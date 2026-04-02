@@ -1,0 +1,53 @@
+[tool.poetry]
+name = "weel-backend"
+version = "0.1.0"
+description = "Weel Backend API"
+authors = ["xelland042 <xelland042@gmail.com>"]
+readme = "README.md"
+packages = []
+
+[tool.poetry.dependencies]
+python = "^3.11"
+psycopg2-binary = "^2.9.10"
+django = "^5.2.6"
+djangorestframework = "^3.16.1"
+djangorestframework-simplejwt = "^5.5.1"
+pillow = "^11.3.0"
+phonenumbers = "^9.0.14"
+requests = "^2.32.5"
+drf-yasg = "^1.21.10"
+python-dotenv = "^1.1.1"
+django-cors-headers = "^4.9.0"
+django-filter = "^25.1"
+celery = "^5.5.3"
+django-redis = "^6.0.0"
+pyjwt = "^2.10.1"
+django-celery-beat = "^2.8.1"
+django-import-export = "^4.3.10"
+django-unfold = "^0.66.0"
+gunicorn = "^23.0.0"
+whitenoise = "^6.11.0"
+pytest = "^9.0.1"
+pytest-django = "^4.11.1"
+pytest-cov = "^7.0.0"
+pytest-xdist = "^3.8.0"
+init-data-py = "^0.2.7"
+firebase-admin = "^7.1.0"
+flower = "^2.0.1"
+django-prometheus = "^2.4.1"
+python-json-logger = "^4.0.0"
+django-request-logging = "^0.7.5"
+django-minio-storage = "^0.5.7"
+django-storages = "^3.14.0"
+boto3 = "^1.35.0"
+python-telegram-bot = "^21.10"
+
+[tool.poetry.group.dev.dependencies]
+black = "^25.9.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.dokploy]
+start = "poetry run gunicorn core.wsgi:application --bind 0.0.0.0:8000"

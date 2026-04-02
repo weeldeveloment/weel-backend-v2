@@ -1,0 +1,2 @@
+# Keep LF and text so requirements.txt parses correctly in Linux/Docker
+requirements.txt text eol=lf

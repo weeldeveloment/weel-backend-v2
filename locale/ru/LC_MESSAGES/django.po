@@ -1,0 +1,1034 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#: apps/booking/models.py:136
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-12-10 19:07+0500\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=4; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+"n%10<=4 && (n%100<12 || n%100>14) ? 1 : n%10==0 || (n%10>=5 && n%10<=9) || "
+"(n%100>=11 && n%100<=14)? 2 : 3);\n"
+
+#: apps/booking/apps.py:7 apps/booking/models.py:60 apps/booking/models.py:75
+#: apps/booking/models.py:107 core/unfold_settings.py:140
+msgid "Booking"
+msgstr "Бронирование"
+
+#: apps/booking/models.py:15
+msgid "Pending"
+msgstr "В ожидании"
+
+#: apps/booking/models.py:16
+msgid "Confirmed"
+msgstr "Подтверждено"
+
+#: apps/booking/models.py:17
+msgid "Cancelled"
+msgstr "Отменено"
+
+#: apps/booking/models.py:18
+msgid "Completed"
+msgstr "Завершено"
+
+#: apps/booking/models.py:26 apps/property/models.py:358
+#: apps/stories/models.py:96 apps/users/models/clients.py:86
+msgid "Client"
+msgstr "Клиент"
+
+#: apps/booking/models.py:32 apps/booking/models.py:128 apps/property/apps.py:8
+#: apps/property/models.py:145 apps/property/models.py:184
+#: apps/property/models.py:249 apps/property/models.py:284
+#: apps/property/models.py:328 apps/property/models.py:364
+msgid "Property"
+msgstr "Недвижимость"
+
+#: apps/booking/models.py:34 apps/property/models.py:289
+msgid "Check in"
+msgstr "Заезд"
+
+#: apps/booking/models.py:35 apps/property/models.py:290
+msgid "Check out"
+msgstr "Выезд"
+
+#: apps/booking/models.py:39
+msgid "Adults"
+msgstr "Взрослые"
+
+#: apps/booking/models.py:44
+msgid "Children"
+msgstr "Дети"
+
+#: apps/booking/models.py:49
+msgid "Babies"
+msgstr "Младенцы"
+
+#: apps/booking/models.py:56
+msgid "Status"
+msgstr "Статус"
+
+#: apps/booking/models.py:48
+msgid "Booking number"
+msgstr "Номер брони"
+
+#: apps/booking/models.py:65
+msgid "Reminder sent"
+msgstr "Напоминание отправлено"
+
+#: apps/booking/models.py:82
+msgid "Confirmed at"
+msgstr "Подтверждено"
+
+#: apps/booking/models.py:85
+msgid "Cancelled at"
+msgstr "Отменено"
+
+#: apps/booking/models.py:88
+msgid "Completed at"
+msgstr "Завершено"
+
+#: apps/booking/models.py:74
+msgid "Cancellation reason"
+msgstr "Причина отмены"
+
+#: apps/booking/models.py:25
+msgid "User cancelled"
+msgstr "Отмена пользователем"
+
+#: apps/booking/models.py:27
+msgid "User did not arrive"
+msgstr "Пользователь не прибыл"
+
+#: apps/booking/models.py:28
+msgid "Partner cancelled"
+msgstr "Отмена партнёром"
+
+#: apps/booking/models.py:29
+msgid "System timeout"
+msgstr "Таймаут системы"
+
+#: apps/booking/models.py:121
+msgid "Subtotal"
+msgstr "Промежуточный итог"
+
+#: apps/booking/models.py:124
+msgid "Hold amount"
+msgstr "Сумма блокировки"
+
+#: apps/booking/models.py:127
+msgid "Charge amount"
+msgstr "Сумма списания"
+
+#: apps/booking/models.py:130
+msgid "Service fee"
+msgstr "Сервисный сбор"
+
+#: apps/booking/models.py:133
+msgid "Service fee percentage"
+msgstr "Процент сервисного сбора"
+
+#: apps/booking/models.py:136
+msgid "Booking price"
+msgstr "Цена брони"
+
+#: apps/booking/models.py:137
+msgid "Booking prices"
+msgstr "Цены бронирований"
+
+#: apps/booking/models.py:168
+msgid "Booking transaction"
+msgstr "Транзакция брони"
+
+#: apps/booking/models.py:169
+msgid "Booking transactions"
+msgstr "Транзакции бронирований"
+
+#: apps/booking/models.py:185
+msgid "Held"
+msgstr "Зарезервировано"
+
+#: apps/booking/models.py:206
+msgid "Calendar Date"
+msgstr "Дата календаря"
+
+#: apps/booking/models.py:207
+msgid "Calendar Dates"
+msgstr "Даты календаря"
+
+#: apps/booking/models.py:228
+msgid "Calendar date for this property already exists"
+msgstr "Дата календаря для этого объекта уже существует"
+
+#: apps/stories/models.py:88
+msgid "Story media"
+msgstr "Медиа истории"
+
+#: apps/stories/models.py:60
+msgid "Video"
+msgstr "Видео"
+
+#: apps/stories/models.py:161
+msgid "Viewed at"
+msgstr "Просмотрено"
+
+#: apps/shared/models.py
+msgid "Verified"
+msgstr "Подтверждено"
+
+#: apps/booking/models.py:61
+msgid "Bookings"
+msgstr "Бронирования"
+
+#: apps/booking/models.py:81
+msgid "Original price (from property)"
+msgstr "Оригинальная цена (от объекта)"
+
+#: apps/booking/models.py:87
+msgid "Original currency (from property)"
+msgstr "Оригинальная валюта (от объекта)"
+
+#: apps/booking/models.py:94
+msgid "Exchange rate (USD -> UZS)"
+msgstr "Курс валют (USD -> UZS)"
+
+#: apps/booking/models.py:99
+msgid "Total price (UZS)"
+msgstr "Общая цена (UZS)"
+
+#: apps/booking/models.py:113
+msgid "Plum transaction"
+msgstr "Транзакция Plum"
+
+#: apps/booking/models.py:118
+msgid "Available"
+msgstr "Доступно"
+
+#: apps/booking/models.py:119
+msgid "Booked"
+msgstr "Забронировано"
+
+#: apps/booking/models.py:120
+msgid "Blocked"
+msgstr "Заблокировано"
+
+#: apps/payment/choices.py:6
+msgid "US Dollar"
+msgstr "Доллар США"
+
+#: apps/payment/choices.py:7
+msgid "Uzbekistan So'm"
+msgstr "Узбекский сум"
+
+#: apps/payment/models.py:53 apps/property/models.py:107
+msgid "Currency"
+msgstr "Валюта"
+
+#: apps/payment/models.py:55
+msgid "Rate"
+msgstr "Курс"
+
+#: apps/payment/models.py:56
+msgid "Date"
+msgstr "Дата"
+
+#: apps/payment/models.py:59
+msgid "Exchange rate"
+msgstr "Курс обмена"
+
+#: apps/payment/models.py:60
+msgid "Exchange rates"
+msgstr "Курсы валют"
+
+#: apps/property/admin.py:41 apps/property/admin.py:62
+#: apps/property/models.py:98
+msgid "Title"
+msgstr "Название"
+
+#: apps/property/mixins.py:47 apps/property/serializers.py:480
+msgid "Invalid property type"
+msgstr "Недопустимый тип недвижимости"
+
+#: apps/property/mixins.py:53
+msgid ""
+"Price must be a single number for this property type. "
+"Only cottages support price as a list of dicts."
+msgstr ""
+"Цена должна быть одним числом для этого типа недвижимости. "
+"Только для дачей цена может быть списком словарей."
+
+#: apps/property/mixins.py:65
+msgid "Each item in price list must be a dict"
+msgstr "Каждый элемент в прайс-листе должен быть словарем"
+
+#: apps/property/mixins.py:75
+msgid "Missing fields for cottage price: "
+msgstr "Отсутствующие поля для цены дачи: "
+
+#: apps/property/mixins.py:86 apps/property/serializers.py:515
+msgid "Price should be a single number for non-cottage properties"
+msgstr "Цена должна быть одним числом для недвижимости, не являющейся коттеджем"
+
+#: apps/property/mixins.py:101
+msgid "Price is too large, maximum 12 digits allowed"
+msgstr "Цена слишком велика, максимально допускается 12 цифр"
+
+#: apps/property/mixins.py:121 apps/property/mixins.py:128
+#, python-brace-format
+msgid "You can only set prices for months: {months}"
+msgstr "Вы можете установить цены только на месяцы: {months}"
+
+#: apps/property/mixins.py:136
+msgid ""
+"The value of month_to must be greater than or equal to the value of "
+"month_from"
+msgstr ""
+"Значение month_to должно быть больше или равно значению month_from"
+
+#: apps/property/models.py:29 apps/property/models.py:50
+msgid "Title (en)"
+msgstr "Название (en)"
+
+#: apps/property/models.py:30 apps/property/models.py:51
+msgid "Title (ru)"
+msgstr "Название (ru)"
+
+#: apps/property/models.py:31 apps/property/models.py:52
+msgid "Title (uz)"
+msgstr "Название (uz)"
+
+#: apps/property/models.py:34 apps/property/models.py:60
+msgid "Icon"
+msgstr "Иконка"
+
+#: apps/property/models.py:39 apps/property/models.py:57
+#: apps/property/models.py:113
+msgid "Property type"
+msgstr "Тип недвижимости"
+
+#: apps/property/models.py:40
+msgid "Property types"
+msgstr "Типы недвижимости"
+
+#: apps/property/models.py:66
+msgid "Property service"
+msgstr "Услуга недвижимости"
+
+#: apps/property/models.py:67 apps/property/models.py:122
+msgid "Property services"
+msgstr "Услуги недвижимости"
+
+#: apps/property/models.py:78
+msgid "Latitude"
+msgstr "Широта"
+
+#: apps/property/models.py:81
+msgid "Longitude"
+msgstr "Долгота"
+
+#: apps/property/models.py:83
+msgid "City"
+msgstr "Город"
+
+#: apps/property/models.py:84
+msgid "Country"
+msgstr "Страна"
+
+#: apps/property/models.py:87 apps/property/models.py:119
+msgid "Property location"
+msgstr "Местоположение недвижимости"
+
+#: apps/property/models.py:88
+msgid "Property locations"
+msgstr "Местоположения недвижимости"
+
+#: apps/property/models.py:100
+msgid "Price"
+msgstr "Цена"
+
+#: apps/property/models.py:125
+msgid "Comment count"
+msgstr "Количество комментариев"
+
+#: apps/property/models.py:130
+msgid "Minimum weekend day stay"
+msgstr "Минимальное пребывание в выходные дни"
+
+#: apps/property/models.py:136 apps/stories/models.py:41
+msgid "Partner"
+msgstr "Партнер"
+
+#: apps/property/models.py:139
+msgid "Is archived"
+msgstr "Архивировано"
+
+#: apps/property/models.py:146 core/unfold_settings.py:126
+msgid "Properties"
+msgstr "Недвижимости"
+
+#: apps/property/models.py:186
+msgid "Price valid from"
+msgstr "Цена действительна с"
+
+#: apps/property/models.py:187
+msgid "Price valid to"
+msgstr "Цена действительна до"
+
+#: apps/property/models.py:189
+msgid "Price per person"
+msgstr "Цена за человека"
+
+#: apps/property/models.py:192
+msgid "Price on working days"
+msgstr "Цена в рабочие дни"
+
+#: apps/property/models.py:195
+msgid "Price on weekends"
+msgstr "Цена в выходные дни"
+
+#: apps/property/models.py:199
+msgid "Property price"
+msgstr "Цена недвижимости"
+
+#: apps/property/models.py:200
+msgid "Property prices"
+msgstr "Цены недвижимости"
+
+#: apps/property/models.py:252
+msgid "Order"
+msgstr "Порядок"
+
+#: apps/property/models.py:256
+msgid "Image"
+msgstr "Изображение"
+
+#: apps/property/models.py:259
+msgid "Is pending"
+msgstr "В ожидании"
+
+#: apps/property/models.py:268
+msgid "Property image"
+msgstr "Изображение недвижимости"
+
+#: apps/property/models.py:269
+msgid "Property images"
+msgstr "Изображения недвижимости"
+
+#: apps/property/models.py:286
+msgid "Description (en)"
+msgstr "Описание (en)"
+
+#: apps/property/models.py:287
+msgid "Description (ru)"
+msgstr "Описание (ru)"
+
+#: apps/property/models.py:288
+msgid "Description (uz)"
+msgstr "Описание (uz)"
+
+#: apps/property/models.py:294
+msgid "Is allowed alcohol"
+msgstr "Алкоголь разрешен"
+
+#: apps/property/models.py:299
+msgid "Is allowed corporate"
+msgstr "Корпоративы разрешены"
+
+#: apps/property/models.py:304
+msgid "Is allowed pets"
+msgstr "Домашние животные разрешены"
+
+#: apps/property/models.py:309
+msgid "Is quiet hours"
+msgstr "Тихие часы"
+
+#: apps/property/models.py:313
+msgid "Property detail"
+msgstr "Детали недвижимости"
+
+#: apps/property/models.py:314
+msgid "Property details"
+msgstr "Детали недвижимости"
+
+#: apps/property/models.py:332
+msgid "Guests"
+msgstr "Гости"
+
+#: apps/property/models.py:335
+msgid "Rooms"
+msgstr "Комнаты"
+
+#: apps/property/models.py:337
+msgid "Beds"
+msgstr "Кровати"
+
+#: apps/property/models.py:339
+msgid "Bathrooms"
+msgstr "Ванные комнаты"
+
+#: apps/property/models.py:343
+msgid "Property room"
+msgstr "Комната в недвижимости"
+
+#: apps/property/models.py:344
+msgid "Property rooms"
+msgstr "Комнаты в недвижимости"
+
+#: apps/property/models.py:373
+msgid "Rating"
+msgstr "Рейтинг"
+
+#: apps/property/models.py:379
+msgid "Comment"
+msgstr "Комментарии"
+
+#: apps/property/models.py:381
+msgid "Hide"
+msgstr "Скрыть"
+
+#: apps/property/models.py:385
+msgid "Property review"
+msgstr "Отзыв о недвижимости"
+
+#: apps/property/models.py:386
+msgid "Property reviews"
+msgstr "Отзывы о недвижимости"
+
+#: apps/property/permissions.py:11
+msgid "You don't have permission to modify this property"
+msgstr "У вас нет прав на изменение этой недвижимости"
+
+#: apps/property/permissions.py:20
+msgid "Authentication credentials were not provided for partner"
+msgstr "Учетные данные аутентификации для партнера не предоставлены"
+
+#: apps/property/permissions.py:30
+msgid "You don't have permission to edit this property"
+msgstr "У вас нет прав на редактирование этой недвижимости"
+
+#: apps/property/permissions.py:32
+msgid "You don't have permission to delete this property"
+msgstr "У вас нет прав на удаление этой недвижимости"
+
+#: apps/property/serializers.py:215
+msgid "Rating must be between 1 and 5"
+msgstr "Оценка должна быть от 1 до 5"
+
+#: apps/property/serializers.py:232
+msgid "You have already left reviews about this property"
+msgstr "Вы уже оставили отзывы об этом недвижимости"
+
+#: apps/property/serializers.py:343 apps/property/serializers.py:443
+msgid "Invalid value for property type"
+msgstr "Недопустимое значение для типа свойства недвижимости"
+
+#: apps/property/serializers.py:344 apps/property/serializers.py:444
+msgid "Property type with this GUID doesn't exist"
+msgstr "Тип недвижимости с этим GUID не существует"
+
+#: apps/property/serializers.py:355 apps/property/serializers.py:454
+msgid "Invalid value in property services list"
+msgstr "Недопустимое значение для списка услуги недвижимости"
+
+#: apps/property/serializers.py:357 apps/property/serializers.py:456
+msgid "One or more if the selected property services don't exist"
+msgstr "Одна или несколько выбранных услуг недвижимости не существуют"
+
+#: apps/property/serializers.py:384 apps/property/serializers.py:487
+msgid "Property type not found"
+msgstr "Тип недвижимости не найден"
+
+#: apps/property/serializers.py:394 apps/property/serializers.py:497
+msgid ""
+"The following services don't belong to '{property_type.title_en}' property type: {', '.join(invalid_titles)}. "
+"Please select services that match the chosen property type."
+msgstr ""
+"Следующие услуги не относятся к типу недвижимости '{property_type.title_en}': {', '.join(invalid_titles)}. "
+"Пожалуйста, выберите услуги, соответствующие выбранному типу недвижимости."
+
+#: apps/property/serializers.py:399 apps/property/serializers.py:502
+msgid "Duplication is prohibited"
+msgstr "Дублирование запрещено"
+
+#: apps/property/serializers.py:509
+msgid "Property type is required for price validation"
+msgstr "Тип недвижимости необходим для подтверждения цены"
+
+#: apps/property/serializers.py:593
+msgid "Property not found"
+msgstr "Недвижимость не найдена"
+
+#: apps/property/serializers.py:599
+msgid "This field is required"
+msgstr "Это поле обязательно"
+
+#: apps/property/serializers.py:607 apps/shared/compress_image.py:16
+#: apps/stories/serializers.py:41
+msgid "Invalid image format, allowed are: jpg, jpeg, png, heif, heic"
+msgstr "Неверный формат изображения, разрешены: jpg, jpeg, png, heif, heic"
+
+#: apps/property/serializers.py:652
+msgid "No fields provided for update"
+msgstr "Не представлены поля для обновления"
+
+#: apps/shared/compress_video.py:15 apps/stories/serializers.py:46
+msgid "Invalid video format, allowed are: mp4, mov, avi, mkv"
+msgstr "Неверный формат видео, разрешены: mp4, mov, avi, mkv"
+
+#: apps/shared/models.py:14
+msgid "Created at"
+msgstr "Создано"
+
+#: apps/shared/models.py:15
+msgid "Updated at"
+msgstr "Изменено в"
+
+#: apps/shared/permissions.py:8
+msgid "Authentication credentials were not provided for partner."
+msgstr "Учетные данные аутентификации для партнера не предоставлены."
+
+#: apps/shared/permissions.py:19
+msgid "Authentication credentials were not provided for client."
+msgstr "Учетные данные аутентификации для клиента не предоставлены."
+
+#: apps/stories/apps.py:7 apps/stories/models.py:61 core/unfold_settings.py:133
+msgid "Stories"
+msgstr "Истории"
+
+#: apps/stories/models.py:43
+msgid "Media"
+msgstr "Медиа"
+
+#: apps/stories/models.py:49
+msgid "Media type"
+msgstr "Тип медиа"
+
+#: apps/stories/models.py:52
+msgid "Expires at"
+msgstr "Истекает в"
+
+#: apps/stories/models.py:55
+msgid "Views"
+msgstr "Просмотры"
+
+#: apps/stories/models.py:57
+msgid "Uploaded at"
+msgstr "Загружено"
+
+#: apps/stories/models.py:60 apps/stories/models.py:90
+msgid "Story"
+msgstr "История"
+
+#: apps/stories/models.py:101
+msgid "Story view"
+msgstr "Просмотр истории"
+
+#: apps/stories/models.py:102
+msgid "Story views"
+msgstr "Просмотры историй"
+
+#: apps/stories/views.py:138
+msgid "You don't have permission to delete this story"
+msgstr "У вас нет прав на удаление этой истории"
+
+#: apps/users/authentication.py:48 apps/users/serializers.py:43
+msgid "Client not found"
+msgstr "Клиент не найден"
+
+#: apps/users/authentication.py:53 apps/users/authentication.py:93
+msgid "Authentication failed"
+msgstr "Ошибка аутентификации"
+
+#: apps/users/authentication.py:88 apps/users/serializers.py:158
+msgid "Partner not found"
+msgstr "Партнёр не найден"
+
+#: apps/users/serializers.py:17
+#, fuzzy
+#| msgid "Phone number must start with +998"
+msgid "Phone number must start with 998"
+msgstr "Номер телефона должен начинаться с +998"
+
+#: apps/users/serializers.py:57
+msgid "Client with this phone number already exists"
+msgstr "Клиент с этим номером телефона уже существует"
+
+#: apps/users/serializers.py:79 apps/users/serializers.py:221
+msgid "Registration data not found. Please start registration again"
+msgstr "Данные регистрации не найдены. Пожалуйста, начните регистрацию заново"
+
+#: apps/users/serializers.py:92
+msgid "Client already registered"
+msgstr "Клиент уже зарегистрирован"
+
+#: apps/users/serializers.py:182
+msgid "Partner with this phone number already exists"
+msgstr "Партнёр с этим номером телефона уже существует"
+
+#: apps/users/serializers.py:188
+msgid "Username already exists"
+msgstr "Имя пользователя уже существует"
+
+#: apps/users/serializers.py:194
+msgid "Partner with this email already exists"
+msgstr "Партнёр с этим email уже существует"
+
+#: apps/users/serializers.py:235
+msgid "Partner already registered"
+msgstr "Партнёр уже зарегистрирован"
+
+#: apps/users/services.py:200
+msgid "OTP not found or expired"
+msgstr "OTP не найден или истек"
+
+#: apps/users/services.py:207
+msgid "Invalid OTP data"
+msgstr "Неверные данные OTP"
+
+#: apps/users/services.py:212
+msgid "Too many failed attempts. Please request a new OTP."
+msgstr "Слишком много неудачных попыток. Запросите новый OTP"
+
+#: apps/users/services.py:217
+msgid "OTP verified successfully"
+msgstr "OTP успешно проверен"
+
+#: apps/users/services.py:222
+#, python-brace-format
+msgid "Invalid OTP. {remaining_attempts} attempts remaining"
+msgstr "Неверный OTP. {remaining_attempts} Осталось попыток"
+
+#: apps/users/views.py:56
+msgid "Client not found. Please register first"
+msgstr "Клиент не найден. Пожалуйста, сначала зарегистрируйтесь."
+
+#: apps/users/views.py:65
+msgid "OTP sent successfully"
+msgstr "OTP отправлен успешно"
+
+#: apps/users/views.py:128 apps/users/views.py:302
+msgid "OTP sent successfully for registration"
+msgstr "OTP успешно отправлен для регистрации"
+
+#: apps/users/views.py:169 apps/users/views.py:354
+msgid "Registration completed successfully"
+msgstr "Регистрация успешно завершена"
+
+#: apps/users/views.py:195
+msgid "Invalid or expired refresh token"
+msgstr "Недействительный или просроченный токен обновления"
+
+#: apps/users/views.py:201
+msgid "Token refresh failed"
+msgstr "Ошибка обновления токена"
+
+#: apps/users/views.py:230
+msgid "Successfully logged out"
+msgstr "Успешно вышел из системы"
+
+#: apps/users/views.py:233
+msgid "Invalid token"
+msgstr "Недействительный токен"
+
+#: apps/users/views.py:377
+msgid "Partner not found. Please register first."
+msgstr "Партнёр не найден. Пожалуйста, сначала зарегистрируйтесь."
+
+#: apps/users/views.py:387
+msgid "OTP Send successfully"
+msgstr "OTP успешно отправлен"
+
+#: apps/users/views.py:422
+msgid "Login successful"
+msgstr "Вход выполнен успешно"
+
+#: apps/users/views.py:475
+msgid "Successfully logged out."
+msgstr "Успешно вышел из системы."
+
+#: apps/users/views.py:479
+msgid "Logout failed."
+msgstr "Ошибка выхода."
+
+#: apps/users/views.py:601
+msgid "You cannot delete a card that does not belong to you"
+msgstr "Вы не можете удалить карту, которая вам не принадлежит"
+
+#: core/settings.py:207
+msgid "English"
+msgstr "Английский"
+
+#: core/settings.py:208
+msgid "Russian"
+msgstr "Русский"
+
+#: core/unfold_settings.py:12
+msgid "My site"
+msgstr "Мой сайт"
+
+#: core/unfold_settings.py:107
+msgid "Navigation"
+msgstr "Навигация"
+
+#: core/unfold_settings.py:119 apps/users/apps.py:10
+msgid "Users"
+msgstr "Пользователи"
+
+#: apps/notification/models.py:47 apps/notification/models.py:48
+msgid "Notification"
+msgstr "Уведомление"
+
+msgid "Notifications"
+msgstr "Уведомления"
+
+#: apps/payment/apps.py:9
+msgid "Payment"
+msgstr "Платёж"
+
+#: apps/users/models/partners.py apps/users/models/clients.py
+msgid "First name"
+msgstr "Имя"
+
+msgid "Last name"
+msgstr "Фамилия"
+
+msgid "Username"
+msgstr "Имя пользователя"
+
+msgid "Phone number"
+msgstr "Номер телефона"
+
+msgid "Email"
+msgstr "Эл. почта"
+
+msgid "Email verified"
+msgstr "Почта подтверждена"
+
+msgid "Active"
+msgstr "Активен"
+
+msgid "Partners"
+msgstr "Партнёры"
+
+msgid "Partner Telegram user"
+msgstr "Партнёр Telegram"
+
+msgid "Partner Telegram users"
+msgstr "Партнёры Telegram"
+
+msgid "Partner session"
+msgstr "Сессия партнёра"
+
+msgid "Partner sessions"
+msgstr "Сессии партнёров"
+
+msgid "Device ID"
+msgstr "ID устройства"
+
+msgid "User agent"
+msgstr "User agent"
+
+msgid "Last IP"
+msgstr "Последний IP"
+
+msgid "Partner document"
+msgstr "Документ партнёра"
+
+msgid "Partner documents"
+msgstr "Документы партнёра"
+
+msgid "Type"
+msgstr "Тип"
+
+msgid "Document"
+msgstr "Документ"
+
+msgid "Is verified"
+msgstr "Подтверждено"
+
+msgid "Verified by"
+msgstr "Проверено"
+
+msgid "Verified at"
+msgstr "Проверено в"
+
+msgid "Certificate"
+msgstr "Свидетельство"
+
+msgid "Passport"
+msgstr "Паспорт"
+
+msgid "Clients"
+msgstr "Клиенты"
+
+msgid "Client session"
+msgstr "Сессия клиента"
+
+msgid "Client sessions"
+msgstr "Сессии клиентов"
+
+msgid "Device type"
+msgstr "Тип устройства"
+
+msgid "Client device"
+msgstr "Устройство клиента"
+
+msgid "Client devices"
+msgstr "Устройства клиентов"
+
+msgid "FCM token"
+msgstr "FCM токен"
+
+#~ msgid "Invalid value for client"
+#~ msgstr "Недопустимый формат для клиента"
+
+#~| msgid "Client with this phone number already exists"
+#~ msgid "Client with this GUID doesn't exist"
+#~ msgstr "Клиент с этим GUID не существует"
+
+#~ msgid "Invalid value for partner"
+#~ msgstr "Недопустимое значение для партнера"
+
+#~ msgid "Partner with this GUID doesn't exist"
+#~ msgstr "Партнер с этим GUID не существует"
+
+#~ msgid "Invalid property"
+#~ msgstr "Недопустимая недвижимость"
+
+#~ msgid "Registration data expired. Please start over"
+#~ msgstr ""
+#~ "Срок действия регистрационных данных истек. Пожалуйста, начните заново"
+
+#~ msgid "Dashboard"
+#~ msgstr "Мониторинг"
+
+msgid "Sanatorium"
+msgstr "Санаторий"
+
+msgid "Sanatoriums"
+msgstr "Санатории"
+
+msgid "Medical specialization"
+msgstr "Медицинская специализация"
+
+msgid "Medical specializations"
+msgstr "Медицинские специализации"
+
+msgid "Treatment"
+msgstr "Лечение"
+
+msgid "Treatments"
+msgstr "Виды лечения"
+
+msgid "Room type"
+msgstr "Тип номера"
+
+msgid "Room types"
+msgstr "Типы номеров"
+
+msgid "Package type"
+msgstr "Тип пакета"
+
+msgid "Package types"
+msgstr "Типы пакетов"
+
+msgid "Room amenity"
+msgstr "Удобство номера"
+
+msgid "Room amenities"
+msgstr "Удобства номера"
+
+msgid "Sanatorium location"
+msgstr "Расположение санатория"
+
+msgid "Sanatorium locations"
+msgstr "Расположения санаториев"
+
+msgid "Sanatorium image"
+msgstr "Изображение санатория"
+
+msgid "Sanatorium images"
+msgstr "Изображения санатория"
+
+msgid "Sanatorium room"
+msgstr "Номер санатория"
+
+msgid "Sanatorium rooms"
+msgstr "Номера санатория"
+
+msgid "Room image"
+msgstr "Изображение номера"
+
+msgid "Room images"
+msgstr "Изображения номера"
+
+msgid "Room price"
+msgstr "Цена номера"
+
+msgid "Room prices"
+msgstr "Цены номеров"
+
+msgid "Room calendar date"
+msgstr "Дата календаря номера"
+
+msgid "Room calendar dates"
+msgstr "Даты календаря номера"
+
+msgid "Sanatorium review"
+msgstr "Отзыв о санатории"
+
+msgid "Sanatorium reviews"
+msgstr "Отзывы о санатории"
+
+msgid "Sanatorium favorite"
+msgstr "Избранный санаторий"
+
+msgid "Sanatorium favorites"
+msgstr "Избранные санатории"
+
+msgid "Sanatorium booking"
+msgstr "Бронирование санатория"
+
+msgid "Sanatorium bookings"
+msgstr "Бронирования санатория"
+
+msgid "Sanatorium booking price"
+msgstr "Цена бронирования санатория"
+
+msgid "Sanatorium booking prices"
+msgstr "Цены бронирований санатория"
+
+msgid "Sanatorium booking transaction"
+msgstr "Транзакция бронирования санатория"
+
+msgid "Sanatorium booking transactions"
+msgstr "Транзакции бронирований санатория"
+
+#: apps/users/admin.py (admin filters and columns)
+msgid "Has property"
+msgstr "Есть объект"
+msgid "Yes (has property)"
+msgstr "Да (есть объект)"
+msgid "No (no property)"
+msgstr "Нет (нет объекта)"
+msgid "Last online"
+msgstr "Был в сети"
+msgid "Full name / email"
+msgstr "ФИО / email"
+msgid "Partner"
+msgstr "Партнёр"
+
+#: core/unfold_settings.py (site title/header)
+msgid "WEEL"
+msgstr "WEEL"
+msgid "Booking Service"
+msgstr "Сервис бронирования"

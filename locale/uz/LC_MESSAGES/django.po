@@ -1,0 +1,828 @@
+# Uzbek translations for WEEL admin
+# Copyright (C) 2025
+# This file is distributed under the same license as the WEEL package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: WEEL\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-02-19 12:00+0500\n"
+"PO-Revision-Date: 2025-02-19 12:00+0500\n"
+"Last-Translator: \n"
+"Language-Team: Uzbek\n"
+"Language: uz\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: core/unfold_settings.py:12
+msgid "My site"
+msgstr "Mening saytim"
+
+#: core/unfold_settings.py:107
+msgid "Navigation"
+msgstr "Navigatsiya"
+
+#: core/unfold_settings.py:119 apps/users/apps.py:10
+msgid "Users"
+msgstr "Foydalanuvchilar"
+
+#: apps/notification/models.py:48
+msgid "Notifications"
+msgstr "Bildirishnomalar"
+
+#: apps/payment/apps.py:9
+msgid "Payment"
+msgstr "To'lov"
+
+#: apps/users/models/partners.py apps/users/models/clients.py
+msgid "First name"
+msgstr "Ism"
+
+msgid "Last name"
+msgstr "Familiya"
+
+msgid "Username"
+msgstr "Foydalanuvchi nomi"
+
+msgid "Phone number"
+msgstr "Telefon raqami"
+
+msgid "Email"
+msgstr "Elektron pochta"
+
+msgid "Email verified"
+msgstr "Pochta tasdiqlangan"
+
+msgid "Active"
+msgstr "Faol"
+
+msgid "Partners"
+msgstr "Hamkorlar"
+
+msgid "Partner Telegram user"
+msgstr "Hamkor Telegram"
+
+msgid "Partner Telegram users"
+msgstr "Hamkorlar Telegram"
+
+msgid "Partner session"
+msgstr "Hamkor sessiyasi"
+
+msgid "Partner sessions"
+msgstr "Hamkor sessiyalari"
+
+msgid "Device ID"
+msgstr "Qurilma ID"
+
+msgid "User agent"
+msgstr "User agent"
+
+msgid "Last IP"
+msgstr "Oxirgi IP"
+
+msgid "Partner document"
+msgstr "Hamkor hujjati"
+
+msgid "Partner documents"
+msgstr "Hamkor hujjatlari"
+
+msgid "Type"
+msgstr "Turi"
+
+msgid "Document"
+msgstr "Hujjat"
+
+msgid "Is verified"
+msgstr "Tasdiqlangan"
+
+msgid "Verified by"
+msgstr "Tekshiruvchi"
+
+msgid "Verified at"
+msgstr "Tekshirilgan vaqti"
+
+msgid "Certificate"
+msgstr "Guvohnoma"
+
+msgid "Passport"
+msgstr "Pasport"
+
+msgid "Clients"
+msgstr "Mijozlar"
+
+msgid "Client session"
+msgstr "Mijoz sessiyasi"
+
+msgid "Client sessions"
+msgstr "Mijoz sessiyalari"
+
+msgid "Device type"
+msgstr "Qurilma turi"
+
+msgid "Client device"
+msgstr "Mijoz qurilmasi"
+
+msgid "Client devices"
+msgstr "Mijoz qurilmalari"
+
+msgid "FCM token"
+msgstr "FCM token"
+
+#: core/unfold_settings.py:126
+msgid "Properties"
+msgstr "Ko'chmas mulklar"
+
+#: core/unfold_settings.py:133
+msgid "Stories"
+msgstr "Hikoyalar"
+
+#: core/unfold_settings.py:140
+msgid "Booking"
+msgstr "Bron qilish"
+
+#: core/unfold_settings.py:147
+msgid "Payments"
+msgstr "To'lovlar"
+
+#: core/unfold_settings.py:154 apps/notification/models.py:47
+msgid "Notification"
+msgstr "Bildirishnoma"
+
+#: apps/users/admin.py (admin filters and columns)
+msgid "Has property"
+msgstr "Property yaratgan"
+msgid "Yes (has property)"
+msgstr "Ha (property bor)"
+msgid "No (no property)"
+msgstr "Yoʻq (property yoʻq)"
+msgid "Last online"
+msgstr "Oxirgi online"
+msgid "Full name / email"
+msgstr "To'liq ism / email"
+msgid "Partner"
+msgstr "Hamkor"
+
+#: core/unfold_settings.py (site title/header)
+msgid "WEEL"
+msgstr "WEEL"
+msgid "Booking Service"
+msgstr "Bron xizmati"
+
+#: apps/booking/models.py
+msgid "Booking number"
+msgstr "Bron raqami"
+
+msgid "Reminder sent"
+msgstr "Eslatma yuborildi"
+
+msgid "Confirmed at"
+msgstr "Tasdiqlandi"
+
+msgid "Cancelled at"
+msgstr "Bekor qilindi"
+
+msgid "Completed at"
+msgstr "Yakunlandi"
+
+msgid "Cancellation reason"
+msgstr "Bekor qilish sababi"
+
+msgid "User cancelled"
+msgstr "Foydalanuvchi bekor qildi"
+
+msgid "User did not arrive"
+msgstr "Foydalanuvchi kelmadi"
+
+msgid "Partner cancelled"
+msgstr "Hamkor bekor qildi"
+
+msgid "System timeout"
+msgstr "Tizim vaqti tugadi"
+
+msgid "Subtotal"
+msgstr "Aralash yig'indi"
+
+msgid "Hold amount"
+msgstr "Bloklangan summa"
+
+msgid "Charge amount"
+msgstr "Yechib olingan summa"
+
+msgid "Service fee"
+msgstr "Xizmat haqi"
+
+msgid "Service fee percentage"
+msgstr "Xizmat haqi foizi"
+
+msgid "Booking price"
+msgstr "Bron narxi"
+
+msgid "Booking prices"
+msgstr "Bron narxlari"
+
+msgid "Booking transaction"
+msgstr "Bron tranzaksiyasi"
+
+msgid "Booking transactions"
+msgstr "Bron tranzaksiyalari"
+
+msgid "Held"
+msgstr "Band qilingan"
+
+msgid "Calendar Date"
+msgstr "Kalendar sanasi"
+
+msgid "Calendar Dates"
+msgstr "Kalendar sanalari"
+
+msgid "Calendar date for this property already exists"
+msgstr "Ushbu mulk uchun kalendar sanasi allaqachon mavjud"
+
+msgid "Story media"
+msgstr "Hikoya media"
+
+msgid "Video"
+msgstr "Video"
+
+msgid "Viewed at"
+msgstr "Ko'rilgan vaqti"
+
+msgid "Verified"
+msgstr "Tasdiqlangan"
+
+msgid "Bookings"
+msgstr "Bronlar"
+
+#: apps/property/models.py
+msgid "Property"
+msgstr "Ko'chmas mulk"
+
+#: apps/shared/models.py
+msgid "Created at"
+msgstr "Yaratilgan sana"
+
+#: apps/shared/models.py
+msgid "Updated at"
+msgstr "Yangilangan sana"
+
+#: core/settings.py
+msgid "English"
+msgstr "Ingliz tili"
+
+#: core/settings.py
+msgid "Russian"
+msgstr "Rus tili"
+
+#: core/settings.py
+msgid "Uzbek"
+msgstr "O'zbek tili"
+
+msgid "Pending"
+msgstr "Kutilmoqda"
+
+msgid "Confirmed"
+msgstr "Tasdiqlandi"
+
+msgid "Cancelled"
+msgstr "Bekor qilindi"
+
+msgid "Completed"
+msgstr "Yakunlandi"
+
+msgid "Client"
+msgstr "Mijoz"
+
+msgid "Check in"
+msgstr "Kirish vaqti"
+
+msgid "Check out"
+msgstr "Chiqish vaqti"
+
+msgid "Adults"
+msgstr "Kattalar"
+
+msgid "Children"
+msgstr "Bolalar"
+
+msgid "Babies"
+msgstr "Chaqaloqlar"
+
+msgid "Status"
+msgstr "Holat"
+
+msgid "Original price (from property)"
+msgstr "Asl narx (mulkdan)"
+
+msgid "Original currency (from property)"
+msgstr "Asl valyuta (mulkdan)"
+
+msgid "Exchange rate (USD -> UZS)"
+msgstr "Valyuta kursi (USD -> UZS)"
+
+msgid "Total price (UZS)"
+msgstr "Jami narx (UZS)"
+
+msgid "Plum transaction"
+msgstr "Plum tranzaksiyasi"
+
+msgid "Available"
+msgstr "Mavjud"
+
+msgid "Booked"
+msgstr "Band qilingan"
+
+msgid "Blocked"
+msgstr "Bloklangan"
+
+msgid "US Dollar"
+msgstr "AQSh dollari"
+
+msgid "Uzbekistan So'm"
+msgstr "O'zbekiston so'mi"
+
+msgid "Currency"
+msgstr "Valyuta"
+
+msgid "Rate"
+msgstr "Kurs"
+
+msgid "Date"
+msgstr "Sana"
+
+msgid "Exchange rate"
+msgstr "Valyuta kursi"
+
+msgid "Exchange rates"
+msgstr "Valyuta kurslari"
+
+msgid "Title"
+msgstr "Sarlavha"
+
+msgid "Invalid property type"
+msgstr "Yaroqsiz mulk turi"
+
+msgid ""
+"Price must be a single number for this property type. "
+"Only cottages support price as a list of dicts."
+msgstr ""
+"Ushbu mulk turi uchun narx bitta raqam bo'lishi kerak. "
+"Faqat Dachalar narxni lug'atlar ro'yxati sifatida qo'llab-quvvatlaydi."
+
+msgid "Each item in price list must be a dict"
+msgstr "Narxlar ro'yxatidagi har bir element lug'at bo'lishi kerak"
+
+msgid "Missing fields for cottage price: "
+msgstr ""
+
+msgid "Price should be a single number for non-cottage properties"
+msgstr "Dacha bo'lmagan mulklar uchun narx bitta raqam bo'lishi kerak"
+
+msgid "Price is too large, maximum 12 digits allowed"
+msgstr "Narx juda katta, ko'pi bilan 12 raqamga ruxsat beriladi"
+
+msgid "You can only set prices for months: {months}"
+msgstr "Siz faqat quyidagi oylar uchun narx belgilashingiz mumkin: {months}"
+
+msgid "The value of month_to must be greater than or equal to the value of month_from"
+msgstr "month_to qiymati month_from qiymatidan katta yoki teng bo'lishi kerak"
+
+msgid "Title (en)"
+msgstr "Sarlavha (en)"
+
+msgid "Title (ru)"
+msgstr "Sarlavha (ru)"
+
+msgid "Title (uz)"
+msgstr "Sarlavha (uz)"
+
+msgid "Icon"
+msgstr "Belgi"
+
+msgid "Property type"
+msgstr "Mulk turi"
+
+msgid "Property types"
+msgstr "Mulk turlari"
+
+msgid "Property service"
+msgstr "Mulk xizmati"
+
+msgid "Property services"
+msgstr "Mulk xizmatlari"
+
+msgid "Latitude"
+msgstr "Kenglik"
+
+msgid "Longitude"
+msgstr "Uzunlik"
+
+msgid "City"
+msgstr "Shahar"
+
+msgid "Country"
+msgstr "Mamlakat"
+
+msgid "Property location"
+msgstr "Mulk joylashuvi"
+
+msgid "Property locations"
+msgstr "Mulk joylashuvlari"
+
+msgid "Price"
+msgstr "Narx"
+
+msgid "Comment count"
+msgstr "Izohlar soni"
+
+msgid "Minimum weekend day stay"
+msgstr "Dam olish kunlarida minimal qolish"
+
+msgid "Partner"
+msgstr "Hamkor"
+
+msgid "Is archived"
+msgstr "Arxivlangan"
+
+msgid "Price valid from"
+msgstr "Narx amal qilish muddati davri (dan)"
+
+msgid "Price valid to"
+msgstr "Narx amal qilish muddati davri (gacha)"
+
+msgid "Price per person"
+msgstr "Kishi boshiga narx"
+
+msgid "Price on working days"
+msgstr "Ish kunlaridagi narx"
+
+msgid "Price on weekends"
+msgstr "Dam olish kunlaridagi narx"
+
+msgid "Property price"
+msgstr "Mulk narxi"
+
+msgid "Property prices"
+msgstr "Mulk narxlari"
+
+msgid "Order"
+msgstr "Buyurtma"
+
+msgid "Image"
+msgstr "Rasm"
+
+msgid "Is pending"
+msgstr "Kutilmoqda"
+
+msgid "Property image"
+msgstr "Mulk rasmi"
+
+msgid "Property images"
+msgstr "Mulk rasmlari"
+
+msgid "Description (en)"
+msgstr "Tavsif (en)"
+
+msgid "Description (ru)"
+msgstr "Tavsif (ru)"
+
+msgid "Description (uz)"
+msgstr "Tavsif (uz)"
+
+msgid "Is allowed alcohol"
+msgstr "Spirtli ichimliklarga ruxsat"
+
+msgid "Is allowed corporate"
+msgstr "Korporativlarga ruxsat"
+
+msgid "Is allowed pets"
+msgstr "Uy hayvonlariga ruxsat"
+
+msgid "Is quiet hours"
+msgstr "Tinch soatlar"
+
+msgid "Property detail"
+msgstr "Mulk tafsiloti"
+
+msgid "Property details"
+msgstr "Mulk tafsilotlari"
+
+msgid "Guests"
+msgstr "Mehmonlar"
+
+msgid "Rooms"
+msgstr "Xonalar"
+
+msgid "Beds"
+msgstr "Yotoqlar"
+
+msgid "Bathrooms"
+msgstr "Vannalar"
+
+msgid "Property room"
+msgstr "Mulk xonasi"
+
+msgid "Property rooms"
+msgstr "Mulk xonalari"
+
+msgid "Rating"
+msgstr "Reyting"
+
+msgid "Comment"
+msgstr "Izoh"
+
+msgid "Hide"
+msgstr "Yashirish"
+
+msgid "Property review"
+msgstr "Mulk sharhi"
+
+msgid "Property reviews"
+msgstr "Mulk sharhlari"
+
+msgid "You don't have permission to modify this property"
+msgstr "Sizda ushbu mulkni o'zgartirish huquqi yo'q"
+
+msgid "Authentication credentials were not provided for partner"
+msgstr "Hamkor uchun autentifikatsiya ma'lumotlari taqdim etilmadi"
+
+msgid "You don't have permission to edit this property"
+msgstr "Sizda ushbu mulkni tahrirlash huquqi yo'q"
+
+msgid "You don't have permission to delete this property"
+msgstr "Sizda ushbu mulkni o'chirish huquqi yo'q"
+
+msgid "Rating must be between 1 and 5"
+msgstr "Reyting 1 va 5 orasida bo'lishi kerak"
+
+msgid "You have already left reviews about this property"
+msgstr "Siz ushbu mulk haqida allaqachon sharh qoldirgansiz"
+
+msgid "Invalid value for property type"
+msgstr "Mulk turi uchun yaroqsiz qiymat"
+
+msgid "Property type with this GUID doesn't exist"
+msgstr "Ushbu GUID ga ega mulk turi mavjud emas"
+
+msgid "Invalid value in property services list"
+msgstr "Mulk xizmatlari ro'yxatida yaroqsiz qiymat"
+
+msgid "One or more if the selected property services don't exist"
+msgstr "Tanlangan mulk xizmatlaridan biri yoki bir nechtasi mavjud emas"
+
+msgid "Property type not found"
+msgstr "Mulk turi topilmadi"
+
+msgid ""
+"The following services don't belong to '{property_type.title_en}' property type: {', '.join(invalid_titles)}. "
+"Please select services that match the chosen property type."
+msgstr ""
+"Quyidagi xizmatlar '{property_type.title_en}' mulk turiga tegishli emas: {', '.join(invalid_titles)}. "
+"Tanlangan mulk turiga mos keladigan xizmatlarni tanlang."
+
+msgid "Duplication is prohibited"
+msgstr "Dublikat taqiqlanadi"
+
+msgid "Property type is required for price validation"
+msgstr "Narxni tasdiqlash uchun mulk turi talab qilinadi"
+
+msgid "Property not found"
+msgstr "Mulk topilmadi"
+
+msgid "This field is required"
+msgstr "Ushbu maydon majburiy"
+
+msgid "Invalid image format, allowed are: jpg, jpeg, png, heif, heic"
+msgstr "Yaroqsiz rasm formati, ruxsat etilganlar: jpg, jpeg, png, heif, heic"
+
+msgid "No fields provided for update"
+msgstr "Yangilash uchun maydonlar taqdim etilmadi"
+
+msgid "Invalid video format, allowed are: mp4, mov, avi, mkv"
+msgstr "Yaroqsiz video formati, ruxsat etilganlar: mp4, mov, avi, mkv"
+
+msgid "Authentication credentials were not provided for partner."
+msgstr "Hamkor uchun autentifikatsiya ma'lumotlari taqdim etilmadi."
+
+msgid "Authentication credentials were not provided for client."
+msgstr "Mijoz uchun autentifikatsiya ma'lumotlari taqdim etilmadi."
+
+msgid "Media"
+msgstr "Media"
+
+msgid "Media type"
+msgstr "Media turi"
+
+msgid "Expires at"
+msgstr "Tugash muddati"
+
+msgid "Views"
+msgstr "Ko'rishlar"
+
+msgid "Uploaded at"
+msgstr "Yuklangan vaqti"
+
+msgid "Story"
+msgstr "Hikoya"
+
+msgid "Story view"
+msgstr "Hikoya ko'rinishi"
+
+msgid "Story views"
+msgstr "Hikoya ko'rishlari"
+
+msgid "You don't have permission to delete this story"
+msgstr "Sizda ushbu hikoyani o'chirish huquqi yo'q"
+
+msgid "Client not found"
+msgstr "Mijoz topilmadi"
+
+msgid "Authentication failed"
+msgstr "Autentifikatsiya muvaffaqiyatsiz tugadi"
+
+msgid "Partner not found"
+msgstr "Hamkor topilmadi"
+
+msgid "Phone number must start with 998"
+msgstr "Telefon raqami 998 bilan boshlanishi kerak"
+
+msgid "Client with this phone number already exists"
+msgstr "Ushbu telefon raqamiga ega mijoz allaqachon mavjud"
+
+msgid "Registration data not found. Please start registration again"
+msgstr "Ro'yxatdan o'tish ma'lumotlari topilmadi. Iltimos, ro'yxatdan o'tishni qaytadan boshlang"
+
+msgid "Client already registered"
+msgstr "Mijoz allaqachon ro'yxatdan o'tgan"
+
+msgid "Partner with this phone number already exists"
+msgstr "Ushbu telefon raqamiga ega hamkor allaqachon mavjud"
+
+msgid "Username already exists"
+msgstr "Foydalanuvchi nomi allaqachon mavjud"
+
+msgid "Partner with this email already exists"
+msgstr "Ushbu elektron pochtaga ega hamkor allaqachon mavjud"
+
+msgid "Partner already registered"
+msgstr "Hamkor allaqachon ro'yxatdan o'tgan"
+
+msgid "OTP not found or expired"
+msgstr "OTP topilmadi yoki muddati tugagan"
+
+msgid "Invalid OTP data"
+msgstr "Yaroqsiz OTP ma'lumotlari"
+
+msgid "Too many failed attempts. Please request a new OTP."
+msgstr "Juda ko'p muvaffaqiyatsiz urinishlar. Iltimos, yangi OTP so'rang."
+
+msgid "OTP verified successfully"
+msgstr "OTP muvaffaqiyatli tasdiqlandi"
+
+msgid "Invalid OTP. {remaining_attempts} attempts remaining"
+msgstr "Yaroqsiz OTP. {remaining_attempts} ta urinish qoldi"
+
+msgid "Client not found. Please register first"
+msgstr "Mijoz topilmadi. Iltimos, avval ro'yxatdan o'ting"
+
+msgid "OTP sent successfully"
+msgstr "OTP muvaffaqiyatli yuborildi"
+
+msgid "OTP sent successfully for registration"
+msgstr "Ro'yxatdan o'tish uchun OTP muvaffaqiyatli yuborildi"
+
+msgid "Registration completed successfully"
+msgstr "Ro'yxatdan o'tish muvaffaqiyatli yakunlandi"
+
+msgid "Invalid or expired refresh token"
+msgstr "Yaroqsiz yoki muddati tugagan yangilash tokeni"
+
+msgid "Token refresh failed"
+msgstr "Tokenni yangilash muvaffaqiyatsiz bo'ldi"
+
+msgid "Successfully logged out"
+msgstr "Tizimdan muvaffaqiyatli chiqildi"
+
+msgid "Invalid token"
+msgstr "Yaroqsiz token"
+
+msgid "Partner not found. Please register first."
+msgstr "Hamkor topilmadi. Iltimos, avval ro'yxatdan o'ting."
+
+msgid "OTP Send successfully"
+msgstr "OTP muvaffaqiyatli yuborildi"
+
+msgid "Login successful"
+msgstr "Kirish muvaffaqiyatli"
+
+msgid "Successfully logged out."
+msgstr "Tizimdan muvaffaqiyatli chiqildi."
+
+msgid "Logout failed."
+msgstr "Chiqish muvaffaqiyatsiz bo'ldi."
+
+msgid "You cannot delete a card that does not belong to you"
+msgstr "Sizga tegishli bo'lmagan kartani o'chira olmaysiz"
+
+msgid "Sanatorium"
+msgstr "Sanatoriya"
+
+msgid "Sanatoriums"
+msgstr "Sanatoriyalar"
+
+msgid "Medical specialization"
+msgstr "Tibbiy mutaxassislik"
+
+msgid "Medical specializations"
+msgstr "Tibbiy mutaxassisliklar"
+
+msgid "Treatment"
+msgstr "Muolaja"
+
+msgid "Treatments"
+msgstr "Muolajalar"
+
+msgid "Room type"
+msgstr "Xona turi"
+
+msgid "Room types"
+msgstr "Xona turlari"
+
+msgid "Package type"
+msgstr "Paket turi"
+
+msgid "Package types"
+msgstr "Paket turlari"
+
+msgid "Room amenity"
+msgstr "Xona qulayligi"
+
+msgid "Room amenities"
+msgstr "Xona qulayliklari"
+
+msgid "Sanatorium location"
+msgstr "Sanatoriya joylashuvi"
+
+msgid "Sanatorium locations"
+msgstr "Sanatoriya joylashuvlari"
+
+msgid "Sanatorium image"
+msgstr "Sanatoriya rasmi"
+
+msgid "Sanatorium images"
+msgstr "Sanatoriya rasmlari"
+
+msgid "Sanatorium room"
+msgstr "Sanatoriya xonasi"
+
+msgid "Sanatorium rooms"
+msgstr "Sanatoriya xonalari"
+
+msgid "Room image"
+msgstr "Xona rasmi"
+
+msgid "Room images"
+msgstr "Xona rasmlari"
+
+msgid "Room price"
+msgstr "Xona narxi"
+
+msgid "Room prices"
+msgstr "Xona narxlari"
+
+msgid "Room calendar date"
+msgstr "Xona kalendar sanasi"
+
+msgid "Room calendar dates"
+msgstr "Xona kalendar sanalari"
+
+msgid "Sanatorium review"
+msgstr "Sanatoriya sharhi"
+
+msgid "Sanatorium reviews"
+msgstr "Sanatoriya sharhlari"
+
+msgid "Sanatorium favorite"
+msgstr "Sevimli sanatoriya"
+
+msgid "Sanatorium favorites"
+msgstr "Sevimli sanatoriyalar"
+
+msgid "Sanatorium booking"
+msgstr "Sanatoriya bronlashi"
+
+msgid "Sanatorium bookings"
+msgstr "Sanatoriya bronlashlari"
+
+msgid "Sanatorium booking price"
+msgstr "Sanatoriya bronlash narxi"
+
+msgid "Sanatorium booking prices"
+msgstr "Sanatoriya bronlash narxlari"
+
+msgid "Sanatorium booking transaction"
+msgstr "Sanatoriya bronlash tranzaksiyasi"
+
+msgid "Sanatorium booking transactions"
+msgstr "Sanatoriya bronlash tranzaksiyalari"
