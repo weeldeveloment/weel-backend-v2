@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.core.files.storage import default_storage
+from django.utils.translation import gettext_lazy as _
 
 from rest_framework import serializers
+
+from .mixins import DateRangeValidationMixin
 
 
 def _build_media_url(request, media_path: str | None) -> str | None:
@@ -34,6 +39,85 @@ class RawBookingPriceSerializer(serializers.Serializer):
                 "service_fee_percentage": None,
             }
         return super().to_representation(instance)
+
+
+class RawCalendarDateSerializer(serializers.Serializer):
+    date = serializers.DateField()
+    status = serializers.CharField()
+
+
+class RawPropertyCalendarDateRangeSerializer(
+    DateRangeValidationMixin,
+    serializers.Serializer,
+):
+    from_date = serializers.DateField()
+    to_date = serializers.DateField(required=False)
+
+    def validate(self, attrs):
+        return self.validate_date_range(attrs)
+
+
+class RawClientBookingCreateSerializer(
+    DateRangeValidationMixin,
+    serializers.Serializer,
+):
+    property_id = serializers.UUIDField()
+    card_id = serializers.CharField()
+    check_in = serializers.DateField()
+    check_out = serializers.DateField()
+    adults = serializers.IntegerField(min_value=1)
+    children = serializers.IntegerField(min_value=0, required=False, default=0)
+    babies = serializers.IntegerField(min_value=0, max_value=5, required=False, default=0)
+
+    start_field = "check_in"
+    end_field = "check_out"
+    is_single_day = False
+
+    def validate(self, attrs):
+        attrs = self.validate_date_range(attrs)
+
+        check_in = attrs["check_in"]
+        check_out = attrs["check_out"]
+        property_row = self.context["property_row"]
+
+        guests = attrs["adults"] + attrs.get("children", 0)
+        if guests <= 0 or guests > 15:
+            raise serializers.ValidationError(
+                _("The total number of adults and children shouldn't greater than 15")
+            )
+
+        nights = (check_out - check_in).days
+        if property_row.get("minimum_weekend_day_stay"):
+            if check_in.weekday() == 4 and nights < 2:
+                raise serializers.ValidationError(
+                    _(
+                        "This property requires minimum 2 nights stay, when booking starts on Friday"
+                    )
+                )
+
+        if property_row.get("weekend_only_sunday_inclusive"):
+            if check_in.weekday() not in (4, 5):
+                raise serializers.ValidationError(
+                    _(
+                        "This property can only be booked with check-in on Friday or Saturday."
+                    )
+                )
+            day = check_in
+            has_sunday = False
+            while day < check_out:
+                if day.weekday() == 6:
+                    has_sunday = True
+                    break
+                day += timedelta(days=1)
+            if not has_sunday:
+                raise serializers.ValidationError(
+                    _(
+                        "This property requires the stay to include Sunday. "
+                        "Please choose check-out on Monday or later."
+                    )
+                )
+
+        return attrs
 
 
 class RawPropertyBookingSerializer(serializers.Serializer):

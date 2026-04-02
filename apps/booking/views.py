@@ -18,7 +18,6 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from django_filters.rest_framework import DjangoFilterBackend
 
-from property.models import Property
 from users.authentication import PartnerJWTAuthentication, ClientJWTAuthentication
 from shared.permissions import IsClient, IsPartner, IsPartnerOwnerProperty
 from admin_auth.authentication import AdminJWTAuthentication
@@ -28,41 +27,35 @@ from .raw_repository import fetch_calendar_rows, get_verified_property_by_guid
 from .raw_booking_repository import (
     BOOKING_ALLOWED_STATUSES,
     count_admin_bookings,
+    get_verified_property_for_booking,
     get_client_booking_by_guid,
     get_booking_for_client_action,
     get_booking_for_partner_action,
     get_client_booking_history_detail,
-    get_latest_transaction_history_for_booking,
     list_admin_bookings,
     list_client_booking_history,
     list_client_bookings,
     list_partner_bookings,
-    mark_latest_transaction_dismissed,
     release_calendar_for_booking,
     update_booking_status,
-    create_charge_transaction_from_latest,
 )
-from .models import CalendarDate, Booking
-from .serializers import (
-    CalendarDateSerializer,
-    PropertyCalendarDateRangeSerializer,
-    ClientBookingCreateSerializer,
-    ClientBookingListSerializer,
-    PartnerBookingListSerializer,
-    ClientBookingDetailSerializer,
-    ClientBookingHistoryListSerializer,
-    ClientBookingHistoryDetailSerializer,
-    AdminBookingListSerializer,
+from payment.raw_repository import (
+    create_charge_transaction_from_latest,
+    get_latest_transaction_history_for_booking,
+    mark_latest_transaction_dismissed,
 )
 from .raw_serializers import (
     RawAdminBookingListSerializer,
+    RawCalendarDateSerializer,
+    RawPropertyCalendarDateRangeSerializer,
+    RawClientBookingCreateSerializer,
     RawClientBookingDetailSerializer,
     RawClientBookingHistoryDetailSerializer,
     RawClientBookingHistoryListSerializer,
     RawClientBookingListSerializer,
     RawPartnerBookingListSerializer,
 )
-from .services import BookingService
+from .raw_create_service import RawBookingCreateService
 from .helpers import client_can_cancel, get_cancellation_error_message
 from payment.services import PlumAPIError, PlumAPIService
 
@@ -120,7 +113,7 @@ def _parse_statuses_from_query(status_param: str | None) -> list[str]:
 
 class PropertyCalendarDateListView(ListAPIView):
     permission_classes = [AllowAny]
-    serializer_class = CalendarDateSerializer
+    serializer_class = RawCalendarDateSerializer
 
     def get_property(self):
         property_id = self.kwargs["property_id"]
@@ -131,7 +124,7 @@ class PropertyCalendarDateListView(ListAPIView):
 
     def list(self, request, *args, **kwargs):
         property = self.get_property()
-        date_range_serializer = PropertyCalendarDateRangeSerializer(
+        date_range_serializer = RawPropertyCalendarDateRangeSerializer(
             data={
                 "from_date": request.query_params.get("from_date"),
                 "to_date": request.query_params.get("to_date"),
@@ -214,7 +207,7 @@ class PropertyCalendarDateListView(ListAPIView):
 class PropertyCalendarDateBlockView(GenericAPIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
-    serializer_class = PropertyCalendarDateRangeSerializer
+    serializer_class = RawPropertyCalendarDateRangeSerializer
 
     def get_property(self, property_id):
         property_row = get_verified_property_by_guid(str(property_id))
@@ -272,7 +265,7 @@ class PropertyCalendarDateBlockView(GenericAPIView):
 class PropertyCalendarDateUnblockView(GenericAPIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
-    serializer_class = PropertyCalendarDateRangeSerializer
+    serializer_class = RawPropertyCalendarDateRangeSerializer
 
     def get_property(self, property_id):
         property_row = get_verified_property_by_guid(str(property_id))
@@ -331,7 +324,7 @@ class PropertyCalendarDateUnblockView(GenericAPIView):
 class PropertyCalendarDateHoldView(GenericAPIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
-    serializer_class = PropertyCalendarDateRangeSerializer
+    serializer_class = RawPropertyCalendarDateRangeSerializer
 
     def get_property(self, property_id):
         property_row = get_verified_property_by_guid(str(property_id))
@@ -389,7 +382,7 @@ class PropertyCalendarDateHoldView(GenericAPIView):
 class PropertyCalendarDateUnholdView(GenericAPIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
-    serializer_class = PropertyCalendarDateRangeSerializer
+    serializer_class = RawPropertyCalendarDateRangeSerializer
 
     def get_property(self, property_id):
         property_row = get_verified_property_by_guid(str(property_id))
@@ -450,52 +443,54 @@ class ClientBookingListCreateView(ListCreateAPIView):
 
     def get_serializer_class(self):
         if self.request.method == "POST":
-            return ClientBookingCreateSerializer
-        return ClientBookingListSerializer
+            return RawClientBookingCreateSerializer
+        return RawClientBookingListSerializer
 
     def get_property(self, property_id):
-        property = (
-            Property.objects.filter(guid=property_id, is_verified=True)
-            .select_related("partner", "property_location")
-            .first()
-        )
-        if not property:
+        property_row = get_verified_property_for_booking(str(property_id))
+        if not property_row:
             raise NotFound(_("Property not found"))
-        return property
+        return property_row
 
     def create(self, request, *args, **kwargs):
-        property_id = request.data["property_id"]
-        property = self.get_property(property_id)
+        property_id = request.data.get("property_id")
+        if not property_id:
+            raise ValidationError({"property_id": _("This field is required.")})
+        property_row = self.get_property(property_id)
 
         serializer = self.get_serializer(
             data=request.data,
-            context={"property": property},
+            context={"property_row": property_row},
         )
         serializer.is_valid(raise_exception=True)
 
-        booking_service = BookingService(client=request.user, property=property)
-        booking, hold = booking_service.create_booking(
+        booking_service = RawBookingCreateService(client=request.user)
+        booking, _hold = booking_service.create_booking(
+            property_row=property_row,
             check_in=serializer.validated_data["check_in"],
             check_out=serializer.validated_data["check_out"],
-            data=serializer.validated_data,
+            card_id=serializer.validated_data["card_id"],
+            adults=serializer.validated_data["adults"],
+            children=serializer.validated_data["children"],
+            babies=serializer.validated_data["babies"],
         )
         return Response(
             status=status.HTTP_201_CREATED,
             data={
-                "booking_id": booking.guid,
+                "booking_id": booking["guid"],
                 "partner": {
-                    "username": property.partner.username,
-                    "first_name": property.partner.first_name,
-                    "last_name": property.partner.first_name,
-                    "phone_number": property.partner.phone_number,
+                    "username": property_row.get("partner_username"),
+                    "first_name": property_row.get("partner_first_name"),
+                    "last_name": property_row.get("partner_first_name"),
+                    "phone_number": property_row.get("partner_phone_number"),
                 },
-                "check_in": booking.check_in,
-                "check_out": booking.check_out,
+                "check_in": booking["check_in"],
+                "check_out": booking["check_out"],
                 "property_location": {
-                    "latitude": property.property_location.latitude,
-                    "longitude": property.property_location.longitude,
+                    "latitude": property_row.get("latitude"),
+                    "longitude": property_row.get("longitude"),
                 },
-                "status": booking.status,
+                "status": booking["status"],
             },
         )
 
@@ -519,7 +514,7 @@ class ClientBookingListCreateView(ListCreateAPIView):
         tags=["Client / Booking"],
         operation_summary="Create booking and payment hold",
         operation_description="Creates a **PENDING booking** and places a **payment hold (UZS)**",
-        request_body=ClientBookingCreateSerializer,
+        request_body=RawClientBookingCreateSerializer,
     )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)

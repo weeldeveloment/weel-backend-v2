@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from datetime import timedelta
+from uuid import uuid4
 
 from django.utils import timezone
 
@@ -10,6 +11,69 @@ from shared.raw.db import execute, fetch_all, fetch_one
 
 
 BOOKING_ALLOWED_STATUSES = {"pending", "confirmed", "cancelled", "completed"}
+
+
+def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | None:
+    return fetch_one(
+        """
+        SELECT *
+        FROM (
+            SELECT
+                'apartment'::text AS property_kind,
+                a.id AS property_id,
+                a.guid,
+                a.partner_user_id,
+                a.title,
+                a.minimum_weekend_day_stay,
+                a.weekend_only_sunday_inclusive,
+                a.price_per_person,
+                a.price_on_working_days,
+                a.price_on_weekends,
+                a.currency,
+                a.latitude,
+                a.longitude,
+                a.city,
+                a.country,
+                u.username AS partner_username,
+                u.first_name AS partner_first_name,
+                u.last_name AS partner_last_name,
+                u.phone_number AS partner_phone_number
+            FROM public.apartment a
+            LEFT JOIN public.users u ON u.id = a.partner_user_id
+            WHERE a.guid = %s
+              AND COALESCE(a.is_verified, FALSE) = TRUE
+
+            UNION ALL
+
+            SELECT
+                'cottage'::text AS property_kind,
+                c.id AS property_id,
+                c.guid,
+                c.partner_user_id,
+                c.title,
+                c.minimum_weekend_day_stay,
+                c.weekend_only_sunday_inclusive,
+                c.price_per_person,
+                c.price_on_working_days,
+                c.price_on_weekends,
+                c.currency,
+                c.latitude,
+                c.longitude,
+                c.city,
+                c.country,
+                u.username AS partner_username,
+                u.first_name AS partner_first_name,
+                u.last_name AS partner_last_name,
+                u.phone_number AS partner_phone_number
+            FROM public.cottage c
+            LEFT JOIN public.users u ON u.id = c.partner_user_id
+            WHERE c.guid = %s
+              AND COALESCE(c.is_verified, FALSE) = TRUE
+        ) p
+        LIMIT 1
+        """,
+        [property_guid, property_guid],
+    )
 
 BOOKING_BASE_SELECT = """
     SELECT
@@ -28,6 +92,7 @@ BOOKING_BASE_SELECT = """
         b.confirmed_at,
         b.cancelled_at,
         b.completed_at,
+        b.payment_reminder_stage,
         b.client_user_id,
         b.property_apartment_id,
         b.property_cottage_id,
@@ -186,12 +251,121 @@ def get_booking_for_partner_action(booking_guid: str, partner_user_id: int) -> d
     )
 
 
+def get_booking_by_guid(booking_guid: str) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        {BOOKING_BASE_SELECT}
+        WHERE b.guid = %s
+        LIMIT 1
+        """,
+        [booking_guid],
+    )
+
+
 def _property_column_from_booking(booking_row: dict[str, Any]) -> tuple[str, int]:
     if booking_row.get("property_apartment_id"):
         return "property_apartment_id", int(booking_row["property_apartment_id"])
     if booking_row.get("property_cottage_id"):
         return "property_cottage_id", int(booking_row["property_cottage_id"])
     raise ValueError("Booking has no property reference")
+
+
+def _property_ids(property_kind: str, property_id: int) -> tuple[int | None, int | None]:
+    if property_kind == "apartment":
+        return property_id, None
+    if property_kind == "cottage":
+        return None, property_id
+    raise ValueError("Invalid property kind")
+
+
+def create_booking_row(
+    *,
+    client_user_id: int,
+    property_kind: str,
+    property_id: int,
+    check_in,
+    check_out,
+    adults: int,
+    children: int,
+    babies: int,
+    booking_number: str,
+) -> dict[str, Any] | None:
+    apartment_id, cottage_id = _property_ids(property_kind, property_id)
+    now = timezone.now()
+    return fetch_one(
+        """
+        INSERT INTO public.booking (
+            guid,
+            created_at,
+            updated_at,
+            booking_number,
+            check_in,
+            check_out,
+            adults,
+            children,
+            babies,
+            reminder_sent,
+            status,
+            payment_reminder_stage,
+            client_user_id,
+            property_apartment_id,
+            property_cottage_id
+        ) VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            FALSE,
+            'pending',
+            NULL,
+            %s,
+            %s,
+            %s
+        )
+        RETURNING *
+        """,
+        [
+            uuid4(),
+            now,
+            now,
+            booking_number,
+            check_in,
+            check_out,
+            adults,
+            children,
+            babies,
+            client_user_id,
+            apartment_id,
+            cottage_id,
+        ],
+    )
+
+
+def list_pending_bookings_for_payment_reminders() -> list[dict[str, Any]]:
+    return fetch_all(
+        f"""
+        {BOOKING_BASE_SELECT}
+        WHERE b.status = 'pending'
+        ORDER BY b.created_at ASC, b.id ASC
+        """
+    )
+
+
+def update_booking_payment_reminder_stage(booking_id: int, stage: str) -> int:
+    return execute(
+        """
+        UPDATE public.booking
+        SET payment_reminder_stage = %s,
+            updated_at = %s
+        WHERE id = %s
+        """,
+        [stage, timezone.now(), booking_id],
+    )
 
 
 def release_calendar_for_booking(booking_row: dict[str, Any]) -> int:
@@ -241,95 +415,6 @@ def update_booking_status(
         RETURNING *
         """,
         params,
-    )
-
-
-def get_latest_transaction_history_for_booking(booking_id: int) -> dict[str, Any] | None:
-    return fetch_one(
-        """
-        SELECT *
-        FROM public.transaction_history
-        WHERE booking_id = %s
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        [booking_id],
-    )
-
-
-def mark_latest_transaction_dismissed(booking_id: int) -> int:
-    return execute(
-        """
-        UPDATE public.transaction_history th
-        SET status = 'DISMISSED',
-            updated_at = %s
-        WHERE th.id = (
-            SELECT id
-            FROM public.transaction_history
-            WHERE booking_id = %s
-            ORDER BY id DESC
-            LIMIT 1
-        )
-        """,
-        [timezone.now(), booking_id],
-    )
-
-
-def create_charge_transaction_from_latest(
-    *,
-    booking_row: dict[str, Any],
-    transaction_id: str | None,
-    hold_id: str | None,
-    amount,
-    card_id: str | None = None,
-    extra_id: str | None = None,
-) -> dict[str, Any] | None:
-    now = timezone.now()
-    return fetch_one(
-        """
-        INSERT INTO public.transaction_history (
-            booking_id,
-            client_user_id,
-            partner_user_id,
-            amount,
-            currency,
-            transaction_id,
-            hold_id,
-            type,
-            status,
-            card_id,
-            extra_id,
-            created_at,
-            updated_at
-        ) VALUES (
-            %s,
-            %s,
-            %s,
-            %s,
-            'UZS',
-            %s,
-            %s,
-            'CHRG',
-            'CHARGED',
-            %s,
-            %s,
-            %s,
-            %s
-        )
-        RETURNING *
-        """,
-        [
-            int(booking_row["id"]),
-            int(booking_row["client_user_id"]),
-            int(booking_row["partner_user_id"]) if booking_row.get("partner_user_id") else None,
-            amount,
-            transaction_id,
-            hold_id,
-            card_id,
-            extra_id,
-            now,
-            now,
-        ],
     )
 
 

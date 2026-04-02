@@ -3,10 +3,11 @@ from datetime import timedelta
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from .models import Booking
+
+CLIENT_CANCELLABLE_STATUSES = {"pending", "confirmed"}
 
 
-def _get_cancellation_window(booking: Booking) -> timedelta | None:
+def _get_cancellation_window(booking) -> timedelta | None:
     today = timezone.localdate()
 
     if booking.check_in <= today:
@@ -21,7 +22,7 @@ def _get_cancellation_window(booking: Booking) -> timedelta | None:
     return timedelta(hours=6)
 
 
-def _is_cancellation_expired(booking: Booking) -> bool:
+def _is_cancellation_expired(booking) -> bool:
     window = _get_cancellation_window(booking)
 
     if window is None:
@@ -30,7 +31,7 @@ def _is_cancellation_expired(booking: Booking) -> bool:
     return timezone.now() - booking.created_at > window
 
 
-def get_cancellation_error_message(booking: Booking) -> str:
+def get_cancellation_error_message(booking) -> str:
     window = _get_cancellation_window(booking)
     if window is None:
         return _("This booking can't be cancelled because check-in is today")
@@ -44,11 +45,8 @@ def get_cancellation_error_message(booking: Booking) -> str:
     ) % {"hours": hours}
 
 
-def client_can_cancel(booking: Booking):
-    if booking.status not in {
-        Booking.BookingStatus.PENDING,
-        Booking.BookingStatus.CONFIRMED,
-    }:
+def client_can_cancel(booking):
+    if str(getattr(booking, "status", "")).lower() not in CLIENT_CANCELLABLE_STATUSES:
         return False
 
     if _is_cancellation_expired(booking):
