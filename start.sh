@@ -1,20 +1,11 @@
 #!/bin/bash
 set -e
 
-. /opt/venv/bin/activate
-
-if [ "${SKIP_MIGRATIONS:-}" = "true" ] || [ "${SKIP_MIGRATIONS:-}" = "1" ]; then
-	echo "Skipping migrations (SKIP_MIGRATIONS set)."
-else
-	echo "Running migrations..."
-	python manage.py migrate --fake-initial --noinput
+if [ -f /opt/venv/bin/activate ]; then
+	. /opt/venv/bin/activate
 fi
 
-echo "Creating test user (if not exists)..."
-python manage.py create_test_user --phone=+998001234567 --first-name=Test --last-name=User
-
-echo "Creating test partner (if not exists)..."
-python manage.py create_test_partner --phone=+998901234568 --first-name=Test --last-name=Partner
+echo "Skipping Django migrations. Raw SQL schema is managed externally."
 
 echo "Collecting static files..."
 python manage.py collectstatic --noinput 2>/dev/null || true
