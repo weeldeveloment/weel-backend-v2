@@ -11,6 +11,15 @@ from shared.raw.compat import get_table_name
 NOTIFICATION_TABLE = get_table_name("notification")
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def create_notification(
     *,
     recipient_user_id: int | None,
@@ -80,8 +89,8 @@ def count_partner_notifications(partner_user_id: int) -> dict[str, int]:
         [partner_user_id],
     )
     return {
-        "total": int((row or {}).get("total", 0)),
-        "unread_count": int((row or {}).get("unread_count", 0)),
+        "total": _safe_int((row or {}).get("total", 0), 0),
+        "unread_count": _safe_int((row or {}).get("unread_count", 0), 0),
     }
 
 

@@ -1,308 +1,222 @@
-"""
-Tests for the notification app: models, serializers, service (mocked FCM), views, tasks.
-"""
+from __future__ import annotations
 
-import logging
-from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
-from django.test import TestCase
+from django.test import SimpleTestCase
 
 from rest_framework import status
-from rest_framework.test import APIClient
+from rest_framework.test import APIRequestFactory, force_authenticate
 
-from users.models.clients import Client
-
-from .models import Notification
-from .serializers import ClientDeviceSerializer
-from .service import NotificationService, FCMService
-
-# Less log noise when running notification tests
-logging.getLogger("notification.service").setLevel(logging.WARNING)
-logging.getLogger("django.request").setLevel(logging.ERROR)
+from notification.service import FCMService, NotificationService
+from notification.views import (
+    FCMTokenUpdateView,
+    PartnerNotificationListView,
+    PartnerNotificationMarkAsReadView,
+)
 
 
-# ──────────────────────────────────────────────
-# Test helpers
-# ──────────────────────────────────────────────
+def _fake_send_response(*, success: bool, code: str | None = None):
+    if success:
+        return SimpleNamespace(success=True, exception=None)
+    exception = SimpleNamespace(code=code) if code else Exception("unknown")
+    return SimpleNamespace(success=False, exception=exception)
 
 
-def make_client(**kwargs):
-    defaults = {
-        "first_name": "Test",
-        "last_name": "Client",
-        "phone_number": "+998901234567",
-        "is_active": True,
-    }
-    defaults.update(kwargs)
-    return Client.objects.create(**defaults)
-
-
-# ──────────────────────────────────────────────
-# 1. Model tests
-# ──────────────────────────────────────────────
-
-
-class NotificationModelTests(TestCase):
-    def test_create_notification_with_recipient(self):
-        client = make_client()
-        notification = Notification.objects.create(
-            recipient=client,
-            title="Test",
-            push_message="Body",
-            notification_type=Notification.NotificationType.SYSTEM,
-            status=Notification.Status.PENDING,
-            is_for_every_one=False,
-        )
-        self.assertEqual(notification.recipient, client)
-        self.assertFalse(notification.is_for_every_one)
-        self.assertEqual(notification.status, Notification.Status.PENDING)
-
-    def test_create_broadcast_notification_recipient_null(self):
-        notification = Notification.objects.create(
-            recipient=None,
-            title="Broadcast",
-            push_message="Hello all",
-            notification_type=Notification.NotificationType.SYSTEM,
-            status=Notification.Status.PENDING,
-            is_for_every_one=True,
-        )
-        self.assertIsNone(notification.recipient)
-        self.assertTrue(notification.is_for_every_one)
-
-    def test_recipient_consistency_constraint_violation(self):
-        from django.db import IntegrityError
-        client = make_client()
-        with self.assertRaises(IntegrityError):
-            Notification.objects.create(
-                recipient=client,
-                title="Bad",
-                push_message="Bad",
-                notification_type=Notification.NotificationType.SYSTEM,
-                is_for_every_one=True,  # must be recipient=None
-            )
-
-    def test_notification_str(self):
-        client = make_client()
-        notification = Notification.objects.create(
-            recipient=client,
-            title="Title",
-            push_message="Msg",
-            notification_type=Notification.NotificationType.REMINDER,
-            is_for_every_one=False,
-        )
-        self.assertIn("Title", str(notification))
-
-
-# ──────────────────────────────────────────────
-# 2. Serializer tests
-# ──────────────────────────────────────────────
-
-
-class ClientDeviceSerializerTests(TestCase):
-    def test_valid_data_ios(self):
-        s = ClientDeviceSerializer(data={"fcm_token": "token123", "device_type": "ios"})
-        self.assertTrue(s.is_valid(), s.errors)
-
-    def test_valid_data_android(self):
-        s = ClientDeviceSerializer(
-            data={"fcm_token": "token456", "device_type": "android"}
-        )
-        self.assertTrue(s.is_valid(), s.errors)
-
-    def test_invalid_device_type(self):
-        s = ClientDeviceSerializer(
-            data={"fcm_token": "token", "device_type": "windows"}
-        )
-        self.assertFalse(s.is_valid())
-        self.assertIn("device_type", s.errors)
-
-    def test_missing_fcm_token(self):
-        s = ClientDeviceSerializer(data={"device_type": "ios"})
-        self.assertFalse(s.is_valid())
-        self.assertIn("fcm_token", s.errors)
-
-
-# ──────────────────────────────────────────────
-# 3. Service tests (mocked FCM)
-# ──────────────────────────────────────────────
-
-
-class NotificationServiceTests(TestCase):
-    @patch("notification.service.FCMService.send_to_tokens")
-    def test_send_to_client_creates_notification_and_sends(
-        self, mock_send_to_tokens
-    ):
-        mock_send_to_tokens.return_value = MagicMock(success_count=1, failure_count=0)
-        client = make_client()
-        notification = NotificationService.send_to_client(
-            client=client,
-            title="Test Title",
-            message="Test body",
-            notification_type=Notification.NotificationType.SYSTEM,
-            data={"key": "value"},
-        )
-        self.assertIsNotNone(notification)
-        self.assertEqual(notification.recipient, client)
-        self.assertEqual(notification.title, "Test Title")
-        self.assertEqual(notification.push_message, "Test body")
-        self.assertEqual(notification.status, Notification.Status.SENT)
-        self.assertFalse(notification.is_for_every_one)
-        mock_send_to_tokens.assert_called_once()
-        call_kw = mock_send_to_tokens.call_args[1]
-        self.assertEqual(call_kw["title"], "Test Title")
-        self.assertEqual(call_kw["body"], "Test body")
-        self.assertEqual(call_kw["data"], {"key": "value"})
-
-    @patch("notification.service.FCMService.send_to_tokens")
-    def test_send_to_client_keeps_pending_when_fcm_fails(self, mock_send_to_tokens):
-        mock_send_to_tokens.return_value = None
-        client = make_client()
-
-        notification = NotificationService.send_to_client(
-            client=client,
-            title="Test Title",
-            message="Test body",
-            notification_type=Notification.NotificationType.SYSTEM,
-            data={"key": "value"},
-        )
-
-        self.assertEqual(notification.status, Notification.Status.PENDING)
-
-
-class NotificationServiceSendBroadcastTests(TestCase):
-    @patch("notification.service.messaging.send")
+class FCMServiceTests(SimpleTestCase):
     @patch("notification.service.logger")
-    def test_send_broadcast_updates_status_to_sent(self, mock_logger, mock_send):
-        notification = Notification.objects.create(
-            recipient=None,
-            title="Broadcast",
-            push_message="Hello all",
-            notification_type=Notification.NotificationType.SYSTEM,
-            status=Notification.Status.PENDING,
-            is_for_every_one=True,
-        )
-        NotificationService.send_broadcast(notification)
-        notification.refresh_from_db()
-        self.assertEqual(notification.status, Notification.Status.SENT)
-        mock_send.assert_called_once()
-
-
-class FCMServiceTests(TestCase):
-    @patch("notification.service.messaging.send_each_for_multicast")
-    def test_send_to_tokens_empty_list_returns_none(self, mock_send):
+    def test_send_to_tokens_returns_none_for_empty_tokens(self, _mock_logger):
         result = FCMService.send_to_tokens(tokens=[], title="T", body="B")
         self.assertIsNone(result)
-        mock_send.assert_not_called()
 
-    @patch("notification.service.messaging.send_each_for_multicast")
-    def test_send_to_tokens_calls_firebase(self, mock_send):
-        mock_send.return_value = MagicMock(success_count=1, failure_count=0)
-        result = FCMService.send_to_tokens(
-            tokens=["token1"],
-            title="Title",
-            body="Body",
-            data={"k": "v"},
-        )
-        self.assertIsNotNone(result)
-        mock_send.assert_called_once()
-
-    @patch("notification.service.logger.exception")
-    @patch("notification.service.messaging.send_each_for_multicast")
-    def test_send_to_tokens_returns_none_when_firebase_raises(
-        self, mock_send, mock_log_exception
+    @patch("notification.service.messaging.send_each_for_multicast", side_effect=RuntimeError("bad auth"))
+    @patch("notification.service.messaging.MulticastMessage")
+    @patch("notification.service.messaging.Notification")
+    def test_send_to_tokens_returns_none_if_firebase_raises(
+        self,
+        _mock_notification,
+        _mock_multicast,
+        _mock_send,
     ):
-        mock_send.side_effect = RuntimeError("bad auth")
-        result = FCMService.send_to_tokens(tokens=["token1"], title="T", body="B")
+        result = FCMService.send_to_tokens(tokens=["token-1"], title="T", body="B")
         self.assertIsNone(result)
-        mock_log_exception.assert_called_once()
 
-
-# ──────────────────────────────────────────────
-# 4. API / View tests
-# ──────────────────────────────────────────────
-
-
-class FCMTokenUpdateViewTests(TestCase):
-    def setUp(self):
-        self.api = APIClient()
-
-    def test_update_fcm_token_unauthenticated(self):
-        response = self.api.post(
-            "/api/notification/device/",
-            data={"fcm_token": "token123", "device_type": "ios"},
-            format="json",
+    @patch("notification.service.FCMService._deactivate_invalid_tokens")
+    @patch("notification.service.messaging.send_each_for_multicast")
+    @patch("notification.service.messaging.MulticastMessage")
+    @patch("notification.service.messaging.Notification")
+    def test_send_to_tokens_deactivates_invalid_tokens(
+        self,
+        _mock_notification,
+        _mock_multicast,
+        mock_send_each,
+        mock_deactivate,
+    ):
+        mock_send_each.return_value = SimpleNamespace(
+            success_count=1,
+            failure_count=1,
+            responses=[
+                _fake_send_response(success=True),
+                _fake_send_response(success=False, code="registration-token-not-registered"),
+            ],
         )
-        self.assertIn(response.status_code, (401, 403))
+        result = FCMService.send_to_tokens(tokens=["ok-token", "bad-token"], title="T", body="B")
+
+        self.assertEqual(result.success_count, 1)
+        mock_deactivate.assert_called_once_with(["bad-token"])
+
+    @patch("notification.service.execute")
+    @patch("notification.service.table_exists")
+    def test_deactivate_invalid_tokens_updates_existing_tables(self, mock_table_exists, mock_execute):
+        mock_table_exists.side_effect = lambda table_name: table_name in {"client_devices", "partner_devices"}
+
+        FCMService._deactivate_invalid_tokens(["t1", "t2"])
+
+        self.assertEqual(mock_execute.call_count, 2)
+
+
+class NotificationServiceTests(SimpleTestCase):
+    @patch("notification.service.execute")
+    @patch("notification.service.FCMService.send_to_tokens")
+    @patch("notification.service.fetch_all")
+    @patch("notification.service.table_exists", return_value=True)
+    @patch("notification.service.create_notification")
+    def test_send_to_client_marks_notification_sent_on_success(
+        self,
+        mock_create_notification,
+        _mock_table_exists,
+        mock_fetch_all,
+        mock_send_to_tokens,
+        mock_execute,
+    ):
+        mock_create_notification.return_value = {"id": 77}
+        mock_fetch_all.return_value = [{"fcm_token": "tok-1"}]
+        mock_send_to_tokens.return_value = SimpleNamespace(success_count=1, failure_count=0)
+
+        client = SimpleNamespace(id=10)
+        created = NotificationService.send_to_client(
+            client=client,
+            title="New booking",
+            message="You have a new booking",
+            notification_type="booking_new",
+            data={"booking_id": 99},
+        )
+
+        self.assertEqual(created["id"], 77)
+        mock_execute.assert_called_once()
+
+    @patch("notification.service.execute")
+    @patch("notification.service.FCMService.send_to_tokens", return_value=None)
+    @patch("notification.service.fetch_all", return_value=[])
+    @patch("notification.service.table_exists", return_value=True)
+    @patch("notification.service.create_notification", return_value={"id": 88})
+    def test_send_to_client_keeps_pending_if_no_successful_delivery(
+        self,
+        _mock_create_notification,
+        _mock_table_exists,
+        _mock_fetch_all,
+        _mock_send_to_tokens,
+        mock_execute,
+    ):
+        client = SimpleNamespace(id=11)
+        NotificationService.send_to_client(
+            client=client,
+            title="Title",
+            message="Body",
+            notification_type="system",
+        )
+        mock_execute.assert_not_called()
+
+    @patch("notification.service.FCMService.send_to_tokens")
+    @patch("notification.service.fetch_all", return_value=[{"fcm_token": "pt-1"}])
+    @patch("notification.service.table_exists", return_value=True)
+    @patch("notification.service.create_notification")
+    def test_send_to_partner_saves_and_sends(
+        self,
+        mock_create_notification,
+        _mock_table_exists,
+        _mock_fetch_all,
+        mock_send_to_tokens,
+    ):
+        mock_send_to_tokens.return_value = SimpleNamespace(success_count=1, failure_count=0)
+        partner = SimpleNamespace(id=12)
+
+        response = NotificationService.send_to_partner(
+            partner=partner,
+            title="Admin message",
+            message="Hello",
+            notification_type="message",
+            data={"conversation_id": 5},
+        )
+
+        self.assertEqual(response.success_count, 1)
+        mock_create_notification.assert_called_once()
+
+    def test_normalize_data_converts_values_to_strings_and_skips_none(self):
+        payload = NotificationService._normalize_data({"a": 1, "b": None, 3: True})
+        self.assertEqual(payload, {"a": "1", "3": "True"})
+
+
+class NotificationViewsTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
 
     @patch("notification.views.ClientDeviceService.register_device")
-    def test_update_fcm_token_authenticated_success(self, mock_register):
-        from django.conf import settings
-        from rest_framework_simplejwt.tokens import AccessToken
-        from users.tokens import TokenMetadata
-
-        client = make_client()
-        access = AccessToken()
-        access[TokenMetadata.TOKEN_SUBJECT] = str(client.guid)
-        access[TokenMetadata.TOKEN_ISSUER] = getattr(settings, "JWT_ISSUER", "weel")
-        access[TokenMetadata.TOKEN_USER_TYPE] = "client"
-        access[TokenMetadata.TOKEN_TYPE_CLAIM] = "access"
-        self.api.credentials(HTTP_AUTHORIZATION=f"Bearer {str(access)}")
-
-        response = self.api.post(
+    def test_fcm_token_update_view_returns_200(self, mock_register_device):
+        request = self.factory.post(
             "/api/notification/device/",
-            data={"fcm_token": "fcm_token_abc", "device_type": "android"},
+            {"fcm_token": "token-12345", "device_type": "ios"},
             format="json",
         )
+        user = SimpleNamespace(id=100, role="client", is_active=True)
+        force_authenticate(request, user=user, token="token")
+        response = FCMTokenUpdateView.as_view()(request)
+
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn("detail", response.data)
-        mock_register.assert_called_once()
-        call_kw = mock_register.call_args[1]
-        self.assertEqual(call_kw["client"], client)
-        self.assertEqual(call_kw["fcm_token"], "fcm_token_abc")
-        self.assertEqual(call_kw["device_type"], "android")
+        self.assertEqual(response.data["detail"], "FCM token updated successfully")
+        mock_register_device.assert_called_once()
 
-
-# ──────────────────────────────────────────────
-# 5. URL test
-# ──────────────────────────────────────────────
-
-
-# ──────────────────────────────────────────────
-# 6. Task tests
-# ──────────────────────────────────────────────
-
-
-class SendBookingRemindersTaskTests(TestCase):
-    @patch("notification.tasks.NotificationService.send_to_client")
-    def test_send_booking_reminders_calls_send_to_client_for_matching_bookings(
-        self, mock_send_to_client
+    @patch("notification.views.count_partner_notifications", return_value={"total": 3, "unread_count": 2})
+    @patch("notification.views.list_partner_notifications")
+    def test_partner_notification_list_returns_counts(
+        self,
+        mock_list_notifications,
+        _mock_count_notifications,
     ):
-        from datetime import timedelta
-        from django.utils import timezone
+        mock_list_notifications.return_value = [
+            {
+                "guid": "11111111-1111-1111-1111-111111111111",
+                "title": "A",
+                "push_message": "Body",
+                "notification_type": "system",
+                "status": "pending",
+                "created_at": "2026-01-01T10:00:00",
+            }
+        ]
+        request = self.factory.get("/api/notification/partner/?page=1&limit=10")
+        user = SimpleNamespace(id=101, role="partner", is_active=True)
+        force_authenticate(request, user=user, token="token")
 
-        from booking.models import Booking
-        from booking.tests import BookingTestMixin
-        from notification.tasks import send_booking_reminders
+        response = PartnerNotificationListView.as_view()(request)
 
-        tomorrow = timezone.localdate() + timedelta(days=1)
-        client = make_client()
-        prop = BookingTestMixin.make_property()
-        booking = Booking.objects.create(
-            client=client,
-            property=prop,
-            check_in=tomorrow,
-            check_out=tomorrow + timedelta(days=1),
-            status=Booking.BookingStatus.CONFIRMED,
-            reminder_sent=False,
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["total"], 3)
+        self.assertEqual(response.data["unread_count"], 2)
+        self.assertEqual(len(response.data["notifications"]), 1)
+
+    @patch("notification.views.mark_partner_notifications_as_read", return_value=4)
+    def test_partner_mark_as_read_returns_marked_count(self, mock_mark_as_read):
+        request = self.factory.post(
+            "/api/notification/partner/read/",
+            {"notification_ids": ["11111111-1111-1111-1111-111111111111"]},
+            format="json",
         )
-        send_booking_reminders()
-        self.assertEqual(mock_send_to_client.call_count, 1)
-        booking.refresh_from_db()
-        self.assertTrue(booking.reminder_sent)
+        user = SimpleNamespace(id=102, role="partner", is_active=True)
+        force_authenticate(request, user=user, token="token")
 
+        response = PartnerNotificationMarkAsReadView.as_view()(request)
 
-class NotificationURLTests(TestCase):
-    def test_device_url_resolves(self):
-        from django.urls import reverse
-        url = reverse("notification:update-fcm-token")
-        self.assertIn("device", url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["marked_count"], 4)
+        mock_mark_as_read.assert_called_once()
+

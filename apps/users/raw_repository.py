@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
+from shared.raw.compat import get_table_name
 from shared.raw.entities import RawUser
 from shared.raw.tables import USER_TABLE
 

@@ -1,5 +1,5 @@
 PYTHON ?= venv/bin/python
-TEST_APPS = shared.tests shared.smoke_tests bot.tests
+TEST_APPS = users.tests payment.tests notification.tests chat.tests stories.tests property.tests booking.tests shared.tests shared.smoke_tests bot.tests
 PYTHONWARNINGS ?= ignore::Warning:requests
 
 run:
