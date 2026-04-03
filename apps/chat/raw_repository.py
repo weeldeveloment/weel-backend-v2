@@ -4,6 +4,7 @@ from typing import Any
 
 from django.utils import timezone
 
+from shared.raw.compat import get_table_name, is_postgresql, return_star
 from shared.raw.db import execute, fetch_all, fetch_one
 from shared.raw.entities import RawChatConversation, RawChatMessage, RawUser
 from users.raw_repository import fetch_users_by_ids, get_user_by_id, list_active_admin_ids
@@ -22,9 +23,9 @@ def get_first_active_admin() -> RawUser | None:
 
 def get_or_create_conversation(admin_user_id: int, partner_user_id: int) -> RawChatConversation:
     existing = fetch_one(
-        """
+        f"""
         SELECT *
-        FROM public.chat_conversation
+        FROM {get_table_name("chat_conversation")}
         WHERE admin_user_id = %s
           AND partner_user_id = %s
         LIMIT 1
@@ -36,15 +37,15 @@ def get_or_create_conversation(admin_user_id: int, partner_user_id: int) -> RawC
 
     now = timezone.now()
     inserted = fetch_one(
-        """
-        INSERT INTO public.chat_conversation (
+        f"""
+        INSERT INTO {get_table_name("chat_conversation")} (
             created_at,
             updated_at,
             admin_user_id,
             partner_user_id
         ) VALUES (%s, %s, %s, %s)
         ON CONFLICT (admin_user_id, partner_user_id) DO NOTHING
-        RETURNING *
+        {"RETURNING *" if return_star() else ""}
         """,
         [now, now, admin_user_id, partner_user_id],
     )
@@ -52,9 +53,9 @@ def get_or_create_conversation(admin_user_id: int, partner_user_id: int) -> RawC
         return RawChatConversation.from_row(inserted)
 
     row = fetch_one(
-        """
+        f"""
         SELECT *
-        FROM public.chat_conversation
+        FROM {get_table_name("chat_conversation")}
         WHERE admin_user_id = %s
           AND partner_user_id = %s
         LIMIT 1
@@ -69,9 +70,9 @@ def get_or_create_conversation(admin_user_id: int, partner_user_id: int) -> RawC
 def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[str, Any]]:
     if actor_role == "admin":
         rows = fetch_all(
-            """
+            f"""
             SELECT *
-            FROM public.chat_conversation
+            FROM {get_table_name("chat_conversation")}
             WHERE admin_user_id = %s
             ORDER BY updated_at DESC, id DESC
             """,
@@ -81,9 +82,9 @@ def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[st
         counterpart_field = "partner_user_id"
     elif actor_role == "partner":
         rows = fetch_all(
-            """
+            f"""
             SELECT *
-            FROM public.chat_conversation
+            FROM {get_table_name("chat_conversation")}
             WHERE partner_user_id = %s
             ORDER BY updated_at DESC, id DESC
             """,
@@ -101,32 +102,59 @@ def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[st
     conversation_ids = [conversation.id for conversation in conversations]
     counterparts = fetch_users_by_ids(counterpart_ids)
 
-    last_messages = fetch_all(
-        """
-        SELECT DISTINCT ON (conversation_id) *
-        FROM public.chat_message
-        WHERE conversation_id = ANY(%s)
-        ORDER BY conversation_id, created_at DESC, id DESC
-        """,
-        [conversation_ids],
-    )
+    if is_postgresql():
+        last_messages = fetch_all(
+            f"""
+            SELECT DISTINCT ON (conversation_id) *
+            FROM {get_table_name("chat_message")}
+            WHERE conversation_id = ANY(%s)
+            ORDER BY conversation_id, created_at DESC, id DESC
+            """,
+            [conversation_ids],
+        )
+    else:
+        placeholders = ','.join(['%s'] * len(conversation_ids))
+        last_messages = fetch_all(
+            f"""
+            SELECT *
+            FROM {get_table_name("chat_message")}
+            WHERE conversation_id IN ({placeholders})
+            ORDER BY conversation_id, created_at DESC, id DESC
+            """,
+            conversation_ids,
+        )
     last_message_by_conversation: dict[int, RawChatMessage] = {}
     for row in last_messages:
         message = RawChatMessage.from_row(row)
         last_message_by_conversation[message.conversation_id] = message
 
-    unread_rows = fetch_all(
-        """
-        SELECT conversation_id, COUNT(*)::int AS unread_count
-        FROM public.chat_message
-        WHERE conversation_id = ANY(%s)
-          AND receiver_user_id = %s
-          AND receiver_role = %s
-          AND is_read = FALSE
-        GROUP BY conversation_id
-        """,
-        [conversation_ids, actor_id, actor_role],
-    )
+    if is_postgresql():
+        unread_rows = fetch_all(
+            f"""
+            SELECT conversation_id, COUNT(*) AS unread_count
+            FROM {get_table_name("chat_message")}
+            WHERE conversation_id = ANY(%s)
+              AND receiver_user_id = %s
+              AND receiver_role = %s
+              AND is_read = FALSE
+            GROUP BY conversation_id
+            """,
+            [conversation_ids, actor_id, actor_role],
+        )
+    else:
+        placeholders = ','.join(['%s'] * len(conversation_ids))
+        unread_rows = fetch_all(
+            f"""
+            SELECT conversation_id, COUNT(*) AS unread_count
+            FROM {get_table_name("chat_message")}
+            WHERE conversation_id IN ({placeholders})
+              AND receiver_user_id = %s
+              AND receiver_role = %s
+              AND is_read = FALSE
+            GROUP BY conversation_id
+            """,
+            conversation_ids + [actor_id, actor_role],
+        )
     unread_count_by_conversation = {
         int(row["conversation_id"]): int(row["unread_count"]) for row in unread_rows
     }
@@ -151,9 +179,9 @@ def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[st
 
 def list_messages_for_conversation(conversation_id: int) -> list[RawChatMessage]:
     rows = fetch_all(
-        """
+        f"""
         SELECT *
-        FROM public.chat_message
+        FROM {get_table_name("chat_message")}
         WHERE conversation_id = %s
         ORDER BY created_at ASC, id ASC
         """,
@@ -166,8 +194,8 @@ def mark_conversation_messages_read(
     conversation_id: int, receiver_user_id: int, receiver_role: str
 ) -> int:
     return execute(
-        """
-        UPDATE public.chat_message
+        f"""
+        UPDATE {get_table_name("chat_message")}
         SET is_read = TRUE,
             updated_at = %s
         WHERE conversation_id = %s
@@ -190,8 +218,8 @@ def create_chat_message(
 ) -> RawChatMessage:
     now = timezone.now()
     row = fetch_one(
-        """
-        INSERT INTO public.chat_message (
+        f"""
+        INSERT INTO {get_table_name("chat_message")} (
             content,
             is_read,
             created_at,
@@ -202,7 +230,7 @@ def create_chat_message(
             sender_role,
             receiver_role
         ) VALUES (%s, FALSE, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING *
+        {"RETURNING *" if return_star() else ""}
         """,
         [
             content,
@@ -215,6 +243,11 @@ def create_chat_message(
             receiver_role,
         ],
     )
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {get_table_name('chat_message')} WHERE conversation_id = %s AND sender_user_id = %s ORDER BY id DESC LIMIT 1",
+            [conversation_id, sender_user_id],
+        )
     if row is None:
         raise RuntimeError("Failed to create chat message")
     return RawChatMessage.from_row(row)
@@ -222,8 +255,8 @@ def create_chat_message(
 
 def touch_conversation(conversation_id: int) -> None:
     execute(
-        """
-        UPDATE public.chat_conversation
+        f"""
+        UPDATE {get_table_name("chat_conversation")}
         SET updated_at = %s
         WHERE id = %s
         """,
@@ -236,15 +269,30 @@ def mark_message_ids_read(message_ids: list[int], receiver_user_id: int, receive
     if not normalized_ids:
         return 0
 
-    return execute(
-        """
-        UPDATE public.chat_message
-        SET is_read = TRUE,
-            updated_at = %s
-        WHERE id = ANY(%s)
-          AND receiver_user_id = %s
-          AND receiver_role = %s
-          AND is_read = FALSE
-        """,
-        [timezone.now(), normalized_ids, receiver_user_id, receiver_role],
-    )
+    if is_postgresql():
+        return execute(
+            f"""
+            UPDATE {get_table_name("chat_message")}
+            SET is_read = TRUE,
+                updated_at = %s
+            WHERE id = ANY(%s)
+              AND receiver_user_id = %s
+              AND receiver_role = %s
+              AND is_read = FALSE
+            """,
+            [timezone.now(), normalized_ids, receiver_user_id, receiver_role],
+        )
+    else:
+        placeholders = ','.join(['%s'] * len(normalized_ids))
+        return execute(
+            f"""
+            UPDATE {get_table_name("chat_message")}
+            SET is_read = TRUE,
+                updated_at = %s
+            WHERE id IN ({placeholders})
+              AND receiver_user_id = %s
+              AND receiver_role = %s
+              AND is_read = FALSE
+            """,
+            [timezone.now()] + normalized_ids + [receiver_user_id, receiver_role],
+        )

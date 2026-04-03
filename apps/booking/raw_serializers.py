@@ -7,6 +7,9 @@ from django.utils.translation import gettext_lazy as _
 
 from rest_framework import serializers
 
+from shared.raw.compat import get_table_name
+from shared.raw.db import fetch_one
+
 from .mixins import DateRangeValidationMixin
 
 
@@ -22,7 +25,45 @@ def _build_media_url(request, media_path: str | None) -> str | None:
     return request.build_absolute_uri(url)
 
 
+def _resolve_property_average_rating(obj) -> float:
+    apartment_id = obj.get("property_apartment_id")
+    cottage_id = obj.get("property_cottage_id")
+    if apartment_id is None and cottage_id is None:
+        return 1.0
+
+    if apartment_id is not None:
+        row = fetch_one(
+            f"""
+            SELECT ROUND(COALESCE(AVG(r.rating), 1.0), 2) AS avg_rating
+            FROM {get_table_name("review")} r
+            WHERE r.apartment_id = %s
+              AND r.rating IS NOT NULL
+              AND COALESCE(r.is_hidden, FALSE) = FALSE
+            """,
+            [apartment_id],
+        )
+    else:
+        row = fetch_one(
+            f"""
+            SELECT ROUND(COALESCE(AVG(r.rating), 1.0), 2) AS avg_rating
+            FROM {get_table_name("review")} r
+            WHERE r.cottage_id = %s
+              AND r.rating IS NOT NULL
+              AND COALESCE(r.is_hidden, FALSE) = FALSE
+            """,
+            [cottage_id],
+        )
+    value = row.get("avg_rating") if row else None
+    if value is None:
+        return 1.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 class RawBookingPriceSerializer(serializers.Serializer):
+    guid = serializers.UUIDField(required=False, allow_null=True)
     subtotal = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
     hold_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
     charge_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
@@ -32,6 +73,7 @@ class RawBookingPriceSerializer(serializers.Serializer):
     def to_representation(self, instance):
         if not instance:
             return {
+                "guid": None,
                 "subtotal": None,
                 "hold_amount": None,
                 "charge_amount": None,
@@ -205,7 +247,7 @@ class RawPropertyBookingHistoryDetailSerializer(RawPropertyBookingHistorySeriali
     average_rating = serializers.SerializerMethodField("get_average_rating")
 
     def get_average_rating(self, obj):
-        return 1.0
+        return _resolve_property_average_rating(obj)
 
     def to_representation(self, instance):
         payload = dict(instance)
@@ -223,6 +265,7 @@ class RawClientBookingHistoryDetailSerializer(serializers.Serializer):
 
     def get_booking_price(self, obj):
         price_payload = {
+            "guid": obj.get("booking_price_guid"),
             "subtotal": obj.get("booking_subtotal"),
             "hold_amount": obj.get("booking_hold_amount"),
             "charge_amount": obj.get("booking_charge_amount"),
@@ -256,6 +299,7 @@ class RawPartnerBookingListSerializer(serializers.Serializer):
 
     def get_booking_price(self, obj):
         price_payload = {
+            "guid": obj.get("booking_price_guid"),
             "subtotal": obj.get("booking_subtotal"),
             "hold_amount": obj.get("booking_hold_amount"),
             "charge_amount": obj.get("booking_charge_amount"),
@@ -284,6 +328,23 @@ class RawAdminBookingPropertySerializer(serializers.Serializer):
     property_type = serializers.CharField(source="property_type_title", read_only=True)
 
 
+class RawAdminBookingPriceSerializer(serializers.Serializer):
+    subtotal = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
+    hold_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
+    charge_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
+    service_fee = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
+
+    def to_representation(self, instance):
+        if not instance:
+            return {
+                "subtotal": None,
+                "hold_amount": None,
+                "charge_amount": None,
+                "service_fee": None,
+            }
+        return super().to_representation(instance)
+
+
 class RawAdminBookingListSerializer(serializers.Serializer):
     guid = serializers.UUIDField(read_only=True)
     booking_number = serializers.CharField(read_only=True)
@@ -309,7 +370,7 @@ class RawAdminBookingListSerializer(serializers.Serializer):
             "charge_amount": obj.get("booking_charge_amount"),
             "service_fee": obj.get("booking_service_fee"),
         }
-        return RawBookingPriceSerializer(price_payload).data
+        return RawAdminBookingPriceSerializer(price_payload).data
 
     def to_representation(self, instance):
         payload = dict(instance)

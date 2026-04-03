@@ -1,76 +1,52 @@
-from django.db import models
-from django.utils.translation import gettext_lazy as _
+from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+from types import SimpleNamespace
+
+from shared.raw.choices import ChoiceEnum, build_choices
 from shared.models import HardDeleteBaseModel
-from users.models.clients import Client
+
 from .choices import Currency
 
 
-class PlumTransactionType(models.TextChoices):
-    HOLD = "HOLD", "Hold"
-    CHARGE = "CHRG", "Charge"
+class PlumTransactionType(ChoiceEnum):
+    HOLD = "HOLD"
+    CHARGE = "CHRG"
 
 
-class PlumTransactionStatus(models.TextChoices):
-    PENDING = "PENDING", "Pending"
-    HOLD_CONFIRMED = "HOLD_CONFIRMED", "Hold Confirmed"
-    CHARGED = "CHARGED", "Charged"
-    DISMISSED = "DISMISSED", "Dismissed"
-    FAILED = "FAILED", "Failed"
+PlumTransactionType.choices = build_choices(PlumTransactionType)
 
 
+class PlumTransactionStatus(ChoiceEnum):
+    PENDING = "PENDING"
+    HOLD_CONFIRMED = "HOLD_CONFIRMED"
+    CHARGED = "CHARGED"
+    DISMISSED = "DISMISSED"
+    FAILED = "FAILED"
+
+
+PlumTransactionStatus.choices = build_choices(PlumTransactionStatus)
+
+
+@dataclass(slots=True)
 class PlumTransaction(HardDeleteBaseModel):
-    transaction_id = models.CharField(max_length=255, unique=True)
-    hold_id = models.CharField(max_length=255, unique=True)
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
-    type = models.CharField(
-        max_length=4,
-        choices=PlumTransactionType.choices,
-    )
-    status = models.CharField(
-        max_length=20,
-        choices=PlumTransactionStatus.choices,
-        default=PlumTransactionStatus.PENDING,
-    )
-    card_id = models.CharField(max_length=255, null=True, blank=True)
-    extra_id = models.CharField(max_length=255, null=True, blank=True)
+    transaction_id: str | None = None
+    hold_id: str | None = None
+    amount: Decimal | None = None
+    type: str = PlumTransactionType.HOLD.value
+    status: str = PlumTransactionStatus.PENDING.value
+    card_id: str | None = None
+    extra_id: str | None = None
 
-    def __str__(self):
-        return (
-            f"<Transaction id: {self.transaction_id} | "
-            f"Hold id: {self.hold_id} | "
-            f"Type: {self.get_type_display()} | "
-            f"Status: {self.get_status_display()}>"
-        )
+    _meta = SimpleNamespace(db_table="payment_plumtransaction")
 
 
+@dataclass(slots=True)
 class ExchangeRate(HardDeleteBaseModel):
-    currency = models.CharField(
-        max_length=3,
-        choices=Currency,
-        default=Currency.USD,
-        db_default=Currency.USD,
-        verbose_name=_("Currency"),
-    )
-    rate = models.DecimalField(max_digits=18, decimal_places=6, verbose_name=_("Rate"))
-    date = models.DateField(auto_now=True, db_index=True, verbose_name=_("Date"))
+    currency: str = Currency.USD.value
+    rate: Decimal | None = None
+    date: date | None = None
 
-    class Meta:
-        verbose_name = _("Exchange rate")
-        verbose_name_plural = _("Exchange rates")
-        indexes = [
-            models.Index(fields=["currency", "date"]),
-        ]
-
-        constraints = [
-            models.UniqueConstraint(
-                fields=["currency", "date"],
-                name="unique_currency_date",
-            ),
-        ]
-
-    def __str__(self):
-        return f"Currency {self.currency!r}: {self.rate} on {self.date}"
-
-    def __repr__(self):
-        return f"<ExchangeRate id={self.guid} currency={self.currency} rate={self.rate} date={self.date}>"
+    _meta = SimpleNamespace(db_table="payment_exchangerate")

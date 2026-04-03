@@ -15,10 +15,8 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
-from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf.urls.static import static
-from django.conf.urls.i18n import i18n_patterns
 from django.views.static import serve
 
 from rest_framework import permissions
@@ -41,18 +39,11 @@ schema_view = get_schema_view(
     permission_classes=[permissions.AllowAny],
 )
 
-try:
-    import core.admin_mods
-except ImportError:
-    pass
-
 urlpatterns = [
     path("", include("django_prometheus.urls")),
     path("i18n/", include("django.conf.urls.i18n")),
     path("api/", include("apps.urls")),
-] + i18n_patterns(
-    path("admin/", admin.site.urls),
-)
+]
 
 urlpatterns += [
     path(
@@ -75,4 +66,3 @@ if not settings.USE_MINIO:
             {"document_root": settings.MEDIA_ROOT},
         )
     ]
-

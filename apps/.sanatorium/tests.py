@@ -60,7 +60,7 @@ from .services import (
 
 
 class SanatoriumTestMixin:
-    """Shared factory helpers for .sanatorium tests."""
+    """Shared factory helpers for ..sanatorium tests."""
 
     @staticmethod
     def make_partner(**kwargs):
@@ -141,7 +141,7 @@ class SanatoriumTestMixin:
         sanatorium = sanatorium or cls.make_sanatorium()
         room_type = room_type or cls.make_room_type()
         defaults = {
-            ".sanatorium": sanatorium,
+            "..sanatorium": sanatorium,
             "room_type": room_type,
             "title": "Room 101",
             "capacity": 2,
@@ -284,7 +284,7 @@ class SanatoriumModelTests(SanatoriumTestMixin, TestCase):
 
 
 class SanatoriumImageSignalTests(SanatoriumTestMixin, TestCase):
-    """Test that pending images are approved when .sanatorium becomes verified."""
+    """Test that pending images are approved when ..sanatorium becomes verified."""
 
     @staticmethod
     def _create_test_image(sanatorium, **kwargs):
@@ -296,7 +296,7 @@ class SanatoriumImageSignalTests(SanatoriumTestMixin, TestCase):
         PILImage.new("RGB", (100, 100), color="red").save(buf, format="JPEG")
         buf.seek(0)
         fake_file = SimpleUploadedFile("test.jpg", buf.read(), content_type="image/jpeg")
-        defaults = {".sanatorium": sanatorium, "image": fake_file, "order": 1, "is_pending": True}
+        defaults = {"..sanatorium": sanatorium, "image": fake_file, "order": 1, "is_pending": True}
         defaults.update(kwargs)
         return SanatoriumImage.objects.create(**defaults)
 
@@ -960,32 +960,32 @@ class LookupEndpointTests(SanatoriumTestMixin, TestCase):
 
     def test_specializations_list(self):
         self.make_specialization()
-        resp = self.api.get("/api/.sanatorium/specializations/")
+        resp = self.api.get("/api/..sanatorium/specializations/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_treatments_list(self):
         self.make_treatment()
-        resp = self.api.get("/api/.sanatorium/treatments/")
+        resp = self.api.get("/api/..sanatorium/treatments/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_room_types_list(self):
         self.make_room_type()
-        resp = self.api.get("/api/.sanatorium/room-types/")
+        resp = self.api.get("/api/..sanatorium/room-types/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_package_types_list(self):
         self.make_package_type()
-        resp = self.api.get("/api/.sanatorium/package-types/")
+        resp = self.api.get("/api/..sanatorium/package-types/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_amenities_list(self):
         self.make_amenity()
-        resp = self.api.get("/api/.sanatorium/amenities/")
+        resp = self.api.get("/api/..sanatorium/amenities/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
 
 class SanatoriumPublicEndpointTests(SanatoriumTestMixin, TestCase):
-    """Test public .sanatorium list and detail views."""
+    """Test public ..sanatorium list and detail views."""
 
     def setUp(self):
         self.api = APIClient()
@@ -993,7 +993,7 @@ class SanatoriumPublicEndpointTests(SanatoriumTestMixin, TestCase):
         self.san = self.make_sanatorium(partner=self.partner, verified=True)
 
     def test_sanatorium_list(self):
-        resp = self.api.get("/api/.sanatorium/")
+        resp = self.api.get("/api/..sanatorium/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_sanatorium_list_excludes_unverified(self):
@@ -1003,24 +1003,24 @@ class SanatoriumPublicEndpointTests(SanatoriumTestMixin, TestCase):
             verified=False,
             location=self.make_location(city="Bukhara"),
         )
-        resp = self.api.get("/api/.sanatorium/")
+        resp = self.api.get("/api/..sanatorium/")
         data = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         titles = [s["title"] for s in data]
         self.assertNotIn("Unverified", titles)
 
     def test_sanatorium_detail(self):
-        resp = self.api.get(f"/api/.sanatorium/{self.san.guid}/")
+        resp = self.api.get(f"/api/..sanatorium/{self.san.guid}/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["guid"], str(self.san.guid))
 
     def test_sanatorium_detail_not_found(self):
         import uuid
 
-        resp = self.api.get(f"/api/.sanatorium/{uuid.uuid4()}/")
+        resp = self.api.get(f"/api/..sanatorium/{uuid.uuid4()}/")
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_search_by_title(self):
-        resp = self.api.get("/api/.sanatorium/", {"search": "Test"})
+        resp = self.api.get("/api/..sanatorium/", {"search": "Test"})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
 
@@ -1033,12 +1033,12 @@ class RoomEndpointTests(SanatoriumTestMixin, TestCase):
         self.room = self.make_room(sanatorium=self.san)
 
     def test_room_list(self):
-        resp = self.api.get(f"/api/.sanatorium/{self.san.guid}/rooms/")
+        resp = self.api.get(f"/api/..sanatorium/{self.san.guid}/rooms/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_room_detail(self):
         resp = self.api.get(
-            f"/api/.sanatorium/{self.san.guid}/rooms/{self.room.guid}/"
+            f"/api/..sanatorium/{self.san.guid}/rooms/{self.room.guid}/"
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["guid"], str(self.room.guid))
@@ -1047,7 +1047,7 @@ class RoomEndpointTests(SanatoriumTestMixin, TestCase):
         import uuid
 
         resp = self.api.get(
-            f"/api/.sanatorium/{self.san.guid}/rooms/{uuid.uuid4()}/"
+            f"/api/..sanatorium/{self.san.guid}/rooms/{uuid.uuid4()}/"
         )
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
@@ -1067,7 +1067,7 @@ class CalendarEndpointTests(SanatoriumTestMixin, TestCase):
             status=RoomCalendarDate.CalendarStatus.AVAILABLE,
         )
         resp = self.api.get(
-            f"/api/.sanatorium/{self.san.guid}/rooms/{self.room.guid}/calendar/"
+            f"/api/..sanatorium/{self.san.guid}/rooms/{self.room.guid}/calendar/"
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
@@ -1084,7 +1084,7 @@ class ReviewEndpointTests(SanatoriumTestMixin, TestCase):
         SanatoriumReview.objects.create(
             client=client, sanatorium=self.san, rating=Decimal("4.0"), comment="Nice"
         )
-        resp = self.api.get(f"/api/.sanatorium/{self.san.guid}/reviews/")
+        resp = self.api.get(f"/api/..sanatorium/{self.san.guid}/reviews/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_hidden_reviews_excluded(self):
@@ -1096,7 +1096,7 @@ class ReviewEndpointTests(SanatoriumTestMixin, TestCase):
             comment="Bad",
             is_hidden=True,
         )
-        resp = self.api.get(f"/api/.sanatorium/{self.san.guid}/reviews/")
+        resp = self.api.get(f"/api/..sanatorium/{self.san.guid}/reviews/")
         results = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertEqual(len(results), 0)
 
@@ -1109,7 +1109,7 @@ class FavoriteEndpointTests(SanatoriumTestMixin, TestCase):
         self.san = self.make_sanatorium()
 
     def test_favorite_toggle_unauthenticated(self):
-        resp = self.api.post(f"/api/.sanatorium/{self.san.guid}/favorite/")
+        resp = self.api.post(f"/api/..sanatorium/{self.san.guid}/favorite/")
         self.assertIn(resp.status_code, [401, 403])
 
 
@@ -1120,11 +1120,11 @@ class PartnerEndpointTests(SanatoriumTestMixin, TestCase):
         self.api = APIClient()
 
     def test_partner_list_unauthenticated(self):
-        resp = self.api.get("/api/.sanatorium/partner/")
+        resp = self.api.get("/api/..sanatorium/partner/")
         self.assertIn(resp.status_code, [401, 403])
 
     def test_partner_create_unauthenticated(self):
-        resp = self.api.post("/api/.sanatorium/partner/", data={})
+        resp = self.api.post("/api/..sanatorium/partner/", data={})
         self.assertIn(resp.status_code, [401, 403])
 
     def test_partner_create_duplicate_title_returns_400(self):
@@ -1149,7 +1149,7 @@ class PartnerEndpointTests(SanatoriumTestMixin, TestCase):
             "check_out_time": "10:00:00",
         }
 
-        resp = self.api.post("/api/.sanatorium/partner/", data=payload, format="json")
+        resp = self.api.post("/api/..sanatorium/partner/", data=payload, format="json")
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("errors", resp.data)
         self.assertIn("already exists", str(resp.data["errors"][0]["detail"]).lower())
@@ -1163,15 +1163,15 @@ class ClientBookingEndpointTests(SanatoriumTestMixin, TestCase):
         self.api = APIClient()
 
     def test_client_booking_list_unauthenticated(self):
-        resp = self.api.get("/api/.sanatorium/booking/client/")
+        resp = self.api.get("/api/..sanatorium/booking/client/")
         self.assertIn(resp.status_code, [401, 403])
 
     def test_client_booking_create_unauthenticated(self):
-        resp = self.api.post("/api/.sanatorium/booking/client/", data={})
+        resp = self.api.post("/api/..sanatorium/booking/client/", data={})
         self.assertIn(resp.status_code, [401, 403])
 
     def test_client_booking_history_unauthenticated(self):
-        resp = self.api.get("/api/.sanatorium/booking/client/history/")
+        resp = self.api.get("/api/..sanatorium/booking/client/history/")
         self.assertIn(resp.status_code, [401, 403])
 
 
@@ -1182,5 +1182,5 @@ class PartnerBookingEndpointTests(SanatoriumTestMixin, TestCase):
         self.api = APIClient()
 
     def test_partner_booking_list_unauthenticated(self):
-        resp = self.api.get("/api/.sanatorium/booking/partner/")
+        resp = self.api.get("/api/..sanatorium/booking/partner/")
         self.assertIn(resp.status_code, [401, 403])

@@ -1,11 +1,11 @@
 import os
 import csv
-from django.conf import settings
 
 BIN_DATA = {}
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CSV_PATH = os.path.join(settings.BASE_DIR, "bin-list-data.csv")
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+CSV_PATH = os.path.join(PROJECT_ROOT, "bin-list-data.csv")
 
 
 def load_bin_data():

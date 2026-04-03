@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
-
 from datetime import timedelta
+from typing import Any
 from uuid import uuid4
 
 from django.utils import timezone
 
+from shared.raw.compat import get_table_name, is_postgresql, return_star
 from shared.raw.db import execute, fetch_all, fetch_one
 
 
@@ -15,11 +15,11 @@ BOOKING_ALLOWED_STATUSES = {"pending", "confirmed", "cancelled", "completed"}
 
 def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | None:
     return fetch_one(
-        """
+        f"""
         SELECT *
         FROM (
             SELECT
-                'apartment'::text AS property_kind,
+                'apartment' AS property_kind,
                 a.id AS property_id,
                 a.guid,
                 a.partner_user_id,
@@ -38,15 +38,15 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
                 u.first_name AS partner_first_name,
                 u.last_name AS partner_last_name,
                 u.phone_number AS partner_phone_number
-            FROM public.apartment a
-            LEFT JOIN public.users u ON u.id = a.partner_user_id
+            FROM {get_table_name("apartment")} a
+            LEFT JOIN {get_table_name("users")} u ON u.id = a.partner_user_id
             WHERE a.guid = %s
               AND COALESCE(a.is_verified, FALSE) = TRUE
 
             UNION ALL
 
             SELECT
-                'cottage'::text AS property_kind,
+                'cottage' AS property_kind,
                 c.id AS property_id,
                 c.guid,
                 c.partner_user_id,
@@ -65,8 +65,8 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
                 u.first_name AS partner_first_name,
                 u.last_name AS partner_last_name,
                 u.phone_number AS partner_phone_number
-            FROM public.cottage c
-            LEFT JOIN public.users u ON u.id = c.partner_user_id
+            FROM {get_table_name("cottage")} c
+            LEFT JOIN {get_table_name("users")} u ON u.id = c.partner_user_id
             WHERE c.guid = %s
               AND COALESCE(c.is_verified, FALSE) = TRUE
         ) p
@@ -75,10 +75,11 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
         [property_guid, property_guid],
     )
 
-BOOKING_BASE_SELECT = """
+BOOKING_BASE_SELECT = f"""
     SELECT
         b.id,
         b.guid,
+        b.guid AS booking_price_guid,
         b.created_at,
         b.updated_at,
         b.booking_number,
@@ -126,11 +127,11 @@ BOOKING_BASE_SELECT = """
         bp.service_fee AS booking_service_fee,
         bp.service_fee_percentage AS booking_service_fee_percentage
 
-    FROM public.booking b
-    LEFT JOIN public.users client_u ON client_u.id = b.client_user_id
-    LEFT JOIN public.apartment a ON a.id = b.property_apartment_id
-    LEFT JOIN public.cottage c ON c.id = b.property_cottage_id
-    LEFT JOIN public.users partner_u ON partner_u.id = COALESCE(a.partner_user_id, c.partner_user_id)
+    FROM {get_table_name("booking")} b
+    LEFT JOIN {get_table_name("users")} client_u ON client_u.id = b.client_user_id
+    LEFT JOIN {get_table_name("apartment")} a ON a.id = b.property_apartment_id
+    LEFT JOIN {get_table_name("cottage")} c ON c.id = b.property_cottage_id
+    LEFT JOIN {get_table_name("users")} partner_u ON partner_u.id = COALESCE(a.partner_user_id, c.partner_user_id)
     LEFT JOIN LATERAL (
         SELECT
             COALESCE(SUM(th.amount), 0) AS subtotal,
@@ -138,7 +139,7 @@ BOOKING_BASE_SELECT = """
             MAX(CASE WHEN th.type = 'CHRG' THEN th.amount END) AS charge_amount,
             MAX(CASE WHEN COALESCE(th.type, '') <> 'CHRG' THEN th.amount END) AS service_fee,
             20::smallint AS service_fee_percentage
-        FROM public.transaction_history th
+        FROM {get_table_name("transaction_history")} th
         WHERE th.booking_id = b.id
     ) bp ON TRUE
 """
@@ -161,8 +162,13 @@ def list_client_bookings(client_user_id: int, statuses: list[str] | None = None)
     where = ["b.client_user_id = %s"]
     params: list[Any] = [client_user_id]
     if normalized_statuses:
-        where.append("b.status = ANY(%s)")
-        params.append(normalized_statuses)
+        if is_postgresql():
+            where.append("b.status = ANY(%s)")
+            params.append(normalized_statuses)
+        else:
+            placeholders = ','.join(['%s'] * len(normalized_statuses))
+            where.append(f"b.status IN ({placeholders})")
+            params.extend(normalized_statuses)
 
     return fetch_all(
         f"""
@@ -214,8 +220,13 @@ def list_partner_bookings(partner_user_id: int, statuses: list[str] | None = Non
     where = ["partner_u.id = %s"]
     params: list[Any] = [partner_user_id]
     if normalized_statuses:
-        where.append("b.status = ANY(%s)")
-        params.append(normalized_statuses)
+        if is_postgresql():
+            where.append("b.status = ANY(%s)")
+            params.append(normalized_statuses)
+        else:
+            placeholders = ','.join(['%s'] * len(normalized_statuses))
+            where.append(f"b.status IN ({placeholders})")
+            params.extend(normalized_statuses)
 
     return fetch_all(
         f"""
@@ -292,9 +303,10 @@ def create_booking_row(
 ) -> dict[str, Any] | None:
     apartment_id, cottage_id = _property_ids(property_kind, property_id)
     now = timezone.now()
-    return fetch_one(
-        """
-        INSERT INTO public.booking (
+    returning_clause = "RETURNING *" if return_star() else ""
+    row = fetch_one(
+        f"""
+        INSERT INTO {get_table_name("booking")} (
             guid,
             created_at,
             updated_at,
@@ -327,7 +339,7 @@ def create_booking_row(
             %s,
             %s
         )
-        RETURNING *
+        {returning_clause}
         """,
         [
             uuid4(),
@@ -344,6 +356,12 @@ def create_booking_row(
             cottage_id,
         ],
     )
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {get_table_name('booking')} WHERE booking_number = %s ORDER BY id DESC LIMIT 1",
+            [booking_number],
+        )
+    return row
 
 
 def list_pending_bookings_for_payment_reminders() -> list[dict[str, Any]]:
@@ -359,7 +377,7 @@ def list_pending_bookings_for_payment_reminders() -> list[dict[str, Any]]:
 def update_booking_payment_reminder_stage(booking_id: int, stage: str) -> int:
     return execute(
         """
-        UPDATE public.booking
+        UPDATE {get_table_name("booking")}
         SET payment_reminder_stage = %s,
             updated_at = %s
         WHERE id = %s
@@ -373,7 +391,7 @@ def release_calendar_for_booking(booking_row: dict[str, Any]) -> int:
     end_date = booking_row["check_out"] - timedelta(days=1)
     return execute(
         f"""
-        DELETE FROM public.calendar
+        DELETE FROM {get_table_name("calendar")}
         WHERE {property_column} = %s
           AND date BETWEEN %s AND %s
         """,
@@ -407,15 +425,22 @@ def update_booking_status(
         params.append(now)
 
     params.append(booking_id)
-    return fetch_one(
+    returning_clause = "RETURNING *" if return_star() else ""
+    row = fetch_one(
         f"""
-        UPDATE public.booking
+        UPDATE {get_table_name("booking")}
         SET {', '.join(fields)}
         WHERE id = %s
-        RETURNING *
+        {returning_clause}
         """,
         params,
     )
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {get_table_name('booking')} WHERE id = %s LIMIT 1",
+            [booking_id],
+        )
+    return row
 
 
 def count_admin_bookings(status: str | None = None, search: str | None = None) -> int:
@@ -429,15 +454,15 @@ def count_admin_bookings(status: str | None = None, search: str | None = None) -
     if search:
         like = f"%{search.strip()}%"
         where.append(
-            "(COALESCE(b.booking_number, '') ILIKE %s OR COALESCE(client_u.phone_number, '') ILIKE %s)"
+            "(COALESCE(b.booking_number, '') LIKE %s OR COALESCE(client_u.phone_number, '') LIKE %s)"
         )
         params.extend([like, like])
 
     row = fetch_one(
-        """
-        SELECT COUNT(*)::int AS total
-        FROM public.booking b
-        LEFT JOIN public.users client_u ON client_u.id = b.client_user_id
+        f"""
+        SELECT COUNT(*) AS total
+        FROM {get_table_name("booking")} b
+        LEFT JOIN {get_table_name("users")} client_u ON client_u.id = b.client_user_id
         WHERE """
         + " AND ".join(where),
         params,
@@ -463,7 +488,7 @@ def list_admin_bookings(
     if search:
         like = f"%{search.strip()}%"
         where.append(
-            "(COALESCE(b.booking_number, '') ILIKE %s OR COALESCE(client_u.phone_number, '') ILIKE %s)"
+            "(COALESCE(b.booking_number, '') LIKE %s OR COALESCE(client_u.phone_number, '') LIKE %s)"
         )
         params.extend([like, like])
 

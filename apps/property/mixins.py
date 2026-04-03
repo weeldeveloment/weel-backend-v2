@@ -5,9 +5,11 @@ from dateutil.relativedelta import relativedelta
 from django.utils.translation import gettext_lazy as _
 
 from rest_framework import serializers
+from types import SimpleNamespace
 
-from .models import PropertyType
+from shared.raw.db import fetch_one
 from shared.date import month_start, month_end, parse_yyyy_mm_dd
+from shared.raw.tables import PROPERTY_TYPE_TABLE
 
 
 class LanguageFieldMixin:
@@ -52,10 +54,18 @@ class PropertyServicesValidateMixin:
         if property_type_id is not None:
             property_type_id = str(property_type_id).strip()
         if property_type_id:
-            property_type = PropertyType.objects.filter(guid=property_type_id).first()
-            if property_type is None:
+            row = fetch_one(
+                f"""
+                SELECT id, guid
+                FROM {PROPERTY_TYPE_TABLE}
+                WHERE guid = %s
+                LIMIT 1
+                """,
+                [property_type_id],
+            )
+            if row is None:
                 raise serializers.ValidationError(_("Invalid property type"))
-            return property_type
+            return SimpleNamespace(id=row["id"], guid=row["guid"])
 
         # Update serializer with existing instance
         if hasattr(self, "instance") and self.instance:

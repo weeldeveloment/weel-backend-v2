@@ -20,13 +20,13 @@ from .models import (
     SanatoriumBookingPrice,
 )
 
-logger = logging.getLogger(".sanatorium")
+logger = logging.getLogger("..sanatorium")
 
 SERVICE_FEE_PERCENTAGE = 20
 
 
 def calculate_booking_price(room: SanatoriumRoom, package_type: PackageType) -> dict:
-    """Calculate total and hold amounts for a .sanatorium booking.
+    """Calculate total and hold amounts for a ..sanatorium booking.
 
     Payment flow from Figma:
       1. 20% hold upfront

@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
+from django.core.cache import cache
+from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
 
 from rest_framework import parsers, status
@@ -27,6 +30,7 @@ from .raw_repository import (
     list_reviews,
     parse_property_kind,
     prepare_property_rows,
+    set_property_primary_image,
     update_property,
 )
 from .raw_serializers import (
@@ -39,6 +43,9 @@ from .raw_serializers import (
     RawPropertyTypeSerializer,
     RawPropertyUpdateSerializer,
 )
+
+
+_FAVORITES_CACHE_TTL_SECONDS = 60 * 60 * 24 * 30
 
 
 def _source_get(source, key: str, default=None):
@@ -85,6 +92,46 @@ def _resolve_reference_date(value) -> date:
         return date.fromisoformat(raw)
     except ValueError:
         return date.today()
+
+
+def _build_media_url(request, media_path: str | None) -> str | None:
+    if not media_path:
+        return None
+    try:
+        url = default_storage.url(media_path)
+    except Exception:
+        return None
+    if not request:
+        return url
+    return request.build_absolute_uri(url)
+
+
+def _favorites_cache_key(client_user_id: int) -> str:
+    return f"property:favorites:{int(client_user_id)}"
+
+
+def _load_favorite_guids(client_user_id: int) -> set[str]:
+    payload = cache.get(_favorites_cache_key(client_user_id), [])
+    if not isinstance(payload, (list, tuple, set)):
+        return set()
+    return {str(value) for value in payload if value}
+
+
+def _store_favorite_guids(client_user_id: int, values: set[str]) -> None:
+    cache.set(
+        _favorites_cache_key(client_user_id),
+        sorted({str(value) for value in values if value}),
+        timeout=_FAVORITES_CACHE_TTL_SECONDS,
+    )
+
+
+def _favorite_guids_from_request(request) -> set[str]:
+    user = getattr(request, "user", None)
+    if not user or not getattr(user, "is_authenticated", False):
+        return set()
+    if getattr(user, "role", None) != "client":
+        return set()
+    return _load_favorite_guids(int(user.id))
 
 
 def _list_property_rows(
@@ -207,7 +254,14 @@ class UnifiedRecommendationsListView(APIView):
             default_ordering=ordering,
             default_limit=20,
         )
-        serializer = RawPropertyListSerializer(rows, many=True, context={"request": request})
+        serializer = RawPropertyListSerializer(
+            rows,
+            many=True,
+            context={
+                "request": request,
+                "favorite_guids": _favorite_guids_from_request(request),
+            },
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -252,7 +306,14 @@ class PropertyListCreateView(APIView):
             public_only=True,
             forced_kind=self.forced_property_kind,
         )
-        serializer = RawPropertyListSerializer(rows, many=True, context={"request": request})
+        serializer = RawPropertyListSerializer(
+            rows,
+            many=True,
+            context={
+                "request": request,
+                "favorite_guids": _favorite_guids_from_request(request),
+            },
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request, *args, **kwargs):
@@ -288,7 +349,14 @@ class PropertyFilterByLinkView(APIView):
             return Response({"url": [_("This field is required.")]}, status=status.HTTP_400_BAD_REQUEST)
         parsed = parse_qs(urlparse(url).query)
         rows = _list_property_rows(parsed, public_only=True)
-        serializer = RawPropertyListSerializer(rows, many=True, context={"request": request})
+        serializer = RawPropertyListSerializer(
+            rows,
+            many=True,
+            context={
+                "request": request,
+                "favorite_guids": _favorite_guids_from_request(request),
+            },
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -308,7 +376,14 @@ class RegionPropertyListView(PropertyListCreateView):
         mutable = request.query_params.copy()
         mutable["region_id"] = str(region_id)
         rows = _list_property_rows(mutable, public_only=True)
-        serializer = RawPropertyListSerializer(rows, many=True, context={"request": request})
+        serializer = RawPropertyListSerializer(
+            rows,
+            many=True,
+            context={
+                "request": request,
+                "favorite_guids": _favorite_guids_from_request(request),
+            },
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -337,7 +412,13 @@ class PropertyRetrieveUpdateDestroyView(APIView):
 
     def get(self, request, property_id, *args, **kwargs):
         row = self._read_property_or_404(str(property_id))
-        serializer = RawPropertyDetailSerializer(row, context={"request": request})
+        serializer = RawPropertyDetailSerializer(
+            row,
+            context={
+                "request": request,
+                "favorite_guids": _favorite_guids_from_request(request),
+            },
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request, property_id, *args, **kwargs):
@@ -389,9 +470,51 @@ class PropertyImageCreateView(APIView):
     permission_classes = [IsPartner]
 
     def post(self, request, property_id, *args, **kwargs):
+        property_row = get_property_for_partner(str(property_id), int(request.user.id))
+        if not property_row:
+            raise NotFound(_("Property not found"))
+
+        uploaded_files = request.FILES.getlist("images")
+        if not uploaded_files:
+            single = request.FILES.get("image")
+            if single is not None:
+                uploaded_files = [single]
+        if not uploaded_files:
+            raise ValidationError({"images": [_("This field is required.")]})
+
+        uploaded = uploaded_files[0]
+        saved_path = default_storage.save(
+            f"property/{property_id}/{uuid4()}_{uploaded.name}",
+            uploaded,
+        )
+        updated = set_property_primary_image(
+            property_kind=str(property_row["property_kind"]),
+            property_id=int(property_row["id"]),
+            partner_user_id=int(request.user.id),
+            image_path=saved_path,
+        )
+        if not updated:
+            raise NotFound(_("Property not found"))
+
+        if not bool(updated.get("is_verified")):
+            return Response(
+                status=status.HTTP_200_OK,
+                data={
+                    "detail": "Your image(s) are pending approval",
+                    "status": "pending",
+                },
+            )
+
         return Response(
-            {"detail": _("Property images are not supported in normalized schema.")},
-            status=status.HTTP_501_NOT_IMPLEMENTED,
+            status=status.HTTP_201_CREATED,
+            data=[
+                {
+                    "guid": uuid4(),
+                    "order": 1,
+                    "is_pending": False,
+                    "image_url": _build_media_url(request, updated.get("img")),
+                }
+            ],
         )
 
 
@@ -401,16 +524,61 @@ class PropertyImageUpdateDeleteView(APIView):
     permission_classes = [IsPartner]
 
     def patch(self, request, property_id, image_id, *args, **kwargs):
+        property_row = get_property_for_partner(str(property_id), int(request.user.id))
+        if not property_row:
+            raise NotFound(_("Property not found"))
+
+        uploaded = request.FILES.get("image")
+        if uploaded is None:
+            images = request.FILES.getlist("images")
+            if images:
+                uploaded = images[0]
+        image_path = property_row.get("img")
+        if uploaded is not None:
+            image_path = default_storage.save(
+                f"property/{property_id}/{uuid4()}_{uploaded.name}",
+                uploaded,
+            )
+            updated = set_property_primary_image(
+                property_kind=str(property_row["property_kind"]),
+                property_id=int(property_row["id"]),
+                partner_user_id=int(request.user.id),
+                image_path=image_path,
+            )
+            if not updated:
+                raise NotFound(_("Property not found"))
+        elif not image_path:
+            raise NotFound(_("Property image not found"))
+
         return Response(
-            {"detail": _("Property images are not supported in normalized schema.")},
-            status=status.HTTP_501_NOT_IMPLEMENTED,
+            status=status.HTTP_200_OK,
+            data={
+                "detail": _("Your image has been updated and is pending approval"),
+                "status": "pending",
+            },
         )
 
     def delete(self, request, property_id, image_id, *args, **kwargs):
-        return Response(
-            {"detail": _("Property images are not supported in normalized schema.")},
-            status=status.HTTP_501_NOT_IMPLEMENTED,
+        property_row = get_property_for_partner(str(property_id), int(request.user.id))
+        if not property_row:
+            raise NotFound(_("Property not found"))
+        image_path = property_row.get("img")
+        if not image_path:
+            raise NotFound(_("Property image not found"))
+
+        updated = set_property_primary_image(
+            property_kind=str(property_row["property_kind"]),
+            property_id=int(property_row["id"]),
+            partner_user_id=int(request.user.id),
+            image_path=None,
         )
+        if not updated:
+            raise NotFound(_("Property not found"))
+        try:
+            default_storage.delete(image_path)
+        except Exception:
+            pass
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class PropertyReviewListCreateView(APIView):
@@ -502,7 +670,20 @@ class SavedPropertyListView(APIView):
     permission_classes = [IsClient]
 
     def get(self, request, *args, **kwargs):
-        return Response([], status=status.HTTP_200_OK)
+        favorite_guids = _load_favorite_guids(int(request.user.id))
+        if not favorite_guids:
+            return Response([], status=status.HTTP_200_OK)
+        rows = _list_property_rows(request.query_params, public_only=True)
+        rows = [row for row in rows if str(row.get("guid")) in favorite_guids]
+        serializer = RawPropertyListSerializer(
+            rows,
+            many=True,
+            context={
+                "request": request,
+                "favorite_guids": favorite_guids,
+            },
+        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class PropertyFavoriteToggleView(APIView):
@@ -513,18 +694,35 @@ class PropertyFavoriteToggleView(APIView):
         row = get_property_for_public(str(property_id))
         if not row:
             raise NotFound(_("Property not found"))
+        favorite_guids = _load_favorite_guids(int(request.user.id))
+        guid = str(row["guid"])
+        if guid in favorite_guids:
+            favorite_guids.remove(guid)
+            _store_favorite_guids(int(request.user.id), favorite_guids)
+            return Response(
+                {
+                    "detail": _("Removed from favorites"),
+                    "is_favorite": False,
+                },
+                status=status.HTTP_200_OK,
+            )
+        favorite_guids.add(guid)
+        _store_favorite_guids(int(request.user.id), favorite_guids)
         return Response(
             {
-                "detail": _("Favorites are not available in normalized schema"),
-                "is_favorite": False,
+                "detail": _("Added to favorites"),
+                "is_favorite": True,
             },
-            status=status.HTTP_501_NOT_IMPLEMENTED,
+            status=status.HTTP_201_CREATED,
         )
 
     def delete(self, request, property_id, *args, **kwargs):
         row = get_property_for_public(str(property_id))
         if not row:
             raise NotFound(_("Property not found"))
+        favorite_guids = _load_favorite_guids(int(request.user.id))
+        favorite_guids.discard(str(row["guid"]))
+        _store_favorite_guids(int(request.user.id), favorite_guids)
         return Response(
             {
                 "detail": _("Removed from favorites"),

@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from payment.exchange_rate import exchange_rate
 from shared.raw.db import execute, fetch_all, fetch_one
+from shared.raw.compat import get_table_name, is_postgresql, return_star
 
 
 APARTMENT_TYPE_GUID = UUID("11111111-1111-1111-1111-111111111111")
@@ -36,11 +37,11 @@ TYPE_GUID_TO_KIND = {
     str(COTTAGE_TYPE_GUID): PROPERTY_KIND_COTTAGE,
 }
 
-PROPERTY_UNION_SELECT = """
+PROPERTY_UNION_SELECT = f"""
     SELECT *
     FROM (
         SELECT
-            'apartment'::text AS property_kind,
+            'apartment' AS property_kind,
             a.id,
             a.legacy_property_id,
             a.guid,
@@ -90,15 +91,15 @@ PROPERTY_UNION_SELECT = """
             u.first_name AS partner_first_name,
             u.last_name AS partner_last_name,
             u.phone_number AS partner_phone_number,
-            COALESCE(stats.average_rating, 1.0)::numeric AS average_rating,
-            COALESCE(stats.review_count, 0)::int AS review_count
-        FROM public.apartment a
-        LEFT JOIN public.users u ON u.id = a.partner_user_id
+            COALESCE(stats.average_rating, 1.0) AS average_rating,
+            COALESCE(stats.review_count, 0) AS review_count
+        FROM {get_table_name("apartment")} a
+        LEFT JOIN {get_table_name("users")} u ON u.id = a.partner_user_id
         LEFT JOIN LATERAL (
             SELECT
-                ROUND(COALESCE(AVG(r.rating), 1.0)::numeric, 2) AS average_rating,
-                COUNT(*)::int AS review_count
-            FROM public.review r
+                ROUND(COALESCE(AVG(r.rating), 1.0), 2) AS average_rating,
+                COUNT(*) AS review_count
+            FROM {get_table_name("review")} r
             WHERE r.apartment_id = a.id
               AND (COALESCE(r.is_hidden, FALSE) = FALSE)
               AND r.rating IS NOT NULL
@@ -107,7 +108,7 @@ PROPERTY_UNION_SELECT = """
         UNION ALL
 
         SELECT
-            'cottage'::text AS property_kind,
+            'cottage' AS property_kind,
             c.id,
             c.legacy_property_id,
             c.guid,
@@ -157,15 +158,15 @@ PROPERTY_UNION_SELECT = """
             u.first_name AS partner_first_name,
             u.last_name AS partner_last_name,
             u.phone_number AS partner_phone_number,
-            COALESCE(stats.average_rating, 1.0)::numeric AS average_rating,
-            COALESCE(stats.review_count, 0)::int AS review_count
-        FROM public.cottage c
-        LEFT JOIN public.users u ON u.id = c.partner_user_id
+            COALESCE(stats.average_rating, 1.0) AS average_rating,
+            COALESCE(stats.review_count, 0) AS review_count
+        FROM {get_table_name("cottage")} c
+        LEFT JOIN {get_table_name("users")} u ON u.id = c.partner_user_id
         LEFT JOIN LATERAL (
             SELECT
-                ROUND(COALESCE(AVG(r.rating), 1.0)::numeric, 2) AS average_rating,
-                COUNT(*)::int AS review_count
-            FROM public.review r
+                ROUND(COALESCE(AVG(r.rating), 1.0), 2) AS average_rating,
+                COUNT(*) AS review_count
+            FROM {get_table_name("review")} r
             WHERE r.cottage_id = c.id
               AND (COALESCE(r.is_hidden, FALSE) = FALSE)
               AND r.rating IS NOT NULL
@@ -386,7 +387,7 @@ def list_properties(
     if recommended_only:
         where.append("COALESCE(p.is_recommended, FALSE) = TRUE")
     if search:
-        where.append("COALESCE(p.title, '') ILIKE %s")
+        where.append("COALESCE(p.title, '') LIKE %s")
         params.append(f"%{search.strip()}%")
     if region_id is not None:
         where.append("p.region_id = %s")
@@ -437,7 +438,7 @@ def _table_for_kind(property_kind: str) -> str:
     table = KIND_TO_TABLE.get(property_kind)
     if not table:
         raise ValueError("Invalid property kind")
-    return table
+    return get_table_name(table)
 
 
 def create_property(
@@ -451,7 +452,7 @@ def create_property(
 
     row = fetch_one(
         f"""
-        INSERT INTO public.{table} (
+        INSERT INTO {table} (
             guid,
             created_at,
             updated_at,
@@ -557,7 +558,7 @@ def update_property(
         return fetch_one(
             f"""
             SELECT *
-            FROM public.{table}
+            FROM {table}
             WHERE id = %s
               AND partner_user_id = %s
             LIMIT 1
@@ -606,7 +607,7 @@ def update_property(
     params = list(updates.values()) + [property_id, partner_user_id]
     row = fetch_one(
         f"""
-        UPDATE public.{table}
+        UPDATE {table}
         SET {assignments}
         WHERE id = %s
           AND partner_user_id = %s
@@ -628,12 +629,36 @@ def delete_property(
     table = _table_for_kind(property_kind)
     return execute(
         f"""
-        DELETE FROM public.{table}
+        DELETE FROM {table}
         WHERE id = %s
           AND partner_user_id = %s
         """,
         [property_id, partner_user_id],
     )
+
+
+def set_property_primary_image(
+    *,
+    property_kind: str,
+    property_id: int,
+    partner_user_id: int,
+    image_path: str | None,
+) -> dict[str, Any] | None:
+    table = _table_for_kind(property_kind)
+    row = fetch_one(
+        f"""
+        UPDATE {table}
+        SET img = %s,
+            updated_at = %s
+        WHERE id = %s
+          AND partner_user_id = %s
+        RETURNING guid
+        """,
+        [image_path, timezone.now(), property_id, partner_user_id],
+    )
+    if not row:
+        return None
+    return get_property_for_partner(str(row["guid"]), partner_user_id)
 
 
 def list_reviews(
@@ -653,7 +678,7 @@ def list_reviews(
         where.append("COALESCE(r.is_hidden, FALSE) = FALSE")
 
     return fetch_all(
-        """
+        f"""
         SELECT
             r.guid,
             r.created_at,
@@ -662,8 +687,8 @@ def list_reviews(
             r.user_id AS client_id,
             u.first_name AS client_first_name,
             u.last_name AS client_last_name
-        FROM public.review r
-        LEFT JOIN public.users u ON u.id = r.user_id
+        FROM {get_table_name("review")} r
+        LEFT JOIN {get_table_name("users")} u ON u.id = r.user_id
         WHERE """
         + " AND ".join(where)
         + """
@@ -680,19 +705,35 @@ def has_eligible_booking_for_review(
     property_id: int,
 ) -> bool:
     property_column = "property_apartment_id" if property_kind == PROPERTY_KIND_APARTMENT else "property_cottage_id"
-    row = fetch_one(
-        f"""
-        SELECT EXISTS (
-            SELECT 1
-            FROM public.booking
-            WHERE client_user_id = %s
-              AND {property_column} = %s
-              AND status = ANY(%s)
-        ) AS exists
-        """,
-        [client_user_id, property_id, ["confirmed", "completed", "cancelled"]],
-    )
-    return bool(row and row["exists"])
+    statuses = ["confirmed", "completed", "cancelled"]
+    if is_postgresql():
+        row = fetch_one(
+            f"""
+            SELECT EXISTS (
+                SELECT 1
+                FROM {get_table_name("booking")}
+                WHERE client_user_id = %s
+                  AND {property_column} = %s
+                  AND status = ANY(%s)
+            ) AS exists_flag
+            """,
+            [client_user_id, property_id, statuses],
+        )
+    else:
+        placeholders = ','.join(['%s'] * len(statuses))
+        row = fetch_one(
+            f"""
+            SELECT EXISTS (
+                SELECT 1
+                FROM {get_table_name("booking")}
+                WHERE client_user_id = %s
+                  AND {property_column} = %s
+                  AND status IN ({placeholders})
+            ) AS exists_flag
+            """,
+            [client_user_id, property_id] + statuses,
+        )
+    return bool(row and row["exists_flag"])
 
 
 def create_review(
@@ -708,8 +749,8 @@ def create_review(
     cottage_id = property_id if property_kind == PROPERTY_KIND_COTTAGE else None
 
     row = fetch_one(
-        """
-        INSERT INTO public.review (
+        f"""
+        INSERT INTO {get_table_name("review")} (
             guid,
             created_at,
             updated_at,

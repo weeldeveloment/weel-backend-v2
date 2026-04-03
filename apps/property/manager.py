@@ -1,6 +1,3 @@
-from django.db import models
-
-
-class PropertyManager(models.Manager):
+class PropertyManager:
     def get_queryset(self):
-        return super().get_queryset().filter(is_archived=False)
+        return []

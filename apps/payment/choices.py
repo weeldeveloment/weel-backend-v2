@@ -1,8 +1,12 @@
-from django.db import models
-from django.utils.translation import gettext_lazy as _
+from shared.raw.choices import ChoiceEnum
 
 
-class Currency(models.TextChoices):
-    USD = "USD", _("US Dollar")
-    UZS = "UZS", _("Uzbekistan So'm")
+class Currency(ChoiceEnum):
+    USD = "USD"
+    UZS = "UZS"
 
+
+Currency.choices = [
+    (Currency.USD.value, "US Dollar"),
+    (Currency.UZS.value, "Uzbekistan So'm"),
+]

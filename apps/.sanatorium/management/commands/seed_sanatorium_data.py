@@ -10,7 +10,7 @@ from sanatorium.models import (
     RoomAmenity,
 )
 
-logger = logging.getLogger(".sanatorium")
+logger = logging.getLogger("..sanatorium")
 
 
 SPECIALIZATIONS = [
@@ -57,7 +57,7 @@ AMENITIES = [
 
 
 class Command(BaseCommand):
-    help = "Seed .sanatorium reference data: specializations, treatments, room types, packages, amenities"
+    help = "Seed ..sanatorium reference data: specializations, treatments, room types, packages, amenities"
 
     def handle(self, *args, **options):
         created_count = 0

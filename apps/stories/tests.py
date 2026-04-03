@@ -371,7 +371,7 @@ class PublicStoriesAPITests(TestCase):
         self.assertNotIn(str(unverified.guid), guids)
 
     def test_public_stories_list_filter_by_property_type(self):
-        """Client dacha tanlasa faqat dacha istoriyalari, .sanatorium tanlasa faqat .sanatorium."""
+        """Client dacha tanlasa faqat dacha istoriyalari, ..sanatorium tanlasa faqat ..sanatorium."""
         pt_dacha = PropertyType.objects.create(
             title_en="Dacha",
             title_ru="Дача",
@@ -403,7 +403,7 @@ class PublicStoriesAPITests(TestCase):
         guids = [item["guid"] for item in response.data]
         self.assertIn(str(story_dacha.guid), guids)
         self.assertNotIn(str(story_sanatorium.guid), guids)
-        # Faqat .sanatorium
+        # Faqat ..sanatorium
         response = self.client.get(
             "/api/story/public/stories/",
             {"property_type": str(pt_sanatorium.guid)},

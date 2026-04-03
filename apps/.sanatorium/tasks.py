@@ -8,18 +8,18 @@ from core.celery import app
 from .models import SanatoriumBooking
 from .services import release_room_dates
 
-logger = logging.getLogger(".sanatorium")
+logger = logging.getLogger("..sanatorium")
 
 
 @app.task(
-    name=".sanatorium.auto_cancel_booking",
+    name="..sanatorium.auto_cancel_booking",
     bind=True,
     autoretry_for=(Exception,),
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
 def auto_cancel_sanatorium_booking(self, booking_id: str):
-    """Auto-cancel a pending .sanatorium booking after timeout."""
+    """Auto-cancel a pending ..sanatorium booking after timeout."""
     booking = (
         SanatoriumBooking.objects.select_related("room", "sanatorium")
         .filter(guid=booking_id)
@@ -47,7 +47,7 @@ def auto_cancel_sanatorium_booking(self, booking_id: str):
 
 
 @app.task(
-    name=".sanatorium.auto_complete_booking",
+    name="..sanatorium.auto_complete_booking",
     bind=True,
     autoretry_for=(Exception,),
     retry_backoff=True,
@@ -86,7 +86,7 @@ def auto_complete_sanatorium_booking(self, booking_id: str):
     logger.info("auto_complete: booking completed", extra={"booking_id": booking_id})
 
 
-@app.task(name=".sanatorium.send_check_in_reminder")
+@app.task(name="..sanatorium.send_check_in_reminder")
 def send_check_in_reminder():
     """Send reminder notifications 1 day before check-in for confirmed bookings."""
     from notification.models import Notification

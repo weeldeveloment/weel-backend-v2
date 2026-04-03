@@ -4,7 +4,6 @@ Jadvallar test_schema da, public schema (asosiy ma'lumotlar) ta'sirlanmaydi.
 
 Ishlatish:
   python manage.py create_test_db
-  python manage.py migrate --settings=core.settings_test_db
   python manage.py test --settings=core.settings_test_db --keepdb
 """
 import os
@@ -52,6 +51,6 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.SUCCESS(
                     f"Test schema yaratildi: {schema_name} (asosiy baza ichida). "
-                    "Keyin: python manage.py migrate --settings=core.settings_test_db"
+                    "Keyin raw-SQL schema/bootstrap ni yuklang va testlarni ishga tushiring."
                 )
             )

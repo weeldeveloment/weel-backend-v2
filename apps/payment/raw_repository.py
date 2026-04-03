@@ -4,14 +4,15 @@ from typing import Any
 
 from django.utils import timezone
 
+from shared.raw.compat import get_table_name, return_star
 from shared.raw.db import execute, fetch_one
 
 
 def get_latest_transaction_history_for_booking(booking_id: int) -> dict[str, Any] | None:
     return fetch_one(
-        """
+        f"""
         SELECT *
-        FROM public.transaction_history
+        FROM {get_table_name("transaction_history")}
         WHERE booking_id = %s
         ORDER BY id DESC
         LIMIT 1
@@ -22,13 +23,13 @@ def get_latest_transaction_history_for_booking(booking_id: int) -> dict[str, Any
 
 def mark_latest_transaction_dismissed(booking_id: int) -> int:
     return execute(
-        """
-        UPDATE public.transaction_history th
+        f"""
+        UPDATE {get_table_name("transaction_history")} th
         SET status = 'DISMISSED',
             updated_at = %s
         WHERE th.id = (
             SELECT id
-            FROM public.transaction_history
+            FROM {get_table_name("transaction_history")}
             WHERE booking_id = %s
             ORDER BY id DESC
             LIMIT 1
@@ -51,8 +52,8 @@ def create_hold_transaction(
 ) -> dict[str, Any] | None:
     now = timezone.now()
     return fetch_one(
-        """
-        INSERT INTO public.transaction_history (
+        f"""
+        INSERT INTO {get_table_name("transaction_history")} (
             booking_id,
             client_user_id,
             partner_user_id,
@@ -81,7 +82,7 @@ def create_hold_transaction(
             %s,
             %s
         )
-        RETURNING *
+        {"RETURNING *" if return_star() else ""}
         """,
         [
             booking_id,
@@ -109,8 +110,8 @@ def create_charge_transaction_from_latest(
 ) -> dict[str, Any] | None:
     now = timezone.now()
     return fetch_one(
-        """
-        INSERT INTO public.transaction_history (
+        f"""
+        INSERT INTO {get_table_name("transaction_history")} (
             booking_id,
             client_user_id,
             partner_user_id,
@@ -139,7 +140,7 @@ def create_charge_transaction_from_latest(
             %s,
             %s
         )
-        RETURNING *
+        {"RETURNING *" if return_star() else ""}
         """,
         [
             int(booking_row["id"]),

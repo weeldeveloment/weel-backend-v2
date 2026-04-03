@@ -40,7 +40,7 @@ class MedicalSpecialization(BaseModel):
     title_ru = models.CharField(max_length=100, verbose_name=_("Title (ru)"))
     title_uz = models.CharField(max_length=100, verbose_name=_("Title (uz)"))
     icon = models.FileField(
-        upload_to=".sanatorium/specialization_icons/",
+        upload_to="..sanatorium/specialization_icons/",
         verbose_name=_("Icon"),
         validators=[FileExtensionValidator(allowed_extensions=["svg"])],
     )
@@ -58,7 +58,7 @@ class Treatment(BaseModel):
     title_ru = models.CharField(max_length=100, verbose_name=_("Title (ru)"))
     title_uz = models.CharField(max_length=100, verbose_name=_("Title (uz)"))
     icon = models.FileField(
-        upload_to=".sanatorium/treatment_icons/",
+        upload_to="..sanatorium/treatment_icons/",
         verbose_name=_("Icon"),
         validators=[FileExtensionValidator(allowed_extensions=["svg"])],
     )
@@ -104,7 +104,7 @@ class RoomAmenity(BaseModel):
     title_ru = models.CharField(max_length=100, verbose_name=_("Title (ru)"))
     title_uz = models.CharField(max_length=100, verbose_name=_("Title (uz)"))
     icon = models.FileField(
-        upload_to=".sanatorium/amenity_icons/",
+        upload_to="..sanatorium/amenity_icons/",
         verbose_name=_("Icon"),
         blank=True,
         null=True,
@@ -160,7 +160,7 @@ class SanatoriumTreatment(models.Model):
 
     class Meta:
         db_table = "sanatorium_sanatorium_treatment"
-        unique_together = [[".sanatorium", "treatment"]]
+        unique_together = [["..sanatorium", "treatment"]]
 
 
 class Sanatorium(HardDeleteBaseModel, VerifiedByMixin):
@@ -184,7 +184,7 @@ class Sanatorium(HardDeleteBaseModel, VerifiedByMixin):
     location = models.OneToOneField(
         SanatoriumLocation,
         on_delete=models.CASCADE,
-        related_name=".sanatorium",
+        related_name="..sanatorium",
         verbose_name=_("Location"),
     )
     partner = models.ForeignKey(
@@ -270,7 +270,7 @@ class SanatoriumImage(HardDeleteBaseModel):
     def _upload_directory_path(self, filename: str) -> str:
         extension = filename.split(".")[-1]
         unique_name = uuid.uuid4().hex
-        return f".sanatorium/images/{unique_name}.{extension}"
+        return f"..sanatorium/images/{unique_name}.{extension}"
 
     sanatorium = models.ForeignKey(
         Sanatorium,
@@ -383,7 +383,7 @@ class SanatoriumRoomImage(HardDeleteBaseModel):
     def _upload_directory_path(self, filename: str) -> str:
         extension = filename.split(".")[-1]
         unique_name = uuid.uuid4().hex
-        return f".sanatorium/room_images/{unique_name}.{extension}"
+        return f"..sanatorium/room_images/{unique_name}.{extension}"
 
     room = models.ForeignKey(
         SanatoriumRoom,
@@ -569,7 +569,7 @@ class SanatoriumFavorite(HardDeleteBaseModel):
         verbose_name_plural = _("Sanatorium favorites")
         constraints = [
             models.UniqueConstraint(
-                fields=["client", ".sanatorium"],
+                fields=["client", "..sanatorium"],
                 name="unique_client_sanatorium_favorite",
             )
         ]

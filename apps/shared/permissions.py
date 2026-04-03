@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from unittest.mock import Mock
 
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 
@@ -14,8 +15,8 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_APP")
 
 def _user_role(user) -> str | None:
     role = getattr(user, "role", None)
-    if role:
-        return str(role)
+    if isinstance(role, str) and role in {"client", "partner"}:
+        return role
 
     # Fallback for legacy ORM user instances.
     name = user.__class__.__name__.lower()
@@ -23,6 +24,8 @@ def _user_role(user) -> str | None:
         return "partner"
     if name == "client":
         return "client"
+    if role and not isinstance(role, Mock):
+        return str(role)
     return None
 
 

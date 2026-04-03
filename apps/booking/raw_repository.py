@@ -6,32 +6,33 @@ from typing import Any
 
 from django.utils import timezone
 
+from shared.raw.compat import get_table_name, is_postgresql
 from shared.raw.db import execute, fetch_all, fetch_one
 
 
 def get_verified_property_by_guid(property_guid: str) -> dict[str, Any] | None:
     return fetch_one(
-        """
+        f"""
         SELECT *
         FROM (
             SELECT
-                'apartment'::text AS property_kind,
+                'apartment' AS property_kind,
                 id AS property_id,
                 guid,
                 partner_user_id,
                 is_verified
-            FROM public.apartment
+            FROM {get_table_name("apartment")}
             WHERE guid = %s
 
             UNION ALL
 
             SELECT
-                'cottage'::text AS property_kind,
+                'cottage' AS property_kind,
                 id AS property_id,
                 guid,
                 partner_user_id,
                 is_verified
-            FROM public.cottage
+            FROM {get_table_name("cottage")}
             WHERE guid = %s
         ) p
         WHERE COALESCE(is_verified, FALSE) = TRUE
@@ -60,7 +61,7 @@ def fetch_calendar_rows(
     return fetch_all(
         f"""
         SELECT date, status
-        FROM public.calendar
+        FROM {get_table_name("calendar")}
         WHERE {main_col} = %s
           AND date BETWEEN %s AND %s
         ORDER BY date
@@ -78,17 +79,31 @@ def fetch_calendar_dates_by_status(
     statuses: list[str],
 ) -> list[date]:
     main_col, _ = _property_columns(property_kind)
-    rows = fetch_all(
-        f"""
-        SELECT date
-        FROM public.calendar
-        WHERE {main_col} = %s
-          AND date BETWEEN %s AND %s
-          AND status = ANY(%s)
-        ORDER BY date
-        """,
-        [property_id, from_date, to_date, statuses],
-    )
+    if is_postgresql():
+        rows = fetch_all(
+            f"""
+            SELECT date
+            FROM {get_table_name("calendar")}
+            WHERE {main_col} = %s
+              AND date BETWEEN %s AND %s
+              AND status = ANY(%s)
+            ORDER BY date
+            """,
+            [property_id, from_date, to_date, statuses],
+        )
+    else:
+        placeholders = ','.join(['%s'] * len(statuses))
+        rows = fetch_all(
+            f"""
+            SELECT date
+            FROM {get_table_name("calendar")}
+            WHERE {main_col} = %s
+              AND date BETWEEN %s AND %s
+              AND status IN ({placeholders})
+            ORDER BY date
+            """,
+            [property_id, from_date, to_date] + statuses,
+        )
     return [row["date"] for row in rows]
 
 
@@ -107,7 +122,7 @@ def upsert_calendar_days(
     for day in days:
         execute(
             f"""
-            INSERT INTO public.calendar (
+            INSERT INTO {get_table_name("calendar")} (
                 guid,
                 created_at,
                 updated_at,
@@ -135,7 +150,7 @@ def delete_calendar_days_by_status(
     main_col, _ = _property_columns(property_kind)
     return execute(
         f"""
-        DELETE FROM public.calendar
+        DELETE FROM {get_table_name("calendar")}
         WHERE {main_col} = %s
           AND date BETWEEN %s AND %s
           AND status = %s

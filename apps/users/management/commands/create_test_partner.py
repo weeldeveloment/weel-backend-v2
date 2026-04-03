@@ -5,7 +5,13 @@ TEST_PARTNER_PHONE_NUMBER .env da bo'lishi kerak.
 from django.core.management.base import BaseCommand
 from django.conf import settings
 
-from users.models.partners import Partner
+from django.utils import timezone
+
+from users.raw_repository import (
+    create_partner,
+    exists_partner_username,
+    get_active_user_by_phone,
+)
 
 
 class Command(BaseCommand):
@@ -66,16 +72,19 @@ class Command(BaseCommand):
         username = options.get("username") or f"test_partner_{phone}"
         email = (options.get("email") or "").strip() or None
 
-        partner, created = Partner.objects.get_or_create(
-            phone_number=canonical,
-            defaults={
-                "first_name": first_name,
-                "last_name": last_name,
-                "username": username,
-                "email": email,
-                "is_active": True,
-            },
-        )
+        partner = get_active_user_by_phone(canonical, role="partner")
+        created = False
+        if partner is None:
+            if exists_partner_username(username):
+                username = f"{username}_{int(timezone.now().timestamp())}"
+            partner = create_partner(
+                phone_number=canonical,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+            )
+            created = True
 
         if created:
             self.stdout.write(

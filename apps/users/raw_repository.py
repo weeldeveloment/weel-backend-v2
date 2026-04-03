@@ -3,15 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 from shared.raw.entities import RawUser
-
-
-USER_TABLE = "public.users"
+from shared.raw.tables import USER_TABLE
 
 
 def _row_to_user(row: dict[str, Any] | None) -> RawUser | None:
@@ -43,18 +41,36 @@ def get_active_user_by_phone(phone_number: str, role: str) -> RawUser | None:
     if not candidates:
         return None
 
-    row = fetch_one(
-        f"""
-        SELECT *
-        FROM {USER_TABLE}
-        WHERE role = %s
-          AND is_active = TRUE
-          AND phone_number = ANY(%s)
-        ORDER BY id
-        LIMIT 1
-        """,
-        [role, candidates],
-    )
+    # Database-agnostic array membership
+    from shared.raw.compat import is_postgresql
+    if is_postgresql():
+        row = fetch_one(
+            f"""
+            SELECT *
+            FROM {USER_TABLE}
+            WHERE role = %s
+              AND is_active = TRUE
+              AND phone_number = __ANY_MARKER__(%s)
+            ORDER BY id
+            LIMIT 1
+            """,
+            [role, candidates],
+        )
+    else:
+        # SQLite: expand array into IN clause
+        placeholders = ','.join(['%s'] * len(candidates))
+        row = fetch_one(
+            f"""
+            SELECT *
+            FROM {USER_TABLE}
+            WHERE role = %s
+              AND is_active = TRUE
+              AND phone_number IN ({placeholders})
+            ORDER BY id
+            LIMIT 1
+            """,
+            [role] + candidates,
+        )
     return _row_to_user(row)
 
 
@@ -107,18 +123,35 @@ def exists_user_by_phone(phone_number: str, role: str) -> bool:
     candidates = normalized_phone_candidates(phone_number)
     if not candidates:
         return False
-    row = fetch_one(
-        f"""
-        SELECT EXISTS (
-            SELECT 1
-            FROM {USER_TABLE}
-            WHERE role = %s
-              AND phone_number = ANY(%s)
-        ) AS exists
-        """,
-        [role, candidates],
-    )
-    return bool(row and row["exists"])
+    
+    from shared.raw.compat import is_postgresql
+    if is_postgresql():
+        row = fetch_one(
+            f"""
+            SELECT EXISTS (
+                SELECT 1
+                FROM {USER_TABLE}
+                WHERE role = %s
+                  AND phone_number = __ANY_MARKER__(%s)
+            ) AS exists_flag
+            """,
+            [role, candidates],
+        )
+    else:
+        # SQLite: expand array into IN clause
+        placeholders = ','.join(['%s'] * len(candidates))
+        row = fetch_one(
+            f"""
+            SELECT EXISTS (
+                SELECT 1
+                FROM {USER_TABLE}
+                WHERE role = %s
+                  AND phone_number IN ({placeholders})
+            ) AS exists_flag
+            """,
+            [role] + candidates,
+        )
+    return bool(row and row["exists_flag"])
 
 
 def exists_partner_username(username: str) -> bool:
@@ -129,11 +162,11 @@ def exists_partner_username(username: str) -> bool:
             FROM {USER_TABLE}
             WHERE role = 'partner'
               AND LOWER(COALESCE(username, '')) = LOWER(%s)
-        ) AS exists
+        ) AS exists_flag
         """,
         [username],
     )
-    return bool(row and row["exists"])
+    return bool(row and row["exists_flag"])
 
 
 def exists_partner_email(email: str) -> bool:
@@ -144,11 +177,11 @@ def exists_partner_email(email: str) -> bool:
             FROM {USER_TABLE}
             WHERE role = 'partner'
               AND LOWER(COALESCE(email, '')) = LOWER(%s)
-        ) AS exists
+        ) AS exists_flag
         """,
         [email],
     )
-    return bool(row and row["exists"])
+    return bool(row and row["exists_flag"])
 
 
 def _insert_user(
@@ -162,6 +195,10 @@ def _insert_user(
     is_active: bool = True,
 ) -> RawUser:
     now: datetime = timezone.now()
+    
+    from shared.raw.compat import is_postgresql, return_star
+    returning_clause = "__RETURNING_MARKER__" if return_star() else ""
+    
     row = fetch_one(
         f"""
         INSERT INTO {USER_TABLE} (
@@ -176,10 +213,18 @@ def _insert_user(
             created_at,
             updated_at
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s)
-        RETURNING *
+        {returning_clause}
         """,
         [role, email, phone_number, first_name, last_name, username, is_active, now, now],
     )
+    
+    # If RETURNING not supported, fetch the inserted row
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {USER_TABLE} WHERE role = %s AND phone_number = %s ORDER BY id DESC LIMIT 1",
+            [role, phone_number],
+        )
+    
     if row is None:
         raise RuntimeError("Failed to insert user")
     return RawUser.from_row(row)
@@ -215,6 +260,57 @@ def create_partner(
         username=username,
         email=email,
         is_active=True,
+    )
+
+
+def create_sms_log(phone_number: str, purpose: str | Any, is_sent: bool) -> None:
+    if not table_exists("users_smslog"):
+        return
+
+    now = timezone.now()
+    purpose_value = getattr(purpose, "value", purpose)
+    execute(
+        f"""
+        INSERT INTO {get_table_name("users_smslog")} (
+            guid,
+            created_at,
+            updated_at,
+            phone_number,
+            purpose,
+            is_sent
+        ) VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        [uuid4(), now, now, phone_number, purpose_value, bool(is_sent)],
+    )
+
+
+def get_latest_active_partner_telegram_user(partner_id: int) -> dict[str, Any] | None:
+    if not table_exists("users_partnertelegramuser"):
+        return None
+    return fetch_one(
+        f"""
+        SELECT id, telegram_user_id, is_active
+        FROM {get_table_name("users_partnertelegramuser")}
+        WHERE partner_id = %s
+          AND is_active = TRUE
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        [partner_id],
+    )
+
+
+def deactivate_partner_telegram_user(telegram_row_id: int) -> None:
+    if not table_exists("users_partnertelegramuser"):
+        return
+    execute(
+        f"""
+        UPDATE {get_table_name("users_partnertelegramuser")}
+        SET is_active = FALSE,
+            updated_at = %s
+        WHERE id = %s
+        """,
+        [timezone.now(), telegram_row_id],
     )
 
 
@@ -274,7 +370,7 @@ def update_user_profile(
         SET {assignments}
         WHERE id = %s
           AND role = %s
-        RETURNING *
+        __RETURNING_MARKER__
         """,
         params,
     )
@@ -347,14 +443,29 @@ def fetch_users_by_ids(ids: Iterable[int]) -> dict[int, RawUser]:
     values = [int(v) for v in ids]
     if not values:
         return {}
-    rows = fetch_all(
-        f"""
-        SELECT *
-        FROM {USER_TABLE}
-        WHERE id = ANY(%s)
-        """,
-        [values],
-    )
+    
+    from shared.raw.compat import is_postgresql
+    if is_postgresql():
+        rows = fetch_all(
+            f"""
+            SELECT *
+            FROM {USER_TABLE}
+            WHERE id = __ANY_MARKER__(%s)
+            """,
+            [values],
+        )
+    else:
+        # SQLite: expand array into IN clause
+        placeholders = ','.join(['%s'] * len(values))
+        rows = fetch_all(
+            f"""
+            SELECT *
+            FROM {USER_TABLE}
+            WHERE id IN ({placeholders})
+            """,
+            values,
+        )
+    
     result: dict[int, RawUser] = {}
     for row in rows:
         user = RawUser.from_row(row)

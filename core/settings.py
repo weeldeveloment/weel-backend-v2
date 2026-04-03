@@ -15,12 +15,13 @@ from firebase_admin import initialize_app, credentials, get_app
 
 import core.middleware.logging
 from core.middleware.utils import CompressedTimedRotatingFileHandler
-from .unfold_settings import UNFOLD
 
 load_dotenv(find_dotenv(), override=True)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(os.path.join(BASE_DIR, "apps"))
+
+from users.bin_lookup import load_bin_data
 
 DEBUG = bool(int(os.environ.get("DJANGO_DEBUG", "0")))
 
@@ -61,48 +62,23 @@ if "host.docker.internal" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("host.docker.internal")
 
 GLOBAL_APPS = [
-    # django_prometheus
     "django_prometheus",
-    # channels ASGI server (must come before django.contrib.staticfiles)
     "daphne",
-    # django unfold
-    "unfold",
-    "unfold.contrib.filters",
-    "unfold.contrib.forms",
-    "unfold.contrib.inlines",
-    "unfold.contrib.import_export",
-    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
     "django.contrib.staticfiles",
 ]
 
 USE_NORM_DATASTORE = False  # Explicitly disable norm_* datastore usage
 
-LOCAL_APPS = [
-    "users",
-    "shared",
-    "payment",
-    "property",
-    "stories",
-    "booking",
-    "notification",
-    "bot",
-    "chat",
-    "apps.admin_auth",
-]
+LOCAL_APPS: list[str] = []
 
 THIRD_PART_APPS = [
     "channels",
     "corsheaders",
     "drf_yasg",
     "rest_framework",
-    "rest_framework_simplejwt.token_blacklist",
-    "rest_framework.authtoken",
     "django_filters",
-    "import_export",
 ]
 if HAS_MINIO_STORAGE:
     THIRD_PART_APPS.append("minio_storage")
@@ -115,12 +91,9 @@ MIDDLEWARE = [
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
@@ -138,8 +111,6 @@ TEMPLATES = [
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
                 "django.template.context_processors.i18n",
             ],
         },
@@ -210,7 +181,6 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "users.authentication.PartnerJWTAuthentication",
         "users.authentication.ClientJWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -218,13 +188,14 @@ REST_FRAMEWORK = {
     "DATETIME_FORMAT": "%Y-%m-%d %H:%M:%S",
     "EXCEPTION_HANDLER": "shared.utils.exception_errors_format_handler",
     "DEFAULT_THROTTLE_RATES": {"anon": "5/minute", "user": "10/minute", "frontend_log": "60/minute"},
+    "UNAUTHENTICATED_USER": None,
 }
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
     "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": True,
+    "BLACKLIST_AFTER_ROTATION": False,
     "UPDATE_LAST_LOGIN": False,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
@@ -241,7 +212,6 @@ SIMPLE_JWT = {
 SWAGGER_URL = os.getenv("SWAGGER_URL")
 SWAGGER_SETTINGS = {
     "SECURITY_DEFINITIONS": {
-        "Basic": {"type": "basic"},
         "Bearer": {
             "type": "apiKey",
             "name": "Authorization",
@@ -268,6 +238,8 @@ AUTH_PASSWORD_VALIDATORS = [
         "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
+
+load_bin_data()
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
@@ -446,7 +418,6 @@ ALLOWED_VIDEO_EXTENSION = ["mp4", "mov", "avi", "mkv"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Django Unfold
-UNFOLD = UNFOLD
 
 # Eskiz
 ESKIZ_LOGIN_URL = os.getenv("ESKIZ_LOGIN_URL")
@@ -656,7 +627,7 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
-        ".sanatorium": {
+        "..sanatorium": {
             "handlers": ["console", "file"],
             "level": "INFO",
             "propagate": False,

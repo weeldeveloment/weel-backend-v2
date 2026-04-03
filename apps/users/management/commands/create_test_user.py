@@ -4,7 +4,7 @@ Test Client yaratadi. Shu raqam bilan login qilganda OTP so'ralmaydi (developmen
 from django.core.management.base import BaseCommand
 from django.conf import settings
 
-from users.models.clients import Client
+from users.raw_repository import create_client, get_active_user_by_phone
 
 
 class Command(BaseCommand):
@@ -51,14 +51,15 @@ class Command(BaseCommand):
         first_name = options.get("first_name", "Test")
         last_name = options.get("last_name", "User")
 
-        client, created = Client.objects.get_or_create(
-            phone_number=canonical,
-            defaults={
-                "first_name": first_name,
-                "last_name": last_name,
-                "is_active": True,
-            },
-        )
+        client = get_active_user_by_phone(canonical, role="client")
+        created = False
+        if client is None:
+            client = create_client(
+                phone_number=canonical,
+                first_name=first_name,
+                last_name=last_name,
+            )
+            created = True
 
         if created:
             self.stdout.write(

@@ -4,7 +4,6 @@ Asosiy ma'lumotlar (public) ta'sirlanmaydi. Jadvallar faqat test_schema da yarat
 
 Ishlatish:
   python manage.py create_test_db   # test_schema yaratadi (asosiy bazada)
-  python manage.py migrate --settings=core.settings_test_db
   python manage.py test --settings=core.settings_test_db --keepdb
 """
 import os

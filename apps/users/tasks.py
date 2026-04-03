@@ -4,8 +4,13 @@ from datetime import timedelta
 from core.celery import app
 
 from .services import EskizService, OTPRedisService, TelegramService
-from .models.logs import SmsPurpose, SmsLog
-from .raw_repository import table_capability_snapshot
+from .models.logs import SmsPurpose
+from .raw_repository import (
+    create_sms_log,
+    deactivate_partner_telegram_user,
+    get_latest_active_partner_telegram_user,
+    table_capability_snapshot,
+)
 from shared.raw.db import fetch_all
 
 logger = logging.getLogger(__name__)
@@ -48,7 +53,7 @@ def send_otp_sms_eskiz(
 
         if table_capability_snapshot().get("users_smslog"):
             try:
-                SmsLog.objects.create(
+                create_sms_log(
                     phone_number=phone_number,
                     purpose=purpose,
                     is_sent=True,
@@ -62,7 +67,7 @@ def send_otp_sms_eskiz(
     except Exception as exp:
         if table_capability_snapshot().get("users_smslog"):
             try:
-                SmsLog.objects.create(
+                create_sms_log(
                     phone_number=phone_number,
                     purpose=purpose,
                     is_sent=False,
@@ -85,15 +90,7 @@ def send_partner_telegram_msg(self, partner_id: int, message: str):
     if not table_capability_snapshot().get("users_partnertelegramuser"):
         return "Skipped: Partner telegram table is absent in normalized schema."
 
-    from .models.partners import PartnerTelegramUser  # Local import is safer in tasks
-
-    # 1. Fetch the "Last" and "Active" Telegram User for this Partner
-    # We use .filter() instead of .get() so it returns None instead of crashing if missing
-    tg_user = (
-        PartnerTelegramUser.objects.filter(partner_id=partner_id, is_active=True)
-        .order_by("-id")
-        .first()
-    )  # Gets the most recently created one
+    tg_user = get_latest_active_partner_telegram_user(partner_id=partner_id)
 
     # 2. Skip logic: If no user found, just stop.
     if not tg_user:
@@ -101,15 +98,14 @@ def send_partner_telegram_msg(self, partner_id: int, message: str):
 
     # 3. Proceed with sending
     service = TelegramService()
-    success, result = service.send_message(tg_user.telegram_user_id, message)
+    success, result = service.send_message(int(tg_user["telegram_user_id"]), message)
 
     if result == "blocked":
         # Optional: Mark this specific TG user as inactive
-        tg_user.is_active = False
-        tg_user.save()
+        deactivate_partner_telegram_user(int(tg_user["id"]))
         return f"Skipped: Partner {partner_id} has blocked the bot."
 
-    return f"Sent to Partner {partner_id} (TG: {tg_user.telegram_user_id})"
+    return f"Sent to Partner {partner_id} (TG: {tg_user['telegram_user_id']})"
 
 
 @app.task(

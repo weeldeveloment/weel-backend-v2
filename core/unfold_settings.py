@@ -159,7 +159,7 @@ UNFOLD = {
                     {
                         "title": _("Sanatorium"),
                         "icon": "local_hospital",
-                        "link": reverse_lazy("admin:app_list", args=[".sanatorium"]),
+                        "link": reverse_lazy("admin:app_list", args=["..sanatorium"]),
                         "badge": None,
                         "permission": lambda request: request.user.is_superuser,
                     },

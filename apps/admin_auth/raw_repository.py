@@ -5,12 +5,11 @@ from typing import Any
 
 from django.utils import timezone
 
+from shared.raw.compat import return_star
 from shared.raw.db import fetch_all, fetch_one
 from shared.raw.entities import RawUser
+from shared.raw.tables import USER_TABLE
 from users.raw_repository import get_user_by_id
-
-
-USER_TABLE = "public.users"
 ALLOWED_ORDER_FIELDS = {"created_at", "first_name", "email", "username", "phone_number"}
 
 
@@ -81,11 +80,11 @@ def exists_admin_email(email: str) -> bool:
             FROM {USER_TABLE}
             WHERE role = 'admin'
               AND LOWER(COALESCE(email, '')) = LOWER(%s)
-        ) AS exists
+        ) AS exists_flag
         """,
         [email],
     )
-    return bool(row and row["exists"])
+    return bool(row and row["exists_flag"])
 
 
 def exists_admin_username(username: str) -> bool:
@@ -96,11 +95,11 @@ def exists_admin_username(username: str) -> bool:
             FROM {USER_TABLE}
             WHERE role = 'admin'
               AND LOWER(COALESCE(username, '')) = LOWER(%s)
-        ) AS exists
+        ) AS exists_flag
         """,
         [username],
     )
-    return bool(row and row["exists"])
+    return bool(row and row["exists_flag"])
 
 
 def create_admin_user(
@@ -136,10 +135,15 @@ def create_admin_user(
             %s,
             %s
         )
-        RETURNING *
+        {"RETURNING *" if return_star() else ""}
         """,
         [email, first_name, last_name, username, now, now],
     )
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {USER_TABLE} WHERE role = 'admin' AND email = %s ORDER BY id DESC LIMIT 1",
+            [email],
+        )
     if row is None:
         raise RuntimeError("Failed to create admin user")
     return RawUser.from_row(row)
@@ -163,7 +167,7 @@ def _build_search_clause(search: str | None, columns: list[str]) -> tuple[str, l
     if not term:
         return "", []
     like_value = f"%{term}%"
-    parts = [f"COALESCE({column}::text, '') ILIKE %s" for column in columns]
+    parts = [f"COALESCE({column}, '') LIKE %s" for column in columns]
     sql = " AND (" + " OR ".join(parts) + ")"
     return sql, [like_value] * len(parts)
 
@@ -195,7 +199,7 @@ def count_users_by_role(role: str, search: str | None = None, search_columns: li
     params.extend(search_params)
     row = fetch_one(
         f"""
-        SELECT COUNT(*)::int AS total
+        SELECT COUNT(*) AS total
         FROM {USER_TABLE}
         WHERE {where}{search_sql}
         """,

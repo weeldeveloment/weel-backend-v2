@@ -1,13 +1,10 @@
 PYTHON ?= venv/bin/python
-TEST_APPS = users shared payment property stories booking notification bot sanatorium chat admin_auth
+TEST_APPS = shared.tests bot.tests
 PYTHONWARNINGS ?= ignore::Warning:requests
 
 run:
     # Run local server
 	command $(PYTHON) manage.py runserver
-migrate:
-    # Migrate models in the database
-	command $(PYTHON) manage.py makemigrations && $(PYTHON) manage.py migrate
 superuser:
     # Create superuser in the database
 	command $(PYTHON) manage.py createsuperuser
@@ -15,19 +12,17 @@ superuser:
 # --- Test DB (asosiy baza ichida test_schema, asosiy ma'lumotlarga ta'sir yo'q) ---
 test-db-create:
 	command $(PYTHON) manage.py create_test_db
-test-db-migrate: test-db-create
-	command $(PYTHON) manage.py migrate --settings=core.settings_test_db
-test-db: test-db-migrate
-# test_schema da testlarni ishga tushiradi
-test: test-db-migrate
+test-db: test-db-create
+# test_schema da raw-SQL testlarni ishga tushiradi
+test: test-db-create
 	command $(PYTHON) manage.py test --settings=core.settings_test_db --keepdb
-# To'liq: schema + migrate + test
+# To'liq: schema + test
 test-all: test
 
-# CI/local pre-deploy automation tests (isolated, no external DB/Redis required)
+# CI/local pre-deploy automation tests (raw SQL schema must already exist)
 test-ci:
-	PYTHONWARNINGS="$(PYTHONWARNINGS)" command $(PYTHON) manage.py check --settings=core.test_settings
-	PYTHONWARNINGS="$(PYTHONWARNINGS)" command $(PYTHON) manage.py test $(TEST_APPS) --settings=core.test_settings
+	PYTHONWARNINGS="$(PYTHONWARNINGS)" command $(PYTHON) manage.py check --settings=core.settings_test_db
+	PYTHONWARNINGS="$(PYTHONWARNINGS)" command $(PYTHON) manage.py test $(TEST_APPS) --settings=core.settings_test_db --keepdb
 
 # --- Partner property reminder SMS (manual test helpers) ---
 # Example: make sms-reminder-one PARTNER_ID=123

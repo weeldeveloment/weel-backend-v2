@@ -71,6 +71,13 @@ def _parse_int_maybe(value: Any) -> int | None:
         return None
 
 
+def _favorite_guid_set(context: dict[str, Any] | None) -> set[str]:
+    if not context:
+        return set()
+    raw_value = context.get("favorite_guids") or []
+    return {str(value) for value in raw_value if value is not None}
+
+
 class RawPropertyTypeSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
@@ -117,14 +124,14 @@ class RawPropertyListSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
     img = serializers.CharField(allow_blank=True, allow_null=True)
-    price = RawPropertyListPriceSerializer(many=True)
+    price = RawPropertyListPriceSerializer(many=True, allow_null=True)
     property_location = RawPropertyLocationSerializer(allow_null=True)
     property_images = RawPropertyImageSerializer(many=True)
     region = RawRegionSerializer(allow_null=True)
     district = RawDistrictSerializer(allow_null=True)
     guests = serializers.IntegerField(allow_null=True)
     rooms = serializers.IntegerField(allow_null=True)
-    average_rating = serializers.DecimalField(max_digits=6, decimal_places=2, allow_null=True)
+    average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
     created_at = serializers.DateTimeField()
 
@@ -132,16 +139,26 @@ class RawPropertyListSerializer(serializers.Serializer):
         request = self.context.get("request")
         row = dict(instance)
         row_currency = row.get("currency")
-        row["price"] = [
-            {
-                "guid": None,
-                "month_from": None,
-                "month_to": None,
-                "price_per_person": _convert_price_for_output(row.get("price_per_person"), row_currency),
-                "price_on_working_days": _convert_price_for_output(row.get("price_on_working_days"), row_currency),
-                "price_on_weekends": _convert_price_for_output(row.get("price_on_weekends"), row_currency),
-            }
-        ]
+        converted_price_per_person = _convert_price_for_output(row.get("price_per_person"), row_currency)
+        converted_working_days = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
+        converted_weekends = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
+        if (
+            converted_price_per_person is None
+            and converted_working_days is None
+            and converted_weekends is None
+        ):
+            row["price"] = None
+        else:
+            row["price"] = [
+                {
+                    "guid": None,
+                    "month_from": None,
+                    "month_to": None,
+                    "price_per_person": converted_price_per_person,
+                    "price_on_working_days": converted_working_days,
+                    "price_on_weekends": converted_weekends,
+                }
+            ]
         row["property_location"] = {
             "guid": None,
             "latitude": row.get("latitude"),
@@ -180,7 +197,8 @@ class RawPropertyListSerializer(serializers.Serializer):
             }
         row["guests"] = None
         row["rooms"] = None
-        row["is_favorite"] = False
+        favorites = _favorite_guid_set(self.context)
+        row["is_favorite"] = str(row.get("guid")) in favorites
         return super().to_representation(row)
 
 
@@ -194,11 +212,11 @@ class RawPropertyDetailSerializer(serializers.Serializer):
     img = serializers.CharField(allow_blank=True, allow_null=True)
     created_at = serializers.DateTimeField()
     currency = serializers.CharField(allow_blank=True, allow_null=True)
-    price = RawPropertyListPriceSerializer(many=True)
+    price = RawPropertyListPriceSerializer(many=True, allow_null=True)
     minimum_weekend_day_stay = serializers.BooleanField()
     description = serializers.CharField(allow_blank=True, allow_null=True)
     comment_count = serializers.IntegerField()
-    average_rating = serializers.DecimalField(max_digits=6, decimal_places=2, allow_null=True)
+    average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
     property_services = serializers.ListField()
     property_room = serializers.DictField()
@@ -236,19 +254,30 @@ class RawPropertyDetailSerializer(serializers.Serializer):
         request = self.context.get("request")
         row = dict(instance)
         row_currency = row.get("currency")
-        row["price"] = [
-            {
-                "guid": None,
-                "month_from": None,
-                "month_to": None,
-                "price_per_person": _convert_price_for_output(row.get("price_per_person"), row_currency),
-                "price_on_working_days": _convert_price_for_output(row.get("price_on_working_days"), row_currency),
-                "price_on_weekends": _convert_price_for_output(row.get("price_on_weekends"), row_currency),
-            }
-        ]
+        converted_price_per_person = _convert_price_for_output(row.get("price_per_person"), row_currency)
+        converted_working_days = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
+        converted_weekends = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
+        if (
+            converted_price_per_person is None
+            and converted_working_days is None
+            and converted_weekends is None
+        ):
+            row["price"] = None
+        else:
+            row["price"] = [
+                {
+                    "guid": None,
+                    "month_from": None,
+                    "month_to": None,
+                    "price_per_person": converted_price_per_person,
+                    "price_on_working_days": converted_working_days,
+                    "price_on_weekends": converted_weekends,
+                }
+            ]
         row["description"] = self._resolve_description(row)
         row["comment_count"] = int(row.get("review_count") or row.get("comment_count") or 0)
-        row["is_favorite"] = False
+        favorites = _favorite_guid_set(self.context)
+        row["is_favorite"] = str(row.get("guid")) in favorites
         row["property_services"] = []
         row["property_room"] = {
             "guid": None,
@@ -315,6 +344,10 @@ class RawPropertyCreateSerializer(serializers.Serializer):
     kind = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     property_location = serializers.DictField(required=False)
     property_detail = serializers.DictField(required=False)
+    property_services = serializers.ListField(required=False, allow_empty=True)
+    property_room = serializers.DictField(required=False)
+    region = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    district = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     img = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -457,10 +490,14 @@ class RawPropertyCreateSerializer(serializers.Serializer):
             normalized_values.update(location_serializer.validated_data)
         if detail_serializer.validated_data:
             normalized_values.update(detail_serializer.validated_data)
-        if "region_id" in attrs:
-            normalized_values["region_id"] = _parse_int_maybe(attrs.get("region_id"))
-        if "district_id" in attrs:
-            normalized_values["district_id"] = _parse_int_maybe(attrs.get("district_id"))
+        if "region_id" in attrs or "region" in attrs:
+            normalized_values["region_id"] = _parse_int_maybe(
+                attrs.get("region_id") if attrs.get("region_id") is not None else attrs.get("region")
+            )
+        if "district_id" in attrs or "district" in attrs:
+            normalized_values["district_id"] = _parse_int_maybe(
+                attrs.get("district_id") if attrs.get("district_id") is not None else attrs.get("district")
+            )
 
         attrs["property_kind"] = property_kind
         attrs["normalized_values"] = normalized_values
@@ -480,7 +517,7 @@ class RawPropertyReviewClientSerializer(serializers.Serializer):
 class RawPropertyReviewSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     client = RawPropertyReviewClientSerializer()
-    rating = serializers.DecimalField(max_digits=6, decimal_places=2, allow_null=True)
+    rating = serializers.DecimalField(max_digits=2, decimal_places=1, allow_null=True)
     comment = serializers.CharField(allow_blank=True, allow_null=True)
     created_at = serializers.DateTimeField()
 

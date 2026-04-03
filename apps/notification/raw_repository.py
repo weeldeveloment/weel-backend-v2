@@ -6,9 +6,9 @@ from typing import Any
 from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one
+from shared.raw.compat import get_table_name
 
-
-NOTIFICATION_TABLE = "public.notification"
+NOTIFICATION_TABLE = get_table_name("notification")
 
 
 def create_notification(
@@ -36,7 +36,7 @@ def create_notification(
             recipient_user_id,
             recipient_role
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING *
+        __RETURNING_MARKER__
         """,
         [
             uuid.uuid4(),
@@ -71,8 +71,8 @@ def count_partner_notifications(partner_user_id: int) -> dict[str, int]:
     row = fetch_one(
         f"""
         SELECT
-            COUNT(*)::int AS total,
-            COUNT(*) FILTER (WHERE COALESCE(status, '') <> 'read')::int AS unread_count
+            COUNT(*) AS total,
+            SUM(CASE WHEN COALESCE(status, '' THEN 1 ELSE 0 END) <> 'read') AS unread_count
         FROM {NOTIFICATION_TABLE}
         WHERE recipient_role = 'partner'
           AND recipient_user_id = %s
@@ -95,7 +95,7 @@ def mark_partner_notifications_as_read(partner_user_id: int, notification_guids:
                 updated_at = %s
             WHERE recipient_role = 'partner'
               AND recipient_user_id = %s
-              AND guid::text = ANY(%s)
+              AND guid = __ANY_MARKER__(%s)
               AND COALESCE(status, '') <> 'read'
             """,
             [now, partner_user_id, notification_guids],

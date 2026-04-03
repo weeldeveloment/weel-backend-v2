@@ -172,11 +172,11 @@ class SanatoriumImageCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"sanatorium_id": _("Sanatorium not found")}
             )
-        self.context[".sanatorium"] = sanatorium
+        self.context["..sanatorium"] = sanatorium
         return attrs
 
     def create(self, validated_data):
-        sanatorium = self.context[".sanatorium"]
+        sanatorium = self.context["..sanatorium"]
         images = validated_data.pop("images", [])
         last_order = (
             sanatorium.images.aggregate(max_order=models.Max("order"))["max_order"]
@@ -429,7 +429,7 @@ class SanatoriumCreateSerializer(serializers.ModelSerializer):
         ]
 
     duplicate_title_message = _(
-        "A .sanatorium with this title already exists. Please choose a different title."
+        "A ..sanatorium with this title already exists. Please choose a different title."
     )
 
     @staticmethod
@@ -473,7 +473,7 @@ class SanatoriumCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {
                     "detail": _(
-                        "Could not create .sanatorium. Check whether the title is unique and try again."
+                        "Could not create ..sanatorium. Check whether the title is unique and try again."
                     )
                 }
             )
@@ -526,7 +526,7 @@ class SanatoriumReviewCreateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         request = self.context.get("request")
         client = request.user
-        sanatorium = self.context[".sanatorium"]
+        sanatorium = self.context["..sanatorium"]
 
         has_eligible_booking = SanatoriumBooking.objects.filter(
             client=client,
@@ -546,7 +546,7 @@ class SanatoriumReviewCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         client = self.context["request"].user
-        sanatorium = self.context[".sanatorium"]
+        sanatorium = self.context["..sanatorium"]
         return SanatoriumReview.objects.create(
             client=client,
             sanatorium=sanatorium,
@@ -610,7 +610,7 @@ class SanatoriumBookingPriceSerializer(serializers.ModelSerializer):
 
 class SanatoriumBookingListSerializer(serializers.ModelSerializer):
     sanatorium_title = serializers.CharField(
-        source=".sanatorium.title", read_only=True
+        source="..sanatorium.title", read_only=True
     )
     room_title = serializers.CharField(source="room.title", read_only=True)
     room_type = serializers.SerializerMethodField()
@@ -663,10 +663,10 @@ class ClientSanatoriumBookingDetailSerializer(serializers.ModelSerializer):
     specialization = MedicalSpecializationSerializer(read_only=True)
     booking_price = SanatoriumBookingPriceSerializer(read_only=True)
     partner_name = serializers.CharField(
-        source=".sanatorium.partner.first_name", read_only=True
+        source="..sanatorium.partner.first_name", read_only=True
     )
     partner_phone = serializers.CharField(
-        source=".sanatorium.partner.phone_number", read_only=True
+        source="..sanatorium.partner.phone_number", read_only=True
     )
 
     class Meta:

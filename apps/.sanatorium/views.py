@@ -204,7 +204,7 @@ class SanatoriumDetailView(RetrieveAPIView):
 
     @swagger_auto_schema(
         tags=["Sanatorium"],
-        operation_summary="Retrieve .sanatorium details",
+        operation_summary="Retrieve ..sanatorium details",
         manual_parameters=[sanatorium_id_param],
         responses={status.HTTP_200_OK: SanatoriumDetailSerializer},
     )
@@ -232,7 +232,7 @@ class SanatoriumRoomListView(ListAPIView):
 
     @swagger_auto_schema(
         tags=["Sanatorium"],
-        operation_summary="List rooms for a .sanatorium",
+        operation_summary="List rooms for a ..sanatorium",
         manual_parameters=[sanatorium_id_param],
         responses={status.HTTP_200_OK: SanatoriumRoomListSerializer(many=True)},
     )
@@ -401,12 +401,12 @@ class SanatoriumReviewListCreateView(ListCreateAPIView):
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
-        ctx[".sanatorium"] = self.get_sanatorium()
+        ctx["..sanatorium"] = self.get_sanatorium()
         return ctx
 
     @swagger_auto_schema(
         tags=["Sanatorium"],
-        operation_summary="List .sanatorium reviews",
+        operation_summary="List ..sanatorium reviews",
         manual_parameters=[sanatorium_id_param],
         responses={status.HTTP_200_OK: SanatoriumReviewSerializer(many=True)},
     )
@@ -415,7 +415,7 @@ class SanatoriumReviewListCreateView(ListCreateAPIView):
 
     @swagger_auto_schema(
         tags=["Sanatorium"],
-        operation_summary="Create .sanatorium review",
+        operation_summary="Create ..sanatorium review",
         manual_parameters=[sanatorium_id_param],
         request_body=SanatoriumReviewCreateSerializer,
     )
@@ -434,7 +434,7 @@ class SanatoriumFavoriteToggleView(APIView):
 
     @swagger_auto_schema(
         tags=["Sanatorium"],
-        operation_summary="Toggle .sanatorium favorite",
+        operation_summary="Toggle ..sanatorium favorite",
         manual_parameters=[sanatorium_id_param],
     )
     def post(self, request, sanatorium_id):
@@ -503,7 +503,7 @@ class PartnerSanatoriumListCreateView(ListCreateAPIView):
 
     @swagger_auto_schema(
         tags=["Sanatorium"],
-        operation_summary="Partner: create .sanatorium",
+        operation_summary="Partner: create ..sanatorium",
         request_body=SanatoriumCreateSerializer,
     )
     def post(self, request, *args, **kwargs):
@@ -517,7 +517,7 @@ class PartnerSanatoriumImageUploadView(APIView):
 
     @swagger_auto_schema(
         tags=["Sanatorium"],
-        operation_summary="Partner: upload .sanatorium images",
+        operation_summary="Partner: upload ..sanatorium images",
         manual_parameters=[sanatorium_id_param],
     )
     def post(self, request, sanatorium_id):
@@ -528,7 +528,7 @@ class PartnerSanatoriumImageUploadView(APIView):
         serializer.is_valid(raise_exception=True)
         images = serializer.save()
 
-        sanatorium = serializer.context[".sanatorium"]
+        sanatorium = serializer.context["..sanatorium"]
         if not sanatorium.is_verified:
             return Response(
                 {"detail": "Your image(s) are pending approval", "status": "pending"},
@@ -553,7 +553,7 @@ class ClientSanatoriumBookingListCreateView(APIView):
 
     @swagger_auto_schema(
         tags=["Sanatorium Booking"],
-        operation_summary="Client: list .sanatorium bookings",
+        operation_summary="Client: list ..sanatorium bookings",
     )
     def get(self, request):
         bookings = (
@@ -578,7 +578,7 @@ class ClientSanatoriumBookingListCreateView(APIView):
 
     @swagger_auto_schema(
         tags=["Sanatorium Booking"],
-        operation_summary="Client: create .sanatorium booking",
+        operation_summary="Client: create ..sanatorium booking",
         request_body=SanatoriumBookingCreateSerializer,
     )
     def post(self, request):

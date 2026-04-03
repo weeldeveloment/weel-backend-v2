@@ -1,43 +1,30 @@
-import uuid
+from __future__ import annotations
 
-from django.db import models
-from django.contrib.auth import get_user_model
-from django.utils.translation import gettext_lazy as _
+from dataclasses import dataclass
+from datetime import datetime
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
-User = get_user_model()
 
+@dataclass
+class BaseModel:
+    guid: UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
-class BaseModel(models.Model):
-    guid = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created at"))
-    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("Updated at"))
+    _meta = SimpleNamespace(db_table="")
 
-    class Meta:
-        abstract = True
+    def __post_init__(self):
+        if self.guid is None:
+            self.guid = uuid4()
 
 
 class HardDeleteBaseModel(BaseModel):
-    class Meta:
-        abstract = True
+    pass
 
 
-class VerifiedByMixin(models.Model):
-    is_verified = models.BooleanField(
-        null=True,
-        blank=True,
-        default=False,
-        db_default=False,
-        verbose_name=_("Verified"),
-    )
-    verified_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        limit_choices_to={"is_staff": True},
-        verbose_name=_("Verified by"),
-    )
-    verified_at = models.DateTimeField(blank=True, null=True, verbose_name=_("Verified at"))
-
-    class Meta:
-        abstract = True
+@dataclass
+class VerifiedByMixin:
+    is_verified: bool | None = False
+    verified_by_user_id: int | None = None
+    verified_at: datetime | None = None

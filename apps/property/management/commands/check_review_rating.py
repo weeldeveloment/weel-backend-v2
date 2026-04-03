@@ -1,46 +1,62 @@
 """
-Review va reytingni tekshirish: 5 balli review qaysi dachada va u API roʻyxatida chiqadimi?
+Review va reytingni tekshirish: 4+ balli review qaysi propertyda va u API roʻyxatida chiqadimi?
 Ishlatish: python manage.py check_review_rating
 """
-from django.db.models import Q
+from __future__ import annotations
+
 from django.core.management.base import BaseCommand
-from property.models import Property, PropertyReview
+
+from shared.raw.db import fetch_all, table_exists
 
 
 class Command(BaseCommand):
-    help = "5 balli review qaysi propertyda ekanligini va u tekshirilgan roʻyxatda bor-yoʻqligini koʻrsatadi."
+    help = "4+ balli review qaysi propertyda ekanligini va u tekshirilgan roʻyxatda bor-yoʻqligini koʻrsatadi."
 
     def handle(self, *args, **options):
-        reviews = PropertyReview.objects.filter(
-            rating__gte=4,
-            rating__isnull=False,
-        ).filter(Q(is_hidden=False) | Q(is_hidden__isnull=True)).select_related("property")
-
-        if not reviews.exists():
+        if not (table_exists("review") and table_exists("apartment") and table_exists("cottage")):
             self.stdout.write(
                 self.style.WARNING(
-                    "4+ balli va yashirin boʻlmagan review topilmadi. "
-                    "Admin da Hide ni unchecked qiling va rating ni tekshiring."
+                    "Required normalized tables (review/apartment/cottage) are not available."
+                )
+            )
+            return
+
+        reviews = fetch_all(
+            """
+            SELECT
+                r.rating,
+                r.comment,
+                r.is_hidden,
+                COALESCE(a.guid, c.guid) AS property_guid,
+                COALESCE(a.title, c.title) AS property_title,
+                COALESCE(a.is_verified, c.is_verified, FALSE) AS is_verified,
+                COALESCE(a.is_archived, c.is_archived, FALSE) AS is_archived
+            FROM public.review r
+            LEFT JOIN public.apartment a ON a.id = r.apartment_id
+            LEFT JOIN public.cottage c ON c.id = r.cottage_id
+            WHERE r.rating >= 4
+              AND r.rating IS NOT NULL
+              AND COALESCE(r.is_hidden, FALSE) = FALSE
+            ORDER BY r.rating DESC, r.created_at DESC
+            """
+        )
+
+        if not reviews:
+            self.stdout.write(
+                self.style.WARNING(
+                    "4+ balli va yashirin boʻlmagan review topilmadi."
                 )
             )
             return
 
         self.stdout.write(
-            self.style.SUCCESS(f"4+ balli (yashirin emas) reviewlar: {reviews.count()} ta\n")
+            self.style.SUCCESS(f"4+ balli (yashirin emas) reviewlar: {len(reviews)} ta\n")
         )
-        for r in reviews:
-            p = r.property
-            in_list = p.is_verified and not p.is_archived
+        for row in reviews:
+            in_list = bool(row.get("is_verified")) and not bool(row.get("is_archived"))
             status = "✓ API roʻyxatida chiqadi" if in_list else "✗ API roʻyxatida YOʻQ (tekshirilmagan yoki arxiv)"
             self.stdout.write(
-                f"  Property: {p.title} (guid={p.guid})\n"
-                f"    Reyting: {r.rating}, Hide: {r.is_hidden}\n"
+                f"  Property: {row.get('property_title')} (guid={row.get('property_guid')})\n"
+                f"    Reyting: {row.get('rating')}, Hide: {row.get('is_hidden')}\n"
                 f"    {status}\n"
             )
-            if not in_list:
-                self.stdout.write(
-                    self.style.WARNING(
-                        "    → Bu dachani API da koʻrish uchun Admin → Property → "
-                        "«Test» ni oching va Verified (Tekshirilgan) qiling."
-                    )
-                )

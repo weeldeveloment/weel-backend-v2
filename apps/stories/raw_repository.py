@@ -6,6 +6,7 @@ from typing import Any
 
 from django.utils import timezone
 
+from shared.raw.compat import get_table_name, is_postgresql, return_star
 from shared.raw.db import execute, fetch_all, fetch_one
 
 
@@ -29,9 +30,9 @@ STORY_SELECT = f"""
         {PROPERTY_ARCHIVED_EXPR} AS property_is_archived,
         {PROPERTY_KIND_EXPR} AS property_kind,
         {PROPERTY_TYPE_LABEL_EXPR} AS property_type_label
-    FROM public.stories s
-    LEFT JOIN public.apartment a ON a.id = s.property_apartment_id
-    LEFT JOIN public.cottage c ON c.id = s.property_cottage_id
+    FROM {get_table_name("stories")} s
+    LEFT JOIN {get_table_name("apartment")} a ON a.id = s.property_apartment_id
+    LEFT JOIN {get_table_name("cottage")} c ON c.id = s.property_cottage_id
 """
 
 
@@ -52,15 +53,27 @@ def _attach_media(stories: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return stories
 
     story_ids = [int(story["id"]) for story in stories]
-    media_rows = fetch_all(
-        """
-        SELECT *
-        FROM public.story_media
-        WHERE story_id = ANY(%s)
-        ORDER BY id ASC
-        """,
-        [story_ids],
-    )
+    if is_postgresql():
+        media_rows = fetch_all(
+            f"""
+            SELECT *
+            FROM {get_table_name("story_media")}
+            WHERE story_id = ANY(%s)
+            ORDER BY id ASC
+            """,
+            [story_ids],
+        )
+    else:
+        placeholders = ','.join(['%s'] * len(story_ids))
+        media_rows = fetch_all(
+            f"""
+            SELECT *
+            FROM {get_table_name("story_media")}
+            WHERE story_id IN ({placeholders})
+            ORDER BY id ASC
+            """,
+            story_ids,
+        )
 
     media_by_story: dict[int, list[dict[str, Any]]] = {story_id: [] for story_id in story_ids}
     for row in media_rows:
@@ -129,9 +142,9 @@ def get_story_by_guid(story_guid: uuid.UUID | str, *, active_only: bool = True) 
 
 def get_story_media_by_guid(story_id: int, media_guid: uuid.UUID | str) -> dict[str, Any] | None:
     return fetch_one(
-        """
+        f"""
         SELECT *
-        FROM public.story_media
+        FROM {get_table_name("story_media")}
         WHERE story_id = %s
           AND guid = %s
         LIMIT 1
@@ -146,28 +159,28 @@ def get_owned_property_by_guid(
     property_guid: uuid.UUID | str,
 ) -> dict[str, Any] | None:
     return fetch_one(
-        """
+        f"""
         SELECT *
         FROM (
             SELECT
-                'apartment'::text AS property_kind,
+                'apartment' AS property_kind,
                 id,
                 guid,
                 title,
                 img
-            FROM public.apartment
+            FROM {get_table_name("apartment")}
             WHERE guid = %s
               AND partner_user_id = %s
 
             UNION ALL
 
             SELECT
-                'cottage'::text AS property_kind,
+                'cottage' AS property_kind,
                 id,
                 guid,
                 title,
                 img
-            FROM public.cottage
+            FROM {get_table_name("cottage")}
             WHERE guid = %s
               AND partner_user_id = %s
         ) p
@@ -188,7 +201,7 @@ def get_active_story_for_property(property_kind: str, property_id: int) -> dict[
     return fetch_one(
         f"""
         SELECT *
-        FROM public.stories s
+        FROM {get_table_name("stories")} s
         WHERE {where}
           AND s.expires_at > %s
         ORDER BY s.uploaded_at DESC, s.id DESC
@@ -207,8 +220,8 @@ def create_story_for_property(property_kind: str, property_id: int) -> dict[str,
     cottage_id = property_id if property_kind == "cottage" else None
 
     row = fetch_one(
-        """
-        INSERT INTO public.stories (
+        f"""
+        INSERT INTO {get_table_name("stories")} (
             guid,
             created_at,
             updated_at,
@@ -219,10 +232,15 @@ def create_story_for_property(property_kind: str, property_id: int) -> dict[str,
             property_apartment_id,
             property_cottage_id
         ) VALUES (%s, %s, %s, FALSE, %s, 0, %s, %s, %s)
-        RETURNING *
+        {"RETURNING *" if return_star() else ""}
         """,
         [story_guid, now, now, expires_at, now, apartment_id, cottage_id],
     )
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {get_table_name('stories')} WHERE guid = %s ORDER BY id DESC LIMIT 1",
+            [story_guid],
+        )
     if row is None:
         raise RuntimeError("Failed to create story")
     return row
@@ -230,9 +248,10 @@ def create_story_for_property(property_kind: str, property_id: int) -> dict[str,
 
 def create_story_media(*, story_id: int, media_path: str, media_type: str) -> dict[str, Any]:
     now = timezone.now()
+    media_guid = uuid.uuid4()
     row = fetch_one(
-        """
-        INSERT INTO public.story_media (
+        f"""
+        INSERT INTO {get_table_name("story_media")} (
             guid,
             created_at,
             updated_at,
@@ -240,10 +259,15 @@ def create_story_media(*, story_id: int, media_path: str, media_type: str) -> di
             media_type,
             story_id
         ) VALUES (%s, %s, %s, %s, %s, %s)
-        RETURNING *
+        {"RETURNING *" if return_star() else ""}
         """,
-        [uuid.uuid4(), now, now, media_path, media_type, story_id],
+        [media_guid, now, now, media_path, media_type, story_id],
     )
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {get_table_name('story_media')} WHERE guid = %s ORDER BY id DESC LIMIT 1",
+            [media_guid],
+        )
     if row is None:
         raise RuntimeError("Failed to create story media")
     return row
@@ -252,8 +276,8 @@ def create_story_media(*, story_id: int, media_path: str, media_type: str) -> di
 def delete_story_for_partner(story_guid: uuid.UUID | str, partner_user_id: int) -> int:
     return execute(
         f"""
-        DELETE FROM public.stories s
-        USING public.apartment a
+        DELETE FROM {get_table_name("stories")} s
+        USING {get_table_name("apartment")} a
         WHERE s.guid = %s
           AND s.expires_at > %s
           AND s.property_apartment_id = a.id
@@ -262,8 +286,8 @@ def delete_story_for_partner(story_guid: uuid.UUID | str, partner_user_id: int) 
         [story_guid, timezone.now(), partner_user_id],
     ) + execute(
         f"""
-        DELETE FROM public.stories s
-        USING public.cottage c
+        DELETE FROM {get_table_name("stories")} s
+        USING {get_table_name("cottage")} c
         WHERE s.guid = %s
           AND s.expires_at > %s
           AND s.property_cottage_id = c.id
@@ -275,8 +299,8 @@ def delete_story_for_partner(story_guid: uuid.UUID | str, partner_user_id: int) 
 
 def delete_story_media(story_id: int, media_guid: uuid.UUID | str) -> int:
     return execute(
-        """
-        DELETE FROM public.story_media
+        f"""
+        DELETE FROM {get_table_name("story_media")}
         WHERE story_id = %s
           AND guid = %s
         """,
@@ -286,8 +310,8 @@ def delete_story_media(story_id: int, media_guid: uuid.UUID | str) -> int:
 
 def increment_story_views(story_guid: uuid.UUID | str, increment_by: int) -> int:
     return execute(
-        """
-        UPDATE public.stories
+        f"""
+        UPDATE {get_table_name("stories")}
         SET views = COALESCE(views, 0) + %s,
             updated_at = %s
         WHERE guid = %s

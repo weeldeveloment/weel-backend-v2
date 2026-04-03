@@ -10,10 +10,12 @@ Birinchi marta migratsiyani ishlatib, keyin bu commandni ishlating.
 """
 import json
 import os
+from uuid import uuid4
 
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
-from property.models import Region, District
+from shared.raw.db import execute, fetch_one, table_exists
 
 
 # Standart viloyat nomlari (Oʻzbekiston boʻylab)
@@ -106,30 +108,80 @@ def load_from_dict(regions_data, districts_by_region, verbosity=1):
     """Regions va Districts ni yaratadi (yoki yangilaydi)."""
     region_by_title_uz = {}
     created_regions = 0
+    now = timezone.now()
     for r in regions_data:
-        obj, created = Region.objects.get_or_create(
-            title_uz=r["title_uz"],
-            defaults={"title_ru": r["title_ru"], "title_en": r["title_en"]},
+        existing = fetch_one(
+            """
+            SELECT id
+            FROM public.property_region
+            WHERE title_uz = %s
+            LIMIT 1
+            """,
+            [r["title_uz"]],
         )
-        region_by_title_uz[r["title_uz"]] = obj
-        if created:
+        if existing:
+            region_id = int(existing["id"])
+        else:
+            created = fetch_one(
+                """
+                INSERT INTO public.property_region (
+                    guid,
+                    created_at,
+                    updated_at,
+                    title_uz,
+                    title_ru,
+                    title_en
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                [
+                    uuid4(),
+                    now,
+                    now,
+                    r["title_uz"],
+                    r["title_ru"],
+                    r["title_en"],
+                ],
+            )
+            region_id = int(created["id"])
             created_regions += 1
+        region_by_title_uz[r["title_uz"]] = region_id
 
     created_districts = 0
     for region_title_uz, district_names in districts_by_region.items():
-        region = region_by_title_uz.get(region_title_uz)
-        if not region:
+        region_id = region_by_title_uz.get(region_title_uz)
+        if not region_id:
             if verbosity > 0:
                 print(f"Viloyat topilmadi (tumanlar uchun): {region_title_uz}")
             continue
         for name_uz in district_names:
-            _, created = District.objects.get_or_create(
-                region=region,
-                title_uz=name_uz,
-                defaults={"title_ru": name_uz, "title_en": name_uz},
+            existing = fetch_one(
+                """
+                SELECT id
+                FROM public.property_district
+                WHERE region_id = %s
+                  AND title_uz = %s
+                LIMIT 1
+                """,
+                [region_id, name_uz],
             )
-            if created:
-                created_districts += 1
+            if existing:
+                continue
+            execute(
+                """
+                INSERT INTO public.property_district (
+                    guid,
+                    created_at,
+                    updated_at,
+                    region_id,
+                    title_uz,
+                    title_ru,
+                    title_en
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                [uuid4(), now, now, region_id, name_uz, name_uz, name_uz],
+            )
+            created_districts += 1
 
     return created_regions, created_districts
 
@@ -154,10 +206,19 @@ class Command(BaseCommand):
         verbosity = options.get("verbosity", 1)
         file_path = options.get("file")
         clear = options.get("clear", False)
+        if not table_exists("property_region") or not table_exists("property_district"):
+            self.stdout.write(
+                self.style.WARNING(
+                    "Legacy region/district tables are not available in current schema."
+                )
+            )
+            return
+
+        now = timezone.now()
 
         if clear:
-            District.objects.all().delete()
-            Region.objects.all().delete()
+            execute("DELETE FROM public.property_district")
+            execute("DELETE FROM public.property_region")
             if verbosity > 0:
                 self.stdout.write("Region va District tozalandi.")
 
@@ -171,35 +232,89 @@ class Command(BaseCommand):
             districts_data = data.get("districts", [])
             # districts: [{"region_title_uz": "...", "title_uz": "...", "title_ru": "...", "title_en": "..."}]
             region_by_title_uz = {}
+            created_regions = 0
             for r in regions_data:
-                obj, created = Region.objects.get_or_create(
-                    title_uz=r["title_uz"],
-                    defaults={"title_ru": r.get("title_ru", r["title_uz"]), "title_en": r.get("title_en", r["title_uz"])},
+                existing = fetch_one(
+                    """
+                    SELECT id
+                    FROM public.property_region
+                    WHERE title_uz = %s
+                    LIMIT 1
+                    """,
+                    [r["title_uz"]],
                 )
-                region_by_title_uz[r["title_uz"]] = obj
-            created_regions = sum(
-                1 for r in regions_data
-                if Region.objects.filter(title_uz=r["title_uz"]).count() == 1
-            )
+                if existing:
+                    region_id = int(existing["id"])
+                else:
+                    created = fetch_one(
+                        """
+                        INSERT INTO public.property_region (
+                            guid,
+                            created_at,
+                            updated_at,
+                            title_uz,
+                            title_ru,
+                            title_en
+                        ) VALUES (%s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        [
+                            uuid4(),
+                            now,
+                            now,
+                            r["title_uz"],
+                            r.get("title_ru", r["title_uz"]),
+                            r.get("title_en", r["title_uz"]),
+                        ],
+                    )
+                    region_id = int(created["id"])
+                    created_regions += 1
+                region_by_title_uz[r["title_uz"]] = region_id
+
             created_districts = 0
             for d in districts_data:
-                region = region_by_title_uz.get(d["region_title_uz"])
-                if not region:
+                region_id = region_by_title_uz.get(d["region_title_uz"])
+                if not region_id:
                     continue
-                _, created = District.objects.get_or_create(
-                    region=region,
-                    title_uz=d["title_uz"],
-                    defaults={
-                        "title_ru": d.get("title_ru", d["title_uz"]),
-                        "title_en": d.get("title_en", d["title_uz"]),
-                    },
+                exists = fetch_one(
+                    """
+                    SELECT id
+                    FROM public.property_district
+                    WHERE region_id = %s
+                      AND title_uz = %s
+                    LIMIT 1
+                    """,
+                    [region_id, d["title_uz"]],
                 )
-                if created:
-                    created_districts += 1
+                if exists:
+                    continue
+                execute(
+                    """
+                    INSERT INTO public.property_district (
+                        guid,
+                        created_at,
+                        updated_at,
+                        region_id,
+                        title_uz,
+                        title_ru,
+                        title_en
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    [
+                        uuid4(),
+                        now,
+                        now,
+                        region_id,
+                        d["title_uz"],
+                        d.get("title_ru", d["title_uz"]),
+                        d.get("title_en", d["title_uz"]),
+                    ],
+                )
+                created_districts += 1
             if verbosity > 0:
                 self.stdout.write(self.style.SUCCESS(
                     f"JSON dan yuklandi: {len(regions_data)} viloyat, {len(districts_data)} tuman. "
-                    f"Yangi: ~{created_districts} tuman."
+                    f"Yangi: {created_regions} viloyat, {created_districts} tuman."
                 ))
             return
 
