@@ -34,6 +34,7 @@ from shared.permissions import (
     IsClientOrPartner,
     IsPartnerOwnerProperty,
 )
+from shared.raw.db import _compile_sql
 from shared.views import FrontendLogView
 
 logging.getLogger("django.request").setLevel(logging.ERROR)
@@ -143,6 +144,20 @@ class FormatTokenErrorResponseTests(TestCase):
         out = _format_token_error_response(Res())
         self.assertIn("errors", out)
         self.assertIn("hint", out["errors"][0])
+
+
+class RawSQLCompilerTests(TestCase):
+    @patch("shared.raw.db.is_postgresql", return_value=False)
+    def test_any_marker_compiles_for_sqlite(self, mock_is_postgresql):
+        sql, params = _compile_sql(
+            "SELECT * FROM users WHERE role = %s AND phone_number = __ANY_MARKER__(%s)",
+            ["client", ["998901234567", "+998901234567"]],
+        )
+        self.assertEqual(
+            sql,
+            "SELECT * FROM users WHERE role = %s AND phone_number IN (%s, %s)",
+        )
+        self.assertEqual(params, ["client", "998901234567", "+998901234567"])
 
 
 # ──────────────────────────────────────────────

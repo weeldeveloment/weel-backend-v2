@@ -55,4 +55,4 @@ jobs:
         run: python manage.py check --settings=core.settings_test_db
 
       - name: Run automated tests
-        run: python manage.py test shared.tests bot.tests --settings=core.settings_test_db --keepdb
+        run: python manage.py test shared.tests shared.smoke_tests bot.tests --settings=core.settings_test_db --keepdb

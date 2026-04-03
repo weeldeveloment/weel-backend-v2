@@ -1,7 +1,9 @@
+from django.utils.translation import gettext_lazy as _
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.exceptions import TokenError
 from drf_yasg.utils import swagger_auto_schema
 from .authentication import create_admin_tokens, AdminJWTAuthentication
 from .permissions import IsAdminUser
@@ -53,7 +55,12 @@ class AdminRefreshTokenView(APIView):
         from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 
         serializer = TokenRefreshSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError:
+            return Response(
+                {"detail": _("Invalid refresh token")}, status=status.HTTP_401_UNAUTHORIZED
+            )
 
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
 

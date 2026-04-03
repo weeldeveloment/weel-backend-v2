@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 
 from core.celery import app
+from django.conf import settings
 
 from .services import EskizService, OTPRedisService, TelegramService
 from .models.logs import SmsPurpose
@@ -45,6 +46,14 @@ def send_otp_sms_eskiz(
                     "No OTP found for %s with purpose %s", phone_number, purpose.value
                 )
                 return {"error": "OTP not found"}
+
+        if settings.DEBUG:
+            logger.warning(
+                "[DEBUG] OTP prepared for %s purpose=%s code=%s",
+                phone_number,
+                getattr(purpose, "value", purpose),
+                otp_code,
+            )
 
         eskiz_service = EskizService()
         result = eskiz_service.send_sms(phone_number, otp_code, message_template)

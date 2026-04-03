@@ -42,6 +42,8 @@ class EskizService:
         self.password = password or getattr(settings, "ESKIZ_PASSWORD", "")
         self.login_url = login_url or getattr(settings, "ESKIZ_LOGIN_URL", "")
         self.send_sms_url = send_sms_url or getattr(settings, "ESKIZ_SMS_SEND_URL", "")
+        self.sender = getattr(settings, "ESKIZ_SENDER", "")
+        self.callback_url = getattr(settings, "ESKIZ_CALLBACK_URL", "")
 
         if not all([self.email, self.password, self.login_url, self.send_sms_url]):
             logger.warning("Eskiz service is not fully configured")
@@ -79,6 +81,21 @@ class EskizService:
             text = response.text or ""
 
         return text[: cls.RESPONSE_LOG_MAX_LENGTH]
+
+    @staticmethod
+    def _contains_non_ascii(text: str) -> bool:
+        return any(ord(ch) > 127 for ch in (text or ""))
+
+    @staticmethod
+    def _provider_accepts_message(body: dict | None) -> bool:
+        if not isinstance(body, dict):
+            return False
+        status = body.get("status")
+        if status == "success":
+            return True
+        if body.get("id") or (isinstance(body.get("data"), dict) and body["data"].get("id")):
+            return True
+        return False
 
     def get_token(self):
         token = cache.get(self.ESKIZ_TOKEN_KEY)
@@ -153,15 +170,24 @@ class EskizService:
 
         # Eskiz odatda 998901234567 formatida qabul qiladi (+ siz)
         mobile_phone = (phone_number or "").replace("+", "").replace(" ", "").strip()
-        payload = {"mobile_phone": mobile_phone, "message": message}
+        payload = {
+            "mobile_phone": mobile_phone,
+            "message": message,
+        }
+        if self.sender:
+            payload["from"] = self.sender
+        if self.callback_url:
+            payload["callback_url"] = self.callback_url
+        if self._contains_non_ascii(message):
+            payload["unicode"] = "1"
         masked_phone = self._mask_phone(phone_number)
 
         headers = {
-            "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
         }
         started_at = time.monotonic()
         response = None
+        response_body = None
 
         logger.info(
             "Eskiz SMS request started. url=%s phone=%s message_length=%s",
@@ -171,7 +197,7 @@ class EskizService:
         )
         try:
             response = requests.post(
-                str(self.send_sms_url), json=payload, headers=headers, timeout=10
+                str(self.send_sms_url), data=payload, headers=headers, timeout=10
             )
             elapsed_ms = int((time.monotonic() - started_at) * 1000)
 
@@ -187,7 +213,7 @@ class EskizService:
                 headers["Authorization"] = f"Bearer {token}"
                 retry_started_at = time.monotonic()
                 response = requests.post(
-                    self.send_sms_url, json=payload, headers=headers, timeout=10
+                    self.send_sms_url, data=payload, headers=headers, timeout=10
                 )
 
                 elapsed_ms = int((time.monotonic() - retry_started_at) * 1000)
@@ -205,20 +231,33 @@ class EskizService:
 
             provider_message_id = None
             try:
-                provider_message_id = response.json().get("data", {}).get("id")
+                response_body = response.json()
+                provider_message_id = response_body.get("data", {}).get("id") or response_body.get("id")
             except ValueError:
-                pass
+                response_body = None
+
+            if response_body is not None and not self._provider_accepts_message(response_body):
+                logger.error(
+                    "Eskiz SMS request returned non-accepted body. phone=%s status=%s elapsed_ms=%s body=%s",
+                    masked_phone,
+                    response.status_code,
+                    elapsed_ms,
+                    self._response_excerpt(response),
+                )
+                raise ValueError("Eskiz SMS provider did not accept the message")
 
             logger.info(
-                "Eskiz SMS sent successfully. phone=%s status=%s elapsed_ms=%s provider_message_id=%s",
+                "Eskiz SMS sent successfully. phone=%s status=%s elapsed_ms=%s provider_message_id=%s body=%s",
                 masked_phone,
                 response.status_code,
                 elapsed_ms,
                 provider_message_id,
+                self._response_excerpt(response),
             )
             return {
                 "status_code": response.status_code,
                 "detail": "The confirmation code sent successfully",
+                "provider_message_id": provider_message_id,
             }
         except requests.exceptions.RequestException as e:
             response = getattr(e, "response", response)

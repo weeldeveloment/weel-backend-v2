@@ -72,7 +72,7 @@ def count_partner_notifications(partner_user_id: int) -> dict[str, int]:
         f"""
         SELECT
             COUNT(*) AS total,
-            SUM(CASE WHEN COALESCE(status, '' THEN 1 ELSE 0 END) <> 'read') AS unread_count
+            SUM(CASE WHEN COALESCE(status, '') <> 'read' THEN 1 ELSE 0 END) AS unread_count
         FROM {NOTIFICATION_TABLE}
         WHERE recipient_role = 'partner'
           AND recipient_user_id = %s
@@ -112,4 +112,3 @@ def mark_partner_notifications_as_read(partner_user_id: int, notification_guids:
         """,
         [now, partner_user_id],
     )
-

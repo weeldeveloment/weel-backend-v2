@@ -424,6 +424,8 @@ ESKIZ_LOGIN_URL = os.getenv("ESKIZ_LOGIN_URL")
 ESKIZ_SMS_SEND_URL = os.getenv("ESKIZ_SMS_SEND_URL")
 ESKIZ_EMAIL = os.getenv("ESKIZ_EMAIL")
 ESKIZ_PASSWORD = os.getenv("ESKIZ_PASSWORD")
+ESKIZ_SENDER = os.getenv("ESKIZ_SENDER", "")
+ESKIZ_CALLBACK_URL = os.getenv("ESKIZ_CALLBACK_URL", "")
 
 # DEBUG=True da Celery tasklari sinxron ishlaydi — worker ishlamasa ham OTP SMS yuboriladi
 CELERY_TASK_ALWAYS_EAGER = DEBUG
