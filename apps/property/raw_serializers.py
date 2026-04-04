@@ -17,9 +17,14 @@ from .raw_repository import (
 )
 
 
-def _build_media_url(request, media_path: str | None) -> str | None:
+def _build_media_url(request, media_path: Any) -> str | None:
     if not media_path:
         return None
+    if isinstance(media_path, list) and len(media_path) > 0:
+        media_path = str(media_path[0])
+    elif isinstance(media_path, list):
+        return None
+    media_path = str(media_path)
     if media_path.startswith("http://") or media_path.startswith("https://"):
         return media_path
     try:
@@ -278,7 +283,7 @@ class RawPropertyDetailSerializer(serializers.Serializer):
         row["comment_count"] = int(row.get("review_count") or row.get("comment_count") or 0)
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
-        row["property_services"] = []
+        row["property_services"] = row.get("services") or []
         row["property_room"] = {
             "guid": None,
             "guests": None,
