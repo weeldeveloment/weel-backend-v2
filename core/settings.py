@@ -60,6 +60,7 @@ _allowed = (os.getenv("DJANGO_ALLOWED_HOSTS") or "").strip()
 ALLOWED_HOSTS = [h.strip() for h in _allowed.split(",") if h.strip()] if _allowed else ["*"]
 if "host.docker.internal" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("host.docker.internal")
+ALLOWED_HOSTS.append("0.0.0.0")
 
 GLOBAL_APPS = [
     "django_prometheus",
