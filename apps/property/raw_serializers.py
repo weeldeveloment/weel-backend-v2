@@ -132,6 +132,7 @@ class RawPropertyListSerializer(serializers.Serializer):
     price = RawPropertyListPriceSerializer(many=True, allow_null=True)
     property_location = RawPropertyLocationSerializer(allow_null=True)
     property_images = RawPropertyImageSerializer(many=True)
+    services = serializers.ListField()
     region = RawRegionSerializer(allow_null=True)
     district = RawDistrictSerializer(allow_null=True)
     guests = serializers.IntegerField(allow_null=True)
@@ -184,6 +185,7 @@ class RawPropertyListSerializer(serializers.Serializer):
             if image_url
             else []
         )
+        row["services"] = row.get("services") or []
         if row.get("region_id") is None:
             row["region"] = None
         else:

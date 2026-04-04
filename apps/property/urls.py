@@ -55,12 +55,12 @@ urlpatterns = [
     ),
     path("properties/", PropertyListCreateView.as_view(), name="property-list-create"),
     path(
-        "properties/apartments/",
+        "apartments/",
         ApartmentPropertyListCreateView.as_view(),
         name="apartment-property-list-create",
     ),
     path(
-        "properties/cottages/",
+        "cottages/",
         CottagePropertyListCreateView.as_view(),
         name="cottage-property-list-create",
     ),
