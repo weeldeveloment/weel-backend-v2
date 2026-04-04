@@ -12,7 +12,16 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 # Celery CLI entrypoint can load this module before Django settings side effects.
 # Ensure .env values are present here too (e.g. REDIS_CONNECTION_STRING).
 load_dotenv(find_dotenv(), override=True)
-app = Celery("core")
+
+TASK_MODULES = [
+    "booking.tasks",
+    "stories.tasks",
+    "notification.tasks",
+    "payment.tasks",
+    "users.tasks",
+]
+
+app = Celery("core", include=TASK_MODULES)
 # app.config_from_object('django.conf:settings', namespace='CELERY')
 
 logger = logging.getLogger(__name__)
@@ -37,6 +46,7 @@ def _resolve_env_value(raw_value: str | None) -> str | None:
 # Load task modules from all registered Django apps.
 app.autodiscover_tasks()
 app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
+app.conf.imports = tuple(TASK_MODULES)
 
 REDIS_CONNECTION_STRING = _resolve_env_value(
     os.environ.get("REDIS_CONNECTION_STRING")
