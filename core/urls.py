@@ -35,7 +35,7 @@ schema_view = get_schema_view(
         license=openapi.License(name="MIT License"),
     ),
     public=True,
-    url=settings.SWAGGER_URL if not settings.DEBUG else "",
+    url=settings.SWAGGER_URL,
     permission_classes=[permissions.AllowAny],
 )
 

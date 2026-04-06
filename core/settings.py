@@ -210,7 +210,7 @@ SIMPLE_JWT = {
     "JTI_CLAIM": "jti",
 }
 
-SWAGGER_URL = os.getenv("SWAGGER_URL")
+SWAGGER_URL = (os.getenv("SWAGGER_URL") or "https://dev.weel.uz/api").rstrip("/")
 SWAGGER_SETTINGS = {
     "SECURITY_DEFINITIONS": {
         "Bearer": {

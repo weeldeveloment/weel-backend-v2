@@ -44,7 +44,7 @@ class StorySerializer(serializers.Serializer):
     property_id = serializers.SerializerMethodField("get_property_id")
     property_title = serializers.SerializerMethodField("get_property_title")
     property_type_guid = serializers.SerializerMethodField("get_property_type_guid")
-    property_image_url = serializers.SerializerMethodField("get_property_image_url")
+    img = serializers.SerializerMethodField("get_img")
     media = serializers.SerializerMethodField("get_media")
 
     def get_property_id(self, obj):
@@ -54,11 +54,9 @@ class StorySerializer(serializers.Serializer):
         return obj.get("property_title")
 
     def get_property_type_guid(self, obj):
-        # Normalized schema has no dedicated property_type GUID table.
-        # Keep response field for backward compatibility with existing clients.
         return obj.get("property_type_label")
 
-    def get_property_image_url(self, obj):
+    def get_img(self, obj):
         request = self.context.get("request")
         return _build_media_url(request, obj.get("property_img"))
 

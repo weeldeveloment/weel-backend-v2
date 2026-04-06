@@ -165,12 +165,11 @@ class RawClientBookingCreateSerializer(
 class RawPropertyBookingSerializer(serializers.Serializer):
     guid = serializers.UUIDField(source="property_guid", read_only=True)
     title = serializers.CharField(source="property_title", read_only=True)
-    property_images = serializers.SerializerMethodField("get_property_images")
+    img = serializers.SerializerMethodField("get_img")
 
-    def get_property_images(self, obj):
+    def get_img(self, obj):
         request = self.context.get("request")
-        image_url = _build_media_url(request, obj.get("property_img"))
-        return [image_url] if image_url else []
+        return _build_media_url(request, obj.get("property_img"))
 
 
 class RawClientBookingSerializer(serializers.Serializer):

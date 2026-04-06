@@ -57,7 +57,6 @@ PROPERTY_UNION_SELECT = f"""
             a.minimum_weekend_day_stay,
             a.weekend_only_sunday_inclusive,
             a.comment_count,
-            a.price,
             a.price_per_person,
             a.price_on_working_days,
             a.price_on_weekends,
@@ -125,7 +124,6 @@ PROPERTY_UNION_SELECT = f"""
             c.minimum_weekend_day_stay,
             c.weekend_only_sunday_inclusive,
             c.comment_count,
-            c.price,
             c.price_per_person,
             c.price_on_working_days,
             c.price_on_weekends,
@@ -467,7 +465,6 @@ def create_property(
             minimum_weekend_day_stay,
             weekend_only_sunday_inclusive,
             comment_count,
-            price,
             price_per_person,
             price_on_working_days,
             price_on_weekends,
@@ -498,7 +495,7 @@ def create_property(
             %s, %s, %s, %s, %s,
             FALSE, 'pending', FALSE, FALSE,
             %s, %s, %s,
-            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s
@@ -514,7 +511,6 @@ def create_property(
             bool(values.get("minimum_weekend_day_stay", False)),
             bool(values.get("weekend_only_sunday_inclusive", False)),
             int(values.get("comment_count", 0)),
-            values.get("price"),
             values.get("price_per_person"),
             values.get("price_on_working_days"),
             values.get("price_on_weekends"),
@@ -547,7 +543,6 @@ def create_property(
         return None
     return get_property_for_partner(str(row["guid"]), partner_user_id)
 
-
 def update_property(
     *,
     property_kind: str,
@@ -573,7 +568,6 @@ def update_property(
         "title_sort",
         "minimum_weekend_day_stay",
         "weekend_only_sunday_inclusive",
-        "price",
         "price_per_person",
         "price_on_working_days",
         "price_on_weekends",
@@ -620,7 +614,6 @@ def update_property(
     if not row:
         return None
     return get_property_for_partner(str(row["guid"]), partner_user_id)
-
 
 def delete_property(
     *,

@@ -109,29 +109,17 @@ class RawDistrictSerializer(serializers.Serializer):
     region = RawRegionSerializer(allow_null=True)
 
 
-class RawPropertyImageSerializer(serializers.Serializer):
-    guid = serializers.UUIDField(allow_null=True)
-    order = serializers.IntegerField()
-    is_pending = serializers.BooleanField()
-    image_url = serializers.CharField(allow_null=True)
-
-
-class RawPropertyListPriceSerializer(serializers.Serializer):
-    guid = serializers.UUIDField(allow_null=True)
-    month_from = serializers.DateField(allow_null=True)
-    month_to = serializers.DateField(allow_null=True)
-    price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
 
 
 class RawPropertyListSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
     img = serializers.CharField(allow_blank=True, allow_null=True)
-    price = RawPropertyListPriceSerializer(many=True, allow_null=True)
+    price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    currency = serializers.CharField(allow_blank=True, allow_null=True)
     property_location = RawPropertyLocationSerializer(allow_null=True)
-    property_images = RawPropertyImageSerializer(many=True)
     services = serializers.ListField()
     region = RawRegionSerializer(allow_null=True)
     district = RawDistrictSerializer(allow_null=True)
@@ -145,26 +133,9 @@ class RawPropertyListSerializer(serializers.Serializer):
         request = self.context.get("request")
         row = dict(instance)
         row_currency = row.get("currency")
-        converted_price_per_person = _convert_price_for_output(row.get("price_per_person"), row_currency)
-        converted_working_days = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
-        converted_weekends = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
-        if (
-            converted_price_per_person is None
-            and converted_working_days is None
-            and converted_weekends is None
-        ):
-            row["price"] = None
-        else:
-            row["price"] = [
-                {
-                    "guid": None,
-                    "month_from": None,
-                    "month_to": None,
-                    "price_per_person": converted_price_per_person,
-                    "price_on_working_days": converted_working_days,
-                    "price_on_weekends": converted_weekends,
-                }
-            ]
+        row["price_per_person"] = _convert_price_for_output(row.get("price_per_person"), row_currency)
+        row["price_on_working_days"] = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
+        row["price_on_weekends"] = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
         row["property_location"] = {
             "guid": None,
             "latitude": row.get("latitude"),
@@ -172,19 +143,6 @@ class RawPropertyListSerializer(serializers.Serializer):
             "country": row.get("country"),
             "city": row.get("city"),
         }
-        image_url = _build_media_url(request, row.get("img"))
-        row["property_images"] = (
-            [
-                {
-                    "guid": None,
-                    "order": 1,
-                    "is_pending": False,
-                    "image_url": image_url,
-                }
-            ]
-            if image_url
-            else []
-        )
         row["services"] = row.get("services") or []
         if row.get("region_id") is None:
             row["region"] = None
@@ -219,7 +177,9 @@ class RawPropertyDetailSerializer(serializers.Serializer):
     img = serializers.CharField(allow_blank=True, allow_null=True)
     created_at = serializers.DateTimeField()
     currency = serializers.CharField(allow_blank=True, allow_null=True)
-    price = RawPropertyListPriceSerializer(many=True, allow_null=True)
+    price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     minimum_weekend_day_stay = serializers.BooleanField()
     description = serializers.CharField(allow_blank=True, allow_null=True)
     comment_count = serializers.IntegerField()
@@ -228,7 +188,6 @@ class RawPropertyDetailSerializer(serializers.Serializer):
     property_services = serializers.ListField()
     property_room = serializers.DictField()
     property_location = RawPropertyLocationSerializer(allow_null=True)
-    property_images = RawPropertyImageSerializer(many=True)
     apartment_number = serializers.CharField(allow_blank=True, allow_null=True)
     home_number = serializers.CharField(allow_blank=True, allow_null=True)
     entrance_number = serializers.CharField(allow_blank=True, allow_null=True)
@@ -261,26 +220,9 @@ class RawPropertyDetailSerializer(serializers.Serializer):
         request = self.context.get("request")
         row = dict(instance)
         row_currency = row.get("currency")
-        converted_price_per_person = _convert_price_for_output(row.get("price_per_person"), row_currency)
-        converted_working_days = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
-        converted_weekends = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
-        if (
-            converted_price_per_person is None
-            and converted_working_days is None
-            and converted_weekends is None
-        ):
-            row["price"] = None
-        else:
-            row["price"] = [
-                {
-                    "guid": None,
-                    "month_from": None,
-                    "month_to": None,
-                    "price_per_person": converted_price_per_person,
-                    "price_on_working_days": converted_working_days,
-                    "price_on_weekends": converted_weekends,
-                }
-            ]
+        row["price_per_person"] = _convert_price_for_output(row.get("price_per_person"), row_currency)
+        row["price_on_working_days"] = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
+        row["price_on_weekends"] = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
         row["description"] = self._resolve_description(row)
         row["comment_count"] = int(row.get("review_count") or row.get("comment_count") or 0)
         favorites = _favorite_guid_set(self.context)
@@ -300,19 +242,6 @@ class RawPropertyDetailSerializer(serializers.Serializer):
             "country": row.get("country"),
             "city": row.get("city"),
         }
-        image_url = _build_media_url(request, row.get("img"))
-        row["property_images"] = (
-            [
-                {
-                    "guid": None,
-                    "order": 1,
-                    "is_pending": False,
-                    "image_url": image_url,
-                }
-            ]
-            if image_url
-            else []
-        )
         return super().to_representation(row)
 
 
@@ -368,41 +297,36 @@ class RawPropertyCreateSerializer(serializers.Serializer):
     pass_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     def _parse_price(self, attrs: dict[str, Any], *, required: bool) -> dict[str, Decimal | None]:
-        raw_price = attrs.get("price")
-        source: dict[str, Any] = {}
-        if isinstance(raw_price, list) and raw_price:
-            first = raw_price[0]
-            if isinstance(first, dict):
-                source = dict(first)
-        elif isinstance(raw_price, dict):
-            source = dict(raw_price)
-        elif raw_price is not None:
-            source = {"price": raw_price}
+        # 1. Yangi format: To'g'ridan-to'g'ri root (asosiy) maydonlardan olamiz
+        per_person = _to_decimal(attrs.get("price_per_person"))
+        working = _to_decimal(attrs.get("price_on_working_days"))
+        weekends = _to_decimal(attrs.get("price_on_weekends"))
 
-        for key in ("price_per_person", "price_on_working_days", "price_on_weekends"):
-            if attrs.get(key) is not None:
-                source[key] = attrs.get(key)
+        # 2. Eski formatni ushlab qolish (agar frontend hali eski JSON jo'natsa, kod sinib qolmasligi uchun)
+        if working is None and weekends is None and per_person is None:
+            raw_price = attrs.get("price")
+            if isinstance(raw_price, list) and raw_price:
+                first = raw_price[0]
+                if isinstance(first, dict):
+                    per_person = _to_decimal(first.get("price_per_person"))
+                    working = _to_decimal(first.get("price_on_working_days"))
+                    weekends = _to_decimal(first.get("price_on_weekends"))
+            elif isinstance(raw_price, dict):
+                per_person = _to_decimal(raw_price.get("price_per_person"))
+                working = _to_decimal(raw_price.get("price_on_working_days"))
+                weekends = _to_decimal(raw_price.get("price_on_weekends"))
+            elif raw_price is not None:
+                # Agar faqat bitta narx berilsa
+                working = _to_decimal(raw_price)
 
-        if not source:
-            if required:
-                return {
-                    "price": Decimal("0"),
-                    "price_per_person": Decimal("0"),
-                    "price_on_working_days": Decimal("0"),
-                    "price_on_weekends": Decimal("0"),
-                }
-            return {}
+        # 3. Default qiymatlarni o'rnatish
+        if required and working is None and weekends is None and per_person is None:
+            return {
+                "price_per_person": Decimal("0"),
+                "price_on_working_days": Decimal("0"),
+                "price_on_weekends": Decimal("0"),
+            }
 
-        scalar = source.get("price")
-        scalar_decimal = _to_decimal(scalar)
-        per_person = _to_decimal(source.get("price_per_person"))
-        working = _to_decimal(source.get("price_on_working_days"))
-        weekends = _to_decimal(source.get("price_on_weekends"))
-
-        if working is None and scalar_decimal is not None:
-            working = scalar_decimal
-        if weekends is None and scalar_decimal is not None:
-            weekends = scalar_decimal
         if working is None:
             working = Decimal("0")
         if weekends is None:
@@ -410,12 +334,13 @@ class RawPropertyCreateSerializer(serializers.Serializer):
         if per_person is None:
             per_person = Decimal("0")
 
+        # 4. Manfiy narxlarni tekshirish
         for value in (per_person, working, weekends):
             if value < 0:
                 raise serializers.ValidationError(_("Price values must be non-negative"))
 
+        # Baza (DB) uchun umumiy 'price' ga 'working' day narxini yozib yuboramiz
         return {
-            "price": scalar_decimal if scalar_decimal is not None else working,
             "price_per_person": per_person,
             "price_on_working_days": working,
             "price_on_weekends": weekends,
