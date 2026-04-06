@@ -322,7 +322,6 @@ class RawPropertyCreateSerializer(serializers.Serializer):
         # 3. Default qiymatlarni o'rnatish
         if required and working is None and weekends is None and per_person is None:
             return {
-                "price": Decimal("0"),
                 "price_per_person": Decimal("0"),
                 "price_on_working_days": Decimal("0"),
                 "price_on_weekends": Decimal("0"),
@@ -342,7 +341,6 @@ class RawPropertyCreateSerializer(serializers.Serializer):
 
         # Baza (DB) uchun umumiy 'price' ga 'working' day narxini yozib yuboramiz
         return {
-            "price": working,
             "price_per_person": per_person,
             "price_on_working_days": working,
             "price_on_weekends": weekends,
