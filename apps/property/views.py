@@ -8,6 +8,8 @@ from uuid import uuid4
 from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 
 from rest_framework import parsers, status
 from rest_framework.exceptions import NotFound, ValidationError
@@ -46,6 +48,44 @@ from .raw_serializers import (
 
 
 _FAVORITES_CACHE_TTL_SECONDS = 60 * 60 * 24 * 30
+
+
+PROPERTY_LIST_QUERY_PARAMS = [
+    openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+    openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+    openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+    openapi.Parameter("corporate", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN),
+    openapi.Parameter("min_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
+    openapi.Parameter("max_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
+    openapi.Parameter("currency", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+    openapi.Parameter("sort", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+    openapi.Parameter("ordering", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+    openapi.Parameter("from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
+    openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+]
+
+RECOMMENDATIONS_QUERY_PARAMS = PROPERTY_LIST_QUERY_PARAMS + [
+    openapi.Parameter(
+        "kind",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        enum=["property", "apartment", "cottage"],
+    ),
+    openapi.Parameter(
+        "type",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        enum=["featured", "best-by-reviews", "most-booked"],
+    ),
+]
+
+PROPERTY_FILTER_BY_LINK_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    properties={
+        "url": openapi.Schema(type=openapi.TYPE_STRING),
+        "link": openapi.Schema(type=openapi.TYPE_STRING),
+    },
+)
 
 
 def _source_get(source, key: str, default=None):
@@ -230,6 +270,7 @@ class LocationListView(APIView):
 class UnifiedRecommendationsListView(APIView):
     permission_classes = [AllowAny]
 
+    @swagger_auto_schema(manual_parameters=RECOMMENDATIONS_QUERY_PARAMS)
     def get(self, request, *args, **kwargs):
         kind = str(request.query_params.get("kind") or "property").strip().lower()
         if kind not in {"property", "", "apartment", "cottage", "apartments", "cottages"}:
@@ -300,6 +341,7 @@ class PropertyListCreateView(APIView):
             return [IsPartner()]
         return [AllowAny()]
 
+    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
     def get(self, request, *args, **kwargs):
         rows = _list_property_rows(
             request.query_params,
@@ -316,6 +358,7 @@ class PropertyListCreateView(APIView):
         )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @swagger_auto_schema(request_body=RawPropertyCreateSerializer)
     def post(self, request, *args, **kwargs):
         serializer = RawPropertyCreateSerializer(
             data=request.data,
@@ -342,6 +385,7 @@ class PropertyListCreateView(APIView):
 class PropertyFilterByLinkView(APIView):
     permission_classes = [AllowAny]
 
+    @swagger_auto_schema(request_body=PROPERTY_FILTER_BY_LINK_SCHEMA)
     def post(self, request, *args, **kwargs):
         payload = request.data or {}
         url = str(payload.get("url") or payload.get("link") or "").strip()
@@ -369,6 +413,7 @@ class CottagePropertyListCreateView(PropertyListCreateView):
 
 
 class RegionPropertyListView(PropertyListCreateView):
+    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
     def get(self, request, *args, **kwargs):
         region_id = _parse_int(self.kwargs.get("region_id"))
         if region_id is None:
@@ -654,6 +699,10 @@ class PartnerPropertyListView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
 
+    @swagger_auto_schema(
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS
+        + [openapi.Parameter("property_type", openapi.IN_QUERY, type=openapi.TYPE_STRING)]
+    )
     def get(self, request, *args, **kwargs):
         rows = _list_property_rows(
             request.query_params,

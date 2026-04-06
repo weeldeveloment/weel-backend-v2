@@ -71,8 +71,8 @@ class PropertySerializerTests(SimpleTestCase):
 
         self.assertEqual(data["title"], "Test property")
         self.assertTrue(data["is_favorite"])
-        self.assertEqual(str(data["price"][0]["price_on_working_days"]), "120000.00")
-        self.assertEqual(len(data["property_images"]), 1)
+        self.assertEqual(str(data["price_on_working_days"]), "120000.00")
+        self.assertEqual(data["img"], "/media/test.jpg")
 
     @patch("property.raw_serializers.default_storage.url", return_value="/media/test.jpg")
     def test_property_detail_serializer_resolves_language_specific_description(self, _mock_url):
@@ -121,7 +121,7 @@ class PropertySerializerTests(SimpleTestCase):
 
         self.assertEqual(data["description"], "Русский текст")
         self.assertEqual(data["comment_count"], 3)
-        self.assertEqual(len(data["property_images"]), 1)
+        self.assertEqual(data["img"], "http://testserver/media/test.jpg")
 
     def test_parse_int_maybe_handles_invalid_values(self):
         self.assertEqual(_parse_int_maybe("42"), 42)
