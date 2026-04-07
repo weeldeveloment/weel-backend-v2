@@ -783,6 +783,36 @@ class PartnerPropertyListView(APIView):
         return Response(data, status=status.HTTP_200_OK)
 
 
+class ApartmentPartnerPropertyListView(APIView):
+    authentication_classes = [PartnerJWTAuthentication]
+    permission_classes = [IsPartner]
+
+    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
+    def get(self, request, *args, **kwargs):
+        ctx = {"request": request}
+        rows = _list_apartment_rows(
+            request.query_params,
+            public_only=False,
+            partner_user_id=int(request.user.id),
+        )
+        return Response(ApartmentPartnerListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
+
+
+class CottagePartnerPropertyListView(APIView):
+    authentication_classes = [PartnerJWTAuthentication]
+    permission_classes = [IsPartner]
+
+    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
+    def get(self, request, *args, **kwargs):
+        ctx = {"request": request}
+        rows = _list_cottage_rows(
+            request.query_params,
+            public_only=False,
+            partner_user_id=int(request.user.id),
+        )
+        return Response(CottagePartnerListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
+
+
 # ---------------------------------------------------------------------------
 # Favorites
 # ---------------------------------------------------------------------------

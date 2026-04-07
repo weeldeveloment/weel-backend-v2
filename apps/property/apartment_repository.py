@@ -51,7 +51,7 @@ def parse_property_kind(value: str | UUID | None) -> str | None:
 def list_property_types() -> list[dict[str, Any]]:
     return [
         {"guid": APARTMENT_TYPE_GUID, "title": "Apartment", "icon_url": None},
-        {"guid": COTTAGE_TYPE_GUID, "title": "Cottages", "icon_url": None},
+        {"guid": COTTAGE_TYPE_GUID, "title": "Cottage", "icon_url": None},
     ]
 
 
