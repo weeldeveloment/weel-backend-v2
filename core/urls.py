@@ -18,6 +18,7 @@ Including another URLconf
 from django.urls import path, include, re_path
 from django.conf.urls.static import static
 from django.views.static import serve
+from django.http import JsonResponse
 
 from rest_framework import permissions
 
@@ -40,6 +41,7 @@ schema_view = get_schema_view(
 )
 
 urlpatterns = [
+    path("health/", lambda request: JsonResponse({"status": "ok"})),
     path("", include("django_prometheus.urls")),
     path("i18n/", include("django.conf.urls.i18n")),
     path("api/", include("apps.urls")),
