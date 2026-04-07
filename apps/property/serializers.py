@@ -2,22 +2,20 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-from .raw_serializers import (
-    RawDistrictSerializer,
-    RawPartnerPropertyListSerializer,
-    RawPropertyCreateSerializer,
-    RawPropertyDetailSerializer,
-    RawPropertyImageSerializer,
-    RawPropertyListPriceSerializer,
-    RawPropertyListSerializer,
-    RawPropertyLocationSerializer,
-    RawPropertyReviewClientSerializer,
-    RawPropertyReviewCreateSerializer,
-    RawPropertyReviewSerializer,
-    RawPropertyTypeSerializer,
-    RawPropertyUpdateSerializer,
-    RawRegionSerializer,
+from .apartment_serializers import (
+    ApartmentCreateSerializer as RawPropertyCreateSerializer,
+    ApartmentDetailSerializer as RawPropertyDetailSerializer,
+    ApartmentListSerializer as RawPropertyListSerializer,
+    ApartmentPartnerListSerializer as RawPartnerPropertyListSerializer,
+    ApartmentUpdateSerializer as RawPropertyUpdateSerializer,
 )
+from .cottage_serializers import RawDistrictSerializer, RawRegionSerializer
+
+
+class RawPropertyTypeSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    title = serializers.CharField()
+    icon_url = serializers.CharField(allow_null=True)
 
 
 class PropertyTypeSlugRelatedField(serializers.UUIDField):
@@ -28,8 +26,11 @@ class PropertyTypeListSerializer(RawPropertyTypeSerializer):
     pass
 
 
-class PropertyLocationSerializer(RawPropertyLocationSerializer):
-    pass
+class PropertyLocationSerializer(serializers.Serializer):
+    latitude = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    longitude = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 class RegionListSerializer(RawRegionSerializer):
@@ -60,8 +61,10 @@ class CategoryListSerializer(serializers.Serializer):
     icon_url = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
-class PropertyImageSerializer(RawPropertyImageSerializer):
-    pass
+class PropertyImageSerializer(serializers.Serializer):
+    guid = serializers.UUIDField(required=False, allow_null=True)
+    order = serializers.IntegerField(required=False, allow_null=True)
+    image_url = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 class PropertyListSerializer(RawPropertyListSerializer):
@@ -72,11 +75,11 @@ class PartnerPropertyListSerializer(RawPartnerPropertyListSerializer):
     pass
 
 
-class PropertyListPriceSerializer(RawPropertyListPriceSerializer):
-    pass
+class PropertyListPriceSerializer(serializers.Serializer):
+    price = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
 
 
-class PropertyPriceSerializer(RawPropertyListPriceSerializer):
+class PropertyPriceSerializer(PropertyListPriceSerializer):
     pass
 
 
@@ -87,16 +90,23 @@ class PropertyRoomSerializer(serializers.Serializer):
     bathrooms = serializers.IntegerField(required=False, allow_null=True)
 
 
-class PropertyReviewClientSerializer(RawPropertyReviewClientSerializer):
-    pass
+class PropertyReviewClientSerializer(serializers.Serializer):
+    guid = serializers.UUIDField(required=False, allow_null=True)
+    first_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    last_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
-class PropertyReviewSerializer(RawPropertyReviewSerializer):
-    pass
+class PropertyReviewSerializer(serializers.Serializer):
+    guid = serializers.UUIDField(required=False, allow_null=True)
+    client = PropertyReviewClientSerializer(required=False)
+    rating = serializers.DecimalField(max_digits=2, decimal_places=1, required=False, allow_null=True)
+    comment = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    created_at = serializers.DateTimeField(required=False)
 
 
-class PropertyReviewCreateSerializer(RawPropertyReviewCreateSerializer):
-    pass
+class PropertyReviewCreateSerializer(serializers.Serializer):
+    rating = serializers.DecimalField(max_digits=2, decimal_places=1, required=True)
+    comment = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 class PropertyDetailSerializer(RawPropertyDetailSerializer):

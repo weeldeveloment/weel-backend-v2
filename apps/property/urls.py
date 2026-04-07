@@ -2,7 +2,6 @@ from django.urls import path
 
 from .views import (
     PropertyTypeListView,
-    PropertyListCreateView,
     PropertyFilterByLinkView,
     ApartmentPropertyListCreateView,
     CottagePropertyListCreateView,
@@ -60,9 +59,69 @@ urlpatterns = [
         name="apartment-property-list-create",
     ),
     path(
+        "apartments/<uuid:property_id>/",
+        PropertyRetrieveUpdateDestroyView.as_view(),
+        name="apartment-property-retrieve-update-destroy",
+    ),
+    path(
+        "apartments/<uuid:property_id>/favorite/",
+        PropertyFavoriteToggleView.as_view(),
+        name="apartment-property-favorite-toggle",
+    ),
+    path(
+        "apartments/<uuid:property_id>/images/",
+        PropertyImageCreateView.as_view(),
+        name="apartment-property-image-create",
+    ),
+    path(
+        "apartments/<uuid:property_id>/images/<uuid:image_id>/",
+        PropertyImageUpdateDeleteView.as_view(),
+        name="apartment-property-image-update-delete",
+    ),
+    path(
+        "apartments/<uuid:property_id>/reviews/",
+        PropertyReviewListCreateView.as_view(),
+        name="apartment-property-review-list-create",
+    ),
+    path(
+        "apartments/<uuid:property_id>/partner/reviews/",
+        PartnerPropertyReviewListView.as_view(),
+        name="apartment-partner-property-reviews",
+    ),
+    path(
         "cottages/",
         CottagePropertyListCreateView.as_view(),
         name="cottage-property-list-create",
+    ),
+    path(
+        "cottages/<uuid:property_id>/",
+        PropertyRetrieveUpdateDestroyView.as_view(),
+        name="cottage-property-retrieve-update-destroy",
+    ),
+    path(
+        "cottages/<uuid:property_id>/favorite/",
+        PropertyFavoriteToggleView.as_view(),
+        name="cottage-property-favorite-toggle",
+    ),
+    path(
+        "cottages/<uuid:property_id>/images/",
+        PropertyImageCreateView.as_view(),
+        name="cottage-property-image-create",
+    ),
+    path(
+        "cottages/<uuid:property_id>/images/<uuid:image_id>/",
+        PropertyImageUpdateDeleteView.as_view(),
+        name="cottage-property-image-update-delete",
+    ),
+    path(
+        "cottages/<uuid:property_id>/reviews/",
+        PropertyReviewListCreateView.as_view(),
+        name="cottage-property-review-list-create",
+    ),
+    path(
+        "cottages/<uuid:property_id>/partner/reviews/",
+        PartnerPropertyReviewListView.as_view(),
+        name="cottage-partner-property-reviews",
     ),
     path(
         "properties/favorites/",
@@ -75,34 +134,4 @@ urlpatterns = [
         name="property-filter-by-link",
     ),
     path("partner/properties/", PartnerPropertyListView.as_view(), name="partner-property-list"),
-    path(
-        "properties/<uuid:property_id>/",
-        PropertyRetrieveUpdateDestroyView.as_view(),
-        name="property-retrieve-update-destroy",
-    ),
-    path(
-        "properties/<uuid:property_id>/favorite/",
-        PropertyFavoriteToggleView.as_view(),
-        name="property-favorite-toggle",
-    ),
-    path(
-        "properties/<uuid:property_id>/images/",
-        PropertyImageCreateView.as_view(),
-        name="property-image-create",
-    ),
-    path(
-        "properties/<uuid:property_id>/images/<uuid:image_id>/",
-        PropertyImageUpdateDeleteView.as_view(),
-        name="property-image-update-delete",
-    ),
-    path(
-        "properties/<uuid:property_id>/reviews/",
-        PropertyReviewListCreateView.as_view(),
-        name="property-review-list-create",
-    ),
-    path(
-        "properties/<uuid:property_id>/partner/reviews/",
-        PartnerPropertyReviewListView.as_view(),
-        name="partner-property-reviews",
-    ),
 ]
