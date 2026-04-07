@@ -17,23 +17,31 @@ from .raw_repository import (
 )
 
 
-def _build_media_url(request, media_path: Any) -> str | None:
+def _build_media_url(request, media_path: Any) -> list[str]:
     if not media_path:
-        return None
-    if isinstance(media_path, list) and len(media_path) > 0:
-        media_path = str(media_path[0])
-    elif isinstance(media_path, list):
-        return None
-    media_path = str(media_path)
-    if media_path.startswith("http://") or media_path.startswith("https://"):
-        return media_path
-    try:
-        url = default_storage.url(media_path)
-    except Exception:
-        url = media_path
-    if not request:
-        return url
-    return request.build_absolute_uri(url)
+        return []
+
+    if isinstance(media_path, list):
+        values = media_path
+    else:
+        values = [media_path]
+
+    urls: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        item = str(value)
+        if item.startswith("http://") or item.startswith("https://"):
+            urls.append(item)
+            continue
+        try:
+            url = default_storage.url(item)
+        except Exception:
+            url = item
+        if request:
+            url = request.build_absolute_uri(url)
+        urls.append(url)
+    return urls
 
 
 def _synthetic_user_guid(user_id: int | None) -> UUID | None:
@@ -100,7 +108,7 @@ class RawPropertyLocationSerializer(serializers.Serializer):
 class RawRegionSerializer(serializers.Serializer):
     guid = serializers.UUIDField(allow_null=True)
     title = serializers.CharField(allow_blank=True, allow_null=True)
-    img = serializers.CharField(allow_blank=True, allow_null=True)
+    img = serializers.ListField(child=serializers.CharField(), allow_empty=True)
 
 
 class RawDistrictSerializer(serializers.Serializer):
@@ -114,7 +122,7 @@ class RawDistrictSerializer(serializers.Serializer):
 class RawPropertyListSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
-    img = serializers.CharField(allow_blank=True, allow_null=True)
+    img = serializers.ListField(child=serializers.CharField(), allow_empty=True)
     price = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
@@ -133,6 +141,7 @@ class RawPropertyListSerializer(serializers.Serializer):
     def to_representation(self, instance):
         request = self.context.get("request")
         row = dict(instance)
+        row["img"] = _build_media_url(request, row.get("img"))
         row_currency = row.get("currency")
         row["price"] = _convert_price_for_output(row.get("price"), row_currency)
         row["price_per_person"] = _convert_price_for_output(row.get("price_per_person"), row_currency)
@@ -230,6 +239,7 @@ class RawPropertyDetailSerializer(serializers.Serializer):
     def to_representation(self, instance):
         request = self.context.get("request")
         row = dict(instance)
+        row["img"] = _build_media_url(request, row.get("img"))
         row_currency = row.get("currency")
         row["price"] = _convert_price_for_output(row.get("price"), row_currency)
         row["price_per_person"] = _convert_price_for_output(row.get("price_per_person"), row_currency)

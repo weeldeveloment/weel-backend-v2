@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from functools import lru_cache
 from typing import Any
 from uuid import UUID, uuid4
 
 from django.utils import timezone
 
 from payment.exchange_rate import exchange_rate
-from shared.raw.db import execute, fetch_all, fetch_one
+from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 from shared.raw.compat import get_table_name, is_postgresql, return_star
 
 
@@ -36,6 +37,20 @@ TYPE_GUID_TO_KIND = {
     str(APARTMENT_TYPE_GUID): PROPERTY_KIND_APARTMENT,
     str(COTTAGE_TYPE_GUID): PROPERTY_KIND_COTTAGE,
 }
+
+
+@lru_cache(maxsize=32)
+def _table(*candidates: str) -> str:
+    for candidate in candidates:
+        if table_exists(candidate):
+            return get_table_name(candidate)
+    return get_table_name(candidates[0])
+
+
+APARTMENT_TABLE = _table("apartment", "property_apartment")
+COTTAGE_TABLE = _table("cottage", "property_cottage")
+USERS_TABLE = _table("users", "users_user")
+REVIEW_TABLE = _table("review", "property_review")
 
 PROPERTY_UNION_SELECT = f"""
     SELECT *
@@ -94,13 +109,13 @@ PROPERTY_UNION_SELECT = f"""
             u.phone_number AS partner_phone_number,
             COALESCE(stats.average_rating, 5.0) AS average_rating,
             COALESCE(stats.review_count, 0) AS review_count
-        FROM {get_table_name("apartment")} a
-        LEFT JOIN {get_table_name("users")} u ON u.id = a.partner_user_id
+        FROM {APARTMENT_TABLE} a
+        LEFT JOIN {USERS_TABLE} u ON u.id = a.partner_user_id
         LEFT JOIN LATERAL (
             SELECT
                 ROUND(COALESCE(AVG(r.rating), 5.0), 2) AS average_rating,
                 COUNT(*) AS review_count
-            FROM {get_table_name("review")} r
+            FROM {REVIEW_TABLE} r
             WHERE r.apartment_id = a.id
               AND (COALESCE(r.is_hidden, FALSE) = FALSE)
               AND r.rating IS NOT NULL
@@ -162,13 +177,13 @@ PROPERTY_UNION_SELECT = f"""
             u.phone_number AS partner_phone_number,
             COALESCE(stats.average_rating, 5.0) AS average_rating,
             COALESCE(stats.review_count, 0) AS review_count
-        FROM {get_table_name("cottage")} c
-        LEFT JOIN {get_table_name("users")} u ON u.id = c.partner_user_id
+        FROM {COTTAGE_TABLE} c
+        LEFT JOIN {USERS_TABLE} u ON u.id = c.partner_user_id
         LEFT JOIN LATERAL (
             SELECT
                 ROUND(COALESCE(AVG(r.rating), 5.0), 2) AS average_rating,
                 COUNT(*) AS review_count
-            FROM {get_table_name("review")} r
+            FROM {REVIEW_TABLE} r
             WHERE r.cottage_id = c.id
               AND (COALESCE(r.is_hidden, FALSE) = FALSE)
               AND r.rating IS NOT NULL
@@ -438,10 +453,11 @@ def get_property_for_partner(property_guid: str, partner_user_id: int) -> dict[s
 
 
 def _table_for_kind(property_kind: str) -> str:
-    table = KIND_TO_TABLE.get(property_kind)
-    if not table:
-        raise ValueError("Invalid property kind")
-    return get_table_name(table)
+    if property_kind == PROPERTY_KIND_APARTMENT:
+        return APARTMENT_TABLE
+    if property_kind == PROPERTY_KIND_COTTAGE:
+        return COTTAGE_TABLE
+    raise ValueError("Invalid property kind")
 
 
 def create_property(
@@ -773,8 +789,8 @@ def list_reviews(
             r.user_id AS client_id,
             u.first_name AS client_first_name,
             u.last_name AS client_last_name
-        FROM {get_table_name("review")} r
-        LEFT JOIN {get_table_name("users")} u ON u.id = r.user_id
+        FROM {REVIEW_TABLE} r
+        LEFT JOIN {USERS_TABLE} u ON u.id = r.user_id
         WHERE """
         + " AND ".join(where)
         + """
@@ -836,7 +852,7 @@ def create_review(
 
     row = fetch_one(
         f"""
-        INSERT INTO {get_table_name("review")} (
+        INSERT INTO {REVIEW_TABLE} (
             guid,
             created_at,
             updated_at,
