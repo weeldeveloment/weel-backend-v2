@@ -68,4 +68,5 @@ jobs:
 
       - name: Skip deploy (no Dokploy secrets)
         if: env.DOKPLOY_WEBHOOK == '' && (env.DOKPLOY_URL == '' || env.DOKPLOY_APP_ID == '' || env.DOKPLOY_API_KEY == '')
-        run: echo "Deploy skipped: no Dokploy webhook or API secrets configured."
+        run: |
+          echo "Deploy skipped: no Dokploy webhook or API secrets configured."
