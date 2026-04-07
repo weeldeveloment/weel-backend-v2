@@ -7,10 +7,20 @@ from uuid import uuid4
 
 from django.utils import timezone
 
-from shared.raw.db import execute, fetch_all, fetch_one
-from shared.raw.compat import is_postgresql, get_table_name
+from shared.raw.compat import get_table_name
+from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 
-from .raw_repository import COTTAGE_TABLE, USERS_TABLE, REVIEW_TABLE
+
+def _table(*candidates: str) -> str:
+    for candidate in candidates:
+        if table_exists(candidate):
+            return get_table_name(candidate)
+    return get_table_name(candidates[0])
+
+
+COTTAGE_TABLE = _table("cottage", "property_cottage")
+USERS_TABLE = _table("users", "users_user")
+REVIEW_TABLE = _table("review", "property_review")
 
 
 COTTAGE_SELECT = f"""

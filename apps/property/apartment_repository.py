@@ -2,14 +2,56 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from django.utils import timezone
 
-from shared.raw.db import execute, fetch_all, fetch_one
-from shared.raw.compat import is_postgresql, get_table_name
+from payment.exchange_rate import exchange_rate
+from shared.raw.compat import get_table_name, is_postgresql
+from shared.raw.db import execute, fetch_all, fetch_one, table_exists
+from shared.raw.tables import BOOKING_TABLE
 
-from .raw_repository import APARTMENT_TABLE, USERS_TABLE, REVIEW_TABLE
+APARTMENT_TYPE_GUID = UUID("11111111-1111-1111-1111-111111111111")
+COTTAGE_TYPE_GUID = UUID("22222222-2222-2222-2222-222222222222")
+
+PROPERTY_KIND_APARTMENT = "apartment"
+PROPERTY_KIND_COTTAGE = "cottage"
+TYPE_GUID_TO_KIND = {
+    str(APARTMENT_TYPE_GUID): PROPERTY_KIND_APARTMENT,
+    str(COTTAGE_TYPE_GUID): PROPERTY_KIND_COTTAGE,
+}
+
+
+def _table(*candidates: str) -> str:
+    for candidate in candidates:
+        if table_exists(candidate):
+            return get_table_name(candidate)
+    return get_table_name(candidates[0])
+
+
+APARTMENT_TABLE = _table("apartment", "property_apartment")
+USERS_TABLE = _table("users", "users_user")
+REVIEW_TABLE = _table("review", "property_review")
+
+
+def parse_property_kind(value: str | UUID | None) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip().lower()
+    if not raw:
+        return None
+    if raw in {"apartment", "apartments"}:
+        return PROPERTY_KIND_APARTMENT
+    if raw in {"cottage", "cottages"}:
+        return PROPERTY_KIND_COTTAGE
+    return TYPE_GUID_TO_KIND.get(raw)
+
+
+def list_property_types() -> list[dict[str, Any]]:
+    return [
+        {"guid": APARTMENT_TYPE_GUID, "title": "Apartment", "icon_url": None},
+        {"guid": COTTAGE_TYPE_GUID, "title": "Cottages", "icon_url": None},
+    ]
 
 
 APARTMENT_SELECT = f"""
@@ -278,3 +320,149 @@ def effective_apartment_price(row: dict[str, Any]) -> Decimal:
         except Exception:
             pass
     return Decimal("0")
+
+
+def _exchange_rate_safe() -> Decimal:
+    try:
+        return Decimal(str(exchange_rate()))
+    except Exception:
+        return Decimal("1")
+
+
+def _convert_amount(amount: Decimal, from_currency: str, to_currency: str, rate: Decimal) -> Decimal:
+    source = (from_currency or "UZS").upper()
+    target = (to_currency or "UZS").upper()
+    if source == target:
+        return amount
+    if source == "USD" and target == "UZS":
+        return amount * rate
+    if source == "UZS" and target == "USD":
+        if rate == 0:
+            return amount
+        return amount / rate
+    return amount
+
+
+def _effective_price(row: dict[str, Any], reference_date) -> Decimal:
+    if str(row.get("property_kind") or "") == PROPERTY_KIND_COTTAGE:
+        field = "price_on_weekends" if reference_date.weekday() >= 4 else "price_on_working_days"
+        value = row.get(field)
+        if value is not None:
+            try:
+                return Decimal(str(value))
+            except Exception:
+                pass
+    return effective_apartment_price(row)
+
+
+def _sort_rows(rows: list[dict[str, Any]], *, ordering: str | None = None, sort: str | None = None) -> list[dict[str, Any]]:
+    key_spec = (ordering or "").strip()
+    sort_value = (sort or "").strip().lower()
+    if not key_spec:
+        key_spec = {
+            "price_high": "-order_price_uzs",
+            "price_low": "order_price_uzs",
+            "rating_high": "-average_rating",
+            "rating_low": "average_rating",
+            "reviews_high": "-review_count",
+            "reviews_low": "review_count",
+            "title_asc": "title",
+            "title_desc": "-title",
+        }.get(sort_value, "-created_at")
+    desc = key_spec.startswith("-")
+    key_name = key_spec[1:] if desc else key_spec
+    if key_name == "title":
+        return sorted(rows, key=lambda r: (str(r.get("title") or "").lower(), r.get("id") or 0), reverse=desc)
+    if key_name in {"order_price_uzs", "average_rating"}:
+        return sorted(rows, key=lambda r: (Decimal(str(r.get(key_name) or 0)), r.get("id") or 0), reverse=desc)
+    if key_name == "review_count":
+        return sorted(rows, key=lambda r: (int(r.get("review_count") or 0), r.get("id") or 0), reverse=desc)
+    return sorted(rows, key=lambda r: (r.get("created_at"), r.get("id") or 0), reverse=True)
+
+
+def prepare_property_rows(
+    rows: list[dict[str, Any]],
+    *,
+    reference_date,
+    min_price=None,
+    max_price=None,
+    currency: str | None = None,
+    sort: str | None = None,
+    ordering: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    rate = _exchange_rate_safe()
+    prepared: list[dict[str, Any]] = []
+    target_currency = (currency or "").upper().strip() if currency else None
+    if target_currency not in {None, "", "USD", "UZS"}:
+        target_currency = None
+    for raw_row in rows:
+        row = dict(raw_row)
+        effective = _effective_price(row, reference_date)
+        row["effective_price"] = effective
+        row["order_price_uzs"] = _convert_amount(effective, str(row.get("currency") or "UZS"), "UZS", rate)
+        value = effective
+        if target_currency:
+            value = _convert_amount(value, str(row.get("currency") or "UZS"), target_currency, rate)
+        if min_price is not None and value < min_price:
+            continue
+        if max_price is not None and value > max_price:
+            continue
+        prepared.append(row)
+    prepared = _sort_rows(prepared, ordering=ordering, sort=sort)
+    if limit is not None and limit >= 0:
+        prepared = prepared[:limit]
+    return prepared
+
+
+def list_reviews(*, property_kind: str, property_id: int, include_hidden: bool = False) -> list[dict[str, Any]]:
+    where_property = "r.apartment_id = %s" if property_kind == PROPERTY_KIND_APARTMENT else "r.cottage_id = %s"
+    where = [where_property]
+    params: list[Any] = [property_id]
+    if not include_hidden:
+        where.append("COALESCE(r.is_hidden, FALSE) = FALSE")
+    return fetch_all(
+        f"""
+        SELECT r.guid, r.created_at, r.rating, r.comment, r.user_id AS client_id,
+               u.first_name AS client_first_name, u.last_name AS client_last_name
+        FROM {REVIEW_TABLE} r
+        LEFT JOIN {USERS_TABLE} u ON u.id = r.user_id
+        WHERE {' AND '.join(where)}
+        ORDER BY r.created_at DESC, r.id DESC
+        """,
+        params,
+    )
+
+
+def has_eligible_booking_for_review(*, client_user_id: int, property_kind: str, property_id: int) -> bool:
+    property_column = "property_apartment_id" if property_kind == PROPERTY_KIND_APARTMENT else "property_cottage_id"
+    statuses = ["confirmed", "completed", "cancelled"]
+    if is_postgresql():
+        row = fetch_one(
+            f"""SELECT EXISTS (SELECT 1 FROM {BOOKING_TABLE}
+                 WHERE client_user_id = %s AND {property_column} = %s AND status = ANY(%s)) AS exists_flag""",
+            [client_user_id, property_id, statuses],
+        )
+    else:
+        placeholders = ",".join(["%s"] * len(statuses))
+        row = fetch_one(
+            f"""SELECT EXISTS (SELECT 1 FROM {BOOKING_TABLE}
+                 WHERE client_user_id = %s AND {property_column} = %s AND status IN ({placeholders})) AS exists_flag""",
+            [client_user_id, property_id] + statuses,
+        )
+    return bool(row and row["exists_flag"])
+
+
+def create_review(*, client_user_id: int, property_kind: str, property_id: int, rating: Decimal, comment: str | None):
+    now = timezone.now()
+    apartment_id = property_id if property_kind == PROPERTY_KIND_APARTMENT else None
+    cottage_id = property_id if property_kind == PROPERTY_KIND_COTTAGE else None
+    row = fetch_one(
+        f"""INSERT INTO {REVIEW_TABLE} (guid, created_at, updated_at, rating, comment, is_hidden, user_id, apartment_id, cottage_id)
+            VALUES (%s, %s, %s, %s, %s, FALSE, %s, %s, %s) RETURNING guid""",
+        [uuid4(), now, now, rating, comment, client_user_id, apartment_id, cottage_id],
+    )
+    if not row:
+        return None
+    reviews = list_reviews(property_kind=property_kind, property_id=property_id, include_hidden=True)
+    return next((review for review in reviews if str(review.get("guid")) == str(row["guid"])), None)

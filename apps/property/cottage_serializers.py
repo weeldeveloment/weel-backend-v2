@@ -1,23 +1,105 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from decimal import InvalidOperation
 from typing import Any
 
+from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from .raw_serializers import (
-    _build_media_url,
-    _convert_price_for_output,
-    _favorite_guid_set,
-    _parse_int_maybe,
-    _to_decimal,
-    RawPropertyLocationSerializer,
-    RawRegionSerializer,
-    RawDistrictSerializer,
-    _PropertyLocationInputSerializer,
-    _PropertyDetailInputSerializer,
-)
+from payment.exchange_rate import to_uzs
+
+
+def _build_media_url(request, media_path: Any) -> list[str]:
+    if not media_path:
+        return []
+    values = media_path if isinstance(media_path, list) else [media_path]
+    urls: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        item = str(value)
+        if item.startswith("http://") or item.startswith("https://"):
+            urls.append(item)
+            continue
+        try:
+            url = default_storage.url(item)
+        except Exception:
+            url = item
+        if request:
+            url = request.build_absolute_uri(url)
+        urls.append(url)
+    return urls
+
+
+def _to_decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _convert_price_for_output(value: Any, currency: str | None) -> Decimal | None:
+    amount = _to_decimal(value)
+    if amount is None:
+        return None
+    row_currency = str(currency or "UZS").upper()
+    if row_currency == "USD":
+        try:
+            return to_uzs(amount)
+        except Exception:
+            return amount
+    return amount
+
+
+def _favorite_guid_set(context: dict[str, Any] | None) -> set[str]:
+    if not context:
+        return set()
+    raw_value = context.get("favorite_guids") or []
+    return {str(value) for value in raw_value if value is not None}
+
+
+def _parse_int_maybe(value: Any) -> int | None:
+    if value in (None, "", "null", "None", "undefined"):
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+class _PropertyLocationInputSerializer(serializers.Serializer):
+    latitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
+    country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class _PropertyDetailInputSerializer(serializers.Serializer):
+    description_en = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    description_ru = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    description_uz = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    check_in = serializers.TimeField(required=False, allow_null=True)
+    check_out = serializers.TimeField(required=False, allow_null=True)
+    is_allowed_alcohol = serializers.BooleanField(required=False)
+    is_allowed_corporate = serializers.BooleanField(required=False)
+    is_allowed_pets = serializers.BooleanField(required=False)
+    is_quiet_hours = serializers.BooleanField(required=False)
+
+
+class RawRegionSerializer(serializers.Serializer):
+    guid = serializers.UUIDField(allow_null=True)
+    title = serializers.CharField(allow_blank=True, allow_null=True)
+    img = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class RawDistrictSerializer(serializers.Serializer):
+    guid = serializers.UUIDField(allow_null=True)
+    title = serializers.CharField(allow_blank=True, allow_null=True)
+    region = RawRegionSerializer(allow_null=True)
 
 
 class CottageListSerializer(serializers.Serializer):
@@ -28,7 +110,10 @@ class CottageListSerializer(serializers.Serializer):
     price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     currency = serializers.CharField(allow_blank=True, allow_null=True)
-    property_location = RawPropertyLocationSerializer(allow_null=True)
+    latitude = serializers.CharField(allow_blank=True, allow_null=True)
+    longitude = serializers.CharField(allow_blank=True, allow_null=True)
+    country = serializers.CharField(allow_blank=True, allow_null=True)
+    city = serializers.CharField(allow_blank=True, allow_null=True)
     services = serializers.ListField()
     region = RawRegionSerializer(allow_null=True)
     district = RawDistrictSerializer(allow_null=True)
@@ -46,13 +131,6 @@ class CottageListSerializer(serializers.Serializer):
         row["price_per_person"] = _convert_price_for_output(row.get("price_per_person"), row_currency)
         row["price_on_working_days"] = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
         row["price_on_weekends"] = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
-        row["property_location"] = {
-            "guid": None,
-            "latitude": row.get("latitude"),
-            "longitude": row.get("longitude"),
-            "country": row.get("country"),
-            "city": row.get("city"),
-        }
         row["services"] = row.get("services") or []
         if row.get("region_id") is None:
             row["region"] = None
@@ -89,7 +167,10 @@ class CottageDetailSerializer(serializers.Serializer):
     is_favorite = serializers.BooleanField()
     property_services = serializers.ListField()
     property_room = serializers.DictField()
-    property_location = RawPropertyLocationSerializer(allow_null=True)
+    latitude = serializers.CharField(allow_blank=True, allow_null=True)
+    longitude = serializers.CharField(allow_blank=True, allow_null=True)
+    country = serializers.CharField(allow_blank=True, allow_null=True)
+    city = serializers.CharField(allow_blank=True, allow_null=True)
     check_in = serializers.TimeField(allow_null=True)
     check_out = serializers.TimeField(allow_null=True)
     is_allowed_alcohol = serializers.BooleanField()
@@ -127,13 +208,6 @@ class CottageDetailSerializer(serializers.Serializer):
         row["is_favorite"] = str(row.get("guid")) in favorites
         row["property_services"] = row.get("services") or []
         row["property_room"] = {"guid": None, "guests": None, "rooms": None, "beds": None, "bathrooms": None}
-        row["property_location"] = {
-            "guid": None,
-            "latitude": row.get("latitude"),
-            "longitude": row.get("longitude"),
-            "country": row.get("country"),
-            "city": row.get("city"),
-        }
         return super().to_representation(row)
 
 

@@ -1,23 +1,74 @@
 from __future__ import annotations
 
+from decimal import InvalidOperation
 from decimal import Decimal
 from typing import Any
 
+from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from .raw_serializers import (
-    _build_media_url,
-    _convert_price_for_output,
-    _favorite_guid_set,
-    _parse_int_maybe,
-    _to_decimal,
-    RawPropertyLocationSerializer,
-    RawRegionSerializer,
-    RawDistrictSerializer,
-    _PropertyLocationInputSerializer,
-    _PropertyDetailInputSerializer,
-)
+from payment.exchange_rate import to_uzs
+
+
+def _build_media_url(request, media_path: Any) -> list[str]:
+    if not media_path:
+        return []
+    values = media_path if isinstance(media_path, list) else [media_path]
+    urls: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        item = str(value)
+        if item.startswith("http://") or item.startswith("https://"):
+            urls.append(item)
+            continue
+        try:
+            url = default_storage.url(item)
+        except Exception:
+            url = item
+        if request:
+            url = request.build_absolute_uri(url)
+        urls.append(url)
+    return urls
+
+
+def _to_decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _convert_price_for_output(value: Any, currency: str | None) -> Decimal | None:
+    amount = _to_decimal(value)
+    if amount is None:
+        return None
+    row_currency = str(currency or "UZS").upper()
+    if row_currency == "USD":
+        try:
+            return to_uzs(amount)
+        except Exception:
+            return amount
+    return amount
+
+
+def _favorite_guid_set(context: dict[str, Any] | None) -> set[str]:
+    if not context:
+        return set()
+    raw_value = context.get("favorite_guids") or []
+    return {str(value) for value in raw_value if value is not None}
+
+
+def _parse_int_maybe(value: Any) -> int | None:
+    if value in (None, "", "null", "None", "undefined"):
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 class ApartmentListSerializer(serializers.Serializer):
@@ -26,10 +77,13 @@ class ApartmentListSerializer(serializers.Serializer):
     img = serializers.ListField(child=serializers.CharField(), allow_empty=True)
     price = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     currency = serializers.CharField(allow_blank=True, allow_null=True)
-    property_location = RawPropertyLocationSerializer(allow_null=True)
+    latitude = serializers.CharField(allow_blank=True, allow_null=True)
+    longitude = serializers.CharField(allow_blank=True, allow_null=True)
+    country = serializers.CharField(allow_blank=True, allow_null=True)
+    city = serializers.CharField(allow_blank=True, allow_null=True)
     services = serializers.ListField()
-    region = RawRegionSerializer(allow_null=True)
-    district = RawDistrictSerializer(allow_null=True)
+    region_id = serializers.IntegerField(allow_null=True)
+    district_id = serializers.IntegerField(allow_null=True)
     guests = serializers.IntegerField(allow_null=True)
     rooms = serializers.IntegerField(allow_null=True)
     average_rating = serializers.FloatField(allow_null=True)
@@ -42,22 +96,7 @@ class ApartmentListSerializer(serializers.Serializer):
         row["img"] = _build_media_url(request, row.get("img"))
         row_currency = row.get("currency")
         row["price"] = _convert_price_for_output(row.get("price"), row_currency)
-        row["property_location"] = {
-            "guid": None,
-            "latitude": row.get("latitude"),
-            "longitude": row.get("longitude"),
-            "country": row.get("country"),
-            "city": row.get("city"),
-        }
         row["services"] = row.get("services") or []
-        if row.get("region_id") is None:
-            row["region"] = None
-        else:
-            row["region"] = {"guid": None, "title": str(row.get("region_id")), "img": None}
-        if row.get("district_id") is None:
-            row["district"] = None
-        else:
-            row["district"] = {"guid": None, "title": str(row.get("district_id")), "region": row.get("region")}
         row["guests"] = None
         row["rooms"] = None
         favorites = _favorite_guid_set(self.context)
@@ -77,13 +116,20 @@ class ApartmentDetailSerializer(serializers.Serializer):
     currency = serializers.CharField(allow_blank=True, allow_null=True)
     price = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     minimum_weekend_day_stay = serializers.BooleanField()
-    description = serializers.CharField(allow_blank=True, allow_null=True)
+    weekend_only_sunday_inclusive = serializers.BooleanField()
+    description_en = serializers.CharField(allow_blank=True, allow_null=True)
+    description_ru = serializers.CharField(allow_blank=True, allow_null=True)
+    description_uz = serializers.CharField(allow_blank=True, allow_null=True)
     comment_count = serializers.IntegerField()
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
-    property_services = serializers.ListField()
-    property_room = serializers.DictField()
-    property_location = RawPropertyLocationSerializer(allow_null=True)
+    services = serializers.ListField()
+    region_id = serializers.IntegerField(allow_null=True)
+    district_id = serializers.IntegerField(allow_null=True)
+    latitude = serializers.CharField(allow_blank=True, allow_null=True)
+    longitude = serializers.CharField(allow_blank=True, allow_null=True)
+    country = serializers.CharField(allow_blank=True, allow_null=True)
+    city = serializers.CharField(allow_blank=True, allow_null=True)
     apartment_number = serializers.CharField(allow_blank=True, allow_null=True)
     home_number = serializers.CharField(allow_blank=True, allow_null=True)
     entrance_number = serializers.CharField(allow_blank=True, allow_null=True)
@@ -96,41 +142,23 @@ class ApartmentDetailSerializer(serializers.Serializer):
     is_allowed_pets = serializers.BooleanField()
     is_quiet_hours = serializers.BooleanField()
 
-    def _resolve_description(self, row: dict[str, Any]) -> str:
-        request = self.context.get("request")
-        lang = ""
-        if request is not None:
-            lang = str(request.query_params.get("lang") or "").strip().lower()
-            if not lang:
-                header = str(request.headers.get("Accept-Language") or "").strip().lower()
-                if header:
-                    lang = header.split(",")[0].split("-")[0]
-        if lang not in {"en", "ru", "uz"}:
-            lang = "en"
-        value = row.get(f"description_{lang}")
-        if value:
-            return str(value)
-        return str(row.get("description_en") or row.get("description_ru") or row.get("description_uz") or "")
-
     def to_representation(self, instance):
         request = self.context.get("request")
         row = dict(instance)
         row["img"] = _build_media_url(request, row.get("img"))
         row_currency = row.get("currency")
         row["price"] = _convert_price_for_output(row.get("price"), row_currency)
-        row["description"] = self._resolve_description(row)
-        row["comment_count"] = int(row.get("review_count") or row.get("comment_count") or 0)
+        # Keep Uzbek as the default/fallback description value.
+        if not row.get("description_uz"):
+            row["description_uz"] = (
+                row.get("description_en")
+                or row.get("description_ru")
+                or ""
+            )
+        row["comment_count"] = int(row.get("comment_count") or 0)
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
-        row["property_services"] = row.get("services") or []
-        row["property_room"] = {"guid": None, "guests": None, "rooms": None, "beds": None, "bathrooms": None}
-        row["property_location"] = {
-            "guid": None,
-            "latitude": row.get("latitude"),
-            "longitude": row.get("longitude"),
-            "country": row.get("country"),
-            "city": row.get("city"),
-        }
+        row["services"] = row.get("services") or []
         return super().to_representation(row)
 
 
@@ -140,20 +168,19 @@ class ApartmentCreateSerializer(serializers.Serializer):
     currency = serializers.ChoiceField(required=False, choices=["USD", "UZS"])
     minimum_weekend_day_stay = serializers.BooleanField(required=False, default=False)
     weekend_only_sunday_inclusive = serializers.BooleanField(required=False, default=False)
-    property_location = serializers.DictField(required=False)
-    property_detail = serializers.DictField(required=False)
-    property_services = serializers.ListField(required=False, allow_empty=True)
-    property_room = serializers.DictField(required=False)
-    region = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    district = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    latitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
+    country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    services = serializers.ListField(required=False, allow_empty=True)
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     img = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    apartment_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    home_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    entrance_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    floor_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    pass_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    apartment_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
+    home_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
+    entrance_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
+    floor_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
+    pass_code = serializers.CharField(required=True, allow_blank=False, allow_null=False)
 
     def validate(self, attrs):
         is_update = bool(self.context.get("is_update"))
@@ -161,24 +188,6 @@ class ApartmentCreateSerializer(serializers.Serializer):
         title = (attrs.get("title") or "").strip()
         if not is_update and not title:
             raise serializers.ValidationError({"title": _("This field is required.")})
-
-        location_serializer = _PropertyLocationInputSerializer(data=attrs.get("property_location") or {}, partial=True)
-        location_serializer.is_valid(raise_exception=True)
-
-        detail_payload = attrs.get("property_detail") or {}
-        for key in ("apartment_number", "home_number", "entrance_number", "floor_number", "pass_code"):
-            if attrs.get(key) is not None and key not in detail_payload:
-                detail_payload[key] = attrs.get(key)
-        detail_serializer = _PropertyDetailInputSerializer(data=detail_payload, partial=True)
-        detail_serializer.is_valid(raise_exception=True)
-
-        if not is_update:
-            required_detail = ["apartment_number", "home_number", "entrance_number", "floor_number", "pass_code"]
-            missing = [f for f in required_detail if not detail_serializer.validated_data.get(f)]
-            if missing:
-                raise serializers.ValidationError({
-                    "property_detail": {f: _("This field is required for apartment properties.") for f in missing}
-                })
 
         price = _to_decimal(attrs.get("price"))
         if not is_update and price is None:
@@ -206,17 +215,34 @@ class ApartmentCreateSerializer(serializers.Serializer):
             normalized["img"] = attrs.get("img")
         if price is not None:
             normalized["price"] = price
-        if attrs.get("property_location") is not None:
-            normalized.update(location_serializer.validated_data)
-        if detail_serializer.validated_data:
-            normalized.update(detail_serializer.validated_data)
-        if "region_id" in attrs or "region" in attrs:
+        for key in (
+            "latitude",
+            "longitude",
+            "country",
+            "city",
+            "apartment_number",
+            "home_number",
+            "entrance_number",
+            "floor_number",
+            "pass_code",
+            "check_in",
+            "check_out",
+            "is_allowed_alcohol",
+            "is_allowed_corporate",
+            "is_allowed_pets",
+            "is_quiet_hours",
+        ):
+            if key in attrs:
+                normalized[key] = attrs.get(key)
+        if "services" in attrs:
+            normalized["services"] = attrs.get("services") or []
+        if "region_id" in attrs:
             normalized["region_id"] = _parse_int_maybe(
-                attrs.get("region_id") if attrs.get("region_id") is not None else attrs.get("region")
+                attrs.get("region_id")
             )
-        if "district_id" in attrs or "district" in attrs:
+        if "district_id" in attrs:
             normalized["district_id"] = _parse_int_maybe(
-                attrs.get("district_id") if attrs.get("district_id") is not None else attrs.get("district")
+                attrs.get("district_id")
             )
 
         attrs["normalized_values"] = normalized
@@ -224,4 +250,8 @@ class ApartmentCreateSerializer(serializers.Serializer):
 
 
 class ApartmentUpdateSerializer(ApartmentCreateSerializer):
-    pass
+    apartment_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    home_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    entrance_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    floor_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    pass_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)

@@ -11,10 +11,9 @@ from django.utils import timezone
 
 from rest_framework.test import APIRequestFactory
 
-from property.raw_repository import APARTMENT_TYPE_GUID, COTTAGE_TYPE_GUID, list_property_types, parse_property_kind
-from property.apartment_serializers import ApartmentListSerializer, ApartmentDetailSerializer
+from property.apartment_repository import APARTMENT_TYPE_GUID, COTTAGE_TYPE_GUID, list_property_types, parse_property_kind
+from property.apartment_serializers import ApartmentListSerializer, ApartmentDetailSerializer, _parse_int_maybe
 from property.cottage_serializers import CottageListSerializer, CottageDetailSerializer
-from property.raw_serializers import _parse_int_maybe
 
 
 class PropertyRepositoryHelpersTests(SimpleTestCase):
@@ -35,8 +34,8 @@ class PropertyRepositoryHelpersTests(SimpleTestCase):
 
 
 class ApartmentSerializerTests(SimpleTestCase):
-    @patch("property.raw_serializers.to_uzs", side_effect=lambda amount: amount * Decimal("12000"))
-    @patch("property.raw_serializers.default_storage.url", return_value="/media/test.jpg")
+    @patch("property.apartment_serializers.to_uzs", side_effect=lambda amount: amount * Decimal("12000"))
+    @patch("property.apartment_serializers.default_storage.url", return_value="/media/test.jpg")
     def test_apartment_list_serializer_converts_usd_price_and_marks_favorite(
         self, _mock_storage_url, _mock_to_uzs,
     ):
@@ -67,12 +66,19 @@ class ApartmentSerializerTests(SimpleTestCase):
         self.assertNotIn("price_per_person", data)
         self.assertNotIn("price_on_working_days", data)
         self.assertNotIn("price_on_weekends", data)
+        self.assertEqual(data["region_id"], 1)
+        self.assertEqual(data["district_id"], 2)
+        self.assertNotIn("region", data)
+        self.assertNotIn("district", data)
+        self.assertEqual(data["latitude"], "41.3")
+        self.assertEqual(data["longitude"], "69.2")
+        self.assertNotIn("property_location", data)
         self.assertEqual(data["img"], ["http://testserver/media/test.jpg"])
 
 
 class CottageSerializerTests(SimpleTestCase):
-    @patch("property.raw_serializers.to_uzs", side_effect=lambda amount: amount * Decimal("12000"))
-    @patch("property.raw_serializers.default_storage.url", return_value="/media/test.jpg")
+    @patch("property.cottage_serializers.to_uzs", side_effect=lambda amount: amount * Decimal("12000"))
+    @patch("property.cottage_serializers.default_storage.url", return_value="/media/test.jpg")
     def test_cottage_list_serializer_has_three_prices(self, _mock_storage_url, _mock_to_uzs):
         guid = uuid4()
         row = {
@@ -104,8 +110,8 @@ class CottageSerializerTests(SimpleTestCase):
 
 
 class DetailSerializerTests(SimpleTestCase):
-    @patch("property.raw_serializers.default_storage.url", return_value="/media/test.jpg")
-    def test_apartment_detail_resolves_description(self, _mock_url):
+    @patch("property.apartment_serializers.default_storage.url", return_value="/media/test.jpg")
+    def test_apartment_detail_uses_db_field_names(self, _mock_url):
         row = {
             "guid": uuid4(),
             "title": "Detail apartment",
@@ -115,6 +121,8 @@ class DetailSerializerTests(SimpleTestCase):
             "price": Decimal("100000"),
             "property_kind": "apartment",
             "minimum_weekend_day_stay": False,
+            "weekend_only_sunday_inclusive": False,
+            "comment_count": 3,
             "review_count": 3,
             "average_rating": 4.5,
             "description_en": "English text",
@@ -136,18 +144,53 @@ class DetailSerializerTests(SimpleTestCase):
             "is_allowed_pets": False,
             "is_quiet_hours": False,
         }
-        request = type("Req", (), {
-            "query_params": {"lang": "ru"},
-            "headers": {},
-            "build_absolute_uri": staticmethod(lambda url: f"http://testserver{url}"),
-        })()
+        request = type("Req", (), {"build_absolute_uri": staticmethod(lambda url: f"http://testserver{url}")})()
         data = ApartmentDetailSerializer(row, context={"request": request}).data
-        self.assertEqual(data["description"], "Русский текст")
+        self.assertEqual(data["description_en"], "English text")
+        self.assertEqual(data["description_ru"], "Русский текст")
+        self.assertEqual(data["description_uz"], "O'zbekcha matn")
         self.assertEqual(data["comment_count"], 3)
         self.assertEqual(data["img"], ["http://testserver/media/test.jpg"])
-        self.assertNotIn("price_per_person", data)
+        self.assertNotIn("property_room", data)
 
-    @patch("property.raw_serializers.default_storage.url", return_value="/media/cottage.jpg")
+    @patch("property.apartment_serializers.default_storage.url", return_value="/media/test.jpg")
+    def test_apartment_detail_defaults_uzbek_description(self, _mock_url):
+        row = {
+            "guid": uuid4(),
+            "title": "Detail apartment",
+            "img": "test.jpg",
+            "created_at": timezone.now(),
+            "currency": "UZS",
+            "price": Decimal("100000"),
+            "property_kind": "apartment",
+            "minimum_weekend_day_stay": False,
+            "weekend_only_sunday_inclusive": False,
+            "review_count": 0,
+            "average_rating": 5.0,
+            "description_en": "English fallback",
+            "description_ru": None,
+            "description_uz": "",
+            "latitude": "41.3",
+            "longitude": "69.2",
+            "country": "UZ",
+            "city": "Tashkent",
+            "apartment_number": "12",
+            "home_number": "5",
+            "entrance_number": "2",
+            "floor_number": "3",
+            "pass_code": "1234",
+            "check_in": None,
+            "check_out": None,
+            "is_allowed_alcohol": False,
+            "is_allowed_corporate": True,
+            "is_allowed_pets": False,
+            "is_quiet_hours": False,
+        }
+        request = type("Req", (), {"build_absolute_uri": staticmethod(lambda url: f"http://testserver{url}")})()
+        data = ApartmentDetailSerializer(row, context={"request": request}).data
+        self.assertEqual(data["description_uz"], "English fallback")
+
+    @patch("property.cottage_serializers.default_storage.url", return_value="/media/cottage.jpg")
     def test_cottage_detail_has_three_prices(self, _mock_url):
         row = {
             "guid": uuid4(),

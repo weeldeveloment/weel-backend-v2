@@ -20,15 +20,17 @@ from rest_framework.views import APIView
 from shared.permissions import IsClient, IsPartner
 from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
 
-from .raw_repository import (
+from .apartment_repository import (
+    APARTMENT_TYPE_GUID,
+    COTTAGE_TYPE_GUID,
+    PROPERTY_KIND_APARTMENT,
+    PROPERTY_KIND_COTTAGE,
+    parse_property_kind,
     list_property_types,
     list_reviews,
     has_eligible_booking_for_review,
     create_review,
-    parse_property_kind,
     prepare_property_rows,
-    PROPERTY_KIND_APARTMENT,
-    PROPERTY_KIND_COTTAGE,
 )
 from .apartment_repository import (
     list_apartments,
@@ -64,11 +66,7 @@ from .cottage_serializers import (
     CottageCreateSerializer,
     CottageUpdateSerializer,
 )
-from .raw_serializers import (
-    RawPropertyReviewCreateSerializer,
-    RawPropertyReviewSerializer,
-    RawPropertyTypeSerializer,
-)
+from rest_framework import serializers
 
 
 _FAVORITES_CACHE_TTL_SECONDS = 60 * 60 * 24 * 30
@@ -100,6 +98,40 @@ PROPERTY_FILTER_BY_LINK_SCHEMA = openapi.Schema(
         "link": openapi.Schema(type=openapi.TYPE_STRING),
     },
 )
+
+
+class RawPropertyTypeSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    title = serializers.CharField()
+    icon_url = serializers.CharField(allow_null=True)
+
+
+class RawPropertyReviewClientSerializer(serializers.Serializer):
+    guid = serializers.UUIDField(allow_null=True)
+    first_name = serializers.CharField(allow_blank=True, allow_null=True)
+    last_name = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class RawPropertyReviewSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    client = RawPropertyReviewClientSerializer()
+    rating = serializers.DecimalField(max_digits=2, decimal_places=1, allow_null=True)
+    comment = serializers.CharField(allow_blank=True, allow_null=True)
+    created_at = serializers.DateTimeField()
+
+    def to_representation(self, instance):
+        row = dict(instance)
+        row["client"] = {
+            "guid": None,
+            "first_name": row.get("client_first_name"),
+            "last_name": row.get("client_last_name"),
+        }
+        return super().to_representation(row)
+
+
+class RawPropertyReviewCreateSerializer(serializers.Serializer):
+    rating = serializers.DecimalField(max_digits=2, decimal_places=1, required=True)
+    comment = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 def _source_get(source, key: str, default=None):
@@ -291,8 +323,8 @@ class UnifiedRecommendationsListView(APIView):
 
     @swagger_auto_schema(manual_parameters=RECOMMENDATIONS_QUERY_PARAMS)
     def get(self, request, *args, **kwargs):
-        kind = str(request.query_params.get("kind") or "property").strip().lower()
-        if kind not in {"property", "", "apartment", "cottage", "apartments", "cottages"}:
+        property_type = str(request.query_params.get("kind") or "property").strip().lower()
+        if property_type not in {"property", "", "apartment", "cottage", "apartments", "cottages"}:
             return Response([], status=status.HTTP_200_OK)
 
         rec_type = str(request.query_params.get("type") or "featured").strip().lower()
@@ -304,11 +336,11 @@ class UnifiedRecommendationsListView(APIView):
 
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
 
-        if kind in {"apartment", "apartments"}:
+        if property_type in {"apartment", "apartments"}:
             rows = _list_apartment_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
             return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
 
-        if kind in {"cottage", "cottages"}:
+        if property_type in {"cottage", "cottages"}:
             rows = _list_cottage_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
             return Response(CottageListSerializer(rows, many=True, context=ctx).data)
 
@@ -405,7 +437,7 @@ class CottagePropertyListCreateView(APIView):
 
 class PropertyListCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
-    forced_property_kind: str | None = None
+    forced_property_type: str | None = None
 
     def get_authenticators(self):
         if self.request.method == "GET":
@@ -420,14 +452,14 @@ class PropertyListCreateView(APIView):
     @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
     def get(self, request, *args, **kwargs):
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        if self.forced_property_kind == PROPERTY_KIND_COTTAGE:
+        if self.forced_property_type == PROPERTY_KIND_COTTAGE:
             rows = _list_cottage_rows(request.query_params, public_only=True)
             return Response(CottageListSerializer(rows, many=True, context=ctx).data)
         rows = _list_apartment_rows(request.query_params, public_only=True)
         return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
 
     def post(self, request, *args, **kwargs):
-        if self.forced_property_kind == PROPERTY_KIND_COTTAGE:
+        if self.forced_property_type == PROPERTY_KIND_COTTAGE:
             serializer = CottageCreateSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             created = create_cottage(partner_user_id=int(request.user.id), values=serializer.validated_data["normalized_values"])
@@ -527,8 +559,8 @@ class PropertyRetrieveUpdateDestroyView(APIView):
     def get(self, request, property_id, *args, **kwargs):
         row = self._read_property_or_404(str(property_id))
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        kind = str(row.get("property_kind") or "")
-        if kind == PROPERTY_KIND_COTTAGE:
+        property_type = str(row.get("property_kind") or "")
+        if property_type == PROPERTY_KIND_COTTAGE:
             serializer = CottageDetailSerializer(row, context=ctx)
         else:
             serializer = ApartmentDetailSerializer(row, context=ctx)
@@ -542,8 +574,8 @@ class PropertyRetrieveUpdateDestroyView(APIView):
 
     def _update(self, request, property_id, *, partial: bool):
         current = self._partner_property_or_404(str(property_id))
-        kind = str(current["property_kind"])
-        if kind == PROPERTY_KIND_COTTAGE:
+        property_type = str(current["property_kind"])
+        if property_type == PROPERTY_KIND_COTTAGE:
             serializer = CottageUpdateSerializer(data=request.data, partial=partial, context={"is_update": True})
             serializer.is_valid(raise_exception=True)
             updated = update_cottage(cottage_id=int(current["id"]), partner_user_id=int(request.user.id), values=serializer.validated_data["normalized_values"])
@@ -560,8 +592,8 @@ class PropertyRetrieveUpdateDestroyView(APIView):
 
     def delete(self, request, property_id, *args, **kwargs):
         current = self._partner_property_or_404(str(property_id))
-        kind = str(current["property_kind"])
-        if kind == PROPERTY_KIND_COTTAGE:
+        property_type = str(current["property_kind"])
+        if property_type == PROPERTY_KIND_COTTAGE:
             deleted = delete_cottage(cottage_id=int(current["id"]), partner_user_id=int(request.user.id))
         else:
             deleted = delete_apartment(apartment_id=int(current["id"]), partner_user_id=int(request.user.id))
@@ -595,8 +627,8 @@ class PropertyImageCreateView(APIView):
         uploaded = uploaded_files[0]
         saved_path = default_storage.save(f"property/{property_id}/{uuid4()}_{uploaded.name}", uploaded)
 
-        kind = str(property_row["property_kind"])
-        if kind == PROPERTY_KIND_COTTAGE:
+        property_type = str(property_row["property_kind"])
+        if property_type == PROPERTY_KIND_COTTAGE:
             updated = set_cottage_primary_image(cottage_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=saved_path)
         else:
             updated = set_apartment_primary_image(apartment_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=saved_path)
@@ -631,8 +663,8 @@ class PropertyImageUpdateDeleteView(APIView):
         image_path = property_row.get("img")
         if uploaded is not None:
             image_path = default_storage.save(f"property/{property_id}/{uuid4()}_{uploaded.name}", uploaded)
-            kind = str(property_row["property_kind"])
-            if kind == PROPERTY_KIND_COTTAGE:
+            property_type = str(property_row["property_kind"])
+            if property_type == PROPERTY_KIND_COTTAGE:
                 updated = set_cottage_primary_image(cottage_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=image_path)
             else:
                 updated = set_apartment_primary_image(apartment_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=image_path)
@@ -651,8 +683,8 @@ class PropertyImageUpdateDeleteView(APIView):
         if not image_path:
             raise NotFound(_("Property image not found"))
 
-        kind = str(property_row["property_kind"])
-        if kind == PROPERTY_KIND_COTTAGE:
+        property_type = str(property_row["property_kind"])
+        if property_type == PROPERTY_KIND_COTTAGE:
             updated = set_cottage_primary_image(cottage_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=None)
         else:
             updated = set_apartment_primary_image(apartment_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=None)
@@ -731,14 +763,14 @@ class PartnerPropertyListView(APIView):
 
     @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [openapi.Parameter("property_type", openapi.IN_QUERY, type=openapi.TYPE_STRING)])
     def get(self, request, *args, **kwargs):
-        kind = parse_property_kind(request.query_params.get("property_type"))
+        property_type = parse_property_kind(request.query_params.get("property_type"))
         ctx = {"request": request}
         partner_id = int(request.user.id)
 
-        if kind == PROPERTY_KIND_APARTMENT:
+        if property_type == PROPERTY_KIND_APARTMENT:
             rows = _list_apartment_rows(request.query_params, public_only=False, partner_user_id=partner_id)
             return Response(ApartmentPartnerListSerializer(rows, many=True, context=ctx).data)
-        if kind == PROPERTY_KIND_COTTAGE:
+        if property_type == PROPERTY_KIND_COTTAGE:
             rows = _list_cottage_rows(request.query_params, public_only=False, partner_user_id=partner_id)
             return Response(CottagePartnerListSerializer(rows, many=True, context=ctx).data)
 

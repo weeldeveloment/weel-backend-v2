@@ -17,7 +17,7 @@ from payment.raw_repository import (
     mark_latest_transaction_dismissed,
 )
 from payment.services import PlumAPIError, PlumAPIService
-from property.raw_repository import parse_property_kind
+from property.apartment_repository import parse_property_kind
 from users.raw_repository import get_user_by_id
 
 from .helpers import client_can_cancel, get_cancellation_error_message
