@@ -146,8 +146,28 @@ urlpatterns = [
         name="apartment-partner-property-list",
     ),
     path(
+        "apartments/partner/",
+        ApartmentPartnerPropertyListView.as_view(),
+        name="apartment-partner-property-list-legacy",
+    ),
+    path(
+        "apartments/partner/<int:partner_id>/",
+        ApartmentPartnerPropertyListView.as_view(),
+        name="apartment-partner-property-list-by-id-legacy",
+    ),
+    path(
         "partner/cottages/",
         CottagePartnerPropertyListView.as_view(),
         name="cottage-partner-property-list",
+    ),
+    path(
+        "cottages/partner/",
+        CottagePartnerPropertyListView.as_view(),
+        name="cottage-partner-property-list-legacy",
+    ),
+    path(
+        "cottages/partner/<int:partner_id>/",
+        CottagePartnerPropertyListView.as_view(),
+        name="cottage-partner-property-list-by-id-legacy",
     ),
 ]

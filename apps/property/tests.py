@@ -253,10 +253,14 @@ class PropertyUrlsTests(SimpleTestCase):
     def test_apartment_partner_list_url_resolves(self):
         match = resolve("/api/property/partner/apartments/")
         self.assertEqual(match.func.view_class.__name__, "ApartmentPartnerPropertyListView")
+        legacy_match = resolve("/api/property/apartments/partner/")
+        self.assertEqual(legacy_match.func.view_class.__name__, "ApartmentPartnerPropertyListView")
 
     def test_cottage_partner_list_url_resolves(self):
         match = resolve("/api/property/partner/cottages/")
         self.assertEqual(match.func.view_class.__name__, "CottagePartnerPropertyListView")
+        legacy_match = resolve("/api/property/cottages/partner/")
+        self.assertEqual(legacy_match.func.view_class.__name__, "CottagePartnerPropertyListView")
 
     def test_apartment_detail_url_resolves(self):
         match = resolve("/api/property/apartments/00000000-0000-0000-0000-000000000001/")

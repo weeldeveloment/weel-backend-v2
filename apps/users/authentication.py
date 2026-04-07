@@ -10,6 +10,21 @@ from .tokens import TokenMetadata
 from .raw_repository import get_active_user_by_subject
 
 
+def _sanitize_raw_token(raw_token: bytes) -> bytes:
+    """
+    Normalize bearer token bytes for common copy/paste mistakes:
+    - surrounding quotes: "token" or 'token'
+    - leading/trailing spaces/newlines
+    """
+    try:
+        token_str = raw_token.decode("utf-8").strip()
+    except Exception:
+        return raw_token
+    if len(token_str) >= 2 and token_str[0] == token_str[-1] and token_str[0] in {"'", '"'}:
+        token_str = token_str[1:-1].strip()
+    return token_str.encode("utf-8")
+
+
 class ClientJWTAuthentication(JWTAuthentication):
     def authenticate(self, request: Request):
         header = self.get_header(request)
@@ -23,6 +38,7 @@ class ClientJWTAuthentication(JWTAuthentication):
                 _("Invalid authorization header"), code="bad_authorization_header"
             )
 
+        raw_token = _sanitize_raw_token(raw_token)
         validated_token = self.get_validated_token(raw_token)
 
         user_type = validated_token.get("user_type")
@@ -66,6 +82,7 @@ class PartnerJWTAuthentication(JWTAuthentication):
                 _("Invalid authorization header"), code="bad_authorization_header"
             )
 
+        raw_token = _sanitize_raw_token(raw_token)
         validated_token = self.get_validated_token(raw_token)
 
         user_type = validated_token.get("user_type")
