@@ -324,7 +324,7 @@ class UnifiedRecommendationsListView(APIView):
     @swagger_auto_schema(manual_parameters=RECOMMENDATIONS_QUERY_PARAMS)
     def get(self, request, *args, **kwargs):
         property_type = str(request.query_params.get("kind") or "property").strip().lower()
-        if property_type not in {"property", "", "apartment", "cottage", "apartments", "cottages"}:
+        if property_type not in {"property", "apartment", "cottage", "apartments", "cottages"}:
             return Response([], status=status.HTTP_200_OK)
 
         rec_type = str(request.query_params.get("type") or "featured").strip().lower()

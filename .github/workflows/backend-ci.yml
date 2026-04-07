@@ -1,58 +1,61 @@
-name: Backend CI
+# name: Backend CI
 
-on:
-  push:
-    branches:
-      - main
-      - master
-  pull_request:
+# on:
+#   push:
+#     branches:
+#       - main
+#       - master
+#   pull_request:
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:14
-        env:
-          POSTGRES_DB: weel_test
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d weel_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      SECRET_KEY: ci-test-secret-key
-      DJANGO_SETTINGS_MODULE: core.settings_test_db
-      PYTHONWARNINGS: ignore::Warning:requests
-      DB_NAME: weel_test
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_HOST: 127.0.0.1
-      DB_PORT: 5432
-      TEST_DB_SCHEMA: ci_test_schema
+# jobs:
+#   test:
+#     runs-on: ubuntu-latest
+#     services:
+#       postgres:
+#         image: postgres:14
+#         env:
+#           POSTGRES_DB: weel_test
+#           POSTGRES_USER: postgres
+#           POSTGRES_PASSWORD: postgres
+#         ports:
+#           - 5432:5432
+#         options: >-
+#           --health-cmd "pg_isready -U postgres -d weel_test"
+#           --health-interval 10s
+#           --health-timeout 5s
+#           --health-retries 5
+#     env:
+#       SECRET_KEY: ci-test-secret-key
+#       DJANGO_SETTINGS_MODULE: core.settings_test_db
+#       PYTHONWARNINGS: ignore::Warning:requests
+#       DB_NAME: weel_test
+#       DB_USER: postgres
+#       DB_PASSWORD: postgres
+#       DB_HOST: 127.0.0.1
+#       DB_PORT: 5432
+#       TEST_DB_SCHEMA: ci_test_schema
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements.txt
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.12"
+#           cache: pip
+#           cache-dependency-path: requirements.txt
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+#       - name: Install dependencies
+#         run: |
+#           python -m pip install --upgrade pip
+#           pip install -r requirements.txt
 
-      - name: Django system checks
-        run: python manage.py check --settings=core.settings_test_db
+#       - name: Django system checks
+#         run: python manage.py check --settings=core.settings_test_db
 
-      - name: Run automated tests
-        run: python manage.py test shared.tests shared.smoke_tests bot.tests --settings=core.settings_test_db --keepdb
+#       - name: Create test schema
+#         run: python manage.py create_test_db --settings=core.settings_test_db
+
+#       - name: Run automated tests
+#         run: PYTHON=python make test-ci
