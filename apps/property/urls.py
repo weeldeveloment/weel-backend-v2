@@ -13,6 +13,8 @@ from .views import (
     PropertyRetrieveUpdateDestroyView,
     PartnerPropertyReviewListView,
     PartnerPropertyListView,
+    ApartmentPartnerPropertyListView,
+    CottagePartnerPropertyListView,
     SavedPropertyListView,
     PropertyFavoriteToggleView,
     RegionListView,
@@ -133,5 +135,19 @@ urlpatterns = [
         PropertyFilterByLinkView.as_view(),
         name="property-filter-by-link",
     ),
-    path("partner/properties/", PartnerPropertyListView.as_view(), name="partner-property-list"),
+    path(
+        "partner/properties/",
+        PartnerPropertyListView.as_view(),
+        name="partner-property-list",
+    ),
+    path(
+        "partner/apartments/",
+        ApartmentPartnerPropertyListView.as_view(),
+        name="apartment-partner-property-list",
+    ),
+    path(
+        "partner/cottages/",
+        CottagePartnerPropertyListView.as_view(),
+        name="cottage-partner-property-list",
+    ),
 ]

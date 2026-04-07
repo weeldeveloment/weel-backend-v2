@@ -250,6 +250,18 @@ class PropertyUrlsTests(SimpleTestCase):
         match = resolve("/api/property/types/")
         self.assertEqual(match.func.view_class.__name__, "PropertyTypeListView")
 
+    def test_partner_properties_url_resolves(self):
+        match = resolve("/api/property/partner/properties/")
+        self.assertEqual(match.func.view_class.__name__, "PartnerPropertyListView")
+
+    def test_partner_apartments_url_resolves(self):
+        match = resolve("/api/property/partner/apartments/")
+        self.assertEqual(match.func.view_class.__name__, "ApartmentPartnerPropertyListView")
+
+    def test_partner_cottages_url_resolves(self):
+        match = resolve("/api/property/partner/cottages/")
+        self.assertEqual(match.func.view_class.__name__, "CottagePartnerPropertyListView")
+
     def test_apartment_detail_url_resolves(self):
         match = resolve("/api/property/apartments/00000000-0000-0000-0000-000000000001/")
         self.assertEqual(match.func.view_class.__name__, "PropertyRetrieveUpdateDestroyView")
