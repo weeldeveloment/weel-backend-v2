@@ -47,18 +47,25 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     environment: production
+    env:
+      DOKPLOY_WEBHOOK: ${{ secrets.DOKPLOY_WEBHOOK }}   # optional preferred
+      DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
+      DOKPLOY_APP_ID: ${{ secrets.DOKPLOY_APP_ID }}
+      DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
     steps:
-      - name: Trigger Dokploy deploy
-        env:
-          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}           # e.g. https://dokploy.example.com
-          DOKPLOY_APP_ID: ${{ secrets.DOKPLOY_APP_ID }}     # applicationId from Dokploy
-          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}   # generated API key
+      - name: Trigger Dokploy deploy (webhook)
+        if: env.DOKPLOY_WEBHOOK != ''
+        run: curl -fsS -X POST "$DOKPLOY_WEBHOOK"
+
+      - name: Trigger Dokploy deploy (API)
+        if: env.DOKPLOY_WEBHOOK == '' && env.DOKPLOY_URL != '' && env.DOKPLOY_APP_ID != '' && env.DOKPLOY_API_KEY != ''
         run: |
-          if [ -z "$DOKPLOY_URL" ] || [ -z "$DOKPLOY_APP_ID" ] || [ -z "$DOKPLOY_API_KEY" ]; then
-            echo "Dokploy secrets missing"; exit 1;
-          fi
-          curl -sS -X POST "$DOKPLOY_URL/api/application.deploy" \
+          curl -fsS -X POST "$DOKPLOY_URL/api/application.deploy" \
             -H "accept: application/json" \
             -H "x-api-key: $DOKPLOY_API_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"applicationId\":\"$DOKPLOY_APP_ID\"}"
+
+      - name: Skip deploy (no Dokploy secrets)
+        if: env.DOKPLOY_WEBHOOK == '' && (env.DOKPLOY_URL == '' || env.DOKPLOY_APP_ID == '' || env.DOKPLOY_API_KEY == '')
+        run: echo "Deploy skipped: no Dokploy webhook or API secrets configured."
