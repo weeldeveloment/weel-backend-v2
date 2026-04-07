@@ -54,5 +54,8 @@ jobs:
       - name: Django system checks
         run: python manage.py check --settings=core.settings_test_db
 
+      - name: Create test schema
+        run: python manage.py create_test_db --settings=core.settings_test_db
+
       - name: Run automated tests
-        run: python manage.py test shared.tests shared.smoke_tests bot.tests --settings=core.settings_test_db --keepdb
+        run: PYTHON=python make test-ci

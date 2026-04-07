@@ -15,7 +15,8 @@ def _table(*candidates: str) -> str:
     for candidate in candidates:
         if table_exists(candidate):
             return get_table_name(candidate)
-    return get_table_name(candidates[0])
+    # Prefer Django-style prefixed table names when schema isn't ready yet.
+    return get_table_name(candidates[-1])
 
 
 COTTAGE_TABLE = _table("cottage", "property_cottage")
