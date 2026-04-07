@@ -50,9 +50,7 @@ class PropertySerializerTests(SimpleTestCase):
             "title": "Test property",
             "img": "test.jpg",
             "currency": "USD",
-            "price_per_person": Decimal("2"),
-            "price_on_working_days": Decimal("10"),
-            "price_on_weekends": Decimal("11"),
+            "price": Decimal("10"),
             "latitude": "41.3",
             "longitude": "69.2",
             "country": "UZ",
@@ -71,7 +69,7 @@ class PropertySerializerTests(SimpleTestCase):
 
         self.assertEqual(data["title"], "Test property")
         self.assertTrue(data["is_favorite"])
-        self.assertEqual(str(data["price_on_working_days"]), "120000.00")
+        self.assertEqual(str(data["price"]), "120000.00")
         self.assertEqual(data["img"], "/media/test.jpg")
 
     @patch("property.raw_serializers.default_storage.url", return_value="/media/test.jpg")
@@ -82,9 +80,7 @@ class PropertySerializerTests(SimpleTestCase):
             "img": "test.jpg",
             "created_at": timezone.now(),
             "currency": "UZS",
-            "price_per_person": Decimal("0"),
-            "price_on_working_days": Decimal("100000"),
-            "price_on_weekends": Decimal("120000"),
+            "price": Decimal("100000"),
             "minimum_weekend_day_stay": False,
             "review_count": 3,
             "average_rating": 4.5,

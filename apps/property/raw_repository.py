@@ -57,9 +57,10 @@ PROPERTY_UNION_SELECT = f"""
             a.minimum_weekend_day_stay,
             a.weekend_only_sunday_inclusive,
             a.comment_count,
-            a.price_per_person,
-            a.price_on_working_days,
-            a.price_on_weekends,
+            a.price,
+            NULL AS price_per_person,
+            NULL AS price_on_working_days,
+            NULL AS price_on_weekends,
             a.currency,
             a.img,
             a.partner_user_id,
@@ -91,13 +92,13 @@ PROPERTY_UNION_SELECT = f"""
             u.first_name AS partner_first_name,
             u.last_name AS partner_last_name,
             u.phone_number AS partner_phone_number,
-            COALESCE(stats.average_rating, 1.0) AS average_rating,
+            COALESCE(stats.average_rating, 5.0) AS average_rating,
             COALESCE(stats.review_count, 0) AS review_count
         FROM {get_table_name("apartment")} a
         LEFT JOIN {get_table_name("users")} u ON u.id = a.partner_user_id
         LEFT JOIN LATERAL (
             SELECT
-                ROUND(COALESCE(AVG(r.rating), 1.0), 2) AS average_rating,
+                ROUND(COALESCE(AVG(r.rating), 5.0), 2) AS average_rating,
                 COUNT(*) AS review_count
             FROM {get_table_name("review")} r
             WHERE r.apartment_id = a.id
@@ -124,6 +125,7 @@ PROPERTY_UNION_SELECT = f"""
             c.minimum_weekend_day_stay,
             c.weekend_only_sunday_inclusive,
             c.comment_count,
+            NULL AS price,
             c.price_per_person,
             c.price_on_working_days,
             c.price_on_weekends,
@@ -158,13 +160,13 @@ PROPERTY_UNION_SELECT = f"""
             u.first_name AS partner_first_name,
             u.last_name AS partner_last_name,
             u.phone_number AS partner_phone_number,
-            COALESCE(stats.average_rating, 1.0) AS average_rating,
+            COALESCE(stats.average_rating, 5.0) AS average_rating,
             COALESCE(stats.review_count, 0) AS review_count
         FROM {get_table_name("cottage")} c
         LEFT JOIN {get_table_name("users")} u ON u.id = c.partner_user_id
         LEFT JOIN LATERAL (
             SELECT
-                ROUND(COALESCE(AVG(r.rating), 1.0), 2) AS average_rating,
+                ROUND(COALESCE(AVG(r.rating), 5.0), 2) AS average_rating,
                 COUNT(*) AS review_count
             FROM {get_table_name("review")} r
             WHERE r.cottage_id = c.id
@@ -220,10 +222,11 @@ def _exchange_rate_safe() -> Decimal:
 
 
 def _effective_price(row: dict[str, Any], reference_date: date) -> Decimal:
-    field = "price_on_weekends" if reference_date.weekday() >= 4 else "price_on_working_days"
-    value = _to_decimal(row.get(field))
-    if value is not None:
-        return value
+    if str(row.get("property_kind") or "") == PROPERTY_KIND_COTTAGE:
+        field = "price_on_weekends" if reference_date.weekday() >= 4 else "price_on_working_days"
+        value = _to_decimal(row.get(field))
+        if value is not None:
+            return value
     fallback = _to_decimal(row.get("price"))
     if fallback is not None:
         return fallback
@@ -450,95 +453,182 @@ def create_property(
     table = _table_for_kind(property_kind)
     now = timezone.now()
 
-    row = fetch_one(
-        f"""
-        INSERT INTO {table} (
-            guid,
-            created_at,
-            updated_at,
-            title,
-            title_sort,
-            is_verified,
-            verification_status,
-            is_archived,
-            is_recommended,
-            minimum_weekend_day_stay,
-            weekend_only_sunday_inclusive,
-            comment_count,
-            price_per_person,
-            price_on_working_days,
-            price_on_weekends,
-            currency,
-            img,
-            partner_user_id,
-            latitude,
-            longitude,
-            city,
-            country,
-            region_id,
-            district_id,
-            description_en,
-            description_ru,
-            description_uz,
-            check_in,
-            check_out,
-            is_allowed_alcohol,
-            is_allowed_corporate,
-            is_allowed_pets,
-            is_quiet_hours,
-            apartment_number,
-            home_number,
-            entrance_number,
-            floor_number,
-            pass_code
-        ) VALUES (
-            %s, %s, %s, %s, %s,
-            FALSE, 'pending', FALSE, FALSE,
-            %s, %s, %s,
-            %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s
+    if property_kind == PROPERTY_KIND_APARTMENT:
+        row = fetch_one(
+            f"""
+            INSERT INTO {table} (
+                guid,
+                created_at,
+                updated_at,
+                title,
+                title_sort,
+                is_verified,
+                verification_status,
+                is_archived,
+                is_recommended,
+                minimum_weekend_day_stay,
+                weekend_only_sunday_inclusive,
+                comment_count,
+                price,
+                currency,
+                img,
+                partner_user_id,
+                latitude,
+                longitude,
+                city,
+                country,
+                region_id,
+                district_id,
+                description_en,
+                description_ru,
+                description_uz,
+                check_in,
+                check_out,
+                is_allowed_alcohol,
+                is_allowed_corporate,
+                is_allowed_pets,
+                is_quiet_hours,
+                apartment_number,
+                home_number,
+                entrance_number,
+                floor_number,
+                pass_code
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                FALSE, 'pending', FALSE, FALSE,
+                %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s
+            )
+            RETURNING guid
+            """,
+            [
+                uuid4(),
+                now,
+                now,
+                values["title"],
+                values["title_sort"],
+                bool(values.get("minimum_weekend_day_stay", False)),
+                bool(values.get("weekend_only_sunday_inclusive", False)),
+                int(values.get("comment_count", 0)),
+                values.get("price"),
+                values.get("currency"),
+                values.get("img"),
+                partner_user_id,
+                values.get("latitude"),
+                values.get("longitude"),
+                values.get("city"),
+                values.get("country"),
+                values.get("region_id"),
+                values.get("district_id"),
+                values.get("description_en"),
+                values.get("description_ru"),
+                values.get("description_uz"),
+                values.get("check_in"),
+                values.get("check_out"),
+                bool(values.get("is_allowed_alcohol", False)),
+                bool(values.get("is_allowed_corporate", False)),
+                bool(values.get("is_allowed_pets", False)),
+                bool(values.get("is_quiet_hours", False)),
+                values.get("apartment_number"),
+                values.get("home_number"),
+                values.get("entrance_number"),
+                values.get("floor_number"),
+                values.get("pass_code"),
+            ],
         )
-        RETURNING guid
-        """,
-        [
-            uuid4(),
-            now,
-            now,
-            values["title"],
-            values["title_sort"],
-            bool(values.get("minimum_weekend_day_stay", False)),
-            bool(values.get("weekend_only_sunday_inclusive", False)),
-            int(values.get("comment_count", 0)),
-            values.get("price_per_person"),
-            values.get("price_on_working_days"),
-            values.get("price_on_weekends"),
-            values.get("currency"),
-            values.get("img"),
-            partner_user_id,
-            values.get("latitude"),
-            values.get("longitude"),
-            values.get("city"),
-            values.get("country"),
-            values.get("region_id"),
-            values.get("district_id"),
-            values.get("description_en"),
-            values.get("description_ru"),
-            values.get("description_uz"),
-            values.get("check_in"),
-            values.get("check_out"),
-            bool(values.get("is_allowed_alcohol", False)),
-            bool(values.get("is_allowed_corporate", False)),
-            bool(values.get("is_allowed_pets", False)),
-            bool(values.get("is_quiet_hours", False)),
-            values.get("apartment_number"),
-            values.get("home_number"),
-            values.get("entrance_number"),
-            values.get("floor_number"),
-            values.get("pass_code"),
-        ],
-    )
+    else:
+        row = fetch_one(
+            f"""
+            INSERT INTO {table} (
+                guid,
+                created_at,
+                updated_at,
+                title,
+                title_sort,
+                is_verified,
+                verification_status,
+                is_archived,
+                is_recommended,
+                minimum_weekend_day_stay,
+                weekend_only_sunday_inclusive,
+                comment_count,
+                price_per_person,
+                price_on_working_days,
+                price_on_weekends,
+                currency,
+                img,
+                partner_user_id,
+                latitude,
+                longitude,
+                city,
+                country,
+                region_id,
+                district_id,
+                description_en,
+                description_ru,
+                description_uz,
+                check_in,
+                check_out,
+                is_allowed_alcohol,
+                is_allowed_corporate,
+                is_allowed_pets,
+                is_quiet_hours,
+                apartment_number,
+                home_number,
+                entrance_number,
+                floor_number,
+                pass_code
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                FALSE, 'pending', FALSE, FALSE,
+                %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s
+            )
+            RETURNING guid
+            """,
+            [
+                uuid4(),
+                now,
+                now,
+                values["title"],
+                values["title_sort"],
+                bool(values.get("minimum_weekend_day_stay", False)),
+                bool(values.get("weekend_only_sunday_inclusive", False)),
+                int(values.get("comment_count", 0)),
+                values.get("price_per_person"),
+                values.get("price_on_working_days"),
+                values.get("price_on_weekends"),
+                values.get("currency"),
+                values.get("img"),
+                partner_user_id,
+                values.get("latitude"),
+                values.get("longitude"),
+                values.get("city"),
+                values.get("country"),
+                values.get("region_id"),
+                values.get("district_id"),
+                values.get("description_en"),
+                values.get("description_ru"),
+                values.get("description_uz"),
+                values.get("check_in"),
+                values.get("check_out"),
+                bool(values.get("is_allowed_alcohol", False)),
+                bool(values.get("is_allowed_corporate", False)),
+                bool(values.get("is_allowed_pets", False)),
+                bool(values.get("is_quiet_hours", False)),
+                values.get("apartment_number"),
+                values.get("home_number"),
+                values.get("entrance_number"),
+                values.get("floor_number"),
+                values.get("pass_code"),
+            ],
+        )
     if not row:
         return None
     return get_property_for_partner(str(row["guid"]), partner_user_id)
@@ -568,9 +658,6 @@ def update_property(
         "title_sort",
         "minimum_weekend_day_stay",
         "weekend_only_sunday_inclusive",
-        "price_per_person",
-        "price_on_working_days",
-        "price_on_weekends",
         "currency",
         "img",
         "latitude",
@@ -594,6 +681,10 @@ def update_property(
         "floor_number",
         "pass_code",
     }
+    if property_kind == PROPERTY_KIND_APARTMENT:
+        allowed.add("price")
+    else:
+        allowed.update({"price_per_person", "price_on_working_days", "price_on_weekends"})
     updates: dict[str, Any] = {key: value for key, value in values.items() if key in allowed}
     updates["updated_at"] = timezone.now()
     updates["is_verified"] = False
