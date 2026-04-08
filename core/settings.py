@@ -228,8 +228,8 @@ REST_FRAMEWORK = {
         "users.authentication.ClientJWTAuthentication",
     ),
     "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
+        "shared.throttles.SwaggerExemptAnonRateThrottle",
+        "shared.throttles.SwaggerExemptUserRateThrottle",
         "rest_framework.throttling.ScopedRateThrottle",
     ],
     "DEFAULT_FILTER_BACKENDS": [
