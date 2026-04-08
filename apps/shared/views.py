@@ -6,6 +6,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.throttling import ScopedRateThrottle
 import logging
 from datetime import datetime, timezone
+from django.conf import settings
 
 logger = logging.getLogger("frontend")
 
@@ -17,6 +18,13 @@ class FrontendLogView(APIView):
     throttle_classes = [ScopedRateThrottle]
 
     def post(self, request):
+        expected_token = getattr(settings, "FRONTEND_LOG_TOKEN", "")
+        provided = (request.headers.get("X-Frontend-Log-Token") or "").strip()
+        if expected_token and provided != expected_token:
+            return Response(
+                {"detail": "Invalid log token"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
         level = (request.data.get("level") or "info").lower()
         message = request.data.get("message") or ""
         extra = dict(request.data.get("extra") or {})

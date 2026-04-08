@@ -161,7 +161,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             actor_type = access_token.get(TokenMetadata.TOKEN_USER_TYPE)
             subject = access_token.get(TokenMetadata.TOKEN_SUBJECT)
 
-            if actor_type not in {"admin", "partner"}:
+            if actor_type not in {"admin", "partner", "client"}:
                 return None
 
             actor = get_active_user_by_subject(subject, role=actor_type)
@@ -180,28 +180,32 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except (TypeError, ValueError):
             return None
 
-        if sender_type not in {"admin", "partner"}:
+        allowed_roles = {"admin", "partner", "client"}
+        if sender_type not in allowed_roles:
             return None
-        if receiver_type and receiver_type not in {"admin", "partner"}:
+        if not receiver_type:
+            receiver_type = "partner" if sender_type == "admin" else "admin"
+        if receiver_type not in allowed_roles:
             return None
 
         try:
             if sender_type == "admin":
                 admin = get_active_actor(sender_id, "admin")
-                partner = get_active_actor(receiver_id, "partner")
-                if not admin or not partner:
+                target = get_active_actor(receiver_id, receiver_type)
+                if not admin or not target:
                     return None
 
                 conversation = get_or_create_conversation(
                     admin_user_id=admin.id,
-                    partner_user_id=partner.id,
+                    counterpart_user_id=target.id,
+                    counterpart_role="partner" if receiver_type == "partner" else "client",
                 )
                 message = create_chat_message(
                     conversation_id=conversation.id,
                     sender_user_id=admin.id,
-                    receiver_user_id=partner.id,
+                    receiver_user_id=target.id,
                     sender_role="admin",
-                    receiver_role="partner",
+                    receiver_role=receiver_type,
                     content=content,
                 )
                 touch_conversation(conversation.id)
@@ -213,25 +217,35 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 )
                 message_preview = content if len(content) <= 120 else f"{content[:117]}..."
                 try:
-                    NotificationService.send_to_partner(
-                        partner=partner,
-                        title=sender_name,
-                        message=message_preview,
-                        data={
-                            "type": "chat_message",
-                            "conversation_id": conversation.id,
-                            "message_id": message.id,
-                            "sender_id": admin.id,
-                            "sender_type": "admin",
-                            "receiver_id": partner.id,
-                            "receiver_type": "partner",
-                            "message_preview": message_preview,
-                            "sender_name": sender_name,
-                        },
-                    )
+                    notification_payload = {
+                        "type": "chat_message",
+                        "conversation_id": conversation.id,
+                        "message_id": message.id,
+                        "sender_id": admin.id,
+                        "sender_type": "admin",
+                        "receiver_id": target.id,
+                        "receiver_type": receiver_type,
+                        "message_preview": message_preview,
+                        "sender_name": sender_name,
+                    }
+                    if receiver_type == "partner":
+                        NotificationService.send_to_partner(
+                            partner=target,
+                            title=sender_name,
+                            message=message_preview,
+                            data=notification_payload,
+                        )
+                    elif receiver_type == "client":
+                        NotificationService.send_to_client(
+                            client=target,
+                            title=sender_name,
+                            message=message_preview,
+                            notification_type="message",
+                            data=notification_payload,
+                        )
                 except Exception as push_error:
                     print(f"Error sending partner push notification: {push_error}")
-            else:
+            elif sender_type == "partner":
                 partner = get_active_actor(sender_id, "partner")
                 admin = get_active_actor(receiver_id, "admin")
                 if not admin:
@@ -241,13 +255,36 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
                 conversation = get_or_create_conversation(
                     admin_user_id=admin.id,
-                    partner_user_id=partner.id,
+                    counterpart_user_id=partner.id,
+                    counterpart_role="partner",
                 )
                 message = create_chat_message(
                     conversation_id=conversation.id,
                     sender_user_id=partner.id,
                     receiver_user_id=admin.id,
                     sender_role="partner",
+                    receiver_role="admin",
+                    content=content,
+                )
+                touch_conversation(conversation.id)
+            else:
+                client = get_active_actor(sender_id, "client")
+                admin = get_active_actor(receiver_id, "admin")
+                if not admin:
+                    admin = get_first_active_admin()
+                if not admin or not client:
+                    return None
+
+                conversation = get_or_create_conversation(
+                    admin_user_id=admin.id,
+                    counterpart_user_id=client.id,
+                    counterpart_role="client",
+                )
+                message = create_chat_message(
+                    conversation_id=conversation.id,
+                    sender_user_id=client.id,
+                    receiver_user_id=admin.id,
+                    sender_role="client",
                     receiver_role="admin",
                     content=content,
                 )

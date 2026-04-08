@@ -251,7 +251,8 @@ class RawChatConversation(RowEntity):
     created_at: datetime
     updated_at: datetime
     admin_user_id: int
-    partner_user_id: int
+    partner_user_id: int | None
+    client_user_id: int | None
 
 
 @dataclass(slots=True)
