@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from django.core.cache import cache
 from django.core.files.storage import default_storage
+from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -218,6 +219,23 @@ def _favorite_guids_from_request(request) -> set[str]:
     if getattr(user, "role", None) != "client":
         return set()
     return _load_favorite_guids(int(user.id))
+
+
+def _validate_image_upload(uploaded):
+    if uploaded is None:
+        raise ValidationError({"image": [_("This field is required.")]})
+    max_size = getattr(settings, "MAX_IMAGE_SIZE", 20 * 1024 * 1024)
+    allowed_ext = {ext.lower() for ext in getattr(settings, "ALLOWED_PHOTO_EXTENSION", [])}
+    name = (uploaded.name or "").lower()
+    ext = name.rsplit(".", 1)[-1] if "." in name else ""
+    content_type = (uploaded.content_type or "").lower()
+    if allowed_ext and ext not in allowed_ext:
+        raise ValidationError({"image": [_("Unsupported file extension.")]})
+    if content_type and not content_type.startswith("image/"):
+        raise ValidationError({"image": [_("Only image uploads are allowed.")]})
+    if uploaded.size and uploaded.size > max_size:
+        raise ValidationError({"image": [_("File too large.")]})
+    return True
 
 
 def _extract_list_params(source):
@@ -624,6 +642,9 @@ class PropertyImageCreateView(APIView):
         if not uploaded_files:
             raise ValidationError({"images": [_("This field is required.")]})
 
+        for file in uploaded_files:
+            _validate_image_upload(file)
+
         uploaded = uploaded_files[0]
         saved_path = default_storage.save(f"property/{property_id}/{uuid4()}_{uploaded.name}", uploaded)
 
@@ -662,6 +683,7 @@ class PropertyImageUpdateDeleteView(APIView):
                 uploaded = images[0]
         image_path = property_row.get("img")
         if uploaded is not None:
+            _validate_image_upload(uploaded)
             image_path = default_storage.save(f"property/{property_id}/{uuid4()}_{uploaded.name}", uploaded)
             property_type = str(property_row["property_kind"])
             if property_type == PROPERTY_KIND_COTTAGE:

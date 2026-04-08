@@ -29,38 +29,44 @@ from core import settings
 
 schema_view = get_schema_view(
     openapi.Info(
-        "Property Booking API",
+        "Weel API",
         "v1",
-        "API documentation for the property booking service",
-        contact=openapi.Contact(name="support@example.com", url="https://example.com"),
-        license=openapi.License(name="MIT License"),
+        "API documentation for the Weel backend",
+        contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
+        license=openapi.License(name="Proprietary"),
     ),
-    public=True,
-    url=settings.SWAGGER_URL,
+    public=False,
+    url=None,
     permission_classes=[permissions.AllowAny],
 )
 
 urlpatterns = [
     path("health/", lambda request: JsonResponse({"status": "ok"})),
-    path("", include("django_prometheus.urls")),
+]
+
+if settings.PROMETHEUS_ENABLED:
+    urlpatterns += [path("", include("django_prometheus.urls"))]
+
+urlpatterns += [
     path("i18n/", include("django.conf.urls.i18n")),
     path("api/", include("apps.urls")),
 ]
 
-urlpatterns += [
-    path(
-        "swagger/",
-        schema_view.with_ui("swagger", cache_timeout=0),
-        name="schema-swagger-ui",
-    )
-]
+if settings.ENABLE_SWAGGER_UI:
+    urlpatterns += [
+        path(
+            "swagger/",
+            schema_view.with_ui("swagger", cache_timeout=0),
+            name="schema-swagger-ui",
+        )
+    ]
 
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
 # `django.conf.urls.static.static(...)` does not create URL patterns when DEBUG=False.
 # Serve local media files only when MinIO is not enabled.
-if not settings.USE_MINIO:
+if settings.DEBUG and not settings.USE_MINIO:
     urlpatterns += [
         re_path(
             rf"^{settings.MEDIA_URL.lstrip('/')}(?P<path>.*)$",

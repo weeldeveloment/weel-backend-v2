@@ -7,7 +7,7 @@ from shared.raw.entities import RawUser
 
 class ActorSerializer(serializers.Serializer):
     id = serializers.IntegerField()
-    role = serializers.ChoiceField(choices=['admin', 'partner'])
+    role = serializers.ChoiceField(choices=['admin', 'partner', 'client'])
     full_name = serializers.CharField()
     email = serializers.CharField(allow_blank=True, required=False)
     username = serializers.CharField(allow_blank=True, required=False)
@@ -42,6 +42,23 @@ class ActorSerializer(serializers.Serializer):
             'email': partner.email or '',
             'username': partner.username or '',
             'phone_number': partner.phone_number or '',
+        }
+
+    @staticmethod
+    def from_client(client: RawUser):
+        full_name = (
+            f"{(client.first_name or '').strip()} {(client.last_name or '').strip()}".strip()
+            or client.username
+            or client.email
+            or str(client.id)
+        )
+        return {
+            'id': client.id,
+            'role': 'client',
+            'full_name': full_name,
+            'email': client.email or '',
+            'username': client.username or '',
+            'phone_number': client.phone_number or '',
         }
 
 

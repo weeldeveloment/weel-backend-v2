@@ -21,33 +21,42 @@ def get_first_active_admin() -> RawUser | None:
     return get_user_by_id(admin_ids[0], role="admin", active_only=True)
 
 
-def get_or_create_conversation(admin_user_id: int, partner_user_id: int) -> RawChatConversation:
+def get_or_create_conversation(*, admin_user_id: int, counterpart_user_id: int, counterpart_role: str) -> RawChatConversation:
+    if counterpart_role not in {"partner", "client"}:
+        raise ValueError("counterpart_role must be 'partner' or 'client'")
+
+    counterpart_column = "partner_user_id" if counterpart_role == "partner" else "client_user_id"
+
     existing = fetch_one(
         f"""
         SELECT *
         FROM {get_table_name("chat_conversation")}
         WHERE admin_user_id = %s
-          AND partner_user_id = %s
+          AND {counterpart_column} = %s
         LIMIT 1
         """,
-        [admin_user_id, partner_user_id],
+        [admin_user_id, counterpart_user_id],
     )
     if existing is not None:
         return RawChatConversation.from_row(existing)
 
     now = timezone.now()
+    partner_value = counterpart_user_id if counterpart_role == "partner" else None
+    client_value = counterpart_user_id if counterpart_role == "client" else None
+
     inserted = fetch_one(
         f"""
         INSERT INTO {get_table_name("chat_conversation")} (
             created_at,
             updated_at,
             admin_user_id,
-            partner_user_id
-        ) VALUES (%s, %s, %s, %s)
-        ON CONFLICT (admin_user_id, partner_user_id) DO NOTHING
+            partner_user_id,
+            client_user_id
+        ) VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT DO NOTHING
         {"RETURNING *" if return_star() else ""}
         """,
-        [now, now, admin_user_id, partner_user_id],
+        [now, now, admin_user_id, partner_value, client_value],
     )
     if inserted is not None:
         return RawChatConversation.from_row(inserted)
@@ -57,10 +66,10 @@ def get_or_create_conversation(admin_user_id: int, partner_user_id: int) -> RawC
         SELECT *
         FROM {get_table_name("chat_conversation")}
         WHERE admin_user_id = %s
-          AND partner_user_id = %s
+          AND {counterpart_column} = %s
         LIMIT 1
         """,
-        [admin_user_id, partner_user_id],
+        [admin_user_id, counterpart_user_id],
     )
     if row is None:
         raise RuntimeError("Failed to fetch conversation after create")
@@ -78,8 +87,6 @@ def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[st
             """,
             [actor_id],
         )
-        counterpart_ids = [int(row["partner_user_id"]) for row in rows]
-        counterpart_field = "partner_user_id"
     elif actor_role == "partner":
         rows = fetch_all(
             f"""
@@ -90,8 +97,16 @@ def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[st
             """,
             [actor_id],
         )
-        counterpart_ids = [int(row["admin_user_id"]) for row in rows]
-        counterpart_field = "admin_user_id"
+    elif actor_role == "client":
+        rows = fetch_all(
+            f"""
+            SELECT *
+            FROM {get_table_name("chat_conversation")}
+            WHERE client_user_id = %s
+            ORDER BY updated_at DESC, id DESC
+            """,
+            [actor_id],
+        )
     else:
         return []
 
@@ -100,6 +115,17 @@ def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[st
 
     conversations = [RawChatConversation.from_row(row) for row in rows]
     conversation_ids = [conversation.id for conversation in conversations]
+
+    counterpart_ids: list[int] = []
+    if actor_role == "admin":
+        for conversation in conversations:
+            if conversation.partner_user_id is not None:
+                counterpart_ids.append(int(conversation.partner_user_id))
+            elif conversation.client_user_id is not None:
+                counterpart_ids.append(int(conversation.client_user_id))
+    else:
+        counterpart_ids = [int(conversation.admin_user_id) for conversation in conversations]
+
     counterparts = fetch_users_by_ids(counterpart_ids)
 
     if is_postgresql():
@@ -161,10 +187,18 @@ def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[st
 
     payload: list[dict[str, Any]] = []
     for conversation in conversations:
-        counterpart_id = int(getattr(conversation, counterpart_field))
-        counterpart = counterparts.get(counterpart_id)
+        if actor_role == "admin":
+            counterpart_id = conversation.partner_user_id or conversation.client_user_id
+        else:
+            counterpart_id = conversation.admin_user_id
+
+        if counterpart_id is None:
+            continue
+
+        counterpart = counterparts.get(int(counterpart_id))
         if counterpart is None:
             continue
+
         payload.append(
             {
                 "counterpart": counterpart,

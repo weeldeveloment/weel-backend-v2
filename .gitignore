@@ -35,6 +35,7 @@ env/
 .env
 .env.staging
 .env.server
+.env.production
 
 # Django
 *.log

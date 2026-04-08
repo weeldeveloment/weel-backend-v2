@@ -32,6 +32,12 @@ def env_bool(name: str, default: bool = False) -> bool:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
+def env_list(name: str, default: list[str] | None = None) -> list[str]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default or []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
 
 USE_MINIO = env_bool("USE_MINIO", default=False)
 if "test" in sys.argv:
@@ -56,11 +62,49 @@ if not SECRET_KEY:
             "SECRET_KEY is required in production. Set the SECRET_KEY environment variable."
         )
 
-_allowed = (os.getenv("DJANGO_ALLOWED_HOSTS") or "").strip()
-ALLOWED_HOSTS = [h.strip() for h in _allowed.split(",") if h.strip()] if _allowed else ["*"]
+_allowed_hosts_raw = env_list("DJANGO_ALLOWED_HOSTS")
+if not _allowed_hosts_raw:
+    if DEBUG:
+        _allowed_hosts_raw = ["localhost", "127.0.0.1"]
+    else:
+        raise ImproperlyConfigured(
+            "DJANGO_ALLOWED_HOSTS must be set when DEBUG=0."
+        )
+
+ALLOWED_HOSTS = _allowed_hosts_raw.copy()
 if "host.docker.internal" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("host.docker.internal")
 ALLOWED_HOSTS.append("0.0.0.0")
+
+# CORS
+CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
+if DEBUG and not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+    "x-telegram-initdata",
+]
 
 GLOBAL_APPS = [
     "django_prometheus",
@@ -183,6 +227,11 @@ REST_FRAMEWORK = {
         "users.authentication.PartnerJWTAuthentication",
         "users.authentication.ClientJWTAuthentication",
     ),
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
     ],
@@ -210,7 +259,9 @@ SIMPLE_JWT = {
     "JTI_CLAIM": "jti",
 }
 
-SWAGGER_URL = (os.getenv("SWAGGER_URL") or "https://dev.weel.uz/api").rstrip("/")
+SWAGGER_URL = (os.getenv("SWAGGER_URL") or "").strip() or None
+ENABLE_SWAGGER_UI = env_bool("ENABLE_SWAGGER_UI", default=DEBUG)
+PROMETHEUS_ENABLED = env_bool("PROMETHEUS_ENABLED", default=DEBUG)
 SWAGGER_SETTINGS = {
     "SECURITY_DEFINITIONS": {
         "Bearer": {
@@ -457,6 +508,7 @@ TELEGRAM_BOT_TOKEN_APP = os.getenv("TELEGRAM_BOT_TOKEN_APP")
 BOT_TOKEN = TELEGRAM_BOT_TOKEN_APP
 MINIAPP_URL = os.getenv("MINIAPP_URL", "https://partners.weel.uz/")
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "https://api.weel.uz")
+FRONTEND_LOG_TOKEN = (os.getenv("FRONTEND_LOG_TOKEN") or "").strip()
 
 # Firebase
 FIREBASE_APP = None
@@ -490,29 +542,6 @@ except ValueError:
 # Security settings
 if DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-
-    CORS_ALLOW_ALL_ORIGINS = True
-    CORS_ALLOW_CREDENTIALS = True
-    CORS_ORIGIN_ALLOW_ALL = True
-    CORS_ALLOW_METHODS = [
-        "DELETE",
-        "GET",
-        "OPTIONS",
-        "PATCH",
-        "POST",
-        "PUT",
-    ]
-    CORS_ALLOW_HEADERS = [
-        "accept",
-        "accept-encoding",
-        "authorization",
-        "content-type",
-        "dnt",
-        "origin",
-        "user-agent",
-        "x-csrftoken",
-        "x-requested-with",
-    ]
 else:
     CSRF_COOKIE_SECURE = True
     CSRF_TRUSTED_ORIGINS = [
@@ -525,17 +554,6 @@ else:
     USE_X_FORWARDED_HOST = True
     SESSION_COOKIE_SECURE = True
     SECURE_HSTS_PRELOAD = True
-    CORS_ALLOW_ALL_ORIGINS = True
-    CORS_ALLOW_CREDENTIALS = True
-    CORS_ALLOW_HEADERS = ["*"]
-    CORS_ALLOW_METHODS = [
-        "DELETE",
-        "GET",
-        "OPTIONS",
-        "PATCH",
-        "POST",
-        "PUT",
-    ]
 
 # Logging
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
