@@ -71,6 +71,15 @@ def _parse_int_maybe(value: Any) -> int | None:
         return None
 
 
+def _parse_decimal_maybe(value: Any) -> Decimal | None:
+    if value in (None, "", "null", "None", "undefined"):
+        return None
+    amount = _to_decimal(value)
+    if amount is None:
+        raise serializers.ValidationError(_("Invalid numeric value."))
+    return amount
+
+
 class _PropertyLocationInputSerializer(serializers.Serializer):
     latitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
@@ -242,9 +251,6 @@ class CottageCreateSerializer(serializers.Serializer):
         if not is_update and not title:
             raise serializers.ValidationError({"title": _("This field is required.")})
 
-        location_serializer = _PropertyLocationInputSerializer(data=attrs.get("property_location") or {}, partial=True)
-        location_serializer.is_valid(raise_exception=True)
-
         detail_payload = attrs.get("property_detail") or {}
         detail_serializer = _PropertyDetailInputSerializer(data=detail_payload, partial=True)
         detail_serializer.is_valid(raise_exception=True)
@@ -291,9 +297,21 @@ class CottageCreateSerializer(serializers.Serializer):
         normalized["price_on_working_days"] = working
         normalized["price_on_weekends"] = weekends
         if attrs.get("property_location") is not None:
+            cleaned_location_payload = {}
+            for key, value in (attrs.get("property_location") or {}).items():
+                if key in {"latitude", "longitude"}:
+                    cleaned_location_payload[key] = _parse_decimal_maybe(value)
+                elif key in {"region_id", "district_id"}:
+                    cleaned_location_payload[key] = _parse_int_maybe(value)
+                else:
+                    cleaned_location_payload[key] = None if value in ("", "null", "None", "undefined") else value
+            location_serializer = _PropertyLocationInputSerializer(data=cleaned_location_payload, partial=True)
+            location_serializer.is_valid(raise_exception=True)
             normalized.update(location_serializer.validated_data)
         if detail_serializer.validated_data:
             normalized.update(detail_serializer.validated_data)
+        if "property_services" in attrs:
+            normalized["services"] = attrs.get("property_services") or []
         if "region_id" in attrs or "region" in attrs:
             normalized["region_id"] = _parse_int_maybe(
                 attrs.get("region_id") if attrs.get("region_id") is not None else attrs.get("region")

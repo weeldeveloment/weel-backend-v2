@@ -12,8 +12,8 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
 from property.apartment_repository import APARTMENT_TYPE_GUID, COTTAGE_TYPE_GUID, list_property_types, parse_property_kind
-from property.apartment_serializers import ApartmentListSerializer, ApartmentDetailSerializer, _parse_int_maybe
-from property.cottage_serializers import CottageListSerializer, CottageDetailSerializer
+from property.apartment_serializers import ApartmentCreateSerializer, ApartmentListSerializer, ApartmentDetailSerializer, _parse_int_maybe
+from property.cottage_serializers import CottageCreateSerializer, CottageListSerializer, CottageDetailSerializer
 
 
 class PropertyRepositoryHelpersTests(SimpleTestCase):
@@ -235,6 +235,121 @@ class UtilTests(SimpleTestCase):
         self.assertEqual(_parse_int_maybe("42"), 42)
         self.assertIsNone(_parse_int_maybe("abc"))
         self.assertIsNone(_parse_int_maybe(None))
+
+    def test_apartment_create_serializer_normalizes_blank_property_location_coordinates(self):
+        serializer = ApartmentCreateSerializer(
+            data={
+                "title": "Test apartment",
+                "property_location": {
+                    "latitude": "",
+                    "longitude": "",
+                    "country": "Uzbekistan",
+                    "city": "Tashkent",
+                },
+                "apartment_number": "12",
+                "home_number": "10",
+                "entrance_number": "2",
+                "floor_number": "3",
+                "pass_code": "0000",
+            },
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        normalized = serializer.validated_data["normalized_values"]
+        self.assertIsNone(normalized["latitude"])
+        self.assertIsNone(normalized["longitude"])
+
+    def test_cottage_create_serializer_normalizes_blank_property_location_coordinates(self):
+        serializer = CottageCreateSerializer(
+            data={
+                "title": "Test cottage",
+                "property_location": {
+                    "latitude": "",
+                    "longitude": "",
+                    "country": "Uzbekistan",
+                    "city": "Tashkent",
+                },
+            },
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        normalized = serializer.validated_data["normalized_values"]
+        self.assertIsNone(normalized["latitude"])
+        self.assertIsNone(normalized["longitude"])
+
+    def test_apartment_update_serializer_accepts_property_services(self):
+        serializer = ApartmentCreateSerializer(
+            data={
+                "title": "Test apartment",
+                "property_services": ["guid1", "guid2"],
+                "property_location": {
+                    "latitude": "41.3",
+                    "longitude": "69.2",
+                    "country": "Uzbekistan",
+                    "city": "Tashkent",
+                },
+                "apartment_number": "12",
+                "home_number": "10",
+                "entrance_number": "2",
+                "floor_number": "3",
+                "pass_code": "0000",
+            },
+            context={"is_update": True},
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        normalized = serializer.validated_data["normalized_values"]
+        self.assertEqual(normalized["services"], ["guid1", "guid2"])
+
+    def test_apartment_update_serializer_accepts_property_detail(self):
+        serializer = ApartmentCreateSerializer(
+            data={
+                "title": "Test apartment",
+                "property_detail": {
+                    "description_ru": "Русское описание",
+                    "description_uz": "O'zbek tavsifi",
+                    "description_en": "English description",
+                    "check_in": "19:00:00",
+                    "check_out": "17:00:00",
+                    "is_allowed_alcohol": True,
+                    "is_allowed_corporate": False,
+                    "is_allowed_pets": True,
+                    "is_quiet_hours": False,
+                },
+                "property_location": {
+                    "latitude": "41.3",
+                    "longitude": "69.2",
+                    "country": "Uzbekistan",
+                    "city": "Tashkent",
+                },
+                "apartment_number": "12",
+                "home_number": "10",
+                "entrance_number": "2",
+                "floor_number": "3",
+                "pass_code": "0000",
+            },
+            context={"is_update": True},
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        normalized = serializer.validated_data["normalized_values"]
+        self.assertEqual(normalized.get("description_ru"), "Русское описание")
+        self.assertEqual(normalized.get("is_allowed_alcohol"), True)
+        self.assertEqual(normalized.get("is_allowed_pets"), True)
+
+    def test_cottage_update_serializer_processes_property_services(self):
+        serializer = CottageCreateSerializer(
+            data={
+                "title": "Test cottage",
+                "property_services": ["service1", "service2"],
+                "property_location": {
+                    "latitude": "41.3",
+                    "longitude": "69.2",
+                    "country": "Uzbekistan",
+                    "city": "Tashkent",
+                },
+            },
+            context={"is_update": True},
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        normalized = serializer.validated_data["normalized_values"]
+        self.assertEqual(normalized["services"], ["service1", "service2"])
 
 
 class PropertyUrlsTests(SimpleTestCase):

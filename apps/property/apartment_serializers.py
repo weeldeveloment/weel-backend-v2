@@ -71,6 +71,15 @@ def _parse_int_maybe(value: Any) -> int | None:
         return None
 
 
+def _parse_decimal_maybe(value: Any) -> Decimal | None:
+    if value in (None, "", "null", "None", "undefined"):
+        return None
+    amount = _to_decimal(value)
+    if amount is None:
+        raise serializers.ValidationError(_("Invalid numeric value."))
+    return amount
+
+
 class ApartmentListSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
@@ -171,11 +180,13 @@ class ApartmentCreateSerializer(serializers.Serializer):
     minimum_weekend_day_stay = serializers.BooleanField(required=False, default=False)
     weekend_only_sunday_inclusive = serializers.BooleanField(required=False, default=False)
     property_location = serializers.DictField(required=False)
+    property_detail = serializers.DictField(required=False)
     latitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     services = serializers.ListField(required=False, allow_empty=True)
+    property_services = serializers.ListField(required=False, allow_empty=True)
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     prefecture_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -240,11 +251,32 @@ class ApartmentCreateSerializer(serializers.Serializer):
                 normalized[key] = attrs.get(key)
         if "services" in attrs:
             normalized["services"] = attrs.get("services") or []
+        if "property_services" in attrs:
+            normalized["services"] = attrs.get("property_services") or []
+        detail_payload = attrs.get("property_detail") or {}
+        if detail_payload:
+            for key, value in detail_payload.items():
+                if key in {"check_in", "check_out"}:
+                    try:
+                        normalized[key] = value
+                    except Exception:
+                        pass
+                elif key.startswith("is_"):
+                    normalized[key] = bool(value)
+                elif key in {"description_en", "description_ru", "description_uz", "apartment_number", "home_number", "entrance_number", "floor_number", "pass_code"}:
+                    normalized[key] = value
         location_payload = attrs.get("property_location") or {}
         if location_payload:
             for key in ("latitude", "longitude", "country", "city", "region_id", "district_id", "prefecture_id"):
-                if key in location_payload:
-                    normalized[key] = location_payload.get(key)
+                if key not in location_payload:
+                    continue
+                value = location_payload.get(key)
+                if key in {"latitude", "longitude"}:
+                    normalized[key] = _parse_decimal_maybe(value)
+                elif key in {"region_id", "district_id"}:
+                    normalized[key] = _parse_int_maybe(value)
+                else:
+                    normalized[key] = None if value in ("", "null", "None", "undefined") else value
         if "region_id" in attrs or "region_id" in location_payload:
             normalized["region_id"] = _parse_int_maybe(attrs.get("region_id") if attrs.get("region_id") is not None else location_payload.get("region_id"))
         if "district_id" in attrs or "district_id" in location_payload:
