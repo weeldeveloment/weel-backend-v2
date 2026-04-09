@@ -42,7 +42,9 @@ schema_view = get_schema_view(
         contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
         license=openapi.License(name="Proprietary"),
     ),
-    public=False,
+    # public=True shows endpoints even when they require authentication;
+    # otherwise drf_yasg hides them from the schema for anonymous users.
+    public=True,
     url=None,
     permission_classes=[permissions.AllowAny],
 )
