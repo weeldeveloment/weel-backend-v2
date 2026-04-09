@@ -84,6 +84,7 @@ class ApartmentListSerializer(serializers.Serializer):
     services = serializers.ListField()
     region_id = serializers.IntegerField(allow_null=True)
     district_id = serializers.IntegerField(allow_null=True)
+    prefecture_id = serializers.CharField(allow_blank=True, allow_null=True)
     guests = serializers.IntegerField(allow_null=True)
     rooms = serializers.IntegerField(allow_null=True)
     average_rating = serializers.FloatField(allow_null=True)
@@ -126,6 +127,7 @@ class ApartmentDetailSerializer(serializers.Serializer):
     services = serializers.ListField()
     region_id = serializers.IntegerField(allow_null=True)
     district_id = serializers.IntegerField(allow_null=True)
+    prefecture_id = serializers.CharField(allow_blank=True, allow_null=True)
     latitude = serializers.CharField(allow_blank=True, allow_null=True)
     longitude = serializers.CharField(allow_blank=True, allow_null=True)
     country = serializers.CharField(allow_blank=True, allow_null=True)
@@ -168,6 +170,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
     currency = serializers.ChoiceField(required=False, choices=["USD", "UZS"])
     minimum_weekend_day_stay = serializers.BooleanField(required=False, default=False)
     weekend_only_sunday_inclusive = serializers.BooleanField(required=False, default=False)
+    property_location = serializers.DictField(required=False)
     latitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -175,6 +178,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
     services = serializers.ListField(required=False, allow_empty=True)
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    prefecture_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     img = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     apartment_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
     home_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
@@ -236,14 +240,17 @@ class ApartmentCreateSerializer(serializers.Serializer):
                 normalized[key] = attrs.get(key)
         if "services" in attrs:
             normalized["services"] = attrs.get("services") or []
-        if "region_id" in attrs:
-            normalized["region_id"] = _parse_int_maybe(
-                attrs.get("region_id")
-            )
-        if "district_id" in attrs:
-            normalized["district_id"] = _parse_int_maybe(
-                attrs.get("district_id")
-            )
+        location_payload = attrs.get("property_location") or {}
+        if location_payload:
+            for key in ("latitude", "longitude", "country", "city", "region_id", "district_id", "prefecture_id"):
+                if key in location_payload:
+                    normalized[key] = location_payload.get(key)
+        if "region_id" in attrs or "region_id" in location_payload:
+            normalized["region_id"] = _parse_int_maybe(attrs.get("region_id") if attrs.get("region_id") is not None else location_payload.get("region_id"))
+        if "district_id" in attrs or "district_id" in location_payload:
+            normalized["district_id"] = _parse_int_maybe(attrs.get("district_id") if attrs.get("district_id") is not None else location_payload.get("district_id"))
+        if "prefecture_id" in attrs or "prefecture_id" in location_payload:
+            normalized["prefecture_id"] = attrs.get("prefecture_id") if attrs.get("prefecture_id") is not None else location_payload.get("prefecture_id")
 
         attrs["normalized_values"] = normalized
         return attrs

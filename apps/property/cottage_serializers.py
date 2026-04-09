@@ -76,6 +76,9 @@ class _PropertyLocationInputSerializer(serializers.Serializer):
     longitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    region_id = serializers.IntegerField(required=False, allow_null=True)
+    district_id = serializers.IntegerField(required=False, allow_null=True)
+    prefecture_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 class _PropertyDetailInputSerializer(serializers.Serializer):
@@ -117,6 +120,7 @@ class CottageListSerializer(serializers.Serializer):
     services = serializers.ListField()
     region = RawRegionSerializer(allow_null=True)
     district = RawDistrictSerializer(allow_null=True)
+    prefecture_id = serializers.CharField(allow_blank=True, allow_null=True)
     guests = serializers.IntegerField(allow_null=True)
     rooms = serializers.IntegerField(allow_null=True)
     average_rating = serializers.FloatField(allow_null=True)
@@ -167,6 +171,7 @@ class CottageDetailSerializer(serializers.Serializer):
     is_favorite = serializers.BooleanField()
     property_services = serializers.ListField()
     property_room = serializers.DictField()
+    prefecture_id = serializers.CharField(allow_blank=True, allow_null=True)
     latitude = serializers.CharField(allow_blank=True, allow_null=True)
     longitude = serializers.CharField(allow_blank=True, allow_null=True)
     country = serializers.CharField(allow_blank=True, allow_null=True)
@@ -227,6 +232,7 @@ class CottageCreateSerializer(serializers.Serializer):
     district = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    prefecture_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     img = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs):
@@ -296,6 +302,8 @@ class CottageCreateSerializer(serializers.Serializer):
             normalized["district_id"] = _parse_int_maybe(
                 attrs.get("district_id") if attrs.get("district_id") is not None else attrs.get("district")
             )
+        if "prefecture_id" in attrs:
+            normalized["prefecture_id"] = attrs.get("prefecture_id")
 
         attrs["normalized_values"] = normalized
         return attrs

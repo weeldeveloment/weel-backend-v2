@@ -69,7 +69,16 @@ from .cottage_serializers import (
     CottageCreateSerializer,
     CottageUpdateSerializer,
 )
-from .serializers import PropertyServiceListSerializer
+from .serializers import (
+    DistrictListSerializer,
+    LocationDistrictListSerializer,
+    LocationPrefectureSerializer,
+    LocationRegionListSerializer,
+    PrefectureListSerializer,
+    PropertyServiceListSerializer,
+    RegionListSerializer,
+    RegionsResponseSerializer,
+)
 from rest_framework import serializers
 
 
@@ -88,6 +97,11 @@ PROPERTY_LIST_QUERY_PARAMS = [
     openapi.Parameter("ordering", openapi.IN_QUERY, type=openapi.TYPE_STRING),
     openapi.Parameter("from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
     openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+]
+
+LOCATION_QUERY_PARAMS = [
+    openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+    openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
 ]
 
 RECOMMENDATIONS_QUERY_PARAMS = PROPERTY_LIST_QUERY_PARAMS + [
@@ -172,6 +186,156 @@ def _parse_decimal(value) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return None
+
+
+def _preferred_language(request) -> str:
+    raw = (request.headers.get("Accept-Language") or "").lower()
+    if raw.startswith("ru"):
+        return "ru"
+    if raw.startswith("en"):
+        return "en"
+    return "uz"
+
+
+def _select_title(row: dict, language: str, *, title_key: str = "title") -> str:
+    if language == "ru":
+        value = row.get("title_ru") or row.get("ru_name") or row.get("title")
+    elif language == "en":
+        value = row.get("title_en") or row.get("name") or row.get("title")
+    else:
+        value = row.get("title_uz") or row.get("name") or row.get("title")
+    return str(value or row.get(title_key) or "")
+
+
+def _fetch_regions(language: str) -> list[dict]:
+    rows = fetch_all(
+        """
+        SELECT
+            id,
+            guid,
+            title_uz,
+            title_ru,
+            title_en,
+            img
+        FROM public.region
+        ORDER BY title_uz ASC
+        """
+    )
+    normalized = []
+    for row in rows:
+        normalized.append(
+            {
+                "guid": row["guid"],
+                "title": _select_title(row, language),
+                "img": row.get("img"),
+                "id": row.get("id"),
+            }
+        )
+    return normalized
+
+
+def _fetch_districts(language: str, region_id: int | None = None) -> list[dict]:
+    params: list[object] = []
+    where_sql = ""
+    if region_id is not None:
+        where_sql = "WHERE d.region_id = %s"
+        params.append(region_id)
+    rows = fetch_all(
+        f"""
+        SELECT
+            d.id,
+            d.guid,
+            d.title_uz,
+            d.title_ru,
+            d.title_en,
+            d.region_id
+        FROM public.district d
+        {where_sql}
+        ORDER BY d.title_uz ASC
+        """,
+        params,
+    )
+    normalized = []
+    for row in rows:
+        normalized.append(
+            {
+                "guid": row["guid"],
+                "title": _select_title(row, language),
+                "region_id": row.get("region_id"),
+                "id": row.get("id"),
+            }
+        )
+    return normalized
+
+
+def _fetch_prefectures(language: str, district_id: int | None = None) -> list[dict]:
+    params: list[object] = []
+    where_sql = ""
+    if district_id is not None:
+        where_sql = "WHERE dp.district_id = %s"
+        params.append(district_id)
+    rows = fetch_all(
+        f"""
+        SELECT
+            p.id,
+            p.name,
+            p.ru_name,
+            dp.district_id
+        FROM public.prefecture p
+        LEFT JOIN public.district_prefecture dp ON dp.prefecture_id = p.id
+        {where_sql}
+        ORDER BY p.name ASC
+        """,
+        params,
+    )
+    normalized = []
+    for row in rows:
+        normalized.append(
+            {
+                "guid": row["id"],
+                "title": _select_title({"name": row.get("name"), "ru_name": row.get("ru_name")}, language),
+                "district_id": row.get("district_id"),
+            }
+        )
+    return normalized
+
+
+def _build_location_tree(language: str) -> list[dict]:
+    regions = _fetch_regions(language)
+    districts = _fetch_districts(language)
+    prefectures = _fetch_prefectures(language)
+
+    prefectures_by_district: dict[int, list[dict]] = {}
+    for prefecture in prefectures:
+        district_id = prefecture.get("district_id")
+        if district_id is None:
+            continue
+        prefectures_by_district.setdefault(int(district_id), []).append(
+            {"guid": prefecture["guid"], "title": prefecture["title"]}
+        )
+
+    districts_by_region: dict[int, list[dict]] = {}
+    for district in districts:
+        district_id = int(district["id"])
+        region_id = district.get("region_id")
+        if region_id is None:
+            continue
+        districts_by_region.setdefault(int(region_id), []).append(
+            {
+                "guid": district["guid"],
+                "title": district["title"],
+                "prefectures": prefectures_by_district.get(district_id, []),
+            }
+        )
+
+    return [
+        {
+            "guid": region["guid"],
+            "title": region["title"],
+            "districts": districts_by_region.get(int(region["id"]), []),
+        }
+        for region in regions
+    ]
 
 
 def _resolve_reference_date(value) -> date:
@@ -345,20 +509,40 @@ class PropertyServiceListView(APIView):
 
 class RegionListView(APIView):
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(responses={200: RegionListSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        return Response([], status=status.HTTP_200_OK)
+        language = _preferred_language(request)
+        return Response(_fetch_regions(language), status=status.HTTP_200_OK)
 
 
 class DistrictListView(APIView):
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(manual_parameters=LOCATION_QUERY_PARAMS, responses={200: DistrictListSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        return Response([], status=status.HTTP_200_OK)
+        language = _preferred_language(request)
+        region_id = _parse_int(_source_get(request.query_params, "region_id"))
+        return Response(_fetch_districts(language, region_id=region_id), status=status.HTTP_200_OK)
+
+
+class PrefectureListView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(manual_parameters=LOCATION_QUERY_PARAMS, responses={200: PrefectureListSerializer(many=True)})
+    def get(self, request, *args, **kwargs):
+        language = _preferred_language(request)
+        district_id = _parse_int(_source_get(request.query_params, "district_id"))
+        return Response(_fetch_prefectures(language, district_id=district_id), status=status.HTTP_200_OK)
 
 
 class LocationListView(APIView):
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(responses={200: RegionsResponseSerializer()})
     def get(self, request, *args, **kwargs):
-        return Response({"regions": []}, status=status.HTTP_200_OK)
+        language = _preferred_language(request)
+        return Response({"regions": _build_location_tree(language)}, status=status.HTTP_200_OK)
 
 
 class CategoryListView(APIView):

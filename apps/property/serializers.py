@@ -41,12 +41,39 @@ class DistrictListSerializer(RawDistrictSerializer):
     pass
 
 
+class PrefectureListSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    title = serializers.CharField()
+    district_id = serializers.IntegerField(allow_null=True)
+
+
 class LocationDistrictSerializer(RawDistrictSerializer):
     pass
 
 
 class LocationRegionSerializer(RawRegionSerializer):
     districts = serializers.ListField(required=False, default=list)
+
+
+class LocationPrefectureSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    title = serializers.CharField()
+
+
+class LocationDistrictListSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    title = serializers.CharField()
+    prefectures = LocationPrefectureSerializer(many=True, required=False)
+
+
+class LocationRegionListSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    title = serializers.CharField()
+    districts = LocationDistrictListSerializer(many=True, required=False)
+
+
+class RegionsResponseSerializer(serializers.Serializer):
+    regions = LocationRegionListSerializer(many=True)
 
 
 class PropertyServiceListSerializer(serializers.Serializer):

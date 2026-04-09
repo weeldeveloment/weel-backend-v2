@@ -19,6 +19,7 @@ from .views import (
     PropertyFavoriteToggleView,
     RegionListView,
     DistrictListView,
+    PrefectureListView,
     LocationListView,
     UnifiedRecommendationsListView,
     CategoryListView,
@@ -37,6 +38,7 @@ urlpatterns = [
         name="region-property-list",
     ),
     path("districts/", DistrictListView.as_view(), name="district-list"),
+    path("prefectures/", PrefectureListView.as_view(), name="prefecture-list"),
     path("services/", PropertyServiceListView.as_view(), name="property-service-list"),
     path(
         "recommendations/",
