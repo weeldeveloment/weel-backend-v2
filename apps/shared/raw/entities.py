@@ -38,6 +38,10 @@ class RawUser(RowEntity):
     legacy_partner_id: int | None
 
     @property
+    def pk(self):
+        return self.id
+
+    @property
     def guid(self) -> UUID:
         # Reversible synthetic UUID derived from integer user id.
         return UUID(int=self.id)
