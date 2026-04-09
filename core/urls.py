@@ -228,7 +228,22 @@ if settings.ENABLE_SWAGGER_UI:
             "swagger/",
             _swagger_with_optional_basic_auth,
             name="schema-swagger-ui",
-        )
+        ),
+        path(
+            "api/swagger/",
+            _swagger_with_optional_basic_auth,
+            name="schema-swagger-ui-api-prefix",
+        ),
+        path(
+            "redoc/",
+            schema_view.with_ui("redoc", cache_timeout=0),
+            name="schema-redoc-ui",
+        ),
+        path(
+            "api/redoc/",
+            schema_view.with_ui("redoc", cache_timeout=0),
+            name="schema-redoc-ui-api-prefix",
+        ),
     ]
 
 if settings.DEBUG:

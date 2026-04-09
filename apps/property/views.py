@@ -18,6 +18,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from shared.raw.db import fetch_all
+
 from shared.permissions import IsClient, IsPartner
 from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
 
@@ -67,6 +69,7 @@ from .cottage_serializers import (
     CottageCreateSerializer,
     CottageUpdateSerializer,
 )
+from .serializers import PropertyServiceListSerializer
 from rest_framework import serializers
 
 
@@ -292,8 +295,52 @@ class PropertyTypeListView(APIView):
 
 class PropertyServiceListView(APIView):
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                "property_type_id",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description="Optional comma-separated property type GUIDs or kind names (apartment/cottage).",
+            )
+        ]
+    )
     def get(self, request, *args, **kwargs):
-        return Response([], status=status.HTTP_200_OK)
+        raw_values = request.query_params.getlist("property_type_id") or request.query_params.getlist("property_type_ids")
+        if not raw_values:
+            single_value = (request.query_params.get("property_type_id") or "").strip()
+            raw_values = [single_value] if single_value else []
+
+        kinds: list[str] = []
+        for raw_value in raw_values:
+            for token in str(raw_value).split(","):
+                kind = parse_property_kind(token)
+                if kind and kind not in kinds:
+                    kinds.append(kind)
+
+        where_clauses = []
+        params: list[object] = []
+        if kinds:
+            where_clauses.append("type && %s")
+            params.append(kinds)
+
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        rows = fetch_all(
+            f"""
+            SELECT
+                id AS guid,
+                title,
+                icon_url
+            FROM public.services
+            {where_sql}
+            ORDER BY title ASC
+            """,
+            params,
+        )
+        serializer = PropertyServiceListSerializer(rows, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class RegionListView(APIView):
