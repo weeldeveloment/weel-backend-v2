@@ -15,10 +15,17 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+import base64
+import hmac
+import time
+
 from django.urls import path, include, re_path
 from django.conf.urls.static import static
 from django.views.static import serve
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse, HttpResponseRedirect
+from django.core.cache import cache
+from django.core import signing
+from django.core.signing import BadSignature, SignatureExpired
 
 from rest_framework import permissions
 
@@ -42,6 +49,167 @@ schema_view = get_schema_view(
     permission_classes=[permissions.AllowAny],
 )
 
+_SWAGGER_LOCAL_AUTH_ATTEMPTS: dict[str, tuple[int, float]] = {}
+_SWAGGER_AUTH_COOKIE = "swagger_auth"
+_SWAGGER_AUTH_SALT = "swagger-basic-auth-cookie"
+
+
+def _swagger_auth_required() -> bool:
+    return bool(
+        settings.SWAGGER_BASIC_AUTH_USERNAME and settings.SWAGGER_BASIC_AUTH_PASSWORD
+    )
+
+
+def _swagger_unauthorized_response():
+    html = """
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>Swagger Login Required</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .card { max-width: 520px; border: 1px solid #ddd; border-radius: 8px; padding: 20px; }
+        button { background: #0b5ed7; color: #fff; border: none; border-radius: 6px; padding: 10px 14px; cursor: pointer; }
+        button:hover { background: #084db2; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h3>401 Unauthorized</h3>
+        <p>Swagger uchun login talab qilinadi.</p>
+        <form method="get" action="">
+          <div style="margin-bottom: 10px;">
+            <input type="text" name="swagger_username" placeholder="Username" required />
+          </div>
+          <div style="margin-bottom: 10px;">
+            <input type="password" name="swagger_password" placeholder="Password" required />
+          </div>
+          <button type="submit">Qayta login</button>
+        </form>
+      </div>
+    </body>
+    </html>
+    """
+    return HttpResponse(html, status=401, content_type="text/html; charset=utf-8")
+
+
+def _swagger_cookie_is_valid(request) -> bool:
+    token = request.COOKIES.get(_SWAGGER_AUTH_COOKIE)
+    if not token:
+        return False
+    try:
+        payload = signing.loads(
+            token,
+            salt=_SWAGGER_AUTH_SALT,
+            max_age=settings.SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS,
+        )
+    except (BadSignature, SignatureExpired):
+        return False
+    username = payload.get("u")
+    return bool(
+        username
+        and hmac.compare_digest(username, settings.SWAGGER_BASIC_AUTH_USERNAME)
+    )
+
+
+def _set_swagger_cookie(response):
+    token = signing.dumps(
+        {"u": settings.SWAGGER_BASIC_AUTH_USERNAME},
+        salt=_SWAGGER_AUTH_SALT,
+    )
+    response.set_cookie(
+        _SWAGGER_AUTH_COOKIE,
+        token,
+        max_age=settings.SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS,
+        httponly=True,
+        samesite="Lax",
+        secure=False,
+    )
+
+
+def _swagger_with_optional_basic_auth(request, *args, **kwargs):
+    if not _swagger_auth_required():
+        return schema_view.with_ui("swagger", cache_timeout=0)(request, *args, **kwargs)
+
+    if _swagger_cookie_is_valid(request):
+        return schema_view.with_ui("swagger", cache_timeout=0)(request, *args, **kwargs)
+
+    ident = request.META.get("HTTP_X_FORWARDED_FOR") or request.META.get("REMOTE_ADDR") or "unknown"
+    ident = ident.split(",")[0].strip()
+    fail_cache_key = f"swagger_auth_failures:{ident}"
+    try:
+        failed_attempts = int(cache.get(fail_cache_key, 0) or 0)
+    except Exception:
+        # Redis/cache might be unavailable locally; keep auth working with in-process fallback.
+        attempts, expires_at = _SWAGGER_LOCAL_AUTH_ATTEMPTS.get(ident, (0, 0.0))
+        if expires_at and expires_at <= time.time():
+            attempts = 0
+            _SWAGGER_LOCAL_AUTH_ATTEMPTS.pop(ident, None)
+        failed_attempts = attempts
+
+    if failed_attempts >= settings.SWAGGER_BASIC_AUTH_MAX_ATTEMPTS:
+        return HttpResponse(
+            "Too many failed login attempts. Try again later.",
+            status=429,
+        )
+
+    form_username = (request.GET.get("swagger_username") or "").strip()
+    form_password = request.GET.get("swagger_password") or ""
+    if form_username or form_password:
+        is_valid_username = hmac.compare_digest(
+            form_username, settings.SWAGGER_BASIC_AUTH_USERNAME
+        )
+        is_valid_password = hmac.compare_digest(
+            form_password, settings.SWAGGER_BASIC_AUTH_PASSWORD
+        )
+        if is_valid_username and is_valid_password:
+            try:
+                cache.delete(fail_cache_key)
+            except Exception:
+                _SWAGGER_LOCAL_AUTH_ATTEMPTS.pop(ident, None)
+            response = HttpResponseRedirect(request.path)
+            _set_swagger_cookie(response)
+            return response
+
+    auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+    if not auth_header.startswith("Basic "):
+        return _swagger_unauthorized_response()
+
+    try:
+        encoded = auth_header.split(" ", 1)[1].strip()
+        decoded = base64.b64decode(encoded).decode("utf-8")
+        username, password = decoded.split(":", 1)
+    except Exception:
+        return _swagger_unauthorized_response()
+
+    is_valid_username = hmac.compare_digest(
+        username, settings.SWAGGER_BASIC_AUTH_USERNAME
+    )
+    is_valid_password = hmac.compare_digest(
+        password, settings.SWAGGER_BASIC_AUTH_PASSWORD
+    )
+    if not (is_valid_username and is_valid_password):
+        try:
+            cache.set(
+                fail_cache_key,
+                failed_attempts + 1,
+                timeout=settings.SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS,
+            )
+        except Exception:
+            _SWAGGER_LOCAL_AUTH_ATTEMPTS[ident] = (
+                failed_attempts + 1,
+                time.time() + settings.SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS,
+            )
+        return _swagger_unauthorized_response()
+
+    try:
+        cache.delete(fail_cache_key)
+    except Exception:
+        _SWAGGER_LOCAL_AUTH_ATTEMPTS.pop(ident, None)
+    return schema_view.with_ui("swagger", cache_timeout=0)(request, *args, **kwargs)
+
+
 urlpatterns = [
     path("health/", lambda request: JsonResponse({"status": "ok"})),
 ]
@@ -58,7 +226,7 @@ if settings.ENABLE_SWAGGER_UI:
     urlpatterns += [
         path(
             "swagger/",
-            schema_view.with_ui("swagger", cache_timeout=0),
+            _swagger_with_optional_basic_auth,
             name="schema-swagger-ui",
         )
     ]

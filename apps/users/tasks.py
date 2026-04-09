@@ -12,7 +12,8 @@ from .raw_repository import (
     get_latest_active_partner_telegram_user,
     table_capability_snapshot,
 )
-from shared.raw.db import fetch_all
+from shared.raw.compat import get_table_name
+from shared.raw.db import fetch_all, table_exists
 
 logger = logging.getLogger(__name__)
 
@@ -126,44 +127,109 @@ def send_partner_telegram_msg(self, partner_id: int, message: str):
 )
 def send_partner_property_check_reminders(self):
     caps = table_capability_snapshot()
-    if not (caps.get("users") and caps.get("cottage")):
+    has_users = caps.get("users")
+    has_cottage = caps.get("cottage")
+    has_apartment = table_exists("apartment")
+    has_smslog = caps.get("users_smslog")
+
+    if not (has_users and (has_cottage or has_apartment)):
         result = {
             "sent": 0,
             "skipped_recent": 0,
             "failed": 0,
             "checked": 0,
-            "detail": "Skipped: required normalized tables are missing.",
+            "detail": "Skipped: required normalized tables are missing (users + apartment/cottage).",
         }
         logger.info("Partner property reminder SMS task finished: %s", result)
         return result
 
+    users_table = get_table_name("users")
+    property_source_queries = []
+    if has_cottage:
+        cottage_table = get_table_name("cottage")
+        property_source_queries.append(
+            f"""
+            SELECT c.partner_user_id AS partner_user_id
+            FROM {cottage_table} c
+            WHERE COALESCE(c.is_archived, FALSE) = FALSE
+            """
+        )
+    if has_apartment:
+        apartment_table = get_table_name("apartment")
+        property_source_queries.append(
+            f"""
+            SELECT a.partner_user_id AS partner_user_id
+            FROM {apartment_table} a
+            WHERE COALESCE(a.is_archived, FALSE) = FALSE
+            """
+        )
+
     partners = fetch_all(
-        """
-        SELECT DISTINCT u.id, u.phone_number
-        FROM public.users u
-        JOIN public.cottage c ON c.partner_user_id = u.id
+        f"""
+        SELECT MIN(u.id) AS id, u.phone_number
+        FROM {users_table} u
+        JOIN (
+            {" UNION ".join(property_source_queries)}
+        ) p ON p.partner_user_id = u.id
         WHERE u.role = 'partner'
           AND u.is_active = TRUE
-          AND COALESCE(c.is_archived, FALSE) = FALSE
           AND u.phone_number IS NOT NULL
           AND u.phone_number <> ''
-        ORDER BY u.id
+        GROUP BY u.phone_number
+        ORDER BY MIN(u.id)
         """
     )
 
     eskiz_service = EskizService()
     sent_count = 0
     failed_count = 0
+    skipped_recent_count = 0
+
+    reminder_logs_by_phone: dict[str, object] = {}
+    if has_smslog:
+        smslog_table = get_table_name("users_smslog")
+        reminder_logs = fetch_all(
+            f"""
+            SELECT l.phone_number, MAX(l.created_at) AS last_sent_at
+            FROM {smslog_table} l
+            WHERE l.purpose = %s
+              AND l.is_sent = TRUE
+            GROUP BY l.phone_number
+            """,
+            [SmsPurpose.PARTNER_PROPERTY_REMINDER.value],
+        )
+        reminder_logs_by_phone = {
+            row["phone_number"]: row.get("last_sent_at")
+            for row in reminder_logs
+            if row.get("phone_number")
+        }
 
     for partner in partners:
+        last_sent_at = reminder_logs_by_phone.get(partner["phone_number"])
+        if last_sent_at and (last_sent_at + PARTNER_PROPERTY_REMINDER_INTERVAL) > self.app.now():
+            skipped_recent_count += 1
+            continue
+
         try:
             eskiz_service.send_text_sms(
                 phone_number=partner["phone_number"],
                 message=PARTNER_PROPERTY_CHECK_REMINDER_TEXT,
             )
             sent_count += 1
+            if has_smslog:
+                create_sms_log(
+                    phone_number=partner["phone_number"],
+                    purpose=SmsPurpose.PARTNER_PROPERTY_REMINDER,
+                    is_sent=True,
+                )
         except Exception:
             failed_count += 1
+            if has_smslog:
+                create_sms_log(
+                    phone_number=partner["phone_number"],
+                    purpose=SmsPurpose.PARTNER_PROPERTY_REMINDER,
+                    is_sent=False,
+                )
             logger.exception(
                 "Partner property reminder SMS failed. partner_id=%s",
                 partner["id"],
@@ -171,9 +237,9 @@ def send_partner_property_check_reminders(self):
 
     result = {
         "sent": sent_count,
-        "skipped_recent": 0,
+        "skipped_recent": skipped_recent_count,
         "failed": failed_count,
-        "checked": sent_count + failed_count,
+        "checked": sent_count + skipped_recent_count + failed_count,
     }
     logger.info("Partner property reminder SMS task finished: %s", result)
     return result

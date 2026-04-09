@@ -16,10 +16,15 @@ from firebase_admin import initialize_app, credentials, get_app
 import core.middleware.logging
 from core.middleware.utils import CompressedTimedRotatingFileHandler
 
-load_dotenv(find_dotenv(), override=True)
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(os.path.join(BASE_DIR, "apps"))
+
+_default_env_path = BASE_DIR / "ops" / "monitoring" / ".env"
+_found_env_path = find_dotenv()
+if _found_env_path:
+    load_dotenv(_found_env_path, override=True)
+if _default_env_path.exists():
+    load_dotenv(_default_env_path, override=True)
 
 from users.bin_lookup import load_bin_data
 
@@ -260,8 +265,15 @@ SIMPLE_JWT = {
 }
 
 SWAGGER_URL = (os.getenv("SWAGGER_URL") or "").strip() or None
-# Serve Swagger UI and OpenAPI schema publicly in all environments.
-ENABLE_SWAGGER_UI = True
+ENABLE_SWAGGER_UI = env_bool("ENABLE_SWAGGER_UI", default=DEBUG)
+SWAGGER_BASIC_AUTH_USERNAME = (os.getenv("SWAGGER_BASIC_AUTH_USERNAME") or "").strip()
+SWAGGER_BASIC_AUTH_PASSWORD = (os.getenv("SWAGGER_BASIC_AUTH_PASSWORD") or "").strip()
+SWAGGER_BASIC_AUTH_MAX_ATTEMPTS = int(
+    (os.getenv("SWAGGER_BASIC_AUTH_MAX_ATTEMPTS") or "3").strip() or "3"
+)
+SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS = int(
+    (os.getenv("SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS") or "900").strip() or "900"
+)
 PROMETHEUS_ENABLED = env_bool("PROMETHEUS_ENABLED", default=DEBUG)
 SWAGGER_SETTINGS = {
     # Do not require Django session login for docs; everything is viewable anonymously.
