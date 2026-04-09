@@ -132,6 +132,53 @@ class ChatViewSetTests(SimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("No admin user available", str(response.data))
 
+    @patch("chat.views.ChatViewSet._push_ws_event")
+    @patch("chat.views.touch_conversation")
+    @patch("chat.views.create_chat_message")
+    @patch("chat.views.get_or_create_conversation")
+    @patch("chat.views.get_active_actor")
+    def test_client_send_to_admin_returns_201_and_uses_client_conversation(
+        self,
+        mock_get_active_actor,
+        mock_get_or_create_conversation,
+        mock_create_chat_message,
+        mock_touch_conversation,
+        _mock_push_ws_event,
+    ):
+        client = _raw_user(7, "client", username="client7")
+        admin = _raw_user(1, "admin", username="admin")
+
+        mock_get_active_actor.return_value = admin
+        mock_get_or_create_conversation.return_value = type("Conv", (), {"id": 120})()
+        mock_create_chat_message.return_value = _raw_message(
+            message_id=33,
+            conversation_id=120,
+            sender_user_id=client.id,
+            receiver_user_id=admin.id,
+            sender_role="client",
+            receiver_role="admin",
+            content="hello admin",
+        )
+
+        request = self.factory.post(
+            "/api/chat/send/",
+            {"receiver_id": admin.id, "receiver_type": "admin", "content": "hello admin"},
+            format="json",
+        )
+        force_authenticate(request, user=client, token="auth-token")
+
+        response = ChatViewSet.as_view({"post": "send"})(request)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["sender_type"], "client")
+        self.assertEqual(response.data["receiver_type"], "admin")
+        mock_get_or_create_conversation.assert_called_once_with(
+            admin_user_id=admin.id,
+            counterpart_user_id=client.id,
+            counterpart_role="client",
+        )
+        mock_touch_conversation.assert_called_once_with(120)
+
     def test_read_messages_requires_list_payload(self):
         admin = _raw_user(1, "admin", username="admin")
         request = self.factory.post(
@@ -201,4 +248,34 @@ class ChatViewSetTests(SimpleTestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["counterpart"]["role"], "partner")
         self.assertEqual(response.data[0]["conversation_id"], 10)
+
+    @patch("chat.views.list_conversations_for_actor")
+    def test_conversations_for_client_return_admin_counterpart(self, mock_list_conversations):
+        client = _raw_user(8, "client", username="client8")
+        admin = _raw_user(1, "admin", username="admin")
+        last_message = _raw_message(
+            message_id=4,
+            conversation_id=21,
+            sender_user_id=client.id,
+            receiver_user_id=admin.id,
+            sender_role="client",
+            receiver_role="admin",
+        )
+        mock_list_conversations.return_value = [
+            {
+                "counterpart": admin,
+                "conversation_id": 21,
+                "last_message": last_message,
+                "unread_count": 0,
+            }
+        ]
+
+        request = self.factory.get("/api/chat/conversations/")
+        force_authenticate(request, user=client, token="auth-token")
+
+        response = ChatViewSet.as_view({"get": "conversations"})(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data[0]["counterpart"]["role"], "admin")
+        self.assertEqual(response.data[0]["conversation_id"], 21)
 

@@ -10,6 +10,41 @@ from shared.raw.entities import RawChatConversation, RawChatMessage, RawUser
 from users.raw_repository import fetch_users_by_ids, get_user_by_id, list_active_admin_ids
 
 
+_client_conversation_schema_ready = False
+
+
+def _ensure_client_conversation_schema() -> None:
+    global _client_conversation_schema_ready
+    if _client_conversation_schema_ready:
+        return
+
+    if not is_postgresql():
+        _client_conversation_schema_ready = True
+        return
+
+    table_name = get_table_name("chat_conversation")
+    execute(
+        f"""
+        ALTER TABLE {table_name}
+        ADD COLUMN IF NOT EXISTS client_user_id BIGINT NULL
+        """
+    )
+    execute(
+        f"""
+        CREATE INDEX IF NOT EXISTS chat_conversation_client_updated_idx
+            ON {table_name} (client_user_id, updated_at DESC)
+        """
+    )
+    execute(
+        f"""
+        CREATE UNIQUE INDEX IF NOT EXISTS chat_conversation_admin_client_unique
+            ON {table_name} (admin_user_id, client_user_id)
+            WHERE client_user_id IS NOT NULL
+        """
+    )
+    _client_conversation_schema_ready = True
+
+
 def get_active_actor(actor_id: int, role: str) -> RawUser | None:
     return get_user_by_id(actor_id, role=role, active_only=True)
 
@@ -24,6 +59,9 @@ def get_first_active_admin() -> RawUser | None:
 def get_or_create_conversation(*, admin_user_id: int, counterpart_user_id: int, counterpart_role: str) -> RawChatConversation:
     if counterpart_role not in {"partner", "client"}:
         raise ValueError("counterpart_role must be 'partner' or 'client'")
+
+    if counterpart_role == "client":
+        _ensure_client_conversation_schema()
 
     counterpart_column = "partner_user_id" if counterpart_role == "partner" else "client_user_id"
 
@@ -77,6 +115,9 @@ def get_or_create_conversation(*, admin_user_id: int, counterpart_user_id: int, 
 
 
 def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[str, Any]]:
+    if actor_role in {"client", "admin"}:
+        _ensure_client_conversation_schema()
+
     if actor_role == "admin":
         rows = fetch_all(
             f"""
