@@ -128,6 +128,15 @@ class ChatViewSet(viewsets.GenericViewSet):
         serializer = ChatMessageSerializer(messages, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=["get"], url_path="recipient/admin")
+    def admin_recipient(self, request):
+        """Return the single active admin recipient for partner chat."""
+        admin_user = get_first_active_admin()
+        if not admin_user:
+            return Response({"error": "Admin user not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(ActorSerializer.from_admin(admin_user), status=status.HTTP_200_OK)
+
     @action(detail=False, methods=["post"])
     def send(self, request):
         """Send a message to counterpart actor."""
