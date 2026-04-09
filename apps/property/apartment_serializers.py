@@ -71,11 +71,13 @@ def _parse_int_maybe(value: Any) -> int | None:
         return None
 
 
-def _parse_decimal_maybe(value: Any) -> Decimal | None:
+def _parse_decimal_maybe(value: Any, allow_invalid: bool = False) -> Decimal | None:
     if value in (None, "", "null", "None", "undefined"):
         return None
     amount = _to_decimal(value)
     if amount is None:
+        if allow_invalid:
+            return None
         raise serializers.ValidationError(_("Invalid numeric value."))
     return amount
 
@@ -272,7 +274,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
                     continue
                 value = location_payload.get(key)
                 if key in {"latitude", "longitude"}:
-                    normalized[key] = _parse_decimal_maybe(value)
+                    normalized[key] = _parse_decimal_maybe(value, allow_invalid=is_update)
                 elif key in {"region_id", "district_id"}:
                     normalized[key] = _parse_int_maybe(value)
                 else:

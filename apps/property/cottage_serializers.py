@@ -80,7 +80,11 @@ def _parse_decimal_maybe(value: Any) -> Decimal | None:
     return amount
 
 
-class _PropertyLocationInputSerializer(serializers.Serializer):
+def _parse_decimal_maybe_permissive(value: Any) -> Decimal | None:
+    """Parse decimal but return None on invalid values instead of raising"""
+    if value in (None, "", "null", "None", "undefined"):
+        return None
+    return _to_decimal(value)
     latitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -300,7 +304,7 @@ class CottageCreateSerializer(serializers.Serializer):
             cleaned_location_payload = {}
             for key, value in (attrs.get("property_location") or {}).items():
                 if key in {"latitude", "longitude"}:
-                    cleaned_location_payload[key] = _parse_decimal_maybe(value)
+                    cleaned_location_payload[key] = _parse_decimal_maybe_permissive(value)
                 elif key in {"region_id", "district_id"}:
                     cleaned_location_payload[key] = _parse_int_maybe(value)
                 else:
