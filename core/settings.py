@@ -242,7 +242,7 @@ REST_FRAMEWORK = {
     ],
     "DATETIME_FORMAT": "%Y-%m-%d %H:%M:%S",
     "EXCEPTION_HANDLER": "shared.utils.exception_errors_format_handler",
-    "DEFAULT_THROTTLE_RATES": {"anon": "5/minute", "user": "10/minute", "frontend_log": "60/minute"},
+    "DEFAULT_THROTTLE_RATES": {"anon": "100/hour", "user": "1/second", "frontend_log": "2000/hour"},
     "UNAUTHENTICATED_USER": None,
 }
 
