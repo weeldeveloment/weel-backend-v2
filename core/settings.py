@@ -260,9 +260,14 @@ SIMPLE_JWT = {
 }
 
 SWAGGER_URL = (os.getenv("SWAGGER_URL") or "").strip() or None
-ENABLE_SWAGGER_UI = env_bool("ENABLE_SWAGGER_UI", default=DEBUG)
+# Serve Swagger UI and OpenAPI schema publicly in all environments.
+ENABLE_SWAGGER_UI = True
 PROMETHEUS_ENABLED = env_bool("PROMETHEUS_ENABLED", default=DEBUG)
 SWAGGER_SETTINGS = {
+    # Do not require Django session login for docs; everything is viewable anonymously.
+    "USE_SESSION_AUTH": False,
+    "LOGIN_URL": None,
+    "LOGOUT_URL": None,
     "SECURITY_DEFINITIONS": {
         "Bearer": {
             "type": "apiKey",
