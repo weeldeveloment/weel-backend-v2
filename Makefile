@@ -36,7 +36,7 @@ sms-reminder-run:
 
 # Last 20 reminder SMS logs
 sms-reminder-logs:
-	command $(PYTHON) manage.py shell -c "from users.models.logs import SmsLog, SmsPurpose; rows=SmsLog.objects.filter(purpose=SmsPurpose.PARTNER_PROPERTY_REMINDER).order_by('-created_at').values('phone_number','is_sent','created_at')[:20]; print(list(rows))"
+	command $(PYTHON) manage.py shell -c "from users.models.logs import SmsPurpose; from users.raw_repository import table_capability_snapshot; from shared.raw.compat import get_table_name; from shared.raw.db import fetch_all; caps = table_capability_snapshot(); rows = fetch_all(f\"SELECT phone_number, is_sent, created_at FROM {get_table_name('users_smslog')} WHERE purpose = %s ORDER BY created_at DESC LIMIT 20\", [SmsPurpose.PARTNER_PROPERTY_REMINDER.value]) if caps.get('users_smslog') else []; print(rows)"
 
 # Partners that currently have at least one active property
 sms-reminder-partners:
