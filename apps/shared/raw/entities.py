@@ -42,6 +42,14 @@ class RawUser(RowEntity):
         return self.id
 
     @property
+    def is_authenticated(self) -> bool:
+        return True
+
+    @property
+    def is_anonymous(self) -> bool:
+        return False
+
+    @property
     def guid(self) -> UUID:
         # Reversible synthetic UUID derived from integer user id.
         return UUID(int=self.id)
