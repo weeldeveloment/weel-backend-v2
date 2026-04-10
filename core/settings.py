@@ -242,7 +242,16 @@ REST_FRAMEWORK = {
     ],
     "DATETIME_FORMAT": "%Y-%m-%d %H:%M:%S",
     "EXCEPTION_HANDLER": "shared.utils.exception_errors_format_handler",
-    "DEFAULT_THROTTLE_RATES": {"anon": "100/hour", "user": "1/second", "frontend_log": "2000/hour"},
+    # NOTE:
+    # "1/second" for authenticated users is too strict for mobile app startup,
+    # where multiple independent requests are fired in parallel (objects, stories,
+    # property types, etc.). This caused frequent 429 responses.
+    # Use a minute-window rate to allow short bursts while still limiting abuse.
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "100/hour",
+        "user": os.environ.get("API_USER_THROTTLE_RATE", "120/minute"),
+        "frontend_log": "2000/hour",
+    },
     "UNAUTHENTICATED_USER": None,
 }
 
