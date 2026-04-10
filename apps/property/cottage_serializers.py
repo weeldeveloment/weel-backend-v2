@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from decimal import InvalidOperation
 from typing import Any
+from uuid import UUID
 
 from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
@@ -86,6 +87,22 @@ def _parse_decimal_maybe_permissive(value: Any) -> Decimal | None:
     if value in (None, "", "null", "None", "undefined"):
         return None
     return _to_decimal(value)
+
+
+def _normalize_uuid_list(values: Any) -> list[UUID]:
+    if values in (None, "", "null", "None", "undefined"):
+        return []
+    if not isinstance(values, list):
+        raise serializers.ValidationError(_("Expected a list of UUID values."))
+    normalized: list[UUID] = []
+    for value in values:
+        if value in (None, "", "null", "None", "undefined"):
+            continue
+        try:
+            normalized.append(UUID(str(value)))
+        except (ValueError, TypeError, AttributeError):
+            raise serializers.ValidationError(_("Property services must contain valid UUID values."))
+    return normalized
 
 
 class _PropertyLocationInputSerializer(serializers.Serializer):
@@ -325,7 +342,7 @@ class CottageCreateSerializer(serializers.Serializer):
         if detail_serializer.validated_data:
             normalized.update(detail_serializer.validated_data)
         if "property_services" in attrs:
-            normalized["services"] = attrs.get("property_services") or []
+            normalized["services"] = _normalize_uuid_list(attrs.get("property_services"))
         if "region_id" in attrs or "region" in attrs:
             normalized["region_id"] = _parse_int_maybe(
                 attrs.get("region_id") if attrs.get("region_id") is not None else attrs.get("region")

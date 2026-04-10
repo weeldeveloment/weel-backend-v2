@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import InvalidOperation
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
@@ -81,6 +82,22 @@ def _parse_decimal_maybe(value: Any, allow_invalid: bool = False) -> Decimal | N
             return None
         raise serializers.ValidationError(_("Invalid numeric value."))
     return amount
+
+
+def _normalize_uuid_list(values: Any) -> list[UUID]:
+    if values in (None, "", "null", "None", "undefined"):
+        return []
+    if not isinstance(values, list):
+        raise serializers.ValidationError(_("Expected a list of UUID values."))
+    normalized: list[UUID] = []
+    for value in values:
+        if value in (None, "", "null", "None", "undefined"):
+            continue
+        try:
+            normalized.append(UUID(str(value)))
+        except (ValueError, TypeError, AttributeError):
+            raise serializers.ValidationError(_("Services must contain valid UUID values."))
+    return normalized
 
 
 class ApartmentListSerializer(serializers.Serializer):
@@ -259,9 +276,9 @@ class ApartmentCreateSerializer(serializers.Serializer):
             if key in attrs:
                 normalized[key] = attrs.get(key)
         if "services" in attrs:
-            normalized["services"] = attrs.get("services") or []
+            normalized["services"] = _normalize_uuid_list(attrs.get("services"))
         if "property_services" in attrs:
-            normalized["services"] = attrs.get("property_services") or []
+            normalized["services"] = _normalize_uuid_list(attrs.get("property_services"))
         detail_payload = attrs.get("property_detail") or {}
         if detail_payload:
             for key, value in detail_payload.items():
