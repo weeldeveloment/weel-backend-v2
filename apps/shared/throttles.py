@@ -1,4 +1,9 @@
-from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+import logging
+
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, UserRateThrottle
+
+
+logger = logging.getLogger(__name__)
 
 
 class SwaggerExemptAnonRateThrottle(AnonRateThrottle):
@@ -19,7 +24,11 @@ class SwaggerExemptAnonRateThrottle(AnonRateThrottle):
     def allow_request(self, request, view):
         if request.path.startswith("/swagger/"):
             return True
-        return super().allow_request(request, view)
+        try:
+            return super().allow_request(request, view)
+        except Exception as exc:
+            logger.warning("Anon throttle cache unavailable; allowing request: %s", exc)
+            return True
 
 
 class SwaggerExemptUserRateThrottle(UserRateThrottle):
@@ -30,4 +39,22 @@ class SwaggerExemptUserRateThrottle(UserRateThrottle):
     def allow_request(self, request, view):
         if request.path.startswith("/swagger/"):
             return True
-        return super().allow_request(request, view)
+        try:
+            return super().allow_request(request, view)
+        except Exception as exc:
+            logger.warning("User throttle cache unavailable; allowing request: %s", exc)
+            return True
+
+
+class ResilientScopedRateThrottle(ScopedRateThrottle):
+    """
+    Scoped throttle that fails open when cache backend is unavailable.
+    Prevents auth/login endpoints from returning 500 during Redis outages.
+    """
+
+    def allow_request(self, request, view):
+        try:
+            return super().allow_request(request, view)
+        except Exception as exc:
+            logger.warning("Scoped throttle cache unavailable; allowing request: %s", exc)
+            return True

@@ -188,41 +188,40 @@ DATABASES = {
     }
 }
 
-_redis_url = os.environ.get("REDIS_CONNECTION_STRING")
+_redis_url = (os.environ.get("REDIS_CONNECTION_STRING") or "").strip()
+if not _redis_url or _redis_url in {
+    "redis_connection_string",
+    "REDIS_CONNECTION_STRING",
+    "${REDIS_CONNECTION_STRING}",
+}:
+    raise ImproperlyConfigured(
+        "REDIS_CONNECTION_STRING must be set to a valid Redis URL."
+    )
 
-if _redis_url and _redis_url not in ("", "redis_connection_string"):
-    CACHES = {
-        "default": {
-            "BACKEND": "django_prometheus.cache.backends.redis.RedisCache",
-            "LOCATION": _redis_url,
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            },
+_redis_parts = urlsplit(_redis_url)
+if _redis_parts.scheme not in {"redis", "rediss"}:
+    raise ImproperlyConfigured(
+        "REDIS_CONNECTION_STRING must start with redis:// or rediss://"
+    )
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_prometheus.cache.backends.redis.RedisCache",
+        "LOCATION": _redis_url,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
-    }
-    
-    # Channels configuration with Redis
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {
-                "hosts": [_redis_url],
-            },
+    },
+}
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [_redis_url],
         },
-    }
-else:
-    CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        },
-    }
-    
-    # Channels configuration with in-memory backend (for development only)
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels.layers.InMemoryChannelLayer"
-        },
-    }
+    },
+}
 
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
@@ -235,7 +234,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": [
         "shared.throttles.SwaggerExemptAnonRateThrottle",
         "shared.throttles.SwaggerExemptUserRateThrottle",
-        "rest_framework.throttling.ScopedRateThrottle",
+        "shared.throttles.ResilientScopedRateThrottle",
     ],
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",

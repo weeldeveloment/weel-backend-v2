@@ -1,6 +1,5 @@
 import logging
 import os
-import re
 from celery import Celery
 from celery.schedules import crontab
 from django.conf import settings
@@ -25,53 +24,25 @@ app = Celery("core", include=TASK_MODULES)
 # app.config_from_object('django.conf:settings', namespace='CELERY')
 
 logger = logging.getLogger(__name__)
-ENV_PLACEHOLDER_PATTERN = re.compile(r"\$\{([^}]+)\}")
-
-
-def _resolve_env_value(raw_value: str | None) -> str | None:
-    if not raw_value:
-        return None
-
-    resolved_value = ENV_PLACEHOLDER_PATTERN.sub(
-        lambda match: os.environ.get(match.group(1), match.group(0)),
-        raw_value,
-    ).strip()
-
-    if ENV_PLACEHOLDER_PATTERN.search(resolved_value):
-        logger.warning("Unresolved environment placeholder in value: %s", raw_value)
-        return None
-
-    return resolved_value
 
 # Load task modules from all registered Django apps.
 app.autodiscover_tasks()
 app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
 app.conf.imports = tuple(TASK_MODULES)
 
-REDIS_CONNECTION_STRING = _resolve_env_value(
-    os.environ.get("REDIS_CONNECTION_STRING")
-)
+REDIS_CONNECTION_STRING = (os.environ.get("REDIS_CONNECTION_STRING") or "").strip()
+if not REDIS_CONNECTION_STRING or REDIS_CONNECTION_STRING in {
+    "redis_connection_string",
+    "REDIS_CONNECTION_STRING",
+    "${REDIS_CONNECTION_STRING}",
+}:
+    raise RuntimeError("REDIS_CONNECTION_STRING must be set for Celery.")
+
 TASK_ALWAYS_EAGER = bool(getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False))
 
-# Local (DEBUG=True) bo‘lsa — local Redis, serverda — REDIS_CONNECTION_STRING
-if getattr(settings, "DEBUG", False):
-    BROKER_URL = "redis://127.0.0.1:6379/0"
-    RESULT_BACKEND = "redis://127.0.0.1:6379/0"
-    logger.info("Celery: local Redis (DEBUG=True)")
-else:
-    BROKER_URL = REDIS_CONNECTION_STRING
-    RESULT_BACKEND = REDIS_CONNECTION_STRING
-    if BROKER_URL:
-        logger.info("Celery: server Redis (REDIS_CONNECTION_STRING)")
-
-if TASK_ALWAYS_EAGER:
-    # Tests/development eager mode should not require Redis.
-    BROKER_URL = BROKER_URL or "memory://localhost/"
-    RESULT_BACKEND = RESULT_BACKEND or "cache+memory://"
-elif not BROKER_URL:
-    logger.warning(
-        "Celery broker/backend URL is empty. Set REDIS_CONNECTION_STRING (server) yoki DEBUG=True (local)."
-    )
+BROKER_URL = REDIS_CONNECTION_STRING
+RESULT_BACKEND = REDIS_CONNECTION_STRING
+logger.info("Celery: Redis from REDIS_CONNECTION_STRING")
 
 app.conf.update(
     broker_url=BROKER_URL,
