@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from django.utils import timezone
+from django.db.utils import ProgrammingError
 
 from payment.exchange_rate import exchange_rate
 from shared.raw.compat import get_table_name, is_postgresql
@@ -33,6 +34,11 @@ def _table(*candidates: str) -> str:
 APARTMENT_TABLE = _table("apartment", "property_apartment")
 USERS_TABLE = _table("users", "users_user")
 REVIEW_TABLE = _table("review", "property_review")
+PROPERTY_SERVICE_TABLE = _table("property_service", "property_propertyservice")
+REGION_TABLE = _table("region", "property_region")
+DISTRICT_TABLE = _table("district", "property_district")
+PREFECTURE_TABLE = _table("prefecture")
+DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
 def parse_property_kind(value: str | UUID | None) -> str | None:
@@ -53,6 +59,116 @@ def list_property_types() -> list[dict[str, Any]]:
         {"guid": APARTMENT_TYPE_GUID, "title": "Apartment", "icon_url": None},
         {"guid": COTTAGE_TYPE_GUID, "title": "Cottage", "icon_url": None},
     ]
+
+
+def list_property_services() -> list[dict[str, Any]]:
+    if table_exists("services"):
+        try:
+            return fetch_all(
+                """
+                SELECT
+                    s.id AS guid,
+                    COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, '')) AS title,
+                    s.icon_url AS icon_url
+                FROM services s
+                ORDER BY COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, '')), s.id
+                """
+            )
+        except ProgrammingError:
+            pass
+
+    # Backward compatible schema candidates.
+    legacy_candidates = [PROPERTY_SERVICE_TABLE, "property_service", "property_propertyservice"]
+    seen: set[str] = set()
+    for table_name in legacy_candidates:
+        table_name = str(table_name).strip()
+        if not table_name or table_name in seen:
+            continue
+        seen.add(table_name)
+        if not table_exists(table_name):
+            continue
+        try:
+            return fetch_all(
+                f"""
+                SELECT
+                    ps.guid,
+                    COALESCE(NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''), NULLIF(ps.title_en, '')) AS title,
+                    ps.icon AS icon_url
+                FROM {table_name} ps
+                ORDER BY COALESCE(NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''), NULLIF(ps.title_en, '')), ps.id
+                """
+            )
+        except ProgrammingError:
+            pass
+
+    # Keep endpoint stable instead of throwing 500 when table is unavailable.
+    return []
+
+
+def list_regions() -> list[dict[str, Any]]:
+    return fetch_all(
+        f"""
+        SELECT
+            r.guid,
+            COALESCE(NULLIF(r.title_uz, ''), NULLIF(r.title_ru, ''), NULLIF(r.title_en, '')) AS title,
+            r.img
+        FROM {REGION_TABLE} r
+        ORDER BY COALESCE(NULLIF(r.title_uz, ''), NULLIF(r.title_ru, ''), NULLIF(r.title_en, '')), r.id
+        """
+    )
+
+
+def list_districts(*, region_id: int | None = None) -> list[dict[str, Any]]:
+    where = ["1 = 1"]
+    params: list[Any] = []
+    if region_id is not None:
+        where.append("d.region_id = %s")
+        params.append(region_id)
+    return fetch_all(
+        f"""
+        SELECT
+            d.guid,
+            COALESCE(NULLIF(d.title_uz, ''), NULLIF(d.title_ru, ''), NULLIF(d.title_en, '')) AS title,
+            r.guid AS region_guid,
+            COALESCE(NULLIF(r.title_uz, ''), NULLIF(r.title_ru, ''), NULLIF(r.title_en, '')) AS region_title,
+            r.img AS region_img
+        FROM {DISTRICT_TABLE} d
+        LEFT JOIN {REGION_TABLE} r ON r.id = d.region_id
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(NULLIF(d.title_uz, ''), NULLIF(d.title_ru, ''), NULLIF(d.title_en, '')), d.id
+        """,
+        params,
+    )
+
+
+def list_prefectures_for_district(district_id: int) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"""
+        SELECT
+            p.id AS guid,
+            COALESCE(NULLIF(p.name, ''), NULLIF(p.ru_name, '')) AS title
+        FROM {DISTRICT_PREFECTURE_TABLE} dp
+        JOIN {PREFECTURE_TABLE} p ON p.id = dp.prefecture_id
+        WHERE dp.district_id = %s
+        ORDER BY COALESCE(NULLIF(p.name, ''), NULLIF(p.ru_name, '')), p.id
+        """,
+        [district_id],
+    )
+
+
+def is_prefecture_linked_to_district(*, district_id: int, prefecture_guid: str) -> bool:
+    row = fetch_one(
+        f"""
+        SELECT EXISTS (
+            SELECT 1
+            FROM {DISTRICT_PREFECTURE_TABLE} dp
+            WHERE dp.district_id = %s
+              AND CAST(dp.prefecture_id AS TEXT) = %s
+        ) AS exists_flag
+        """,
+        [district_id, str(prefecture_guid)],
+    )
+    return bool(row and row.get("exists_flag"))
 
 
 APARTMENT_SELECT = f"""
@@ -83,9 +199,9 @@ APARTMENT_SELECT = f"""
         a.city,
         a.country,
         a.services,
-        NULL AS region_id,
-        NULL AS district_id,
-        NULL AS prefecture_id,
+        a.region_id,
+        a.district_id,
+        a.prefecture_id,
         a.description_en,
         a.description_ru,
         a.description_uz,
@@ -219,7 +335,7 @@ def create_apartment(
             %s, %s, %s, %s,
             %s,
             %s, %s, %s, %s,
-            %s, %s,
+            %s, %s, %s,
             %s, %s, %s,
             %s, %s,
             %s, %s, %s, %s,
@@ -259,8 +375,7 @@ _APARTMENT_UPDATE_ALLOWED = {
     "minimum_weekend_day_stay", "weekend_only_sunday_inclusive",
     "price", "currency", "img",
     "latitude", "longitude", "city", "country",
-    "region_id", "district_id",
-    "prefecture_id",
+    "region_id", "district_id", "prefecture_id",
     "description_en", "description_ru", "description_uz",
     "check_in", "check_out",
     "is_allowed_alcohol", "is_allowed_corporate", "is_allowed_pets", "is_quiet_hours",
@@ -309,9 +424,10 @@ def set_apartment_primary_image(
     partner_user_id: int,
     image_path: str | None,
 ) -> dict[str, Any] | None:
+    image_payload = [image_path] if image_path else []
     row = fetch_one(
         f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [image_path, timezone.now(), apartment_id, partner_user_id],
+        [image_payload, timezone.now(), apartment_id, partner_user_id],
     )
     if not row:
         return None
