@@ -21,10 +21,12 @@ from .views import (
     DistrictListView,
     PrefectureListView,
     LocationListView,
+    PrefectureListView,
     UnifiedRecommendationsListView,
     CategoryListView,
     CategoryPropertyRecommendationView,
     CategoryLatestPropertyListView,
+    PropertyListCreateView,
 )
 
 
@@ -56,7 +58,7 @@ urlpatterns = [
         CategoryPropertyRecommendationView.as_view(),
         name="category-property-recommendation",
     ),
-    # path("properties/", PropertyListCreateView.as_view(), name="property-list-create"),
+    path("properties/", PropertyListCreateView.as_view(), name="property-list-create"),
     path(
         "apartments/",
         ApartmentPropertyListCreateView.as_view(),

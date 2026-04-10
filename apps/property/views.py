@@ -30,11 +30,16 @@ from .apartment_repository import (
     PROPERTY_KIND_COTTAGE,
     parse_property_kind,
     list_property_types,
+    list_property_services,
+    list_regions,
+    list_districts,
+    list_prefectures_for_district,
     list_reviews,
     has_eligible_booking_for_review,
     create_review,
     prepare_property_rows,
 )
+from .serializers import PropertyServiceListSerializer, RegionListSerializer, DistrictListSerializer, PrefectureListSerializer
 from .apartment_repository import (
     list_apartments,
     get_apartment_for_public,
@@ -460,50 +465,15 @@ class PropertyTypeListView(APIView):
 class PropertyServiceListView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(
-        manual_parameters=[
-            openapi.Parameter(
-                "property_type_id",
-                openapi.IN_QUERY,
-                type=openapi.TYPE_STRING,
-                required=False,
-                description="Optional comma-separated property type GUIDs or kind names (apartment/cottage).",
-            )
-        ]
-    )
+    @swagger_auto_schema(responses={200: PropertyServiceListSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        raw_values = request.query_params.getlist("property_type_id") or request.query_params.getlist("property_type_ids")
-        if not raw_values:
-            single_value = (request.query_params.get("property_type_id") or "").strip()
-            raw_values = [single_value] if single_value else []
-
-        kinds: list[str] = []
-        for raw_value in raw_values:
-            for token in str(raw_value).split(","):
-                kind = parse_property_kind(token)
-                if kind and kind not in kinds:
-                    kinds.append(kind)
-
-        where_clauses = []
-        params: list[object] = []
-        if kinds:
-            where_clauses.append("type && %s")
-            params.append(kinds)
-
-        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        rows = fetch_all(
-            f"""
-            SELECT
-                id AS guid,
-                title,
-                icon_url
-            FROM public.services
-            {where_sql}
-            ORDER BY title ASC
-            """,
-            params,
-        )
-        serializer = PropertyServiceListSerializer(rows, many=True)
+        rows = list_property_services()
+        data = []
+        for row in rows:
+            payload = dict(row)
+            payload["icon_url"] = _build_media_url(request, payload.get("icon_url"))
+            data.append(payload)
+        serializer = PropertyServiceListSerializer(data, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -512,28 +482,57 @@ class RegionListView(APIView):
 
     @swagger_auto_schema(responses={200: RegionListSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        language = _preferred_language(request)
-        return Response(_fetch_regions(language), status=status.HTTP_200_OK)
+        rows = list_regions()
+        data = []
+        for row in rows:
+            payload = dict(row)
+            payload["img"] = _build_media_url(request, payload.get("img"))
+            data.append(payload)
+        serializer = RegionListSerializer(data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class DistrictListView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(manual_parameters=LOCATION_QUERY_PARAMS, responses={200: DistrictListSerializer(many=True)})
+    @swagger_auto_schema(
+        manual_parameters=[openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER)],
+        responses={200: DistrictListSerializer(many=True)},
+    )
     def get(self, request, *args, **kwargs):
-        language = _preferred_language(request)
-        region_id = _parse_int(_source_get(request.query_params, "region_id"))
-        return Response(_fetch_districts(language, region_id=region_id), status=status.HTTP_200_OK)
+        region_id = _parse_int(request.query_params.get("region_id"))
+        rows = list_districts(region_id=region_id)
+        data = []
+        for row in rows:
+            data.append(
+                {
+                    "guid": row.get("guid"),
+                    "title": row.get("title"),
+                    "region": {
+                        "guid": row.get("region_guid"),
+                        "title": row.get("region_title"),
+                        "img": _build_media_url(request, row.get("region_img")),
+                    } if row.get("region_guid") else None,
+                }
+            )
+        serializer = DistrictListSerializer(data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class PrefectureListView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(manual_parameters=LOCATION_QUERY_PARAMS, responses={200: PrefectureListSerializer(many=True)})
+    @swagger_auto_schema(
+        manual_parameters=[openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER)],
+        responses={200: PrefectureListSerializer(many=True)},
+    )
     def get(self, request, *args, **kwargs):
-        language = _preferred_language(request)
-        district_id = _parse_int(_source_get(request.query_params, "district_id"))
-        return Response(_fetch_prefectures(language, district_id=district_id), status=status.HTTP_200_OK)
+        district_id = _parse_int(request.query_params.get("district_id"))
+        if district_id not in {75, 82}:
+            return Response([], status=status.HTTP_200_OK)
+        rows = list_prefectures_for_district(district_id)
+        serializer = PrefectureListSerializer(rows, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class LocationListView(APIView):
@@ -541,8 +540,14 @@ class LocationListView(APIView):
 
     @swagger_auto_schema(responses={200: RegionsResponseSerializer()})
     def get(self, request, *args, **kwargs):
-        language = _preferred_language(request)
-        return Response({"regions": _build_location_tree(language)}, status=status.HTTP_200_OK)
+        rows = list_regions()
+        data = []
+        for row in rows:
+            payload = dict(row)
+            payload["img"] = _build_media_url(request, payload.get("img"))
+            data.append(payload)
+        serializer = RegionListSerializer(data, many=True)
+        return Response({"regions": serializer.data}, status=status.HTTP_200_OK)
 
 
 class CategoryListView(APIView):
@@ -701,7 +706,10 @@ class PropertyListCreateView(APIView):
     @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
     def get(self, request, *args, **kwargs):
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        if self.forced_property_type == PROPERTY_KIND_COTTAGE:
+        requested_kind = self.forced_property_type or parse_property_kind(
+            request.query_params.get("property_type")
+        )
+        if requested_kind == PROPERTY_KIND_COTTAGE:
             rows = _list_cottage_rows(request.query_params, public_only=True)
             return Response(CottageListSerializer(rows, many=True, context=ctx).data)
         rows = _list_apartment_rows(request.query_params, public_only=True)
