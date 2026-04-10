@@ -250,6 +250,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "100/hour",
         "user": os.environ.get("API_USER_THROTTLE_RATE", "120/minute"),
+        "otp_login_send": os.environ.get("API_OTP_LOGIN_SEND_RATE", "30/minute"),
         "frontend_log": "2000/hour",
     },
     "UNAUTHENTICATED_USER": None,

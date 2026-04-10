@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework import status, viewsets
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework.permissions import AllowAny
 
@@ -70,6 +71,8 @@ from payment.services import PlumAPIService
 
 class ClientSendOTPLoginView(APIView):
     permission_classes = (AllowAny,)
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_login_send"
 
     @swagger_auto_schema(
         tags=["Auth - Login"],
@@ -591,6 +594,8 @@ class PartnerRegisterVerifyView(APIView):
 
 class PartnerSendOTPLoginView(APIView):
     permission_classes = (AllowAny,)
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_login_send"
 
     @swagger_auto_schema(
         tags=["Auth - Login"],
