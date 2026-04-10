@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from payment.exchange_rate import to_uzs
+from .apartment_repository import is_prefecture_linked_to_district
 
 
 def _build_media_url(request, media_path: Any) -> list[str]:
@@ -227,7 +228,8 @@ class CottageCreateSerializer(serializers.Serializer):
     district = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    img = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    prefecture_id = serializers.UUIDField(required=False, allow_null=True)
+    img = serializers.JSONField(required=False)
 
     def validate(self, attrs):
         is_update = bool(self.context.get("is_update"))
@@ -280,7 +282,13 @@ class CottageCreateSerializer(serializers.Serializer):
         elif not is_update:
             normalized["currency"] = "UZS"
         if "img" in attrs:
-            normalized["img"] = attrs.get("img")
+            image_value = attrs.get("img")
+            if isinstance(image_value, list):
+                normalized["img"] = [str(v) for v in image_value if v]
+            elif image_value:
+                normalized["img"] = [str(image_value)]
+            else:
+                normalized["img"] = []
         normalized["price_per_person"] = per_person
         normalized["price_on_working_days"] = working
         normalized["price_on_weekends"] = weekends
@@ -296,6 +304,25 @@ class CottageCreateSerializer(serializers.Serializer):
             normalized["district_id"] = _parse_int_maybe(
                 attrs.get("district_id") if attrs.get("district_id") is not None else attrs.get("district")
             )
+        prefecture_value = attrs.get("prefecture_id")
+        if prefecture_value is not None:
+            normalized["prefecture_id"] = str(prefecture_value)
+
+        if not is_update:
+            if normalized.get("region_id") is None:
+                raise serializers.ValidationError({"region_id": _("This field is required.")})
+            if normalized.get("district_id") is None:
+                raise serializers.ValidationError({"district_id": _("This field is required.")})
+
+        district_id = normalized.get("district_id")
+        prefecture_id = normalized.get("prefecture_id")
+        if district_id in {75, 82}:
+            if not prefecture_id:
+                raise serializers.ValidationError({"prefecture_id": _("This field is required for selected district.")})
+            if not is_prefecture_linked_to_district(district_id=district_id, prefecture_guid=prefecture_id):
+                raise serializers.ValidationError({"prefecture_id": _("Invalid prefecture for selected district.")})
+        elif prefecture_id:
+            raise serializers.ValidationError({"prefecture_id": _("Prefecture can be set only for district 75 or 82.")})
 
         attrs["normalized_values"] = normalized
         return attrs

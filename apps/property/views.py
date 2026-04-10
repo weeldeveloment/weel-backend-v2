@@ -28,11 +28,16 @@ from .apartment_repository import (
     PROPERTY_KIND_COTTAGE,
     parse_property_kind,
     list_property_types,
+    list_property_services,
+    list_regions,
+    list_districts,
+    list_prefectures_for_district,
     list_reviews,
     has_eligible_booking_for_review,
     create_review,
     prepare_property_rows,
 )
+from .serializers import PropertyServiceListSerializer, RegionListSerializer, DistrictListSerializer, PrefectureListSerializer
 from .apartment_repository import (
     list_apartments,
     get_apartment_for_public,
@@ -292,26 +297,88 @@ class PropertyTypeListView(APIView):
 
 class PropertyServiceListView(APIView):
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(responses={200: PropertyServiceListSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        return Response([], status=status.HTTP_200_OK)
+        rows = list_property_services()
+        data = []
+        for row in rows:
+            payload = dict(row)
+            payload["icon_url"] = _build_media_url(request, payload.get("icon_url"))
+            data.append(payload)
+        serializer = PropertyServiceListSerializer(data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class RegionListView(APIView):
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(responses={200: RegionListSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        return Response([], status=status.HTTP_200_OK)
+        rows = list_regions()
+        data = []
+        for row in rows:
+            payload = dict(row)
+            payload["img"] = _build_media_url(request, payload.get("img"))
+            data.append(payload)
+        serializer = RegionListSerializer(data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class DistrictListView(APIView):
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        manual_parameters=[openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER)],
+        responses={200: DistrictListSerializer(many=True)},
+    )
     def get(self, request, *args, **kwargs):
-        return Response([], status=status.HTTP_200_OK)
+        region_id = _parse_int(request.query_params.get("region_id"))
+        rows = list_districts(region_id=region_id)
+        data = []
+        for row in rows:
+            data.append(
+                {
+                    "guid": row.get("guid"),
+                    "title": row.get("title"),
+                    "region": {
+                        "guid": row.get("region_guid"),
+                        "title": row.get("region_title"),
+                        "img": _build_media_url(request, row.get("region_img")),
+                    } if row.get("region_guid") else None,
+                }
+            )
+        serializer = DistrictListSerializer(data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class PrefectureListView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        manual_parameters=[openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER)],
+        responses={200: PrefectureListSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        district_id = _parse_int(request.query_params.get("district_id"))
+        if district_id not in {75, 82}:
+            return Response([], status=status.HTTP_200_OK)
+        rows = list_prefectures_for_district(district_id)
+        serializer = PrefectureListSerializer(rows, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class LocationListView(APIView):
     permission_classes = [AllowAny]
     def get(self, request, *args, **kwargs):
-        return Response({"regions": []}, status=status.HTTP_200_OK)
+        rows = list_regions()
+        data = []
+        for row in rows:
+            payload = dict(row)
+            payload["img"] = _build_media_url(request, payload.get("img"))
+            data.append(payload)
+        serializer = RegionListSerializer(data, many=True)
+        return Response({"regions": serializer.data}, status=status.HTTP_200_OK)
 
 
 class CategoryListView(APIView):

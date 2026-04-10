@@ -22,6 +22,9 @@ def _table(*candidates: str) -> str:
 COTTAGE_TABLE = _table("cottage", "property_cottage")
 USERS_TABLE = _table("users", "users_user")
 REVIEW_TABLE = _table("review", "property_review")
+DISTRICT_TABLE = _table("district", "property_district")
+REGION_TABLE = _table("region", "property_region")
+DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
 COTTAGE_SELECT = f"""
@@ -54,8 +57,9 @@ COTTAGE_SELECT = f"""
         c.city,
         c.country,
         c.services,
-        NULL AS region_id,
-        NULL AS district_id,
+        d.region_id AS region_id,
+        dp.district_id AS district_id,
+        c.prefecture_id,
         c.description_en,
         c.description_ru,
         c.description_uz,
@@ -72,6 +76,9 @@ COTTAGE_SELECT = f"""
         COALESCE(stats.average_rating, 5.0) AS average_rating,
         COALESCE(stats.review_count, 0) AS review_count
     FROM {COTTAGE_TABLE} c
+    LEFT JOIN {DISTRICT_PREFECTURE_TABLE} dp ON dp.prefecture_id = c.prefecture_id
+    LEFT JOIN {DISTRICT_TABLE} d ON d.id = dp.district_id
+    LEFT JOIN {REGION_TABLE} reg ON reg.id = d.region_id
     LEFT JOIN {USERS_TABLE} u ON u.id = c.partner_user_id
     LEFT JOIN LATERAL (
         SELECT
@@ -111,10 +118,10 @@ def list_cottages(
         where.append("COALESCE(c.title, '') LIKE %s")
         params.append(f"%{search.strip()}%")
     if region_id is not None:
-        where.append("c.region_id = %s")
+        where.append("d.region_id = %s")
         params.append(region_id)
     if district_id is not None:
-        where.append("c.district_id = %s")
+        where.append("dp.district_id = %s")
         params.append(district_id)
     if corporate is not None:
         where.append("COALESCE(c.is_allowed_corporate, FALSE) = %s")
@@ -171,7 +178,7 @@ def create_cottage(
             price_per_person, price_on_working_days, price_on_weekends,
             currency, img, partner_user_id,
             latitude, longitude, city, country,
-            region_id, district_id,
+            prefecture_id,
             description_en, description_ru, description_uz,
             check_in, check_out,
             is_allowed_alcohol, is_allowed_corporate, is_allowed_pets, is_quiet_hours
@@ -183,7 +190,7 @@ def create_cottage(
             %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s, %s,
-            %s, %s,
+            %s,
             %s, %s, %s,
             %s, %s,
             %s, %s, %s, %s
@@ -202,7 +209,7 @@ def create_cottage(
             partner_user_id,
             values.get("latitude"), values.get("longitude"),
             values.get("city"), values.get("country"),
-            values.get("region_id"), values.get("district_id"),
+            values.get("prefecture_id"),
             values.get("description_en"), values.get("description_ru"), values.get("description_uz"),
             values.get("check_in"), values.get("check_out"),
             bool(values.get("is_allowed_alcohol", False)),
@@ -222,7 +229,7 @@ _COTTAGE_UPDATE_ALLOWED = {
     "price_per_person", "price_on_working_days", "price_on_weekends",
     "currency", "img",
     "latitude", "longitude", "city", "country",
-    "region_id", "district_id",
+    "prefecture_id",
     "description_en", "description_ru", "description_uz",
     "check_in", "check_out",
     "is_allowed_alcohol", "is_allowed_corporate", "is_allowed_pets", "is_quiet_hours",
@@ -270,9 +277,10 @@ def set_cottage_primary_image(
     partner_user_id: int,
     image_path: str | None,
 ) -> dict[str, Any] | None:
+    image_payload = [image_path] if image_path else []
     row = fetch_one(
         f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [image_path, timezone.now(), cottage_id, partner_user_id],
+        [image_payload, timezone.now(), cottage_id, partner_user_id],
     )
     if not row:
         return None
