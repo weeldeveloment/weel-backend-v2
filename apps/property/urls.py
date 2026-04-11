@@ -21,7 +21,6 @@ from .views import (
     DistrictListView,
     PrefectureListView,
     LocationListView,
-    PrefectureListView,
     UnifiedRecommendationsListView,
     CategoryListView,
     CategoryPropertyRecommendationView,

@@ -33,7 +33,7 @@ from .apartment_repository import (
     list_property_services,
     list_regions,
     list_districts,
-    list_prefectures_for_district,
+    list_prefectures,
     list_reviews,
     has_eligible_booking_for_review,
     create_review,
@@ -528,10 +528,22 @@ class PrefectureListView(APIView):
     )
     def get(self, request, *args, **kwargs):
         district_id = _parse_int(request.query_params.get("district_id"))
-        if district_id not in {75, 82}:
-            return Response([], status=status.HTTP_200_OK)
-        rows = list_prefectures_for_district(district_id)
-        serializer = PrefectureListSerializer(rows, many=True)
+        rows = list_prefectures(district_id=district_id)
+        data = []
+        for row in rows:
+            data.append(
+                {
+                    "guid": row.get("guid"),
+                    "title": row.get("title"),
+                    "district": {
+                        "guid": row.get("district_guid"),
+                        "title": row.get("district_title"),
+                    }
+                    if row.get("district_guid")
+                    else None,
+                }
+            )
+        serializer = PrefectureListSerializer(data, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
