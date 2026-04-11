@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunSQL(
             sql="""
-            ALTER TABLE chat_conversation ADD COLUMN client_user_id BIGINT NULL;
+            ALTER TABLE chat_conversation ADD COLUMN IF NOT EXISTS client_user_id BIGINT NULL;
             CREATE INDEX IF NOT EXISTS chat_conversation_client_updated_idx
                 ON chat_conversation (client_user_id, updated_at DESC);
             CREATE UNIQUE INDEX IF NOT EXISTS chat_conversation_admin_client_unique

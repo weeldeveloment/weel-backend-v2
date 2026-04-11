@@ -12,6 +12,7 @@ from users.authentication import ClientJWTAuthentication, PartnerJWTAuthenticati
 
 from .authentication import RawAdminJWTAuthentication
 from .raw_repository import (
+    ChatSchemaNotReadyError,
     create_chat_message,
     get_active_actor,
     get_first_active_admin,
@@ -123,7 +124,13 @@ class ChatViewSet(viewsets.GenericViewSet):
     def messages(self, request, partner_id=None):
         """Get all messages with a specific counterpart."""
         user = request.user
-        requested_role = (request.query_params.get("role") or request.query_params.get("counterpart_role") or "").lower()
+        requested_role = (
+            request.query_params.get("role")
+            or request.query_params.get("counterpart_role")
+            or request.query_params.get("receiver_type")
+            or request.query_params.get("partner_type")
+            or ""
+        ).lower()
 
         try:
             counterpart_id = int(partner_id)
@@ -135,11 +142,14 @@ class ChatViewSet(viewsets.GenericViewSet):
             counterpart = get_active_actor(counterpart_id, target_role)
             if not counterpart:
                 return Response({"error": f"{target_role.capitalize()} not found"}, status=status.HTTP_404_NOT_FOUND)
-            conversation = get_or_create_conversation(
-                admin_user_id=user.id,
-                counterpart_user_id=counterpart.id,
-                counterpart_role=target_role,
-            )
+            try:
+                conversation = get_or_create_conversation(
+                    admin_user_id=user.id,
+                    counterpart_user_id=counterpart.id,
+                    counterpart_role=target_role,
+                )
+            except ChatSchemaNotReadyError as exc:
+                return Response({"error": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         elif is_partner_actor(user):
             admin_user = get_active_actor(counterpart_id, "admin")
             if not admin_user:
@@ -187,7 +197,12 @@ class ChatViewSet(viewsets.GenericViewSet):
     def send(self, request):
         """Send a message to counterpart actor."""
         raw_receiver_id = request.data.get("receiver_id")
-        receiver_type_param = (request.data.get("receiver_type") or "").strip().lower()
+        receiver_type_param = (
+            request.data.get("receiver_type")
+            or request.data.get("counterpart_type")
+            or request.data.get("partner_type")
+            or ""
+        ).strip().lower()
         content = (request.data.get("content") or "").strip()
         if raw_receiver_id in (None, "") or not content:
             return Response(
@@ -207,11 +222,14 @@ class ChatViewSet(viewsets.GenericViewSet):
             if not counterpart:
                 return Response({"error": f"{target_role.capitalize()} not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            conversation = get_or_create_conversation(
-                admin_user_id=sender.id,
-                counterpart_user_id=counterpart.id,
-                counterpart_role=target_role,
-            )
+            try:
+                conversation = get_or_create_conversation(
+                    admin_user_id=sender.id,
+                    counterpart_user_id=counterpart.id,
+                    counterpart_role=target_role,
+                )
+            except ChatSchemaNotReadyError as exc:
+                return Response({"error": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             message = create_chat_message(
                 conversation_id=conversation.id,
                 sender_user_id=sender.id,

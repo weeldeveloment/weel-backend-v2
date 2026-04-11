@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from django.utils import timezone
+from django.db.utils import DatabaseError
 
 from shared.raw.compat import get_table_name, is_postgresql, return_star
 from shared.raw.db import execute, fetch_all, fetch_one
@@ -11,6 +12,41 @@ from users.raw_repository import fetch_users_by_ids, get_user_by_id, list_active
 
 
 _client_conversation_schema_ready = False
+_partner_conversation_column: str | None = None
+
+
+class ChatSchemaNotReadyError(RuntimeError):
+    pass
+
+
+def _resolve_partner_conversation_column() -> str:
+    global _partner_conversation_column
+    if _partner_conversation_column:
+        return _partner_conversation_column
+
+    table_name = get_table_name("chat_conversation")
+    partner_user_col = fetch_one(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = %s
+          AND column_name = 'partner_user_id'
+        LIMIT 1
+        """,
+        [table_name],
+    )
+    _partner_conversation_column = "partner_user_id" if partner_user_col else "partner_id"
+    return _partner_conversation_column
+
+
+def _normalize_conversation_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    if "partner_user_id" not in row and "partner_id" in row:
+        normalized = dict(row)
+        normalized["partner_user_id"] = row.get("partner_id")
+        return normalized
+    return row
 
 
 def _ensure_client_conversation_schema() -> None:
@@ -23,25 +59,31 @@ def _ensure_client_conversation_schema() -> None:
         return
 
     table_name = get_table_name("chat_conversation")
-    execute(
-        f"""
-        ALTER TABLE {table_name}
-        ADD COLUMN IF NOT EXISTS client_user_id BIGINT NULL
-        """
-    )
-    execute(
-        f"""
-        CREATE INDEX IF NOT EXISTS chat_conversation_client_updated_idx
-            ON {table_name} (client_user_id, updated_at DESC)
-        """
-    )
-    execute(
-        f"""
-        CREATE UNIQUE INDEX IF NOT EXISTS chat_conversation_admin_client_unique
-            ON {table_name} (admin_user_id, client_user_id)
-            WHERE client_user_id IS NOT NULL
-        """
-    )
+    try:
+        execute(
+            f"""
+            ALTER TABLE {table_name}
+            ADD COLUMN IF NOT EXISTS client_user_id BIGINT NULL
+            """
+        )
+        execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS chat_conversation_client_updated_idx
+                ON {table_name} (client_user_id, updated_at DESC)
+            """
+        )
+        execute(
+            f"""
+            CREATE UNIQUE INDEX IF NOT EXISTS chat_conversation_admin_client_unique
+                ON {table_name} (admin_user_id, client_user_id)
+                WHERE client_user_id IS NOT NULL
+            """
+        )
+    except DatabaseError as exc:
+        raise ChatSchemaNotReadyError(
+            "Client chat schema is not ready. Run chat migrations (including chat.0003_add_client_conversation) "
+            "or grant ALTER/CREATE INDEX permissions for runtime schema bootstrap."
+        ) from exc
     _client_conversation_schema_ready = True
 
 
@@ -63,7 +105,8 @@ def get_or_create_conversation(*, admin_user_id: int, counterpart_user_id: int, 
     if counterpart_role == "client":
         _ensure_client_conversation_schema()
 
-    counterpart_column = "partner_user_id" if counterpart_role == "partner" else "client_user_id"
+    partner_column = _resolve_partner_conversation_column()
+    counterpart_column = partner_column if counterpart_role == "partner" else "client_user_id"
 
     existing = fetch_one(
         f"""
@@ -76,10 +119,13 @@ def get_or_create_conversation(*, admin_user_id: int, counterpart_user_id: int, 
         [admin_user_id, counterpart_user_id],
     )
     if existing is not None:
-        return RawChatConversation.from_row(existing)
+        return RawChatConversation.from_row(_normalize_conversation_row(existing))
 
     now = timezone.now()
-    partner_value = counterpart_user_id if counterpart_role == "partner" else None
+    # Backward-compat: some deployed DBs still enforce NOT NULL on partner column.
+    # For client conversations, mirror counterpart id into partner column while
+    # also storing the canonical client_user_id.
+    partner_value = counterpart_user_id if counterpart_role in {"partner", "client"} else None
     client_value = counterpart_user_id if counterpart_role == "client" else None
 
     inserted = fetch_one(
@@ -88,7 +134,7 @@ def get_or_create_conversation(*, admin_user_id: int, counterpart_user_id: int, 
             created_at,
             updated_at,
             admin_user_id,
-            partner_user_id,
+            {partner_column},
             client_user_id
         ) VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT DO NOTHING
@@ -97,7 +143,7 @@ def get_or_create_conversation(*, admin_user_id: int, counterpart_user_id: int, 
         [now, now, admin_user_id, partner_value, client_value],
     )
     if inserted is not None:
-        return RawChatConversation.from_row(inserted)
+        return RawChatConversation.from_row(_normalize_conversation_row(inserted))
 
     row = fetch_one(
         f"""
@@ -111,12 +157,14 @@ def get_or_create_conversation(*, admin_user_id: int, counterpart_user_id: int, 
     )
     if row is None:
         raise RuntimeError("Failed to fetch conversation after create")
-    return RawChatConversation.from_row(row)
+    return RawChatConversation.from_row(_normalize_conversation_row(row))
 
 
 def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[str, Any]]:
     if actor_role in {"client", "admin"}:
         _ensure_client_conversation_schema()
+
+    partner_column = _resolve_partner_conversation_column()
 
     if actor_role == "admin":
         rows = fetch_all(
@@ -133,7 +181,7 @@ def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[st
             f"""
             SELECT *
             FROM {get_table_name("chat_conversation")}
-            WHERE partner_user_id = %s
+            WHERE {partner_column} = %s
             ORDER BY updated_at DESC, id DESC
             """,
             [actor_id],
@@ -154,7 +202,7 @@ def list_conversations_for_actor(actor_id: int, actor_role: str) -> list[dict[st
     if not rows:
         return []
 
-    conversations = [RawChatConversation.from_row(row) for row in rows]
+    conversations = [RawChatConversation.from_row(_normalize_conversation_row(row)) for row in rows]
     conversation_ids = [conversation.id for conversation in conversations]
 
     counterpart_ids: list[int] = []
