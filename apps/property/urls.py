@@ -13,6 +13,7 @@ from .views import (
     PropertyRetrieveUpdateDestroyView,
     PartnerPropertyReviewListView,
     PartnerPropertyListView,
+    PartnerPropertyAnalyticsView,
     ApartmentPartnerPropertyListView,
     CottagePartnerPropertyListView,
     SavedPropertyListView,
@@ -148,6 +149,11 @@ urlpatterns = [
         "partner/properties/",
         PartnerPropertyListView.as_view(),
         name="partner-property-list",
+    ),
+    path(
+        "partner/properties/<uuid:property_id>/analytics/",
+        PartnerPropertyAnalyticsView.as_view(),
+        name="partner-property-analytics",
     ),
     path(
         "partner/apartments/",

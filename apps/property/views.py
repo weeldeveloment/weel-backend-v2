@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
+from collections import defaultdict
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
@@ -8,17 +9,19 @@ from uuid import uuid4
 from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.conf import settings
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 
 from rest_framework import parsers, status
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from shared.raw.db import fetch_all
+from shared.raw.compat import get_table_name
 
 from shared.permissions import IsClient, IsPartner
 from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
@@ -1028,6 +1031,250 @@ class PartnerPropertyReviewListView(APIView):
             raise NotFound(_("Property not found"))
         rows = list_reviews(property_kind=str(property_row["property_kind"]), property_id=int(property_row["id"]), include_hidden=True)
         return Response(RawPropertyReviewSerializer(rows, many=True).data, status=status.HTTP_200_OK)
+
+
+ANALYTICS_RANGE_DAYS = {
+    "week": 7,
+    "month": 30,
+    "quarter": 90,
+    "year": 365,
+}
+
+
+def _analytics_range_bounds(range_name: str) -> tuple[date, date, date, date]:
+    days = ANALYTICS_RANGE_DAYS.get(range_name, ANALYTICS_RANGE_DAYS["month"])
+    today = timezone.localdate()
+    start_date = today - timedelta(days=days - 1)
+    previous_end_date = start_date - timedelta(days=1)
+    previous_start_date = previous_end_date - timedelta(days=days - 1)
+    return start_date, today, previous_start_date, previous_end_date
+
+
+def _analytics_property_id_column(property_kind: str) -> str:
+    if property_kind == PROPERTY_KIND_APARTMENT:
+        return "property_apartment_id"
+    return "property_cottage_id"
+
+
+def _as_date(value):
+    if hasattr(value, "date"):
+        return value.date()
+    return value
+
+
+def _change_percent(current: int, previous: int) -> float:
+    if previous <= 0:
+        return 0.0 if current <= 0 else 100.0
+    return round(((current - previous) / previous) * 100, 1)
+
+
+def _format_amount(amount: Decimal) -> str:
+    return str(Decimal(amount).quantize(Decimal("0.01")))
+
+
+def _build_analytics_series(start_date: date, end_date: date, values_by_date: dict[str, float | int]) -> list[dict[str, float | int | str]]:
+    series: list[dict[str, float | int | str]] = []
+    current = start_date
+    while current <= end_date:
+        label = current.isoformat()
+        series.append({"label": label, "value": values_by_date.get(label, 0)})
+        current += timedelta(days=1)
+    return series
+
+
+def _summarize_bookings(rows: list[dict], start_date: date, end_date: date) -> dict[str, object]:
+    booked_count = 0
+    cancelled_count = 0
+    no_show_count = 0
+    cancelled_after_booking_count = 0
+    activity: dict[str, int] = defaultdict(int)
+
+    for row in rows:
+        created_at = row.get("created_at")
+        if created_at:
+            created_date = _as_date(created_at)
+            if start_date <= created_date <= end_date:
+                activity[created_date.isoformat()] += 1
+
+        confirmed_at = row.get("confirmed_at") or row.get("completed_at")
+        if confirmed_at:
+            confirmed_date = _as_date(confirmed_at)
+            if start_date <= confirmed_date <= end_date and str(row.get("status") or "").lower() in {"confirmed", "completed"}:
+                booked_count += 1
+
+        cancelled_at = row.get("cancelled_at")
+        if cancelled_at:
+            cancelled_date = _as_date(cancelled_at)
+            if start_date <= cancelled_date <= end_date and str(row.get("status") or "").lower() == "cancelled":
+                cancelled_count += 1
+                reason = str(row.get("cancellation_reason") or "").strip().lower()
+                if reason == "user_no_show":
+                    no_show_count += 1
+                else:
+                    cancelled_after_booking_count += 1
+
+    return {
+        "booked_count": booked_count,
+        "cancelled_count": cancelled_count,
+        "no_show_count": no_show_count,
+        "cancelled_after_booking_count": cancelled_after_booking_count,
+        "activity": activity,
+    }
+
+
+def _summarize_income(rows: list[dict], start_date: date, end_date: date) -> dict[str, object]:
+    total = Decimal("0")
+    bars: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    count = 0
+
+    for row in rows:
+        created_at = row.get("created_at")
+        if not created_at:
+            continue
+        created_date = _as_date(created_at)
+        if not (start_date <= created_date <= end_date):
+            continue
+        amount = Decimal(str(row.get("amount") or "0"))
+        total += amount
+        bars[created_date.isoformat()] += amount
+        count += 1
+
+    return {"total": total, "count": count, "bars": bars}
+
+
+class PartnerPropertyAnalyticsView(APIView):
+    authentication_classes = [PartnerJWTAuthentication]
+    permission_classes = [IsPartner]
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter("range", openapi.IN_QUERY, type=openapi.TYPE_STRING, enum=["week", "month", "quarter", "year"]),
+        ]
+    )
+    def get(self, request, property_id, *args, **kwargs):
+        partner_id = int(request.user.id)
+        property_row = _get_property_for_partner(str(property_id), partner_id)
+        if not property_row:
+            raise NotFound(_("Property not found"))
+
+        property_kind = str(property_row["property_kind"])
+        if property_kind == PROPERTY_KIND_APARTMENT:
+            full_property = get_apartment_for_partner(str(property_id), partner_id)
+        else:
+            full_property = get_cottage_for_partner(str(property_id), partner_id)
+
+        if not full_property:
+            raise NotFound(_("Property not found"))
+
+        range_name = str(request.query_params.get("range") or "month").lower()
+        if range_name not in ANALYTICS_RANGE_DAYS:
+            raise ValidationError({"range": _("Invalid range")})
+
+        start_date, end_date, previous_start_date, previous_end_date = _analytics_range_bounds(range_name)
+        property_column = _analytics_property_id_column(property_kind)
+        property_table = get_table_name("booking")
+        transaction_table = get_table_name("transaction_history")
+
+        booking_rows = fetch_all(
+            f"""
+            SELECT created_at, confirmed_at, cancelled_at, completed_at, status, cancellation_reason
+            FROM {property_table}
+            WHERE {property_column} = %s
+            ORDER BY created_at ASC, id ASC
+            """,
+            [int(property_row["id"])],
+        )
+
+        income_rows = fetch_all(
+            f"""
+            SELECT th.created_at, th.amount
+            FROM {transaction_table} th
+            INNER JOIN {property_table} b ON b.id = th.booking_id
+            WHERE b.{property_column} = %s
+              AND th.type = 'CHRG'
+              AND th.status = 'CHARGED'
+            ORDER BY th.created_at ASC, th.id ASC
+            """,
+            [int(property_row["id"])],
+        )
+
+        current_bookings = _summarize_bookings(booking_rows, start_date, end_date)
+        previous_bookings = _summarize_bookings(booking_rows, previous_start_date, previous_end_date)
+        current_income = _summarize_income(income_rows, start_date, end_date)
+
+        booked_count = int(current_bookings["booked_count"])
+        cancelled_count = int(current_bookings["cancelled_count"])
+        no_show_count = int(current_bookings["no_show_count"])
+        cancelled_after_booking_count = int(current_bookings["cancelled_after_booking_count"])
+
+        previous_booked_count = int(previous_bookings["booked_count"])
+        previous_cancelled_count = int(previous_bookings["cancelled_count"])
+        previous_no_show_count = int(previous_bookings["no_show_count"])
+        previous_cancelled_after_booking_count = int(previous_bookings["cancelled_after_booking_count"])
+
+        booked_change_percent = _change_percent(booked_count, previous_booked_count)
+        cancelled_change_percent = _change_percent(cancelled_count, previous_cancelled_count)
+        no_show_change_percent = _change_percent(no_show_count, previous_no_show_count)
+        cancelled_after_booking_change_percent = _change_percent(
+            cancelled_after_booking_count,
+            previous_cancelled_after_booking_count,
+        )
+        comparison_percent = _change_percent(booked_count + cancelled_count, previous_booked_count + previous_cancelled_count)
+
+        income_total = Decimal(current_income["total"])
+        charged_count = int(current_income["count"])
+        total_mix = booked_count + cancelled_count + charged_count
+        if total_mix <= 0:
+            distribution = {
+                "income_percent": 0,
+                "bookings_percent": 0,
+                "cancellations_percent": 0,
+            }
+        else:
+            distribution = {
+                "income_percent": round((charged_count / total_mix) * 100, 1),
+                "bookings_percent": round((booked_count / total_mix) * 100, 1),
+                "cancellations_percent": round((cancelled_count / total_mix) * 100, 1),
+            }
+
+        property_image_url = None
+        img_value = full_property.get("img")
+        if img_value:
+            try:
+                property_image_url = default_storage.url(img_value)
+            except Exception:
+                property_image_url = str(img_value)
+
+        return Response(
+            {
+                "property": {
+                    "guid": str(full_property.get("guid")),
+                    "title": full_property.get("title") or "",
+                    "image_url": property_image_url,
+                    "city": full_property.get("city"),
+                },
+                "range": range_name,
+                "bookings_overview": {
+                    "comparison_percent": comparison_percent,
+                    "booked_count": booked_count,
+                    "booked_change_percent": booked_change_percent,
+                    "cancelled_count": cancelled_count,
+                    "cancelled_change_percent": cancelled_change_percent,
+                    "no_show_count": no_show_count,
+                    "no_show_change_percent": no_show_change_percent,
+                    "cancelled_after_booking_count": cancelled_after_booking_count,
+                    "cancelled_after_booking_change_percent": cancelled_after_booking_change_percent,
+                    "distribution": distribution,
+                },
+                "bookings_activity": _build_analytics_series(start_date, end_date, dict(current_bookings["activity"])),
+                "income_overview": {
+                    "balance_amount": _format_amount(income_total),
+                    "currency": str(full_property.get("currency") or "UZS"),
+                    "bars": _build_analytics_series(start_date, end_date, {key: float(value) for key, value in dict(current_income["bars"]).items()}),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 # ---------------------------------------------------------------------------
