@@ -250,6 +250,10 @@ REST_FRAMEWORK = {
         "anon": "100/hour",
         "user": os.environ.get("API_USER_THROTTLE_RATE", "120/minute"),
         "otp_login_send": os.environ.get("API_OTP_LOGIN_SEND_RATE", "30/minute"),
+        # Login/register *verify* views use ScopedRateThrottle only (see users.views);
+        # without these scopes they inherited anon+user limits and hit 429 with long Retry-After.
+        "otp_login_verify": os.environ.get("API_OTP_LOGIN_VERIFY_RATE", "60/minute"),
+        "otp_register_verify": os.environ.get("API_OTP_REGISTER_VERIFY_RATE", "60/minute"),
         "frontend_log": "2000/hour",
     },
     "UNAUTHENTICATED_USER": None,
