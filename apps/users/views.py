@@ -114,6 +114,8 @@ class ClientSendOTPLoginView(APIView):
 
 class ClientVerifyOTPLoginView(APIView):
     permission_classes = (AllowAny,)
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_login_verify"
 
     @swagger_auto_schema(
         tags=["Auth - Login"],
@@ -193,6 +195,8 @@ class ClientSendOTPRegisterView(APIView):
 
 class ClientRegisterVerifyView(APIView):
     permission_classes = (AllowAny,)
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_register_verify"
 
     @swagger_auto_schema(
         tags=["Auth - Register"],
@@ -511,6 +515,8 @@ class PartnerOTPRegisterView(APIView):
 
 class PartnerRegisterVerifyView(APIView):
     permission_classes = (AllowAny,)
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_register_verify"
 
     @swagger_auto_schema(
         tags=["Auth - Register"],
@@ -645,6 +651,8 @@ class PartnerSendOTPLoginView(APIView):
 
 class PartnerLoginVerifyView(APIView):
     permission_classes = (AllowAny,)
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_login_verify"
 
     @swagger_auto_schema(
         tags=["Auth - Login"],
