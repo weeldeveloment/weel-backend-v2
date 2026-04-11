@@ -335,6 +335,8 @@ class ClientResendOTPRegisterView(APIView):
 
 class UserTokenRefreshView(APIView):
     permission_classes = (AllowAny,)
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "token_refresh"
 
     @swagger_auto_schema(
         tags=["Auth - Refresh"],
