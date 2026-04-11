@@ -523,12 +523,16 @@ class PrefectureListView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        manual_parameters=[openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER)],
+        manual_parameters=[
+            openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter("district_guid", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+        ],
         responses={200: PrefectureListSerializer(many=True)},
     )
     def get(self, request, *args, **kwargs):
         district_id = _parse_int(request.query_params.get("district_id"))
-        rows = list_prefectures(district_id=district_id)
+        district_guid = (request.query_params.get("district_guid") or "").strip() or None
+        rows = list_prefectures(district_id=district_id, district_guid=district_guid)
         data = []
         for row in rows:
             data.append(

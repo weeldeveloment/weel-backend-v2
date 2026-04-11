@@ -141,13 +141,16 @@ def list_districts(*, region_id: int | None = None) -> list[dict[str, Any]]:
     )
 
 
-def list_prefectures(*, district_id: int | None = None) -> list[dict[str, Any]]:
-    """List prefectures; optional district_id filter (same idea as list_districts / region_id)."""
+def list_prefectures(*, district_id: int | None = None, district_guid: str | None = None) -> list[dict[str, Any]]:
+    """List prefectures; optional district_id or district_guid filter."""
     where = ["1 = 1"]
     params: list[Any] = []
     if district_id is not None:
         where.append("dp.district_id = %s")
         params.append(district_id)
+    elif district_guid:
+        where.append("CAST(d.guid AS TEXT) = %s")
+        params.append(str(district_guid))
     return fetch_all(
         f"""
         SELECT
