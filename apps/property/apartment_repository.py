@@ -141,19 +141,33 @@ def list_districts(*, region_id: int | None = None) -> list[dict[str, Any]]:
     )
 
 
-def list_prefectures_for_district(district_id: int) -> list[dict[str, Any]]:
+def list_prefectures(*, district_id: int | None = None) -> list[dict[str, Any]]:
+    """List prefectures; optional district_id filter (same idea as list_districts / region_id)."""
+    where = ["1 = 1"]
+    params: list[Any] = []
+    if district_id is not None:
+        where.append("dp.district_id = %s")
+        params.append(district_id)
     return fetch_all(
         f"""
         SELECT
             p.id AS guid,
-            COALESCE(NULLIF(p.name, ''), NULLIF(p.ru_name, '')) AS title
-        FROM {DISTRICT_PREFECTURE_TABLE} dp
-        JOIN {PREFECTURE_TABLE} p ON p.id = dp.prefecture_id
-        WHERE dp.district_id = %s
+            COALESCE(NULLIF(p.name, ''), NULLIF(p.ru_name, '')) AS title,
+            d.guid AS district_guid,
+            COALESCE(NULLIF(d.title_uz, ''), NULLIF(d.title_ru, ''), NULLIF(d.title_en, '')) AS district_title
+        FROM {PREFECTURE_TABLE} p
+        LEFT JOIN {DISTRICT_PREFECTURE_TABLE} dp ON dp.prefecture_id = p.id
+        LEFT JOIN {DISTRICT_TABLE} d ON d.id = dp.district_id
+        WHERE {' AND '.join(where)}
         ORDER BY COALESCE(NULLIF(p.name, ''), NULLIF(p.ru_name, '')), p.id
         """,
-        [district_id],
+        params,
     )
+
+
+def list_prefectures_for_district(district_id: int) -> list[dict[str, Any]]:
+    """Backward-compatible; same rows as list_prefectures(district_id=...) for one district."""
+    return list_prefectures(district_id=district_id)
 
 
 def is_prefecture_linked_to_district(*, district_id: int, prefecture_guid: str) -> bool:
