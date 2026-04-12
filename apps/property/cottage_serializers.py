@@ -258,7 +258,13 @@ class CottageDetailSerializer(serializers.Serializer):
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
         row["property_services"] = row.get("services") or []
-        row["property_room"] = {"guid": None, "guests": None, "rooms": None, "beds": None, "bathrooms": None}
+        row["property_room"] = {
+            "guid": None,
+            "guests": _parse_int_maybe(row.get("guests")),
+            "rooms": _parse_int_maybe(row.get("rooms")),
+            "beds": _parse_int_maybe(row.get("beds")),
+            "bathrooms": _parse_int_maybe(row.get("bathrooms")),
+        }
         return super().to_representation(row)
 
 
@@ -292,24 +298,28 @@ class CottageCreateSerializer(serializers.Serializer):
         detail_serializer = _PropertyDetailInputSerializer(data=detail_payload, partial=True)
         detail_serializer.is_valid(raise_exception=True)
 
-        per_person = _to_decimal(attrs.get("price_per_person"))
-        working = _to_decimal(attrs.get("price_on_working_days"))
-        weekends = _to_decimal(attrs.get("price_on_weekends"))
+        price_fields_present = any(
+            key in attrs for key in ("price_per_person", "price_on_working_days", "price_on_weekends")
+        )
+        per_person = _to_decimal(attrs.get("price_per_person")) if "price_per_person" in attrs else None
+        working = _to_decimal(attrs.get("price_on_working_days")) if "price_on_working_days" in attrs else None
+        weekends = _to_decimal(attrs.get("price_on_weekends")) if "price_on_weekends" in attrs else None
 
-        if not is_update and working is None and weekends is None and per_person is None:
-            per_person = Decimal("0")
-            working = Decimal("0")
-            weekends = Decimal("0")
-        else:
-            if working is None:
-                working = Decimal("0")
-            if weekends is None:
-                weekends = working
-            if per_person is None:
+        if not is_update:
+            if working is None and weekends is None and per_person is None:
                 per_person = Decimal("0")
+                working = Decimal("0")
+                weekends = Decimal("0")
+            else:
+                if working is None:
+                    working = Decimal("0")
+                if weekends is None:
+                    weekends = working
+                if per_person is None:
+                    per_person = Decimal("0")
 
         for val in (per_person, working, weekends):
-            if val < 0:
+            if val is not None and val < 0:
                 raise serializers.ValidationError(_("Price values must be non-negative"))
 
         normalized: dict[str, Any] = {}
@@ -336,9 +346,10 @@ class CottageCreateSerializer(serializers.Serializer):
                 normalized["img"] = [str(image_value)]
             else:
                 normalized["img"] = []
-        normalized["price_per_person"] = per_person
-        normalized["price_on_working_days"] = working
-        normalized["price_on_weekends"] = weekends
+        if price_fields_present or not is_update:
+            normalized["price_per_person"] = per_person if per_person is not None else Decimal("0")
+            normalized["price_on_working_days"] = working if working is not None else Decimal("0")
+            normalized["price_on_weekends"] = weekends if weekends is not None else normalized["price_on_working_days"]
         if attrs.get("property_location") is not None:
             cleaned_location_payload = {}
             for key, value in (attrs.get("property_location") or {}).items():
@@ -355,6 +366,13 @@ class CottageCreateSerializer(serializers.Serializer):
             normalized.update(detail_serializer.validated_data)
         if "property_services" in attrs:
             normalized["services"] = _normalize_uuid_list(attrs.get("property_services"))
+        if "property_room" in attrs:
+            room_payload = attrs.get("property_room") or {}
+            if not isinstance(room_payload, dict):
+                raise serializers.ValidationError({"property_room": _("Expected an object.")})
+            for key in ("guests", "rooms", "beds", "bathrooms"):
+                if key in room_payload:
+                    normalized[key] = _parse_int_maybe(room_payload.get(key))
         if "region_id" in attrs or "region" in attrs:
             normalized["region_id"] = _parse_int_maybe(
                 attrs.get("region_id") if attrs.get("region_id") is not None else attrs.get("region")

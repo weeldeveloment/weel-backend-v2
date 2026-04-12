@@ -46,6 +46,10 @@ def _column_exists(table_name: str, column_name: str, schema: str = "public") ->
 
 HAS_COTTAGE_REGION_ID = _column_exists(COTTAGE_TABLE, "region_id")
 HAS_COTTAGE_DISTRICT_ID = _column_exists(COTTAGE_TABLE, "district_id")
+HAS_COTTAGE_GUESTS = _column_exists(COTTAGE_TABLE, "guests")
+HAS_COTTAGE_ROOMS = _column_exists(COTTAGE_TABLE, "rooms")
+HAS_COTTAGE_BEDS = _column_exists(COTTAGE_TABLE, "beds")
+HAS_COTTAGE_BATHROOMS = _column_exists(COTTAGE_TABLE, "bathrooms")
 
 REGION_SELECT_SQL = "COALESCE(c.region_id, d.region_id)" if HAS_COTTAGE_REGION_ID else "d.region_id"
 DISTRICT_SELECT_SQL = "COALESCE(c.district_id, dp.district_id)" if HAS_COTTAGE_DISTRICT_ID else "dp.district_id"
@@ -93,6 +97,10 @@ COTTAGE_SELECT = f"""
         c.is_allowed_corporate,
         c.is_allowed_pets,
         c.is_quiet_hours,
+        {"c.guests" if HAS_COTTAGE_GUESTS else "NULL"} AS guests,
+        {"c.rooms" if HAS_COTTAGE_ROOMS else "NULL"} AS rooms,
+        {"c.beds" if HAS_COTTAGE_BEDS else "NULL"} AS beds,
+        {"c.bathrooms" if HAS_COTTAGE_BATHROOMS else "NULL"} AS bathrooms,
         u.username AS partner_username,
         u.first_name AS partner_first_name,
         u.last_name AS partner_last_name,
@@ -207,6 +215,22 @@ def create_cottage(
         optional_columns.append("district_id")
         optional_placeholders.append("%s")
         optional_params.append(values.get("district_id"))
+    if HAS_COTTAGE_GUESTS:
+        optional_columns.append("guests")
+        optional_placeholders.append("%s")
+        optional_params.append(values.get("guests"))
+    if HAS_COTTAGE_ROOMS:
+        optional_columns.append("rooms")
+        optional_placeholders.append("%s")
+        optional_params.append(values.get("rooms"))
+    if HAS_COTTAGE_BEDS:
+        optional_columns.append("beds")
+        optional_placeholders.append("%s")
+        optional_params.append(values.get("beds"))
+    if HAS_COTTAGE_BATHROOMS:
+        optional_columns.append("bathrooms")
+        optional_placeholders.append("%s")
+        optional_params.append(values.get("bathrooms"))
 
     location_columns_sql = "latitude, longitude, city, country"
     if optional_columns:
@@ -292,6 +316,14 @@ if HAS_COTTAGE_REGION_ID:
     _COTTAGE_UPDATE_ALLOWED.add("region_id")
 if HAS_COTTAGE_DISTRICT_ID:
     _COTTAGE_UPDATE_ALLOWED.add("district_id")
+if HAS_COTTAGE_GUESTS:
+    _COTTAGE_UPDATE_ALLOWED.add("guests")
+if HAS_COTTAGE_ROOMS:
+    _COTTAGE_UPDATE_ALLOWED.add("rooms")
+if HAS_COTTAGE_BEDS:
+    _COTTAGE_UPDATE_ALLOWED.add("beds")
+if HAS_COTTAGE_BATHROOMS:
+    _COTTAGE_UPDATE_ALLOWED.add("bathrooms")
 
 
 def update_cottage(
