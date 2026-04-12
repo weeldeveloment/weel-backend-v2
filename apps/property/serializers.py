@@ -55,12 +55,14 @@ class LocationPrefectureSerializer(serializers.Serializer):
 
 
 class LocationDistrictListSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False, allow_null=True)
     guid = serializers.UUIDField()
     title = serializers.CharField()
     prefectures = LocationPrefectureSerializer(many=True, required=False)
 
 
 class LocationRegionListSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False, allow_null=True)
     guid = serializers.UUIDField()
     title = serializers.CharField()
     districts = LocationDistrictListSerializer(many=True, required=False)

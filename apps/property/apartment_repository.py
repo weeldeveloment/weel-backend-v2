@@ -111,6 +111,7 @@ def list_regions() -> list[dict[str, Any]]:
     return fetch_all(
         f"""
         SELECT
+            r.id,
             r.guid,
             COALESCE(NULLIF(r.title_uz, ''), NULLIF(r.title_ru, ''), NULLIF(r.title_en, '')) AS title,
             r.img
@@ -129,8 +130,10 @@ def list_districts(*, region_id: int | None = None) -> list[dict[str, Any]]:
     return fetch_all(
         f"""
         SELECT
+            d.id,
             d.guid,
             COALESCE(NULLIF(d.title_uz, ''), NULLIF(d.title_ru, ''), NULLIF(d.title_en, '')) AS title,
+            d.region_id,
             r.guid AS region_guid,
             COALESCE(NULLIF(r.title_uz, ''), NULLIF(r.title_ru, ''), NULLIF(r.title_en, '')) AS region_title,
             r.img AS region_img
@@ -188,6 +191,36 @@ def is_prefecture_linked_to_district(*, district_id: int, prefecture_guid: str) 
         [district_id, str(prefecture_guid)],
     )
     return bool(row and row.get("exists_flag"))
+
+
+def resolve_region_id_by_guid(region_guid: str | None) -> int | None:
+    raw = str(region_guid or "").strip()
+    if not raw:
+        return None
+    row = fetch_one(
+        f"SELECT r.id FROM {REGION_TABLE} r WHERE CAST(r.guid AS TEXT) = %s LIMIT 1",
+        [raw],
+    )
+    value = row.get("id") if row else None
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_district_id_by_guid(district_guid: str | None) -> int | None:
+    raw = str(district_guid or "").strip()
+    if not raw:
+        return None
+    row = fetch_one(
+        f"SELECT d.id FROM {DISTRICT_TABLE} d WHERE CAST(d.guid AS TEXT) = %s LIMIT 1",
+        [raw],
+    )
+    value = row.get("id") if row else None
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 APARTMENT_SELECT = f"""

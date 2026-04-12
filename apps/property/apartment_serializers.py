@@ -10,7 +10,11 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from payment.exchange_rate import to_uzs
-from .apartment_repository import is_prefecture_linked_to_district
+from .apartment_repository import (
+    is_prefecture_linked_to_district,
+    resolve_district_id_by_guid,
+    resolve_region_id_by_guid,
+)
 
 
 def _build_media_url(request, media_path: Any) -> list[str]:
@@ -71,6 +75,20 @@ def _parse_int_maybe(value: Any) -> int | None:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _parse_region_id_maybe(value: Any) -> int | None:
+    parsed = _parse_int_maybe(value)
+    if parsed is not None:
+        return parsed
+    return resolve_region_id_by_guid(str(value or "").strip())
+
+
+def _parse_district_id_maybe(value: Any) -> int | None:
+    parsed = _parse_int_maybe(value)
+    if parsed is not None:
+        return parsed
+    return resolve_district_id_by_guid(str(value or "").strip())
 
 
 def _parse_decimal_maybe(value: Any, allow_invalid: bool = False) -> Decimal | None:
@@ -300,13 +318,20 @@ class ApartmentCreateSerializer(serializers.Serializer):
                 if key in {"latitude", "longitude"}:
                     normalized[key] = _parse_decimal_maybe(value, allow_invalid=is_update)
                 elif key in {"region_id", "district_id"}:
-                    normalized[key] = _parse_int_maybe(value)
+                    if key == "region_id":
+                        normalized[key] = _parse_region_id_maybe(value)
+                    else:
+                        normalized[key] = _parse_district_id_maybe(value)
                 else:
                     normalized[key] = None if value in ("", "null", "None", "undefined") else value
         if "region_id" in attrs or "region_id" in location_payload:
-            normalized["region_id"] = _parse_int_maybe(attrs.get("region_id") if attrs.get("region_id") is not None else location_payload.get("region_id"))
+            normalized["region_id"] = _parse_region_id_maybe(
+                attrs.get("region_id") if attrs.get("region_id") is not None else location_payload.get("region_id")
+            )
         if "district_id" in attrs or "district_id" in location_payload:
-            normalized["district_id"] = _parse_int_maybe(attrs.get("district_id") if attrs.get("district_id") is not None else location_payload.get("district_id"))
+            normalized["district_id"] = _parse_district_id_maybe(
+                attrs.get("district_id") if attrs.get("district_id") is not None else location_payload.get("district_id")
+            )
         if "prefecture_id" in attrs or "prefecture_id" in location_payload:
             pref_val = attrs.get("prefecture_id") if attrs.get("prefecture_id") is not None else location_payload.get("prefecture_id")
             normalized["prefecture_id"] = str(pref_val) if pref_val not in (None, "", "null", "None", "undefined") else None

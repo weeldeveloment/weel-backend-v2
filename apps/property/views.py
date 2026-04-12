@@ -42,6 +42,7 @@ from .apartment_repository import (
     has_eligible_booking_for_review,
     create_review,
     prepare_property_rows,
+    resolve_region_id_by_guid,
 )
 from .serializers import PropertyServiceListSerializer, RegionListSerializer, DistrictListSerializer, PrefectureListSerializer
 from .apartment_repository import (
@@ -190,6 +191,16 @@ def _parse_int(value) -> int | None:
         return None
 
 
+def _parse_region_id_or_guid(value) -> int | None:
+    parsed = _parse_int(value)
+    if parsed is not None:
+        return parsed
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    return resolve_region_id_by_guid(raw)
+
+
 def _parse_decimal(value) -> Decimal | None:
     if value in (None, "", "null", "None", "undefined"):
         return None
@@ -333,6 +344,7 @@ def _build_location_tree(language: str) -> list[dict]:
             continue
         districts_by_region.setdefault(int(region_id), []).append(
             {
+                "id": district_id,
                 "guid": district["guid"],
                 "title": district["title"],
                 "prefectures": prefectures_by_district.get(district_id, []),
@@ -341,6 +353,7 @@ def _build_location_tree(language: str) -> list[dict]:
 
     return [
         {
+            "id": region.get("id"),
             "guid": region["guid"],
             "title": region["title"],
             "districts": districts_by_region.get(int(region["id"]), []),
@@ -502,19 +515,24 @@ class DistrictListView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        manual_parameters=[openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER)],
+        manual_parameters=[
+            openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+        ],
         responses={200: DistrictListSerializer(many=True)},
     )
     def get(self, request, *args, **kwargs):
-        region_id = _parse_int(request.query_params.get("region_id"))
+        region_id = _parse_region_id_or_guid(request.query_params.get("region_id"))
         rows = list_districts(region_id=region_id)
         data = []
         for row in rows:
             data.append(
                 {
+                    "id": row.get("id"),
                     "guid": row.get("guid"),
                     "title": row.get("title"),
+                    "region_id": row.get("region_id"),
                     "region": {
+                        "id": row.get("region_id"),
                         "guid": row.get("region_guid"),
                         "title": row.get("region_title"),
                         "img": _build_media_url(request, row.get("region_img")),
@@ -562,13 +580,9 @@ class LocationListView(APIView):
 
     @swagger_auto_schema(responses={200: RegionsResponseSerializer()})
     def get(self, request, *args, **kwargs):
-        rows = list_regions()
-        data = []
-        for row in rows:
-            payload = dict(row)
-            payload["img"] = _build_media_url(request, payload.get("img"))
-            data.append(payload)
-        serializer = RegionListSerializer(data, many=True)
+        language = _preferred_language(request)
+        regions = _build_location_tree(language)
+        serializer = LocationRegionListSerializer(regions, many=True)
         return Response({"regions": serializer.data}, status=status.HTTP_200_OK)
 
 

@@ -128,12 +128,15 @@ class _PropertyDetailInputSerializer(serializers.Serializer):
 
 
 class RawRegionSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False, allow_null=True)
     guid = serializers.UUIDField(allow_null=True)
     title = serializers.CharField(allow_blank=True, allow_null=True)
     img = serializers.CharField(allow_blank=True, allow_null=True)
 
 
 class RawDistrictSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False, allow_null=True)
+    region_id = serializers.IntegerField(required=False, allow_null=True)
     guid = serializers.UUIDField(allow_null=True)
     title = serializers.CharField(allow_blank=True, allow_null=True)
     region = RawRegionSerializer(allow_null=True)
