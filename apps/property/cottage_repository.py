@@ -27,6 +27,30 @@ REGION_TABLE = _table("region", "property_region")
 DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
+def _column_exists(table_name: str, column_name: str, schema: str = "public") -> bool:
+    raw_table = str(table_name).split(".")[-1]
+    row = fetch_one(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = %s
+              AND table_name = %s
+              AND column_name = %s
+        ) AS exists
+        """,
+        [schema, raw_table, column_name],
+    )
+    return bool(row and row.get("exists"))
+
+
+HAS_COTTAGE_REGION_ID = _column_exists(COTTAGE_TABLE, "region_id")
+HAS_COTTAGE_DISTRICT_ID = _column_exists(COTTAGE_TABLE, "district_id")
+
+REGION_SELECT_SQL = "COALESCE(c.region_id, d.region_id)" if HAS_COTTAGE_REGION_ID else "d.region_id"
+DISTRICT_SELECT_SQL = "COALESCE(c.district_id, dp.district_id)" if HAS_COTTAGE_DISTRICT_ID else "dp.district_id"
+
+
 COTTAGE_SELECT = f"""
     SELECT
         'cottage' AS property_kind,
@@ -57,8 +81,8 @@ COTTAGE_SELECT = f"""
         c.city,
         c.country,
         c.services,
-        COALESCE(c.region_id, d.region_id) AS region_id,
-        COALESCE(c.district_id, dp.district_id) AS district_id,
+        {REGION_SELECT_SQL} AS region_id,
+        {DISTRICT_SELECT_SQL} AS district_id,
         c.prefecture_id,
         c.description_en,
         c.description_ru,
@@ -118,10 +142,10 @@ def list_cottages(
         where.append("COALESCE(c.title, '') LIKE %s")
         params.append(f"%{search.strip()}%")
     if region_id is not None:
-        where.append("COALESCE(c.region_id, d.region_id) = %s")
+        where.append(f"{REGION_SELECT_SQL} = %s")
         params.append(region_id)
     if district_id is not None:
-        where.append("COALESCE(c.district_id, dp.district_id) = %s")
+        where.append(f"{DISTRICT_SELECT_SQL} = %s")
         params.append(district_id)
     if corporate is not None:
         where.append("COALESCE(c.is_allowed_corporate, FALSE) = %s")
@@ -168,6 +192,26 @@ def create_cottage(
     values: dict[str, Any],
 ) -> dict[str, Any] | None:
     now = timezone.now()
+    optional_columns: list[str] = []
+    optional_placeholders: list[str] = []
+    optional_params: list[Any] = []
+    if HAS_COTTAGE_REGION_ID:
+        optional_columns.append("region_id")
+        optional_placeholders.append("%s")
+        optional_params.append(values.get("region_id"))
+    if HAS_COTTAGE_DISTRICT_ID:
+        optional_columns.append("district_id")
+        optional_placeholders.append("%s")
+        optional_params.append(values.get("district_id"))
+
+    location_columns_sql = "latitude, longitude, city, country"
+    if optional_columns:
+        location_columns_sql = f"{location_columns_sql}, {', '.join(optional_columns)}"
+
+    location_placeholders_sql = "%s, %s, %s, %s"
+    if optional_placeholders:
+        location_placeholders_sql = f"{location_placeholders_sql}, {', '.join(optional_placeholders)}"
+
     row = fetch_one(
         f"""
         INSERT INTO {COTTAGE_TABLE} (
@@ -178,8 +222,7 @@ def create_cottage(
             price_per_person, price_on_working_days, price_on_weekends,
             currency, img, partner_user_id,
             services,
-            latitude, longitude, city, country,
-            region_id, district_id,
+            {location_columns_sql},
             prefecture_id,
             description_en, description_ru, description_uz,
             check_in, check_out,
@@ -192,8 +235,7 @@ def create_cottage(
             %s, %s, %s,
             %s, %s, %s,
             %s,
-            %s, %s, %s, %s,
-            %s, %s,
+            {location_placeholders_sql},
             %s,
             %s, %s, %s,
             %s, %s,
@@ -214,7 +256,7 @@ def create_cottage(
             values.get("services") or [],
             values.get("latitude"), values.get("longitude"),
             values.get("city"), values.get("country"),
-            values.get("region_id"), values.get("district_id"),
+            *optional_params,
             values.get("prefecture_id"),
             values.get("description_en"), values.get("description_ru"), values.get("description_uz"),
             values.get("check_in"), values.get("check_out"),
@@ -236,12 +278,16 @@ _COTTAGE_UPDATE_ALLOWED = {
     "currency", "img",
     "services",
     "latitude", "longitude", "city", "country",
-    "region_id", "district_id",
     "prefecture_id",
     "description_en", "description_ru", "description_uz",
     "check_in", "check_out",
     "is_allowed_alcohol", "is_allowed_corporate", "is_allowed_pets", "is_quiet_hours",
 }
+
+if HAS_COTTAGE_REGION_ID:
+    _COTTAGE_UPDATE_ALLOWED.add("region_id")
+if HAS_COTTAGE_DISTRICT_ID:
+    _COTTAGE_UPDATE_ALLOWED.add("district_id")
 
 
 def update_cottage(
