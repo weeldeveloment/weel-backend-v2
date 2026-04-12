@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from decimal import Decimal
 from decimal import InvalidOperation
 from typing import Any
@@ -276,6 +277,7 @@ class CottageCreateSerializer(serializers.Serializer):
     currency = serializers.ChoiceField(required=False, choices=["USD", "UZS"])
     minimum_weekend_day_stay = serializers.BooleanField(required=False, default=False)
     weekend_only_sunday_inclusive = serializers.BooleanField(required=False, default=False)
+    price = serializers.ListField(required=False, allow_empty=False)
     property_location = serializers.DictField(required=False)
     property_detail = serializers.DictField(required=False)
     property_services = serializers.ListField(required=False, allow_empty=True)
@@ -297,6 +299,9 @@ class CottageCreateSerializer(serializers.Serializer):
         detail_payload = attrs.get("property_detail") or {}
         detail_serializer = _PropertyDetailInputSerializer(data=detail_payload, partial=True)
         detail_serializer.is_valid(raise_exception=True)
+
+        raw_monthly_prices = attrs.get("price")
+        monthly_prices_present = isinstance(raw_monthly_prices, list)
 
         price_fields_present = any(
             key in attrs for key in ("price_per_person", "price_on_working_days", "price_on_weekends")
@@ -321,6 +326,71 @@ class CottageCreateSerializer(serializers.Serializer):
         for val in (per_person, working, weekends):
             if val is not None and val < 0:
                 raise serializers.ValidationError(_("Price values must be non-negative"))
+
+        normalized_monthly_prices: list[dict[str, Any]] = []
+        if monthly_prices_present:
+            for index, item in enumerate(raw_monthly_prices):
+                if not isinstance(item, dict):
+                    raise serializers.ValidationError({"price": _("Each price item must be an object.")})
+
+                raw_month_from = item.get("month_from")
+                raw_month_to = item.get("month_to")
+                if not raw_month_from or not raw_month_to:
+                    raise serializers.ValidationError({"price": _("month_from and month_to are required for each price item.")})
+
+                try:
+                    month_from = date.fromisoformat(str(raw_month_from))
+                    month_to = date.fromisoformat(str(raw_month_to))
+                except ValueError:
+                    raise serializers.ValidationError({"price": _("Invalid month date format in price items.")})
+
+                if month_to < month_from:
+                    raise serializers.ValidationError({"price": _("month_to must be greater than or equal to month_from.")})
+
+                item_per_person = _to_decimal(item.get("price_per_person"))
+                item_working = _to_decimal(item.get("price_on_working_days"))
+                item_weekends = _to_decimal(item.get("price_on_weekends"))
+
+                if item_working is None or item_weekends is None:
+                    raise serializers.ValidationError({"price": _("Working days and weekends prices are required for each item.")})
+                if item_per_person is None:
+                    item_per_person = Decimal("0")
+
+                if item_per_person < 0 or item_working < 0 or item_weekends < 0:
+                    raise serializers.ValidationError({"price": _("Price values must be non-negative." )})
+
+                normalized_monthly_prices.append(
+                    {
+                        "month_from": month_from,
+                        "month_to": month_to,
+                        "price_per_person": item_per_person,
+                        "price_on_working_days": item_working,
+                        "price_on_weekends": item_weekends,
+                    }
+                )
+
+            normalized_monthly_prices.sort(key=lambda item: item["month_from"])
+            if len({item["month_from"] for item in normalized_monthly_prices}) != len(normalized_monthly_prices):
+                raise serializers.ValidationError({"price": _("Duplicate month_from values are not allowed.")})
+
+        if not is_update:
+            if not monthly_prices_present:
+                raise serializers.ValidationError({"price": _("Provide exactly 2 monthly prices.")})
+            if len(normalized_monthly_prices) != 2:
+                raise serializers.ValidationError({"price": _("Exactly 2 monthly prices are required.")})
+
+            current_month_start = date.today().replace(day=1)
+            next_month_start = (current_month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            required_months = {
+                (current_month_start.year, current_month_start.month),
+                (next_month_start.year, next_month_start.month),
+            }
+            provided_months = {
+                (item["month_from"].year, item["month_from"].month)
+                for item in normalized_monthly_prices
+            }
+            if provided_months != required_months:
+                raise serializers.ValidationError({"price": _("Prices must be provided for current and next month.")})
 
         normalized: dict[str, Any] = {}
         if title:
@@ -350,6 +420,12 @@ class CottageCreateSerializer(serializers.Serializer):
             normalized["price_per_person"] = per_person if per_person is not None else Decimal("0")
             normalized["price_on_working_days"] = working if working is not None else Decimal("0")
             normalized["price_on_weekends"] = weekends if weekends is not None else normalized["price_on_working_days"]
+        if normalized_monthly_prices:
+            normalized["price"] = normalized_monthly_prices
+            first_item = normalized_monthly_prices[0]
+            normalized["price_per_person"] = first_item["price_per_person"]
+            normalized["price_on_working_days"] = first_item["price_on_working_days"]
+            normalized["price_on_weekends"] = first_item["price_on_weekends"]
         if attrs.get("property_location") is not None:
             cleaned_location_payload = {}
             for key, value in (attrs.get("property_location") or {}).items():

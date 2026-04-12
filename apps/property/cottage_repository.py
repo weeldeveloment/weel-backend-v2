@@ -20,6 +20,7 @@ def _table(*candidates: str) -> str:
 
 
 COTTAGE_TABLE = _table("cottage", "property_cottage")
+COTTAGE_PRICE_TABLE = _table("cottage_price", "property_cottageprice")
 USERS_TABLE = _table("users", "users_user")
 REVIEW_TABLE = _table("review", "property_review")
 DISTRICT_TABLE = _table("district", "property_district")
@@ -269,7 +270,7 @@ def create_cottage(
             %s, %s,
             %s, %s, %s, %s
         )
-        RETURNING guid
+        RETURNING id, guid
         """,
         [
             uuid4(), now, now,
@@ -296,7 +297,52 @@ def create_cottage(
     )
     if not row:
         return None
+    monthly_prices = values.get("price") if isinstance(values.get("price"), list) else None
+    if monthly_prices:
+        replace_cottage_prices(cottage_id=int(row["id"]), price_rows=monthly_prices)
     return get_cottage_for_partner(str(row["guid"]), partner_user_id)
+
+
+def replace_cottage_prices(*, cottage_id: int, price_rows: list[dict[str, Any]]) -> None:
+    if not table_exists(COTTAGE_PRICE_TABLE):
+        return
+
+    execute(
+        f"DELETE FROM {COTTAGE_PRICE_TABLE} WHERE cottage_id = %s",
+        [cottage_id],
+    )
+
+    now = timezone.now()
+    for item in price_rows:
+        if not isinstance(item, dict):
+            continue
+        fetch_one(
+            f"""
+            INSERT INTO {COTTAGE_PRICE_TABLE} (
+                guid,
+                created_at,
+                updated_at,
+                cottage_id,
+                month_from,
+                month_to,
+                price_per_person,
+                price_on_working_days,
+                price_on_weekends
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            [
+                uuid4(),
+                now,
+                now,
+                cottage_id,
+                item.get("month_from"),
+                item.get("month_to"),
+                item.get("price_per_person"),
+                item.get("price_on_working_days"),
+                item.get("price_on_weekends"),
+            ],
+        )
 
 
 _COTTAGE_UPDATE_ALLOWED = {
@@ -338,6 +384,7 @@ def update_cottage(
             [cottage_id, partner_user_id],
         )
 
+    monthly_prices = values.get("price") if isinstance(values.get("price"), list) else None
     updates: dict[str, Any] = {k: v for k, v in values.items() if k in _COTTAGE_UPDATE_ALLOWED}
     if "services" in updates:
         raw_services = updates.get("services") or []
@@ -360,6 +407,8 @@ def update_cottage(
     )
     if not row:
         return None
+    if monthly_prices is not None:
+        replace_cottage_prices(cottage_id=cottage_id, price_rows=monthly_prices)
     return get_cottage_for_partner(str(row["guid"]), partner_user_id)
 
 
