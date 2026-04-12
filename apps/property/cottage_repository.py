@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from django.utils import timezone
 
-from shared.raw.compat import get_table_name
+from shared.raw.compat import get_table_name, is_postgresql
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 
 
@@ -57,8 +57,8 @@ COTTAGE_SELECT = f"""
         c.city,
         c.country,
         c.services,
-        d.region_id AS region_id,
-        dp.district_id AS district_id,
+        COALESCE(c.region_id, d.region_id) AS region_id,
+        COALESCE(c.district_id, dp.district_id) AS district_id,
         c.prefecture_id,
         c.description_en,
         c.description_ru,
@@ -118,10 +118,10 @@ def list_cottages(
         where.append("COALESCE(c.title, '') LIKE %s")
         params.append(f"%{search.strip()}%")
     if region_id is not None:
-        where.append("d.region_id = %s")
+        where.append("COALESCE(c.region_id, d.region_id) = %s")
         params.append(region_id)
     if district_id is not None:
-        where.append("dp.district_id = %s")
+        where.append("COALESCE(c.district_id, dp.district_id) = %s")
         params.append(district_id)
     if corporate is not None:
         where.append("COALESCE(c.is_allowed_corporate, FALSE) = %s")
@@ -179,6 +179,7 @@ def create_cottage(
             currency, img, partner_user_id,
             services,
             latitude, longitude, city, country,
+            region_id, district_id,
             prefecture_id,
             description_en, description_ru, description_uz,
             check_in, check_out,
@@ -192,6 +193,7 @@ def create_cottage(
             %s, %s, %s,
             %s,
             %s, %s, %s, %s,
+            %s, %s,
             %s,
             %s, %s, %s,
             %s, %s,
@@ -212,6 +214,7 @@ def create_cottage(
             values.get("services") or [],
             values.get("latitude"), values.get("longitude"),
             values.get("city"), values.get("country"),
+            values.get("region_id"), values.get("district_id"),
             values.get("prefecture_id"),
             values.get("description_en"), values.get("description_ru"), values.get("description_uz"),
             values.get("check_in"), values.get("check_out"),
@@ -233,6 +236,7 @@ _COTTAGE_UPDATE_ALLOWED = {
     "currency", "img",
     "services",
     "latitude", "longitude", "city", "country",
+    "region_id", "district_id",
     "prefecture_id",
     "description_en", "description_ru", "description_uz",
     "check_in", "check_out",
@@ -253,11 +257,20 @@ def update_cottage(
         )
 
     updates: dict[str, Any] = {k: v for k, v in values.items() if k in _COTTAGE_UPDATE_ALLOWED}
+    if "services" in updates:
+        raw_services = updates.get("services") or []
+        updates["services"] = [str(service) for service in raw_services if service is not None]
     updates["updated_at"] = timezone.now()
     updates["is_verified"] = False
     updates["verification_status"] = "pending"
 
-    assignments = ", ".join(f"{col} = %s" for col in updates)
+    assignments_parts: list[str] = []
+    for col in updates:
+        if col == "services" and is_postgresql():
+            assignments_parts.append("services = %s::uuid[]")
+        else:
+            assignments_parts.append(f"{col} = %s")
+    assignments = ", ".join(assignments_parts)
     params = list(updates.values()) + [cottage_id, partner_user_id]
     row = fetch_one(
         f"UPDATE {COTTAGE_TABLE} SET {assignments} WHERE id = %s AND partner_user_id = %s RETURNING guid",

@@ -205,6 +205,8 @@ class CottageDetailSerializer(serializers.Serializer):
     is_favorite = serializers.BooleanField()
     property_services = serializers.ListField()
     property_room = serializers.DictField()
+    region_id = serializers.IntegerField(allow_null=True)
+    district_id = serializers.IntegerField(allow_null=True)
     prefecture_id = serializers.CharField(allow_blank=True, allow_null=True)
     latitude = serializers.CharField(allow_blank=True, allow_null=True)
     longitude = serializers.CharField(allow_blank=True, allow_null=True)
