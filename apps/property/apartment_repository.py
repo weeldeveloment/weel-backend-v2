@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -17,6 +18,7 @@ COTTAGE_TYPE_GUID = UUID("22222222-2222-2222-2222-222222222222")
 
 PROPERTY_KIND_APARTMENT = "apartment"
 PROPERTY_KIND_COTTAGE = "cottage"
+logger = logging.getLogger(__name__)
 TYPE_GUID_TO_KIND = {
     str(APARTMENT_TYPE_GUID): PROPERTY_KIND_APARTMENT,
     str(COTTAGE_TYPE_GUID): PROPERTY_KIND_COTTAGE,
@@ -397,6 +399,7 @@ _APARTMENT_UPDATE_ALLOWED = {
     "check_in", "check_out",
     "is_allowed_alcohol", "is_allowed_corporate", "is_allowed_pets", "is_quiet_hours",
     "apartment_number", "home_number", "entrance_number", "floor_number", "pass_code",
+    "services",
 }
 
 
@@ -413,11 +416,31 @@ def update_apartment(
         )
 
     updates: dict[str, Any] = {k: v for k, v in values.items() if k in _APARTMENT_UPDATE_ALLOWED}
+    if "services" in updates:
+        raw_services = updates.get("services") or []
+        updates["services"] = [str(service) for service in raw_services if service is not None]
+    dropped_keys = sorted(k for k in values.keys() if k not in _APARTMENT_UPDATE_ALLOWED)
+    logger.info(
+        "apartment_update_normalized apartment_id=%s partner_user_id=%s allowed_keys=%s dropped_keys=%s services_count=%s desc_ru_len=%s desc_uz_len=%s",
+        apartment_id,
+        partner_user_id,
+        sorted(updates.keys()),
+        dropped_keys,
+        len(updates.get("services") or []),
+        len(str(updates.get("description_ru") or "")),
+        len(str(updates.get("description_uz") or "")),
+    )
     updates["updated_at"] = timezone.now()
     updates["is_verified"] = False
     updates["verification_status"] = "pending"
 
-    assignments = ", ".join(f"{col} = %s" for col in updates)
+    assignments_parts: list[str] = []
+    for col in updates:
+        if col == "services" and is_postgresql():
+            assignments_parts.append("services = %s::uuid[]")
+        else:
+            assignments_parts.append(f"{col} = %s")
+    assignments = ", ".join(assignments_parts)
     params = list(updates.values()) + [apartment_id, partner_user_id]
     row = fetch_one(
         f"UPDATE {APARTMENT_TABLE} SET {assignments} WHERE id = %s AND partner_user_id = %s RETURNING guid",
