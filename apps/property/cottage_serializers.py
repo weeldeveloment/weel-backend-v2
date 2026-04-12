@@ -10,7 +10,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from payment.exchange_rate import to_uzs
-from .apartment_repository import is_prefecture_linked_to_district
+from .apartment_repository import COTTAGE_TYPE_GUID, is_prefecture_linked_to_district
 
 
 def _build_media_url(request, media_path: Any) -> list[str]:
@@ -163,6 +163,8 @@ class CottageListSerializer(serializers.Serializer):
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
     created_at = serializers.DateTimeField()
+    property_type_id = serializers.UUIDField()
+    property_type = serializers.DictField()
 
     def to_representation(self, instance):
         request = self.context.get("request")
@@ -183,6 +185,11 @@ class CottageListSerializer(serializers.Serializer):
             row["district"] = {"guid": None, "title": str(row.get("district_id")), "region": row.get("region")}
         row["guests"] = None
         row["rooms"] = None
+        row["property_type_id"] = str(COTTAGE_TYPE_GUID)
+        row["property_type"] = {
+            "guid": str(COTTAGE_TYPE_GUID),
+            "title": "Cottage",
+        }
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
         return super().to_representation(row)

@@ -100,7 +100,11 @@ COTTAGE_SELECT = f"""
         COALESCE(stats.average_rating, 5.0) AS average_rating,
         COALESCE(stats.review_count, 0) AS review_count
     FROM {COTTAGE_TABLE} c
-    LEFT JOIN {DISTRICT_PREFECTURE_TABLE} dp ON dp.prefecture_id = c.prefecture_id
+    LEFT JOIN (
+        SELECT prefecture_id, MIN(district_id) AS district_id
+        FROM {DISTRICT_PREFECTURE_TABLE}
+        GROUP BY prefecture_id
+    ) dp ON dp.prefecture_id = c.prefecture_id
     LEFT JOIN {DISTRICT_TABLE} d ON d.id = dp.district_id
     LEFT JOIN {REGION_TABLE} reg ON reg.id = d.region_id
     LEFT JOIN {USERS_TABLE} u ON u.id = c.partner_user_id
