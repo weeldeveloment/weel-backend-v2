@@ -341,6 +341,25 @@ class ApartmentCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"region_id": _("This field is required.")})
             if normalized.get("district_id") is None:
                 raise serializers.ValidationError({"district_id": _("This field is required.")})
+        else:
+            touches_location = any(
+                key in attrs
+                for key in (
+                    "region_id",
+                    "district_id",
+                    "prefecture_id",
+                    "latitude",
+                    "longitude",
+                    "city",
+                    "country",
+                    "property_location",
+                )
+            )
+            if touches_location:
+                if normalized.get("region_id") is None:
+                    raise serializers.ValidationError({"region_id": _("This field is required.")})
+                if normalized.get("district_id") is None:
+                    raise serializers.ValidationError({"district_id": _("This field is required.")})
 
         district_id = normalized.get("district_id")
         prefecture_id = normalized.get("prefecture_id")
