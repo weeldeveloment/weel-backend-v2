@@ -88,6 +88,10 @@ if DEBUG and not CORS_ALLOWED_ORIGINS:
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
+# Always allow local frontend URL unless explicitly duplicated.
+for _origin in ("http://localhost:3000",):
+    if _origin not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(_origin)
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
