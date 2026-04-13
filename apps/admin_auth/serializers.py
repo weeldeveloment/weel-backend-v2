@@ -2,6 +2,7 @@ import os
 
 from rest_framework import serializers
 
+from .policy import normalized_allowed_admin_email
 from .raw_repository import (
     create_admin_user,
     exists_admin_email,
@@ -21,14 +22,19 @@ class AdminLoginSerializer(serializers.Serializer):
         if not email or not password:
             raise serializers.ValidationError("Email and password are required.")
 
-        user = get_active_admin_by_email(email)
-        if not user:
+        allowed = normalized_allowed_admin_email()
+        static_password = (os.getenv("ADMIN_LOGIN_PASSWORD") or "").strip()
+
+        if allowed:
+            if email.strip().lower() != allowed:
+                raise serializers.ValidationError("Invalid credentials.")
+            if not static_password or password != static_password:
+                raise serializers.ValidationError("Invalid credentials.")
+        elif static_password and password != static_password:
             raise serializers.ValidationError("Invalid credentials.")
 
-        # Optional strict password for normalized DB flow.
-        # If env is missing, login remains email-based to keep endpoint usable.
-        static_password = (os.getenv("ADMIN_LOGIN_PASSWORD") or "").strip()
-        if static_password and password != static_password:
+        user = get_active_admin_by_email(email)
+        if not user:
             raise serializers.ValidationError("Invalid credentials.")
 
         attrs["user"] = user

@@ -7,6 +7,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken
 
+from admin_auth.policy import is_email_allowed_for_admin
 from notification.service import NotificationService
 from users.raw_repository import get_active_user_by_subject
 from users.tokens import TokenMetadata
@@ -14,6 +15,7 @@ from users.tokens import TokenMetadata
 from .raw_repository import (
     create_chat_message,
     get_active_actor,
+    get_allowed_admin_by_id,
     get_first_active_admin,
     get_or_create_conversation,
     mark_message_ids_read,
@@ -301,6 +303,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             if not actor:
                 return None
 
+            if actor_type == "admin" and not is_email_allowed_for_admin(
+                getattr(actor, "email", None)
+            ):
+                return None
+
             return {"actor_type": actor_type, "actor_id": actor.id}
         except (TokenError, ValueError):
             return None
@@ -392,7 +399,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
                 admin = None
                 if receiver_id is not None:
-                    admin = get_active_actor(receiver_id, "admin")
+                    admin = get_allowed_admin_by_id(receiver_id)
                 if not admin:
                     admin = get_first_active_admin()
                 if not admin:
@@ -419,7 +426,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
                 admin = None
                 if receiver_id is not None:
-                    admin = get_active_actor(receiver_id, "admin")
+                    admin = get_allowed_admin_by_id(receiver_id)
                 if not admin:
                     admin = get_first_active_admin()
                 if not admin:

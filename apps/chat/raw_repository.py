@@ -4,6 +4,7 @@ from typing import Any
 
 from django.utils import timezone
 
+from admin_auth.policy import is_email_allowed_for_admin
 from shared.raw.compat import get_table_name, is_postgresql, return_star
 from shared.raw.db import execute, fetch_all, fetch_one
 from shared.raw.entities import RawChatConversation, RawChatMessage, RawUser
@@ -49,11 +50,24 @@ def get_active_actor(actor_id: int, role: str) -> RawUser | None:
     return get_user_by_id(actor_id, role=role, active_only=True)
 
 
+def get_allowed_admin_by_id(actor_id: int) -> RawUser | None:
+    admin = get_user_by_id(actor_id, role="admin", active_only=True)
+    if not admin:
+        return None
+    if not is_email_allowed_for_admin(getattr(admin, "email", None)):
+        return None
+    return admin
+
+
 def get_first_active_admin() -> RawUser | None:
-    admin_ids = list_active_admin_ids(limit=1)
+    admin_ids = list_active_admin_ids(limit=100)
     if not admin_ids:
         return None
-    return get_user_by_id(admin_ids[0], role="admin", active_only=True)
+    for admin_id in admin_ids:
+        admin = get_allowed_admin_by_id(admin_id)
+        if admin:
+            return admin
+    return None
 
 
 def get_or_create_conversation(*, admin_user_id: int, counterpart_user_id: int, counterpart_role: str) -> RawChatConversation:

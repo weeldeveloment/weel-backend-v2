@@ -7,6 +7,7 @@ from rest_framework.request import Request
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import Token
 
+from admin_auth.policy import is_email_allowed_for_admin
 from users.raw_repository import get_active_user_by_subject
 from users.tokens import TokenMetadata
 
@@ -43,6 +44,12 @@ class RawAdminJWTAuthentication(JWTAuthentication):
             if admin is None:
                 raise exceptions.AuthenticationFailed(
                     _("Admin user not found"), code="admin_not_found"
+                )
+
+            if not is_email_allowed_for_admin(getattr(admin, "email", None)):
+                raise exceptions.AuthenticationFailed(
+                    _("Admin access disabled for this account."),
+                    code="admin_not_allowed",
                 )
 
             return admin

@@ -14,6 +14,7 @@ from .authentication import RawAdminJWTAuthentication
 from .raw_repository import (
     create_chat_message,
     get_active_actor,
+    get_allowed_admin_by_id,
     get_first_active_admin,
     get_or_create_conversation,
     list_conversations_for_actor,
@@ -141,7 +142,7 @@ class ChatViewSet(viewsets.GenericViewSet):
                 counterpart_role=target_role,
             )
         elif is_partner_actor(user):
-            admin_user = get_active_actor(counterpart_id, "admin")
+            admin_user = get_allowed_admin_by_id(counterpart_id)
             if not admin_user:
                 return Response({"error": "Admin user not found"}, status=status.HTTP_404_NOT_FOUND)
             conversation = get_or_create_conversation(
@@ -150,7 +151,7 @@ class ChatViewSet(viewsets.GenericViewSet):
                 counterpart_role="partner",
             )
         elif is_client_actor(user):
-            admin_user = get_active_actor(counterpart_id, "admin")
+            admin_user = get_allowed_admin_by_id(counterpart_id)
             if not admin_user:
                 admin_user = get_first_active_admin()
             if not admin_user:
@@ -256,7 +257,7 @@ class ChatViewSet(viewsets.GenericViewSet):
                     data=notification_payload,
                 )
         elif is_partner_actor(sender):
-            admin_user = get_active_actor(requested_receiver_id, "admin")
+            admin_user = get_allowed_admin_by_id(requested_receiver_id)
             if not admin_user:
                 admin_user = get_first_active_admin()
             if not admin_user:
@@ -277,7 +278,7 @@ class ChatViewSet(viewsets.GenericViewSet):
             )
             touch_conversation(conversation.id)
         elif is_client_actor(sender):
-            admin_user = get_active_actor(requested_receiver_id, "admin")
+            admin_user = get_allowed_admin_by_id(requested_receiver_id)
             if not admin_user:
                 admin_user = get_first_active_admin()
             if not admin_user:

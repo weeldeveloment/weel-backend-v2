@@ -8,6 +8,7 @@ from drf_yasg.utils import swagger_auto_schema
 from .authentication import create_admin_tokens, AdminJWTAuthentication
 from .permissions import IsAdminUser
 from .serializers import AdminLoginSerializer, AdminUserSerializer, AdminCreateSerializer
+from .policy import is_admin_user_creation_enabled
 from .raw_repository import is_super_admin
 
 
@@ -81,6 +82,12 @@ class AdminRegisterView(APIView):
         },
     )
     def post(self, request):
+        if not is_admin_user_creation_enabled():
+            return Response(
+                {"error": "Admin user creation is disabled."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         if not is_super_admin(request.user.id):
             return Response(
                 {'error': 'Only superusers can create admin users.'},

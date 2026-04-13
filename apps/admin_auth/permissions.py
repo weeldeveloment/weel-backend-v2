@@ -1,5 +1,7 @@
 from rest_framework.permissions import BasePermission
 
+from .policy import is_email_allowed_for_admin
+
 
 class IsAdminUser(BasePermission):
     message = "Access denied. Admin privileges required."
@@ -8,4 +10,8 @@ class IsAdminUser(BasePermission):
         user = getattr(request, "user", None)
         if not user:
             return False
-        return bool(getattr(user, "role", None) == "admin" and getattr(user, "is_active", False))
+        return bool(
+            getattr(user, "role", None) == "admin"
+            and getattr(user, "is_active", False)
+            and is_email_allowed_for_admin(getattr(user, "email", None))
+        )
