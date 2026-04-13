@@ -69,6 +69,66 @@ def _favorite_guid_set(context: dict[str, Any] | None) -> set[str]:
     return {str(value) for value in raw_value if value is not None}
 
 
+def _build_property_location(row: dict[str, Any]) -> dict[str, Any]:
+    region_id = _parse_int_maybe(row.get("region_id"))
+    district_id = _parse_int_maybe(row.get("district_id"))
+    prefecture_guid = row.get("prefecture_guid") or row.get("prefecture_id")
+
+    return {
+        "latitude": row.get("latitude"),
+        "longitude": row.get("longitude"),
+        "country": row.get("country"),
+        "city": row.get("city"),
+        "region": {
+            "id": region_id,
+            "guid": row.get("region_guid"),
+            "name": row.get("region_name"),
+        }
+        if region_id is not None
+        else None,
+        "district": {
+            "id": district_id,
+            "guid": row.get("district_guid"),
+            "name": row.get("district_name"),
+        }
+        if district_id is not None
+        else None,
+        "prefecture": {
+            "id": str(prefecture_guid),
+            "name": row.get("prefecture_name"),
+        }
+        if prefecture_guid not in (None, "", "null", "None", "undefined")
+        else None,
+    }
+
+
+class PropertyLocationRegionOutputSerializer(serializers.Serializer):
+    id = serializers.IntegerField(allow_null=True)
+    guid = serializers.UUIDField(allow_null=True)
+    name = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class PropertyLocationDistrictOutputSerializer(serializers.Serializer):
+    id = serializers.IntegerField(allow_null=True)
+    guid = serializers.UUIDField(allow_null=True)
+    name = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class PropertyLocationPrefectureOutputSerializer(serializers.Serializer):
+    id = serializers.CharField(allow_blank=True, allow_null=True)
+    name = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class PropertyLocationOutputSerializer(serializers.Serializer):
+    latitude = serializers.CharField(allow_blank=True, allow_null=True)
+    longitude = serializers.CharField(allow_blank=True, allow_null=True)
+    country = serializers.CharField(allow_blank=True, allow_null=True)
+    city = serializers.CharField(allow_blank=True, allow_null=True)
+    region = PropertyLocationRegionOutputSerializer(allow_null=True)
+    district = PropertyLocationDistrictOutputSerializer(allow_null=True)
+    prefecture = PropertyLocationPrefectureOutputSerializer(allow_null=True)
+
+
 def _parse_int_maybe(value: Any) -> int | None:
     if value in (None, "", "null", "None", "undefined"):
         return None
@@ -129,6 +189,7 @@ class ApartmentListSerializer(serializers.Serializer):
     longitude = serializers.CharField(allow_blank=True, allow_null=True)
     country = serializers.CharField(allow_blank=True, allow_null=True)
     city = serializers.CharField(allow_blank=True, allow_null=True)
+    property_location = PropertyLocationOutputSerializer(required=False)
     services = serializers.ListField()
     region_id = serializers.IntegerField(allow_null=True)
     district_id = serializers.IntegerField(allow_null=True)
@@ -148,6 +209,7 @@ class ApartmentListSerializer(serializers.Serializer):
         row_currency = row.get("currency")
         row["price"] = _convert_price_for_output(row.get("price"), row_currency)
         row["services"] = row.get("services") or []
+        row["property_location"] = _build_property_location(row)
         row["guests"] = None
         row["rooms"] = None
         row["property_type_id"] = str(APARTMENT_TYPE_GUID)
@@ -187,6 +249,7 @@ class ApartmentDetailSerializer(serializers.Serializer):
     longitude = serializers.CharField(allow_blank=True, allow_null=True)
     country = serializers.CharField(allow_blank=True, allow_null=True)
     city = serializers.CharField(allow_blank=True, allow_null=True)
+    property_location = PropertyLocationOutputSerializer(required=False)
     apartment_number = serializers.CharField(allow_blank=True, allow_null=True)
     home_number = serializers.CharField(allow_blank=True, allow_null=True)
     entrance_number = serializers.CharField(allow_blank=True, allow_null=True)
@@ -216,6 +279,7 @@ class ApartmentDetailSerializer(serializers.Serializer):
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
         row["services"] = row.get("services") or []
+        row["property_location"] = _build_property_location(row)
         return super().to_representation(row)
 
 

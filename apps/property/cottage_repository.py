@@ -25,6 +25,7 @@ USERS_TABLE = _table("users", "users_user")
 REVIEW_TABLE = _table("review", "property_review")
 DISTRICT_TABLE = _table("district", "property_district")
 REGION_TABLE = _table("region", "property_region")
+PREFECTURE_TABLE = _table("prefecture", "property_prefecture")
 DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
@@ -87,8 +88,14 @@ COTTAGE_SELECT = f"""
         c.country,
         c.services,
         {REGION_SELECT_SQL} AS region_id,
+        reg.guid AS region_guid,
+        COALESCE(NULLIF(reg.title_uz, ''), NULLIF(reg.title_ru, ''), NULLIF(reg.title_en, '')) AS region_name,
         {DISTRICT_SELECT_SQL} AS district_id,
+        d.guid AS district_guid,
+        COALESCE(NULLIF(d.title_uz, ''), NULLIF(d.title_ru, ''), NULLIF(d.title_en, '')) AS district_name,
         c.prefecture_id,
+        pref.id AS prefecture_guid,
+        COALESCE(NULLIF(pref.name, ''), NULLIF(pref.ru_name, '')) AS prefecture_name,
         c.description_en,
         c.description_ru,
         c.description_uz,
@@ -117,6 +124,7 @@ COTTAGE_SELECT = f"""
     ) dp ON dp.prefecture_id = c.prefecture_id
     LEFT JOIN {DISTRICT_TABLE} d ON d.id = dp.district_id
     LEFT JOIN {REGION_TABLE} reg ON reg.id = d.region_id
+    LEFT JOIN {PREFECTURE_TABLE} pref ON CAST(pref.id AS TEXT) = CAST(c.prefecture_id AS TEXT)
     LEFT JOIN {USERS_TABLE} u ON u.id = c.partner_user_id
     LEFT JOIN LATERAL (
         SELECT

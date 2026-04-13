@@ -129,6 +129,61 @@ PROPERTY_FILTER_BY_LINK_SCHEMA = openapi.Schema(
     },
 )
 
+PROPERTY_LOCATION_REGION_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    nullable=True,
+    properties={
+        "id": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid", nullable=True),
+        "name": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    },
+)
+
+PROPERTY_LOCATION_DISTRICT_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    nullable=True,
+    properties={
+        "id": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid", nullable=True),
+        "name": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    },
+)
+
+PROPERTY_LOCATION_PREFECTURE_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    nullable=True,
+    properties={
+        "id": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "name": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    },
+)
+
+PROPERTY_LOCATION_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    properties={
+        "latitude": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "longitude": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "country": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "city": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "region": PROPERTY_LOCATION_REGION_SCHEMA,
+        "district": PROPERTY_LOCATION_DISTRICT_SCHEMA,
+        "prefecture": PROPERTY_LOCATION_PREFECTURE_SCHEMA,
+    },
+)
+
+MIXED_PROPERTY_LIST_RESPONSE_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_ARRAY,
+    items=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+            "title": openapi.Schema(type=openapi.TYPE_STRING),
+            "property_type": openapi.Schema(type=openapi.TYPE_OBJECT),
+            "property_location": PROPERTY_LOCATION_SCHEMA,
+        },
+    ),
+)
+
 
 class RawPropertyTypeSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
@@ -611,7 +666,10 @@ class CategoryPropertyRecommendationView(APIView):
 class UnifiedRecommendationsListView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(manual_parameters=RECOMMENDATIONS_QUERY_PARAMS)
+    @swagger_auto_schema(
+        manual_parameters=RECOMMENDATIONS_QUERY_PARAMS,
+        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+    )
     def get(self, request, *args, **kwargs):
         property_type = str(request.query_params.get("kind") or "property").strip().lower()
         if property_type not in {"property", "apartment", "cottage", "apartments", "cottages"}:
@@ -660,13 +718,28 @@ class ApartmentPropertyListCreateView(APIView):
             return [IsPartner()]
         return [AllowAny()]
 
-    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
+    @swagger_auto_schema(
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        responses={200: ApartmentListSerializer(many=True)},
+    )
     def get(self, request, *args, **kwargs):
         rows = _list_apartment_rows(request.query_params, public_only=True)
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
         return Response(ApartmentListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
 
-    @swagger_auto_schema(request_body=ApartmentCreateSerializer)
+    @swagger_auto_schema(
+        request_body=ApartmentCreateSerializer,
+        responses={
+            201: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "property_id": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                    "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
+                },
+            )
+        },
+    )
     def post(self, request, *args, **kwargs):
         serializer = ApartmentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -699,13 +772,28 @@ class CottagePropertyListCreateView(APIView):
             return [IsPartner()]
         return [AllowAny()]
 
-    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
+    @swagger_auto_schema(
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        responses={200: CottageListSerializer(many=True)},
+    )
     def get(self, request, *args, **kwargs):
         rows = _list_cottage_rows(request.query_params, public_only=True)
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
         return Response(CottageListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
 
-    @swagger_auto_schema(request_body=CottageCreateSerializer)
+    @swagger_auto_schema(
+        request_body=CottageCreateSerializer,
+        responses={
+            201: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "property_id": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                    "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
+                },
+            )
+        },
+    )
     def post(self, request, *args, **kwargs):
         serializer = CottageCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -739,7 +827,10 @@ class PropertyListCreateView(APIView):
             return [IsPartner()]
         return [AllowAny()]
 
-    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
+    @swagger_auto_schema(
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+    )
     def get(self, request, *args, **kwargs):
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
         requested_kind = self.forced_property_type or parse_property_kind(
@@ -791,7 +882,10 @@ class PropertyFilterByLinkView(APIView):
 class RegionPropertyListView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
+    @swagger_auto_schema(
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+    )
     def get(self, request, *args, **kwargs):
         region_id = _parse_int(self.kwargs.get("region_id"))
         if region_id is None:
@@ -849,6 +943,18 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             raise NotFound(_("Property not found"))
         return row
 
+    @swagger_auto_schema(
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                    "title": openapi.Schema(type=openapi.TYPE_STRING),
+                    "property_location": PROPERTY_LOCATION_SCHEMA,
+                },
+            )
+        }
+    )
     def get(self, request, property_id, *args, **kwargs):
         row = self._read_property_or_404(str(property_id))
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
@@ -1323,7 +1429,10 @@ class PartnerPropertyListView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
 
-    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [openapi.Parameter("property_type", openapi.IN_QUERY, type=openapi.TYPE_STRING)])
+    @swagger_auto_schema(
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [openapi.Parameter("property_type", openapi.IN_QUERY, type=openapi.TYPE_STRING)],
+        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+    )
     def get(self, request, *args, **kwargs):
         property_type = parse_property_kind(request.query_params.get("property_type"))
         ctx = {"request": request}
@@ -1349,7 +1458,10 @@ class ApartmentPartnerPropertyListView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
 
-    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
+    @swagger_auto_schema(
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        responses={200: ApartmentPartnerListSerializer(many=True)},
+    )
     def get(self, request, *args, **kwargs):
         ctx = {"request": request}
         rows = _list_apartment_rows(
@@ -1364,7 +1476,10 @@ class CottagePartnerPropertyListView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
 
-    @swagger_auto_schema(manual_parameters=PROPERTY_LIST_QUERY_PARAMS)
+    @swagger_auto_schema(
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        responses={200: CottagePartnerListSerializer(many=True)},
+    )
     def get(self, request, *args, **kwargs):
         ctx = {"request": request}
         rows = _list_cottage_rows(
@@ -1383,6 +1498,7 @@ class SavedPropertyListView(APIView):
     authentication_classes = [ClientJWTAuthentication]
     permission_classes = [IsClient]
 
+    @swagger_auto_schema(responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA})
     def get(self, request, *args, **kwargs):
         favorite_guids = _load_favorite_guids(int(request.user.id))
         if not favorite_guids:

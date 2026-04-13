@@ -39,7 +39,7 @@ REVIEW_TABLE = _table("review", "property_review")
 PROPERTY_SERVICE_TABLE = _table("property_service", "property_propertyservice")
 REGION_TABLE = _table("region", "property_region")
 DISTRICT_TABLE = _table("district", "property_district")
-PREFECTURE_TABLE = _table("prefecture")
+PREFECTURE_TABLE = _table("prefecture", "property_prefecture")
 DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
@@ -252,8 +252,14 @@ APARTMENT_SELECT = f"""
         a.country,
         a.services,
         a.region_id,
+        rgn.guid AS region_guid,
+        COALESCE(NULLIF(rgn.title_uz, ''), NULLIF(rgn.title_ru, ''), NULLIF(rgn.title_en, '')) AS region_name,
         a.district_id,
+        dst.guid AS district_guid,
+        COALESCE(NULLIF(dst.title_uz, ''), NULLIF(dst.title_ru, ''), NULLIF(dst.title_en, '')) AS district_name,
         a.prefecture_id,
+        pref.id AS prefecture_guid,
+        COALESCE(NULLIF(pref.name, ''), NULLIF(pref.ru_name, '')) AS prefecture_name,
         a.description_en,
         a.description_ru,
         a.description_uz,
@@ -275,6 +281,9 @@ APARTMENT_SELECT = f"""
         COALESCE(stats.average_rating, 5.0) AS average_rating,
         COALESCE(stats.review_count, 0) AS review_count
     FROM {APARTMENT_TABLE} a
+    LEFT JOIN {REGION_TABLE} rgn ON rgn.id = a.region_id
+    LEFT JOIN {DISTRICT_TABLE} dst ON dst.id = a.district_id
+    LEFT JOIN {PREFECTURE_TABLE} pref ON CAST(pref.id AS TEXT) = CAST(a.prefecture_id AS TEXT)
     LEFT JOIN {USERS_TABLE} u ON u.id = a.partner_user_id
     LEFT JOIN LATERAL (
         SELECT

@@ -65,6 +65,66 @@ def _favorite_guid_set(context: dict[str, Any] | None) -> set[str]:
     return {str(value) for value in raw_value if value is not None}
 
 
+def _build_property_location(row: dict[str, Any]) -> dict[str, Any]:
+    region_id = _parse_int_maybe(row.get("region_id"))
+    district_id = _parse_int_maybe(row.get("district_id"))
+    prefecture_guid = row.get("prefecture_guid") or row.get("prefecture_id")
+
+    return {
+        "latitude": row.get("latitude"),
+        "longitude": row.get("longitude"),
+        "country": row.get("country"),
+        "city": row.get("city"),
+        "region": {
+            "id": region_id,
+            "guid": row.get("region_guid"),
+            "name": row.get("region_name"),
+        }
+        if region_id is not None
+        else None,
+        "district": {
+            "id": district_id,
+            "guid": row.get("district_guid"),
+            "name": row.get("district_name"),
+        }
+        if district_id is not None
+        else None,
+        "prefecture": {
+            "id": str(prefecture_guid),
+            "name": row.get("prefecture_name"),
+        }
+        if prefecture_guid not in (None, "", "null", "None", "undefined")
+        else None,
+    }
+
+
+class PropertyLocationRegionOutputSerializer(serializers.Serializer):
+    id = serializers.IntegerField(allow_null=True)
+    guid = serializers.UUIDField(allow_null=True)
+    name = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class PropertyLocationDistrictOutputSerializer(serializers.Serializer):
+    id = serializers.IntegerField(allow_null=True)
+    guid = serializers.UUIDField(allow_null=True)
+    name = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class PropertyLocationPrefectureOutputSerializer(serializers.Serializer):
+    id = serializers.CharField(allow_blank=True, allow_null=True)
+    name = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class PropertyLocationOutputSerializer(serializers.Serializer):
+    latitude = serializers.CharField(allow_blank=True, allow_null=True)
+    longitude = serializers.CharField(allow_blank=True, allow_null=True)
+    country = serializers.CharField(allow_blank=True, allow_null=True)
+    city = serializers.CharField(allow_blank=True, allow_null=True)
+    region = PropertyLocationRegionOutputSerializer(allow_null=True)
+    district = PropertyLocationDistrictOutputSerializer(allow_null=True)
+    prefecture = PropertyLocationPrefectureOutputSerializer(allow_null=True)
+
+
 def _parse_int_maybe(value: Any) -> int | None:
     if value in (None, "", "null", "None", "undefined"):
         return None
@@ -155,6 +215,7 @@ class CottageListSerializer(serializers.Serializer):
     longitude = serializers.CharField(allow_blank=True, allow_null=True)
     country = serializers.CharField(allow_blank=True, allow_null=True)
     city = serializers.CharField(allow_blank=True, allow_null=True)
+    property_location = PropertyLocationOutputSerializer(required=False)
     services = serializers.ListField()
     region = RawRegionSerializer(allow_null=True)
     district = RawDistrictSerializer(allow_null=True)
@@ -176,14 +237,26 @@ class CottageListSerializer(serializers.Serializer):
         row["price_on_working_days"] = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
         row["price_on_weekends"] = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
         row["services"] = row.get("services") or []
+        row["property_location"] = _build_property_location(row)
         if row.get("region_id") is None:
             row["region"] = None
         else:
-            row["region"] = {"guid": None, "title": str(row.get("region_id")), "img": None}
+            row["region"] = {
+                "id": _parse_int_maybe(row.get("region_id")),
+                "guid": row.get("region_guid"),
+                "title": row.get("region_name"),
+                "img": None,
+            }
         if row.get("district_id") is None:
             row["district"] = None
         else:
-            row["district"] = {"guid": None, "title": str(row.get("district_id")), "region": row.get("region")}
+            row["district"] = {
+                "id": _parse_int_maybe(row.get("district_id")),
+                "region_id": _parse_int_maybe(row.get("region_id")),
+                "guid": row.get("district_guid"),
+                "title": row.get("district_name"),
+                "region": row.get("region"),
+            }
         row["guests"] = None
         row["rooms"] = None
         row["property_type_id"] = str(COTTAGE_TYPE_GUID)
@@ -224,6 +297,7 @@ class CottageDetailSerializer(serializers.Serializer):
     longitude = serializers.CharField(allow_blank=True, allow_null=True)
     country = serializers.CharField(allow_blank=True, allow_null=True)
     city = serializers.CharField(allow_blank=True, allow_null=True)
+    property_location = PropertyLocationOutputSerializer(required=False)
     check_in = serializers.TimeField(allow_null=True)
     check_out = serializers.TimeField(allow_null=True)
     is_allowed_alcohol = serializers.BooleanField()
@@ -267,6 +341,7 @@ class CottageDetailSerializer(serializers.Serializer):
             "beds": _parse_int_maybe(row.get("beds")),
             "bathrooms": _parse_int_maybe(row.get("bathrooms")),
         }
+        row["property_location"] = _build_property_location(row)
         # Process monthly price data from separate cottage_price table
         price_data = row.get("price")
         if price_data:
