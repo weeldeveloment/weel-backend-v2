@@ -282,6 +282,10 @@ class CottageCreateSerializer(serializers.Serializer):
     property_detail = serializers.DictField(required=False)
     property_services = serializers.ListField(required=False, allow_empty=True)
     property_room = serializers.DictField(required=False)
+    guests = serializers.IntegerField(required=False, allow_null=True)
+    rooms = serializers.IntegerField(required=False, allow_null=True)
+    beds = serializers.IntegerField(required=False, allow_null=True)
+    bathrooms = serializers.IntegerField(required=False, allow_null=True)
     region = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     district = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -373,9 +377,7 @@ class CottageCreateSerializer(serializers.Serializer):
             if len({item["month_from"] for item in normalized_monthly_prices}) != len(normalized_monthly_prices):
                 raise serializers.ValidationError({"price": _("Duplicate month_from values are not allowed.")})
 
-        if not is_update:
-            if not monthly_prices_present:
-                raise serializers.ValidationError({"price": _("Provide exactly 2 monthly prices.")})
+        if monthly_prices_present:
             if len(normalized_monthly_prices) != 2:
                 raise serializers.ValidationError({"price": _("Exactly 2 monthly prices are required.")})
 
@@ -391,6 +393,8 @@ class CottageCreateSerializer(serializers.Serializer):
             }
             if provided_months != required_months:
                 raise serializers.ValidationError({"price": _("Prices must be provided for current and next month.")})
+        elif not is_update:
+            raise serializers.ValidationError({"price": _("Provide exactly 2 monthly prices.")})
 
         normalized: dict[str, Any] = {}
         if title:
@@ -449,6 +453,10 @@ class CottageCreateSerializer(serializers.Serializer):
             for key in ("guests", "rooms", "beds", "bathrooms"):
                 if key in room_payload:
                     normalized[key] = _parse_int_maybe(room_payload.get(key))
+        # Also handle flat fields at top level (guests, rooms, beds, bathrooms directly)
+        for key in ("guests", "rooms", "beds", "bathrooms"):
+            if key in attrs:
+                normalized[key] = _parse_int_maybe(attrs.get(key))
         if "region_id" in attrs or "region" in attrs:
             normalized["region_id"] = _parse_int_maybe(
                 attrs.get("region_id") if attrs.get("region_id") is not None else attrs.get("region")
