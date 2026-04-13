@@ -1,11 +1,3 @@
-"""
-Bitta admin foydalanuvchini users jadvalida yaratadi (role=admin).
-Email ADMIN_ALLOWED_EMAIL yoki --email dan olinadi.
-
-Ishlatish:
-  ADMIN_ALLOWED_EMAIL=info@weel.com python manage.py ensure_admin_user
-"""
-
 import os
 
 from django.core.management.base import BaseCommand
