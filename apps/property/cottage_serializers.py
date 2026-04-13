@@ -209,6 +209,7 @@ class CottageDetailSerializer(serializers.Serializer):
     price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    price = serializers.ListField(required=False, allow_empty=True)
     minimum_weekend_day_stay = serializers.BooleanField()
     description = serializers.CharField(allow_blank=True, allow_null=True)
     comment_count = serializers.IntegerField()
@@ -266,6 +267,31 @@ class CottageDetailSerializer(serializers.Serializer):
             "beds": _parse_int_maybe(row.get("beds")),
             "bathrooms": _parse_int_maybe(row.get("bathrooms")),
         }
+        # Process monthly price data from separate cottage_price table
+        price_data = row.get("price")
+        if price_data:
+            if isinstance(price_data, str):
+                try:
+                    import json
+                    price_data = json.loads(price_data)
+                except (json.JSONDecodeError, TypeError):
+                    price_data = []
+            if isinstance(price_data, list):
+                # Convert Decimal prices to strings in price items
+                processed_prices = []
+                for item in price_data:
+                    if isinstance(item, dict):
+                        processed_item = dict(item)
+                        # Convert any Decimal values to string for JSON serialization
+                        for key in ('price_per_person', 'price_on_working_days', 'price_on_weekends'):
+                            if key in processed_item and processed_item[key] is not None:
+                                processed_item[key] = str(processed_item[key])
+                        processed_prices.append(processed_item)
+                row["price"] = processed_prices
+            else:
+                row["price"] = []
+        else:
+            row["price"] = []
         return super().to_representation(row)
 
 

@@ -107,7 +107,8 @@ COTTAGE_SELECT = f"""
         u.last_name AS partner_last_name,
         u.phone_number AS partner_phone_number,
         COALESCE(stats.average_rating, 5.0) AS average_rating,
-        COALESCE(stats.review_count, 0) AS review_count
+        COALESCE(stats.review_count, 0) AS review_count,
+        COALESCE(monthly_prices.price_data, '[]'::jsonb) AS price
     FROM {COTTAGE_TABLE} c
     LEFT JOIN (
         SELECT prefecture_id, MIN(district_id) AS district_id
@@ -126,6 +127,21 @@ COTTAGE_SELECT = f"""
           AND (COALESCE(r.is_hidden, FALSE) = FALSE)
           AND r.rating IS NOT NULL
     ) stats ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT
+            jsonb_agg(
+                jsonb_build_object(
+                    'guid', cp.guid,
+                    'month_from', cp.month_from,
+                    'month_to', cp.month_to,
+                    'price_per_person', cp.price_per_person,
+                    'price_on_working_days', cp.price_on_working_days,
+                    'price_on_weekends', cp.price_on_weekends
+                ) ORDER BY cp.month_from
+            ) AS price_data
+        FROM {COTTAGE_PRICE_TABLE} cp
+        WHERE cp.cottage_id = c.id
+    ) monthly_prices ON TRUE
 """
 
 
