@@ -333,6 +333,10 @@ class CottageCreateSerializer(serializers.Serializer):
 
         normalized_monthly_prices: list[dict[str, Any]] = []
         if monthly_prices_present:
+            default_item_per_person = per_person if per_person is not None else Decimal("0")
+            default_item_working = working
+            default_item_weekends = weekends if weekends is not None else working
+
             for index, item in enumerate(raw_monthly_prices):
                 if not isinstance(item, dict):
                     raise serializers.ValidationError({"price": _("Each price item must be an object.")})
@@ -355,10 +359,15 @@ class CottageCreateSerializer(serializers.Serializer):
                 item_working = _to_decimal(item.get("price_on_working_days"))
                 item_weekends = _to_decimal(item.get("price_on_weekends"))
 
+                if item_working is None:
+                    item_working = default_item_working
+                if item_weekends is None:
+                    item_weekends = default_item_weekends if default_item_weekends is not None else item_working
+                if item_per_person is None:
+                    item_per_person = default_item_per_person
+
                 if item_working is None or item_weekends is None:
                     raise serializers.ValidationError({"price": _("Working days and weekends prices are required for each item.")})
-                if item_per_person is None:
-                    item_per_person = Decimal("0")
 
                 if item_per_person < 0 or item_working < 0 or item_weekends < 0:
                     raise serializers.ValidationError({"price": _("Price values must be non-negative." )})
