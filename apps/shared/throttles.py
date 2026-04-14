@@ -6,6 +6,14 @@ from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, User
 logger = logging.getLogger(__name__)
 
 
+_SWAGGER_PREFIXES = (
+    "/swagger/",
+    "/api/swagger/",
+    "/redoc/",
+    "/api/redoc/",
+)
+
+
 class SwaggerExemptAnonRateThrottle(AnonRateThrottle):
     """
     Keep global anon throttling, but skip Swagger/OpenAPI docs endpoints.
@@ -22,7 +30,7 @@ class SwaggerExemptAnonRateThrottle(AnonRateThrottle):
         return super().get_ident(request)
 
     def allow_request(self, request, view):
-        if request.path.startswith("/swagger/"):
+        if request.path.startswith(_SWAGGER_PREFIXES):
             return True
         try:
             return super().allow_request(request, view)
@@ -37,7 +45,7 @@ class SwaggerExemptUserRateThrottle(UserRateThrottle):
     """
 
     def allow_request(self, request, view):
-        if request.path.startswith("/swagger/"):
+        if request.path.startswith(_SWAGGER_PREFIXES):
             return True
         try:
             return super().allow_request(request, view)

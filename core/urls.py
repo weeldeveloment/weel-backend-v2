@@ -45,7 +45,7 @@ schema_view = get_schema_view(
     # public=True shows endpoints even when they require authentication;
     # otherwise drf_yasg hides them from the schema for anonymous users.
     public=True,
-    url=None,
+    url=settings.SWAGGER_URL,
     permission_classes=[permissions.AllowAny],
 )
 
@@ -113,7 +113,7 @@ def _swagger_cookie_is_valid(request) -> bool:
     )
 
 
-def _set_swagger_cookie(response):
+def _set_swagger_cookie(request, response):
     token = signing.dumps(
         {"u": settings.SWAGGER_BASIC_AUTH_USERNAME},
         salt=_SWAGGER_AUTH_SALT,
@@ -124,7 +124,7 @@ def _set_swagger_cookie(response):
         max_age=settings.SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS,
         httponly=True,
         samesite="Lax",
-        secure=False,
+        secure=bool(getattr(settings, "SESSION_COOKIE_SECURE", False) or request.is_secure()),
     )
 
 
@@ -169,7 +169,7 @@ def _swagger_with_optional_basic_auth(request, *args, **kwargs):
             except Exception:
                 _SWAGGER_LOCAL_AUTH_ATTEMPTS.pop(ident, None)
             response = HttpResponseRedirect(request.path)
-            _set_swagger_cookie(response)
+            _set_swagger_cookie(request, response)
             return response
 
     auth_header = request.META.get("HTTP_AUTHORIZATION", "")
@@ -207,7 +207,9 @@ def _swagger_with_optional_basic_auth(request, *args, **kwargs):
         cache.delete(fail_cache_key)
     except Exception:
         _SWAGGER_LOCAL_AUTH_ATTEMPTS.pop(ident, None)
-    return schema_view.with_ui("swagger", cache_timeout=0)(request, *args, **kwargs)
+    response = schema_view.with_ui("swagger", cache_timeout=0)(request, *args, **kwargs)
+    _set_swagger_cookie(request, response)
+    return response
 
 
 urlpatterns = [
