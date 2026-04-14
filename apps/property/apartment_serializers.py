@@ -107,16 +107,25 @@ class PropertyLocationRegionOutputSerializer(serializers.Serializer):
     guid = serializers.UUIDField(allow_null=True)
     name = serializers.CharField(allow_blank=True, allow_null=True)
 
+    class Meta:
+        ref_name = "ApartmentPropertyLocationRegionOutput"
+
 
 class PropertyLocationDistrictOutputSerializer(serializers.Serializer):
     id = serializers.IntegerField(allow_null=True)
     guid = serializers.UUIDField(allow_null=True)
     name = serializers.CharField(allow_blank=True, allow_null=True)
 
+    class Meta:
+        ref_name = "ApartmentPropertyLocationDistrictOutput"
+
 
 class PropertyLocationPrefectureOutputSerializer(serializers.Serializer):
     id = serializers.CharField(allow_blank=True, allow_null=True)
     name = serializers.CharField(allow_blank=True, allow_null=True)
+
+    class Meta:
+        ref_name = "ApartmentPropertyLocationPrefectureOutput"
 
 
 class PropertyLocationOutputSerializer(serializers.Serializer):
@@ -127,6 +136,9 @@ class PropertyLocationOutputSerializer(serializers.Serializer):
     region = PropertyLocationRegionOutputSerializer(allow_null=True)
     district = PropertyLocationDistrictOutputSerializer(allow_null=True)
     prefecture = PropertyLocationPrefectureOutputSerializer(allow_null=True)
+
+    class Meta:
+        ref_name = "ApartmentPropertyLocationOutput"
 
 
 def _parse_int_maybe(value: Any) -> int | None:
