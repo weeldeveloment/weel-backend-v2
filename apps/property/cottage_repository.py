@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal, InvalidOperation
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -10,11 +11,20 @@ from django.utils import timezone
 from shared.raw.compat import get_table_name, is_postgresql
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 
+logger = logging.getLogger(__name__)
+
 
 def _table(*candidates: str) -> str:
     for candidate in candidates:
-        if table_exists(candidate):
-            return get_table_name(candidate)
+        try:
+            if table_exists(candidate):
+                return get_table_name(candidate)
+        except Exception:
+            logger.warning(
+                "table resolution skipped for candidate '%s'; falling back",
+                candidate,
+                exc_info=True,
+            )
     # Prefer Django-style prefixed table names when schema isn't ready yet.
     return get_table_name(candidates[-1])
 
@@ -30,20 +40,29 @@ DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
 def _column_exists(table_name: str, column_name: str, schema: str = "public") -> bool:
-    raw_table = str(table_name).split(".")[-1]
-    row = fetch_one(
-        """
-        SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = %s
-              AND table_name = %s
-              AND column_name = %s
-        ) AS exists
-        """,
-        [schema, raw_table, column_name],
-    )
-    return bool(row and row.get("exists"))
+    try:
+        raw_table = str(table_name).split(".")[-1]
+        row = fetch_one(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = %s
+                  AND table_name = %s
+                  AND column_name = %s
+            ) AS exists
+            """,
+            [schema, raw_table, column_name],
+        )
+        return bool(row and row.get("exists"))
+    except Exception:
+        logger.warning(
+            "column detection failed for %s.%s; using safe fallback",
+            table_name,
+            column_name,
+            exc_info=True,
+        )
+        return False
 
 
 HAS_COTTAGE_REGION_ID = _column_exists(COTTAGE_TABLE, "region_id")

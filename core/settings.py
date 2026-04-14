@@ -320,6 +320,15 @@ SWAGGER_SETTINGS = {
     "USE_SESSION_AUTH": False,
     "LOGIN_URL": None,
     "LOGOUT_URL": None,
+    "DEFAULT_MODEL_RENDERING": "example",
+    "DISPLAY_OPERATION_ID": True,
+    "DOC_EXPANSION": "none",
+    "OPERATIONS_SORTER": "alpha",
+    "TAGS_SORTER": "alpha",
+    "DEEP_LINKING": True,
+    "SHOW_EXTENSIONS": True,
+    "SHOW_COMMON_EXTENSIONS": True,
+    "PERSIST_AUTH": True,
     "SECURITY_DEFINITIONS": {
         "Bearer": {
             "type": "apiKey",

@@ -77,7 +77,7 @@ def _swagger_unauthorized_response():
     <body>
       <div class="card">
         <h3>401 Unauthorized</h3>
-        <p>Swagger uchun login talab qilinadi.</p>
+        <p>Swagger access requires authentication.</p>
         <form method="get" action="">
           <div style="margin-bottom: 10px;">
             <input type="text" name="swagger_username" placeholder="Username" required />
@@ -85,7 +85,7 @@ def _swagger_unauthorized_response():
           <div style="margin-bottom: 10px;">
             <input type="password" name="swagger_password" placeholder="Password" required />
           </div>
-          <button type="submit">Qayta login</button>
+          <button type="submit">Sign in</button>
         </form>
       </div>
     </body>

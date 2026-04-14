@@ -27,8 +27,17 @@ TYPE_GUID_TO_KIND = {
 
 def _table(*candidates: str) -> str:
     for candidate in candidates:
-        if table_exists(candidate):
-            return get_table_name(candidate)
+        try:
+            if table_exists(candidate):
+                return get_table_name(candidate)
+        except Exception:
+            # Keep module import safe for Swagger/schema generation when DB is
+            # temporarily unavailable. Runtime queries will still fail loudly.
+            logger.warning(
+                "table resolution skipped for candidate '%s'; falling back",
+                candidate,
+                exc_info=True,
+            )
     # Prefer Django-style prefixed table names when schema isn't ready yet.
     return get_table_name(candidates[-1])
 
