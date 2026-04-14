@@ -105,7 +105,13 @@ PROPERTY_LIST_QUERY_PARAMS = [
     openapi.Parameter("min_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
     openapi.Parameter("max_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
     openapi.Parameter("currency", openapi.IN_QUERY, type=openapi.TYPE_STRING),
-    openapi.Parameter("sort", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+    openapi.Parameter("sort", openapi.IN_QUERY, type=openapi.TYPE_STRING, enum=[
+        "price_high", "price_low",
+        "rating_high", "rating_low",
+        "reviews_high", "reviews_low",
+        "title_asc", "title_desc",
+        "corporate_yes", "corporate_no",
+    ]),
     openapi.Parameter("ordering", openapi.IN_QUERY, type=openapi.TYPE_STRING),
     openapi.Parameter("from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
     openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
@@ -430,11 +436,21 @@ def _validate_image_upload(uploaded):
 
 
 def _extract_list_params(source):
+    # Handle corporate sort as filter
+    sort_value = (_source_get(source, "sort") or "").strip().lower()
+    corporate_filter = _parse_bool(_source_get(source, "corporate"))
+    if sort_value == "corporate_yes":
+        corporate_filter = True
+    elif sort_value == "corporate_no":
+        corporate_filter = False
+
     return {
         "search": _source_get(source, "search"),
         "region_id": _parse_int(_source_get(source, "region_id") or _source_get(source, "location_id")),
         "district_id": _parse_int(_source_get(source, "district_id")),
-        "corporate": _parse_bool(_source_get(source, "corporate")),
+        "corporate": corporate_filter,
+        "min_price": _parse_decimal(_source_get(source, "min_price")),
+        "max_price": _parse_decimal(_source_get(source, "max_price")),
     }
 
 

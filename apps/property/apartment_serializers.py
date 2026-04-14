@@ -137,6 +137,7 @@ class ApartmentListSerializer(serializers.Serializer):
     rooms = serializers.IntegerField(allow_null=True)
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
+    is_allowed_corporate = serializers.BooleanField()
     created_at = serializers.DateTimeField()
     property_type_id = serializers.UUIDField()
     property_type = serializers.DictField()

@@ -193,39 +193,61 @@ DATABASES = {
 }
 
 _redis_url = (os.environ.get("REDIS_CONNECTION_STRING") or "").strip()
-if not _redis_url or _redis_url in {
+
+# For development without Redis, fallback to local memory cache
+if DEBUG and (not _redis_url or _redis_url in {
     "redis_connection_string",
     "REDIS_CONNECTION_STRING",
     "${REDIS_CONNECTION_STRING}",
-}:
-    raise ImproperlyConfigured(
-        "REDIS_CONNECTION_STRING must be set to a valid Redis URL."
-    )
-
-_redis_parts = urlsplit(_redis_url)
-if _redis_parts.scheme not in {"redis", "rediss"}:
-    raise ImproperlyConfigured(
-        "REDIS_CONNECTION_STRING must start with redis:// or rediss://"
-    )
-
-CACHES = {
-    "default": {
-        "BACKEND": "django_prometheus.cache.backends.redis.RedisCache",
-        "LOCATION": _redis_url,
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+}):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         },
-    },
-}
+    }
+    _redis_url = None
+else:
+    if not _redis_url or _redis_url in {
+        "redis_connection_string",
+        "REDIS_CONNECTION_STRING",
+        "${REDIS_CONNECTION_STRING}",
+    }:
+        raise ImproperlyConfigured(
+            "REDIS_CONNECTION_STRING must be set to a valid Redis URL."
+        )
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [_redis_url],
+    _redis_parts = urlsplit(_redis_url)
+    if _redis_parts.scheme not in {"redis", "rediss"}:
+        raise ImproperlyConfigured(
+            "REDIS_CONNECTION_STRING must start with redis:// or rediss://"
+        )
+
+    CACHES = {
+        "default": {
+            "BACKEND": "django_prometheus.cache.backends.redis.RedisCache",
+            "LOCATION": _redis_url,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
         },
-    },
-}
+    }
+
+# Use InMemoryChannelLayer for development without Redis
+if DEBUG and not _redis_url:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [_redis_url],
+            },
+        },
+    }
 
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
