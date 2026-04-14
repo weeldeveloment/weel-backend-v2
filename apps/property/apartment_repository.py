@@ -306,6 +306,8 @@ def list_apartments(
     region_id: int | None = None,
     district_id: int | None = None,
     corporate: bool | None = None,
+    min_price: Decimal | None = None,
+    max_price: Decimal | None = None,
 ) -> list[dict[str, Any]]:
     where = ["1 = 1"]
     params: list[Any] = []
@@ -331,6 +333,12 @@ def list_apartments(
     if corporate is not None:
         where.append("COALESCE(a.is_allowed_corporate, FALSE) = %s")
         params.append(bool(corporate))
+    if min_price is not None:
+        where.append("COALESCE(a.price, 0) >= %s")
+        params.append(min_price)
+    if max_price is not None:
+        where.append("COALESCE(a.price, 0) <= %s")
+        params.append(max_price)
 
     return fetch_all(
         f"""
@@ -560,9 +568,9 @@ def _effective_price(row: dict[str, Any], reference_date) -> Decimal:
 
 
 def _sort_rows(rows: list[dict[str, Any]], *, ordering: str | None = None, sort: str | None = None) -> list[dict[str, Any]]:
-    key_spec = (ordering or "").strip()
     sort_value = (sort or "").strip().lower()
-    if not key_spec:
+    # If sort parameter is provided, use it; otherwise fall back to ordering
+    if sort_value:
         key_spec = {
             "price_high": "-order_price_uzs",
             "price_low": "order_price_uzs",
@@ -572,7 +580,14 @@ def _sort_rows(rows: list[dict[str, Any]], *, ordering: str | None = None, sort:
             "reviews_low": "review_count",
             "title_asc": "title",
             "title_desc": "-title",
-        }.get(sort_value, "-created_at")
+            "corporate_yes": "-is_allowed_corporate",
+            "corporate_no": "is_allowed_corporate",
+        }.get(sort_value)
+    else:
+        key_spec = None
+    # If no valid sort mapping, fall back to ordering parameter
+    if not key_spec:
+        key_spec = (ordering or "").strip() if ordering else "-created_at"
     desc = key_spec.startswith("-")
     key_name = key_spec[1:] if desc else key_spec
     if key_name == "title":
@@ -581,6 +596,8 @@ def _sort_rows(rows: list[dict[str, Any]], *, ordering: str | None = None, sort:
         return sorted(rows, key=lambda r: (Decimal(str(r.get(key_name) or 0)), r.get("id") or 0), reverse=desc)
     if key_name == "review_count":
         return sorted(rows, key=lambda r: (int(r.get("review_count") or 0), r.get("id") or 0), reverse=desc)
+    if key_name == "is_allowed_corporate":
+        return sorted(rows, key=lambda r: (bool(r.get("is_allowed_corporate")), r.get("id") or 0), reverse=desc)
     return sorted(rows, key=lambda r: (r.get("created_at"), r.get("id") or 0), reverse=True)
 
 

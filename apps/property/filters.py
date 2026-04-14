@@ -12,6 +12,8 @@ SORT_TO_ORDERING = {
     "reviews_low": ["comment_count"],
     "title_asc": ["title"],
     "title_desc": ["-title"],
+    "corporate_yes": ["-is_allowed_corporate"],
+    "corporate_no": ["is_allowed_corporate"],
 }
 
 

@@ -162,6 +162,8 @@ def list_cottages(
     region_id: int | None = None,
     district_id: int | None = None,
     corporate: bool | None = None,
+    min_price: Decimal | None = None,
+    max_price: Decimal | None = None,
 ) -> list[dict[str, Any]]:
     where = ["1 = 1"]
     params: list[Any] = []
@@ -187,6 +189,13 @@ def list_cottages(
     if corporate is not None:
         where.append("COALESCE(c.is_allowed_corporate, FALSE) = %s")
         params.append(bool(corporate))
+    # For cottages, check if at least one price falls within the range
+    if min_price is not None:
+        where.append("(COALESCE(c.price_on_working_days, 0) >= %s OR COALESCE(c.price_on_weekends, 0) >= %s)")
+        params.extend([min_price, min_price])
+    if max_price is not None:
+        where.append("(COALESCE(c.price_on_working_days, 0) <= %s OR COALESCE(c.price_on_weekends, 0) <= %s)")
+        params.extend([max_price, max_price])
 
     return fetch_all(
         f"""
