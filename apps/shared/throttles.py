@@ -1,10 +1,13 @@
+import json
 import logging
+import time
 
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, UserRateThrottle
 
 
 logger = logging.getLogger(__name__)
 
+_DEBUG_LOG_PATH = "/home/abbbose/projects/protouch/weel-backend-v2/.cursor/debug-ce4097.log"
 
 _SWAGGER_PREFIXES = (
     "/swagger/",
@@ -12,6 +15,17 @@ _SWAGGER_PREFIXES = (
     "/redoc/",
     "/api/redoc/",
 )
+
+
+# #region agent log
+def _debug_log(hypothesis_id, location, message, data=None):
+    try:
+        entry = json.dumps({"sessionId": "ce4097", "hypothesisId": hypothesis_id, "location": location, "message": message, "data": data or {}, "timestamp": int(time.time() * 1000)})
+        with open(_DEBUG_LOG_PATH, "a") as f:
+            f.write(entry + "\n")
+    except Exception:
+        pass
+# #endregion
 
 
 class SwaggerExemptAnonRateThrottle(AnonRateThrottle):
@@ -33,9 +47,18 @@ class SwaggerExemptAnonRateThrottle(AnonRateThrottle):
         if request.path.startswith(_SWAGGER_PREFIXES):
             return True
         try:
-            return super().allow_request(request, view)
+            allowed = super().allow_request(request, view)
+            # #region agent log
+            if not allowed:
+                ident = self.get_ident(request)
+                _debug_log("H1", "throttles.py:anon", "ANON_THROTTLED", {"path": request.path, "ident": ident, "rate": self.rate, "num_requests": getattr(self, "num_requests", None)})
+            # #endregion
+            return allowed
         except Exception as exc:
             logger.warning("Anon throttle cache unavailable; allowing request: %s", exc)
+            # #region agent log
+            _debug_log("H1", "throttles.py:anon_exc", "ANON_THROTTLE_EXCEPTION", {"path": request.path, "error": str(exc)})
+            # #endregion
             return True
 
 
@@ -48,9 +71,17 @@ class SwaggerExemptUserRateThrottle(UserRateThrottle):
         if request.path.startswith(_SWAGGER_PREFIXES):
             return True
         try:
-            return super().allow_request(request, view)
+            allowed = super().allow_request(request, view)
+            # #region agent log
+            if not allowed:
+                _debug_log("H2", "throttles.py:user", "USER_THROTTLED", {"path": request.path, "rate": self.rate})
+            # #endregion
+            return allowed
         except Exception as exc:
             logger.warning("User throttle cache unavailable; allowing request: %s", exc)
+            # #region agent log
+            _debug_log("H2", "throttles.py:user_exc", "USER_THROTTLE_EXCEPTION", {"path": request.path, "error": str(exc)})
+            # #endregion
             return True
 
 

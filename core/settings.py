@@ -180,6 +180,8 @@ ASGI_APPLICATION = "core.asgi.application"
 _db_port = os.environ.get("DB_PORT", "5432")
 if _db_port in ("", "db_port"):
     _db_port = "5432"
+_db_conn_max_age = int((os.environ.get("DB_CONN_MAX_AGE") or "60").strip() or "60")
+_db_conn_health_checks = bool(int((os.environ.get("DB_CONN_HEALTH_CHECKS") or "1").strip() or "1"))
 
 DATABASES = {
     "default": {
@@ -189,10 +191,16 @@ DATABASES = {
         "PASSWORD": os.environ.get("DB_PASSWORD"),
         "HOST": os.environ.get("DB_HOST"),
         "PORT": _db_port,
+        "CONN_MAX_AGE": _db_conn_max_age,
+        "CONN_HEALTH_CHECKS": _db_conn_health_checks,
     }
 }
 
 _redis_url = (os.environ.get("REDIS_CONNECTION_STRING") or "").strip()
+_redis_socket_timeout = float((os.environ.get("REDIS_SOCKET_TIMEOUT_SECONDS") or "3").strip() or "3")
+_redis_socket_connect_timeout = float(
+    (os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS") or "3").strip() or "3"
+)
 
 # For development without Redis, fallback to local memory cache
 if DEBUG and (not _redis_url or _redis_url in {
@@ -228,6 +236,8 @@ else:
             "LOCATION": _redis_url,
             "OPTIONS": {
                 "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "SOCKET_CONNECT_TIMEOUT": _redis_socket_connect_timeout,
+                "SOCKET_TIMEOUT": _redis_socket_timeout,
             },
         },
     }
@@ -273,7 +283,7 @@ REST_FRAMEWORK = {
     # property types, etc.). This caused frequent 429 responses.
     # Use a minute-window rate to allow short bursts while still limiting abuse.
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",
+        "anon": os.environ.get("API_ANON_THROTTLE_RATE", "2000/hour"),
         "user": os.environ.get("API_USER_THROTTLE_RATE", "120/minute"),
         "otp_login_send": os.environ.get("API_OTP_LOGIN_SEND_RATE", "30/minute"),
         "otp_login_verify": os.environ.get("API_OTP_LOGIN_VERIFY_RATE", "120/minute"),
