@@ -94,6 +94,7 @@ for _origin in (
     "https://weel.uz",
     "https://www.weel.uz",
     "https://dev.weel.uz",
+    "https://partner.weel.uz",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -122,6 +123,7 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken",
     "x-requested-with",
     "x-telegram-initdata",
+    "telegram-web-app-data",
 ]
 
 GLOBAL_APPS = [
@@ -638,6 +640,7 @@ else:
         "https://weel.uz",
         "https://www.weel.uz",
         "https://dev.weel.uz",
+        "https://partner.weel.uz",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",
