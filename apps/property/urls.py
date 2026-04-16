@@ -76,11 +76,6 @@ urlpatterns = [
         name="apartment-property-retrieve-update-destroy",
     ),
     path(
-        "apartments/<uuid:property_id>/favorite/",
-        PropertyFavoriteToggleView.as_view(),
-        name="apartment-property-favorite-toggle",
-    ),
-    path(
         "apartments/<uuid:property_id>/images/",
         PropertyImageCreateView.as_view(),
         name="apartment-property-image-create",
@@ -111,9 +106,9 @@ urlpatterns = [
         name="cottage-property-retrieve-update-destroy",
     ),
     path(
-        "cottages/<uuid:property_id>/favorite/",
+        "<uuid:property_id>/favorite/",
         PropertyFavoriteToggleView.as_view(),
-        name="cottage-property-favorite-toggle",
+        name="property-favorite-toggle",
     ),
     path(
         "cottages/<uuid:property_id>/images/",
