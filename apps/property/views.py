@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 from uuid import uuid4
 
 from django.core.cache import cache
@@ -95,6 +95,10 @@ logger = logging.getLogger(__name__)
 
 
 _FAVORITES_CACHE_TTL_SECONDS = 60 * 60 * 24 * 30
+_PROPERTY_META_CACHE_TTL_SECONDS = 60 * 10
+_PROPERTY_LIST_CACHE_TTL_SECONDS = 60
+_DEFAULT_PUBLIC_LIST_LIMIT = 50
+_DEFAULT_PARTNER_LIST_LIMIT = 100
 
 
 PROPERTY_LIST_QUERY_PARAMS = [
@@ -473,6 +477,23 @@ def _favorite_guids_from_request(request) -> set[str]:
     return _load_favorite_guids(int(user.id))
 
 
+def _public_cache_key(request, prefix: str) -> str:
+    query = urlencode(sorted(request.query_params.items()), doseq=True)
+    lang = _preferred_language(request)
+    return f"{prefix}:lang={lang}:query={query}"
+
+
+def _get_or_set_cached_payload(request, cache_key: str, timeout: int, loader):
+    if getattr(request.user, "is_authenticated", False):
+        return loader()
+    payload = cache.get(cache_key)
+    if payload is not None:
+        return payload
+    payload = loader()
+    cache.set(cache_key, payload, timeout=timeout)
+    return payload
+
+
 def _validate_image_upload(uploaded):
     if uploaded is None:
         raise ValidationError({"image": [_("This field is required.")]})
@@ -548,8 +569,13 @@ class PropertyTypeListView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, *args, **kwargs):
-        serializer = RawPropertyTypeSerializer(list_property_types(), many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        data = _get_or_set_cached_payload(
+            request,
+            _public_cache_key(request, "property:type-list"),
+            _PROPERTY_META_CACHE_TTL_SECONDS,
+            lambda: RawPropertyTypeSerializer(list_property_types(), many=True).data,
+        )
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class PropertyServiceListView(APIView):
@@ -557,14 +583,23 @@ class PropertyServiceListView(APIView):
 
     @swagger_auto_schema(responses={200: PropertyServiceListSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        rows = list_property_services()
-        data = []
-        for row in rows:
-            payload = dict(row)
-            payload["icon_url"] = _build_media_url(request, payload.get("icon_url"))
-            data.append(payload)
-        serializer = PropertyServiceListSerializer(data, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        def _load():
+            rows = list_property_services()
+            data = []
+            for row in rows:
+                payload = dict(row)
+                payload["icon_url"] = _build_media_url(request, payload.get("icon_url"))
+                data.append(payload)
+            serializer = PropertyServiceListSerializer(data, many=True)
+            return serializer.data
+
+        data = _get_or_set_cached_payload(
+            request,
+            _public_cache_key(request, "property:service-list"),
+            _PROPERTY_META_CACHE_TTL_SECONDS,
+            _load,
+        )
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class RegionListView(APIView):
@@ -572,14 +607,23 @@ class RegionListView(APIView):
 
     @swagger_auto_schema(responses={200: RegionListSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        rows = list_regions()
-        data = []
-        for row in rows:
-            payload = dict(row)
-            payload["img"] = _build_media_url(request, payload.get("img"))
-            data.append(payload)
-        serializer = RegionListSerializer(data, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        def _load():
+            rows = list_regions()
+            data = []
+            for row in rows:
+                payload = dict(row)
+                payload["img"] = _build_media_url(request, payload.get("img"))
+                data.append(payload)
+            serializer = RegionListSerializer(data, many=True)
+            return serializer.data
+
+        data = _get_or_set_cached_payload(
+            request,
+            _public_cache_key(request, "property:region-list"),
+            _PROPERTY_META_CACHE_TTL_SECONDS,
+            _load,
+        )
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class DistrictListView(APIView):
@@ -592,26 +636,35 @@ class DistrictListView(APIView):
         responses={200: DistrictListSerializer(many=True)},
     )
     def get(self, request, *args, **kwargs):
-        region_id = _parse_region_id_or_guid(request.query_params.get("region_id"))
-        rows = list_districts(region_id=region_id)
-        data = []
-        for row in rows:
-            data.append(
-                {
-                    "id": row.get("id"),
-                    "guid": row.get("guid"),
-                    "title": row.get("title"),
-                    "region_id": row.get("region_id"),
-                    "region": {
-                        "id": row.get("region_id"),
-                        "guid": row.get("region_guid"),
-                        "title": row.get("region_title"),
-                        "img": _build_media_url(request, row.get("region_img")),
-                    } if row.get("region_guid") else None,
-                }
-            )
-        serializer = DistrictListSerializer(data, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        def _load():
+            region_id = _parse_region_id_or_guid(request.query_params.get("region_id"))
+            rows = list_districts(region_id=region_id)
+            data = []
+            for row in rows:
+                data.append(
+                    {
+                        "id": row.get("id"),
+                        "guid": row.get("guid"),
+                        "title": row.get("title"),
+                        "region_id": row.get("region_id"),
+                        "region": {
+                            "id": row.get("region_id"),
+                            "guid": row.get("region_guid"),
+                            "title": row.get("region_title"),
+                            "img": _build_media_url(request, row.get("region_img")),
+                        } if row.get("region_guid") else None,
+                    }
+                )
+            serializer = DistrictListSerializer(data, many=True)
+            return serializer.data
+
+        data = _get_or_set_cached_payload(
+            request,
+            _public_cache_key(request, "property:district-list"),
+            _PROPERTY_META_CACHE_TTL_SECONDS,
+            _load,
+        )
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class PrefectureListView(APIView):
@@ -625,25 +678,34 @@ class PrefectureListView(APIView):
         responses={200: PrefectureListSerializer(many=True)},
     )
     def get(self, request, *args, **kwargs):
-        district_id = _parse_int(request.query_params.get("district_id"))
-        district_guid = (request.query_params.get("district_guid") or "").strip() or None
-        rows = list_prefectures(district_id=district_id, district_guid=district_guid)
-        data = []
-        for row in rows:
-            data.append(
-                {
-                    "guid": row.get("guid"),
-                    "title": row.get("title"),
-                    "district": {
-                        "guid": row.get("district_guid"),
-                        "title": row.get("district_title"),
+        def _load():
+            district_id = _parse_int(request.query_params.get("district_id"))
+            district_guid = (request.query_params.get("district_guid") or "").strip() or None
+            rows = list_prefectures(district_id=district_id, district_guid=district_guid)
+            data = []
+            for row in rows:
+                data.append(
+                    {
+                        "guid": row.get("guid"),
+                        "title": row.get("title"),
+                        "district": {
+                            "guid": row.get("district_guid"),
+                            "title": row.get("district_title"),
+                        }
+                        if row.get("district_guid")
+                        else None,
                     }
-                    if row.get("district_guid")
-                    else None,
-                }
-            )
-        serializer = PrefectureListSerializer(data, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+                )
+            serializer = PrefectureListSerializer(data, many=True)
+            return serializer.data
+
+        data = _get_or_set_cached_payload(
+            request,
+            _public_cache_key(request, "property:prefecture-list"),
+            _PROPERTY_META_CACHE_TTL_SECONDS,
+            _load,
+        )
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class LocationListView(APIView):
@@ -651,10 +713,19 @@ class LocationListView(APIView):
 
     @swagger_auto_schema(responses={200: RegionsResponseSerializer()})
     def get(self, request, *args, **kwargs):
-        language = _preferred_language(request)
-        regions = _build_location_tree(language)
-        serializer = LocationRegionListSerializer(regions, many=True)
-        return Response({"regions": serializer.data}, status=status.HTTP_200_OK)
+        def _load():
+            language = _preferred_language(request)
+            regions = _build_location_tree(language)
+            serializer = LocationRegionListSerializer(regions, many=True)
+            return {"regions": serializer.data}
+
+        payload = _get_or_set_cached_payload(
+            request,
+            _public_cache_key(request, "property:location-tree"),
+            _PROPERTY_META_CACHE_TTL_SECONDS,
+            _load,
+        )
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class CategoryListView(APIView):
@@ -687,32 +758,40 @@ class UnifiedRecommendationsListView(APIView):
         responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
     )
     def get(self, request, *args, **kwargs):
-        property_type = str(request.query_params.get("kind") or "property").strip().lower()
-        if property_type not in {"property", "apartment", "cottage", "apartments", "cottages"}:
-            return Response([], status=status.HTTP_200_OK)
+        def _load():
+            property_type = str(request.query_params.get("kind") or "property").strip().lower()
+            if property_type not in {"property", "apartment", "cottage", "apartments", "cottages"}:
+                return []
 
-        rec_type = str(request.query_params.get("type") or "featured").strip().lower()
-        ordering = "-created_at"
-        if rec_type == "best-by-reviews":
-            ordering = "-average_rating"
-        elif rec_type == "most-booked":
-            ordering = "-review_count"
+            rec_type = str(request.query_params.get("type") or "featured").strip().lower()
+            ordering = "-created_at"
+            if rec_type == "best-by-reviews":
+                ordering = "-average_rating"
+            elif rec_type == "most-booked":
+                ordering = "-review_count"
 
-        ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
+            ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
 
-        if property_type in {"apartment", "apartments"}:
-            rows = _list_apartment_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
-            return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
+            if property_type in {"apartment", "apartments"}:
+                rows = _list_apartment_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
+                return ApartmentListSerializer(rows, many=True, context=ctx).data
 
-        if property_type in {"cottage", "cottages"}:
-            rows = _list_cottage_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
-            return Response(CottageListSerializer(rows, many=True, context=ctx).data)
+            if property_type in {"cottage", "cottages"}:
+                rows = _list_cottage_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
+                return CottageListSerializer(rows, many=True, context=ctx).data
 
-        apt_rows = _list_apartment_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
-        cot_rows = _list_cottage_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
-        data = (
-            ApartmentListSerializer(apt_rows, many=True, context=ctx).data
-            + CottageListSerializer(cot_rows, many=True, context=ctx).data
+            apt_rows = _list_apartment_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
+            cot_rows = _list_cottage_rows(request.query_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
+            return (
+                ApartmentListSerializer(apt_rows, many=True, context=ctx).data
+                + CottageListSerializer(cot_rows, many=True, context=ctx).data
+            )
+
+        data = _get_or_set_cached_payload(
+            request,
+            _public_cache_key(request, "property:recommendations"),
+            _PROPERTY_LIST_CACHE_TTL_SECONDS,
+            _load,
         )
         return Response(data, status=status.HTTP_200_OK)
 
@@ -739,7 +818,11 @@ class ApartmentPropertyListCreateView(APIView):
         responses={200: ApartmentListSerializer(many=True)},
     )
     def get(self, request, *args, **kwargs):
-        rows = _list_apartment_rows(request.query_params, public_only=True)
+        rows = _list_apartment_rows(
+            request.query_params,
+            public_only=True,
+            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+        )
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
         return Response(ApartmentListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
 
@@ -793,7 +876,11 @@ class CottagePropertyListCreateView(APIView):
         responses={200: CottageListSerializer(many=True)},
     )
     def get(self, request, *args, **kwargs):
-        rows = _list_cottage_rows(request.query_params, public_only=True)
+        rows = _list_cottage_rows(
+            request.query_params,
+            public_only=True,
+            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+        )
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
         return Response(CottageListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
 
@@ -853,9 +940,17 @@ class PropertyListCreateView(APIView):
             request.query_params.get("property_type")
         )
         if requested_kind == PROPERTY_KIND_COTTAGE:
-            rows = _list_cottage_rows(request.query_params, public_only=True)
+            rows = _list_cottage_rows(
+                request.query_params,
+                public_only=True,
+                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            )
             return Response(CottageListSerializer(rows, many=True, context=ctx).data)
-        rows = _list_apartment_rows(request.query_params, public_only=True)
+        rows = _list_apartment_rows(
+            request.query_params,
+            public_only=True,
+            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+        )
         return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
 
     def post(self, request, *args, **kwargs):
@@ -886,8 +981,8 @@ class PropertyFilterByLinkView(APIView):
             return Response({"url": [_("This field is required.")]}, status=status.HTTP_400_BAD_REQUEST)
         parsed = parse_qs(urlparse(url).query)
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        apt_rows = _list_apartment_rows(parsed, public_only=True)
-        cot_rows = _list_cottage_rows(parsed, public_only=True)
+        apt_rows = _list_apartment_rows(parsed, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT)
+        cot_rows = _list_cottage_rows(parsed, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT)
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
             + CottageListSerializer(cot_rows, many=True, context=ctx).data
@@ -909,8 +1004,8 @@ class RegionPropertyListView(APIView):
         mutable = request.query_params.copy()
         mutable["region_id"] = str(region_id)
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        apt_rows = _list_apartment_rows(mutable, public_only=True)
-        cot_rows = _list_cottage_rows(mutable, public_only=True)
+        apt_rows = _list_apartment_rows(mutable, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT)
+        cot_rows = _list_cottage_rows(mutable, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT)
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
             + CottageListSerializer(cot_rows, many=True, context=ctx).data
@@ -1455,14 +1550,34 @@ class PartnerPropertyListView(APIView):
         partner_id = int(request.user.id)
 
         if property_type == PROPERTY_KIND_APARTMENT:
-            rows = _list_apartment_rows(request.query_params, public_only=False, partner_user_id=partner_id)
+            rows = _list_apartment_rows(
+                request.query_params,
+                public_only=False,
+                partner_user_id=partner_id,
+                default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
+            )
             return Response(ApartmentPartnerListSerializer(rows, many=True, context=ctx).data)
         if property_type == PROPERTY_KIND_COTTAGE:
-            rows = _list_cottage_rows(request.query_params, public_only=False, partner_user_id=partner_id)
+            rows = _list_cottage_rows(
+                request.query_params,
+                public_only=False,
+                partner_user_id=partner_id,
+                default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
+            )
             return Response(CottagePartnerListSerializer(rows, many=True, context=ctx).data)
 
-        apt_rows = _list_apartment_rows(request.query_params, public_only=False, partner_user_id=partner_id)
-        cot_rows = _list_cottage_rows(request.query_params, public_only=False, partner_user_id=partner_id)
+        apt_rows = _list_apartment_rows(
+            request.query_params,
+            public_only=False,
+            partner_user_id=partner_id,
+            default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
+        )
+        cot_rows = _list_cottage_rows(
+            request.query_params,
+            public_only=False,
+            partner_user_id=partner_id,
+            default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
+        )
         data = (
             ApartmentPartnerListSerializer(apt_rows, many=True, context=ctx).data
             + CottagePartnerListSerializer(cot_rows, many=True, context=ctx).data
@@ -1484,6 +1599,7 @@ class ApartmentPartnerPropertyListView(APIView):
             request.query_params,
             public_only=False,
             partner_user_id=int(request.user.id),
+            default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
         )
         return Response(ApartmentPartnerListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
 
@@ -1502,6 +1618,7 @@ class CottagePartnerPropertyListView(APIView):
             request.query_params,
             public_only=False,
             partner_user_id=int(request.user.id),
+            default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
         )
         return Response(CottagePartnerListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
 

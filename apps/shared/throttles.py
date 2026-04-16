@@ -5,14 +5,12 @@ from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, User
 
 logger = logging.getLogger(__name__)
 
-
 _SWAGGER_PREFIXES = (
     "/swagger/",
     "/api/swagger/",
     "/redoc/",
     "/api/redoc/",
 )
-
 
 class SwaggerExemptAnonRateThrottle(AnonRateThrottle):
     """
