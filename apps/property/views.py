@@ -1593,6 +1593,35 @@ class PartnerPropertyListView(APIView):
         return Response(data, status=status.HTTP_200_OK)
 
 
+class PartnerAllPropertyListView(APIView):
+    authentication_classes = [PartnerJWTAuthentication]
+    permission_classes = [IsPartner]
+
+    @swagger_auto_schema(
+        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+    )
+    def get(self, request, *args, **kwargs):
+        ctx = {"request": request}
+        partner_id = int(request.user.id)
+        apt_rows = _list_apartment_rows(
+            request.query_params,
+            public_only=False,
+            partner_user_id=partner_id,
+            default_limit=None,
+        )
+        cot_rows = _list_cottage_rows(
+            request.query_params,
+            public_only=False,
+            partner_user_id=partner_id,
+            default_limit=None,
+        )
+        data = (
+            ApartmentPartnerListSerializer(apt_rows, many=True, context=ctx).data
+            + CottagePartnerListSerializer(cot_rows, many=True, context=ctx).data
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
+
 class ApartmentPartnerPropertyListView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
