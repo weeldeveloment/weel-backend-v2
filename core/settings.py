@@ -91,6 +91,9 @@ if DEBUG and not CORS_ALLOWED_ORIGINS:
         "http://127.0.0.1:5173",
     ]
 for _origin in (
+    "https://weel.uz",
+    "https://www.weel.uz",
+    "https://dev.weel.uz",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -632,6 +635,9 @@ else:
     CSRF_TRUSTED_ORIGINS = [
         "https://api.weel.uz",
         "https://api.node.v1.backend.weel.uz",
+        "https://weel.uz",
+        "https://www.weel.uz",
+        "https://dev.weel.uz",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",
