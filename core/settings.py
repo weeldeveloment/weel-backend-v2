@@ -94,7 +94,7 @@ for _origin in (
     "https://weel.uz",
     "https://www.weel.uz",
     "https://dev.weel.uz",
-    "https://partner.weel.uz",
+    "https://partners.weel.uz",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
