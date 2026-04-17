@@ -123,6 +123,8 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken",
     "x-requested-with",
     "x-telegram-initdata",
+    "x-telegram-init-data",
+    "telegram-init-data",
     "telegram-web-app-data",
 ]
 
