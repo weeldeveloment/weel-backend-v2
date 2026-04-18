@@ -423,6 +423,7 @@ class CottageCreateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         is_update = bool(self.context.get("is_update"))
+        is_admin = bool(self.context.get("is_admin"))
 
         title = (attrs.get("title") or "").strip()
         if not is_update and not title:
@@ -597,7 +598,7 @@ class CottageCreateSerializer(serializers.Serializer):
         if prefecture_value is not None:
             normalized["prefecture_id"] = str(prefecture_value)
 
-        if not is_update:
+        if not is_admin and not is_update:
             if normalized.get("region_id") is None:
                 raise serializers.ValidationError({"region_id": _("This field is required.")})
             if normalized.get("district_id") is None:
@@ -605,13 +606,14 @@ class CottageCreateSerializer(serializers.Serializer):
 
         district_id = normalized.get("district_id")
         prefecture_id = normalized.get("prefecture_id")
-        if district_id in {75, 82}:
-            if not prefecture_id:
-                raise serializers.ValidationError({"prefecture_id": _("This field is required for selected district.")})
-            if not is_prefecture_linked_to_district(district_id=district_id, prefecture_guid=prefecture_id):
-                raise serializers.ValidationError({"prefecture_id": _("Invalid prefecture for selected district.")})
-        elif prefecture_id:
-            raise serializers.ValidationError({"prefecture_id": _("Prefecture can be set only for district 75 or 82.")})
+        if not is_admin:
+            if district_id in {75, 82}:
+                if not prefecture_id:
+                    raise serializers.ValidationError({"prefecture_id": _("This field is required for selected district.")})
+                if not is_prefecture_linked_to_district(district_id=district_id, prefecture_guid=prefecture_id):
+                    raise serializers.ValidationError({"prefecture_id": _("Invalid prefecture for selected district.")})
+            elif prefecture_id:
+                raise serializers.ValidationError({"prefecture_id": _("Prefecture can be set only for district 75 or 82.")})
 
         attrs["normalized_values"] = normalized
         return attrs

@@ -1932,7 +1932,7 @@ class AdminApartmentPatchView(APIView):
         serializer = ApartmentAdminUpdateSerializer(
             data=request.data,
             partial=True,
-            context={"is_update": True, "request": request},
+            context={"is_update": True, "is_admin": True, "request": request},
         )
         serializer.is_valid(raise_exception=True)
         normalized = serializer.validated_data.get("normalized_values") or {}
@@ -1994,7 +1994,7 @@ class AdminCottagePatchView(APIView):
         serializer = CottageAdminUpdateSerializer(
             data=request.data,
             partial=True,
-            context={"is_update": True, "request": request},
+            context={"is_update": True, "is_admin": True, "request": request},
         )
         serializer.is_valid(raise_exception=True)
         normalized = serializer.validated_data.get("normalized_values") or {}
