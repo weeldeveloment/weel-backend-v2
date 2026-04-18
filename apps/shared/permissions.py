@@ -59,6 +59,21 @@ class IsClientOrPartner(BasePermission):
         return False
 
 
+class IsPartnerOrAdmin(BasePermission):
+    """Active partner (JWT) or active admin (admin panel JWT)."""
+
+    message = _("Authentication credentials were not provided.")
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_active", False):
+            return False
+        role = getattr(user, "role", None)
+        if role == "admin":
+            return True
+        return _user_role(user) == "partner"
+
+
 class IsPartnerOwnerProperty(BasePermission):
     """Allow partners to edit or delete only their own properties"""
 

@@ -33,6 +33,7 @@ from shared.permissions import (
     IsClient,
     IsClientOrPartner,
     IsPartnerOwnerProperty,
+    IsPartnerOrAdmin,
 )
 from shared.raw.db import _compile_sql
 from shared.views import FrontendLogView
@@ -182,6 +183,34 @@ class IsPartnerPermissionTests(TestCase):
         partner.__class__ = Partner
         req = MagicMock(user=partner)
         self.assertTrue(IsPartner().has_permission(req, None))
+
+
+class IsPartnerOrAdminPermissionTests(TestCase):
+    def test_anonymous_false(self):
+        req = MagicMock(user=None)
+        self.assertFalse(IsPartnerOrAdmin().has_permission(req, None))
+
+    def test_inactive_false(self):
+        req = MagicMock(user=MagicMock(role="admin", is_active=False))
+        self.assertFalse(IsPartnerOrAdmin().has_permission(req, None))
+
+    def test_admin_active_true(self):
+        req = MagicMock(user=MagicMock(role="admin", is_active=True))
+        self.assertTrue(IsPartnerOrAdmin().has_permission(req, None))
+
+    def test_partner_active_true(self):
+        from users.models.partners import Partner
+        partner = MagicMock(spec=Partner, is_active=True)
+        partner.__class__ = Partner
+        req = MagicMock(user=partner)
+        self.assertTrue(IsPartnerOrAdmin().has_permission(req, None))
+
+    def test_client_false(self):
+        from users.models.clients import Client
+        client = MagicMock(spec=Client, is_active=True)
+        client.__class__ = Client
+        req = MagicMock(user=client)
+        self.assertFalse(IsPartnerOrAdmin().has_permission(req, None))
 
 
 class IsClientPermissionTests(TestCase):

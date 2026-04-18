@@ -24,8 +24,10 @@ from rest_framework.views import APIView
 from shared.raw.db import fetch_all
 from shared.raw.compat import get_table_name
 
-from shared.permissions import IsClient, IsPartner
+from admin_auth.authentication import AdminJWTAuthentication
+from shared.permissions import IsClient, IsPartner, IsPartnerOrAdmin
 from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
+from users.raw_repository import get_user_by_id
 
 from .apartment_repository import (
     APARTMENT_TYPE_GUID,
@@ -1594,15 +1596,40 @@ class PartnerPropertyListView(APIView):
 
 
 class PartnerAllPropertyListView(APIView):
-    authentication_classes = [PartnerJWTAuthentication]
-    permission_classes = [IsPartner]
+    authentication_classes = [AdminJWTAuthentication, PartnerJWTAuthentication]
+    permission_classes = [IsPartnerOrAdmin]
 
     @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                "partner_id",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="Admin only: target partner user id. Partners ignore this and always use the JWT subject.",
+            ),
+        ],
         responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
     )
     def get(self, request, *args, **kwargs):
         ctx = {"request": request}
-        partner_id = int(request.user.id)
+        role = getattr(request.user, "role", None)
+        if role == "admin":
+            raw = request.query_params.get("partner_id")
+            if raw is None or str(raw).strip() == "":
+                raise ValidationError(
+                    {"partner_id": _("This field is required when using an admin token.")}
+                )
+            try:
+                partner_id = int(str(raw).strip())
+            except (TypeError, ValueError):
+                raise ValidationError({"partner_id": _("Enter a valid integer.")})
+            if get_user_by_id(partner_id, role="partner", active_only=True) is None:
+                raise ValidationError(
+                    {"partner_id": _("No active partner account found for this id.")}
+                )
+        else:
+            partner_id = int(request.user.id)
         apt_rows = _list_apartment_rows(
             request.query_params,
             public_only=False,
