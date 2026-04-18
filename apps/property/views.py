@@ -1780,6 +1780,120 @@ class AdminAllPropertiesListView(APIView):
         return Response(data, status=status.HTTP_200_OK)
 
 
+class AdminRegionListView(APIView):
+    """Admin-only list of all regions."""
+
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="List regions (admin)",
+        operation_description="Returns all regions without caching (admin access).",
+        responses={200: RegionListSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        rows = list_regions()
+        data = []
+        for row in rows:
+            payload = dict(row)
+            payload["img"] = _build_media_url(request, payload.get("img"))
+            data.append(payload)
+        return Response(RegionListSerializer(data, many=True).data, status=status.HTTP_200_OK)
+
+
+class AdminDistrictListView(APIView):
+    """Admin-only list of districts, optionally filtered by region."""
+
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="List districts (admin)",
+        operation_description="Returns districts, optionally filtered by region_id or region guid.",
+        manual_parameters=[
+            openapi.Parameter(
+                "region_id",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description="Optional region id (integer) or region guid.",
+            ),
+        ],
+        responses={200: DistrictListSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        region_id = _parse_region_id_or_guid(request.query_params.get("region_id"))
+        rows = list_districts(region_id=region_id)
+        data = []
+        for row in rows:
+            data.append(
+                {
+                    "id": row.get("id"),
+                    "guid": row.get("guid"),
+                    "title": row.get("title"),
+                    "region_id": row.get("region_id"),
+                    "region": {
+                        "id": row.get("region_id"),
+                        "guid": row.get("region_guid"),
+                        "title": row.get("region_title"),
+                        "img": _build_media_url(request, row.get("region_img")),
+                    } if row.get("region_guid") else None,
+                }
+            )
+        return Response(DistrictListSerializer(data, many=True).data, status=status.HTTP_200_OK)
+
+
+class AdminPrefectureListView(APIView):
+    """Admin-only list of prefectures, optionally filtered by district."""
+
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="List prefectures (admin)",
+        operation_description="Returns prefectures, optionally filtered by district_id or district_guid.",
+        manual_parameters=[
+            openapi.Parameter(
+                "district_id",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="Optional district id filter.",
+            ),
+            openapi.Parameter(
+                "district_guid",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description="Optional district guid filter.",
+            ),
+        ],
+        responses={200: PrefectureListSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        district_id = _parse_int(request.query_params.get("district_id"))
+        district_guid = (request.query_params.get("district_guid") or "").strip() or None
+        rows = list_prefectures(district_id=district_id, district_guid=district_guid)
+        data = []
+        for row in rows:
+            data.append(
+                {
+                    "guid": row.get("guid"),
+                    "title": row.get("title"),
+                    "district": {
+                        "guid": row.get("district_guid"),
+                        "title": row.get("district_title"),
+                    }
+                    if row.get("district_guid")
+                    else None,
+                }
+            )
+        return Response(PrefectureListSerializer(data, many=True).data, status=status.HTTP_200_OK)
+
+
 class AdminApartmentPatchView(APIView):
     """Admin-only endpoint for patching any field of an apartment record."""
 
