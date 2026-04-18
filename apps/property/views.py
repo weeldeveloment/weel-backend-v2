@@ -58,6 +58,8 @@ from .apartment_repository import (
     delete_apartment,
     set_apartment_primary_image,
     effective_apartment_price,
+    admin_get_apartment,
+    admin_update_apartment,
 )
 from .cottage_repository import (
     list_cottages,
@@ -68,6 +70,8 @@ from .cottage_repository import (
     delete_cottage,
     set_cottage_primary_image,
     effective_cottage_price,
+    admin_get_cottage,
+    admin_update_cottage,
 )
 from .apartment_serializers import (
     ApartmentListSerializer,
@@ -76,6 +80,7 @@ from .apartment_serializers import (
     ApartmentDetailSerializer,
     ApartmentCreateSerializer,
     ApartmentUpdateSerializer,
+    ApartmentAdminUpdateSerializer,
 )
 from .cottage_serializers import (
     CottageListSerializer,
@@ -84,6 +89,7 @@ from .cottage_serializers import (
     CottageDetailSerializer,
     CottageCreateSerializer,
     CottageUpdateSerializer,
+    CottageAdminUpdateSerializer,
 )
 from .serializers import (
     DistrictListSerializer,
@@ -1772,6 +1778,130 @@ class AdminAllPropertiesListView(APIView):
             + CottageAdminListSerializer(cot_rows, many=True, context=ctx).data
         )
         return Response(data, status=status.HTTP_200_OK)
+
+
+class AdminApartmentPatchView(APIView):
+    """Admin-only endpoint for patching any field of an apartment record."""
+
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Retrieve apartment (admin)",
+        operation_description="Returns the full admin view of an apartment by its guid.",
+        responses={200: ApartmentAdminListSerializer},
+    )
+    def get(self, request, apartment_id, *args, **kwargs):
+        row = admin_get_apartment(str(apartment_id))
+        if not row:
+            raise NotFound(_("Apartment not found"))
+        ctx = {"request": request}
+        return Response(ApartmentAdminListSerializer(row, context=ctx).data, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Patch apartment (admin)",
+        operation_description=(
+            "Admin-only partial update for every writable field on the apartment table, "
+            "including verification/archival/recommendation flags and owner reassignment. "
+            "Unlike the partner endpoint, this does NOT auto-reset verification on save."
+        ),
+        request_body=ApartmentAdminUpdateSerializer,
+        responses={200: ApartmentAdminListSerializer},
+    )
+    def patch(self, request, apartment_id, *args, **kwargs):
+        current = admin_get_apartment(str(apartment_id))
+        if not current:
+            raise NotFound(_("Apartment not found"))
+
+        serializer = ApartmentAdminUpdateSerializer(
+            data=request.data,
+            partial=True,
+            context={"is_update": True, "request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        normalized = serializer.validated_data.get("normalized_values") or {}
+
+        logger.info(
+            "admin_apartment_patch apartment_guid=%s admin_user_id=%s normalized_keys=%s",
+            apartment_id,
+            getattr(request.user, "id", None),
+            sorted(normalized.keys()),
+        )
+
+        updated = admin_update_apartment(
+            apartment_guid=str(apartment_id),
+            values=normalized,
+            admin_user_id=getattr(request.user, "id", None),
+        )
+        if not updated:
+            raise NotFound(_("Apartment not found"))
+
+        ctx = {"request": request}
+        return Response(ApartmentAdminListSerializer(updated, context=ctx).data, status=status.HTTP_200_OK)
+
+
+class AdminCottagePatchView(APIView):
+    """Admin-only endpoint for patching any field of a cottage record."""
+
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Retrieve cottage (admin)",
+        operation_description="Returns the full admin view of a cottage by its guid.",
+        responses={200: CottageAdminListSerializer},
+    )
+    def get(self, request, cottage_id, *args, **kwargs):
+        row = admin_get_cottage(str(cottage_id))
+        if not row:
+            raise NotFound(_("Cottage not found"))
+        ctx = {"request": request}
+        return Response(CottageAdminListSerializer(row, context=ctx).data, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Patch cottage (admin)",
+        operation_description=(
+            "Admin-only partial update for every writable field on the cottage table, "
+            "including verification/archival/recommendation flags and owner reassignment. "
+            "Unlike the partner endpoint, this does NOT auto-reset verification on save."
+        ),
+        request_body=CottageAdminUpdateSerializer,
+        responses={200: CottageAdminListSerializer},
+    )
+    def patch(self, request, cottage_id, *args, **kwargs):
+        current = admin_get_cottage(str(cottage_id))
+        if not current:
+            raise NotFound(_("Cottage not found"))
+
+        serializer = CottageAdminUpdateSerializer(
+            data=request.data,
+            partial=True,
+            context={"is_update": True, "request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        normalized = serializer.validated_data.get("normalized_values") or {}
+
+        logger.info(
+            "admin_cottage_patch cottage_guid=%s admin_user_id=%s normalized_keys=%s",
+            cottage_id,
+            getattr(request.user, "id", None),
+            sorted(normalized.keys()),
+        )
+
+        updated = admin_update_cottage(
+            cottage_guid=str(cottage_id),
+            values=normalized,
+            admin_user_id=getattr(request.user, "id", None),
+        )
+        if not updated:
+            raise NotFound(_("Cottage not found"))
+
+        ctx = {"request": request}
+        return Response(CottageAdminListSerializer(updated, context=ctx).data, status=status.HTTP_200_OK)
 
 
 class ApartmentPartnerPropertyListView(APIView):

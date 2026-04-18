@@ -18,6 +18,8 @@ from .views import (
     CottagePartnerPropertyListView,
     PartnerAllPropertyListView,
     AdminAllPropertiesListView,
+    AdminCottagePatchView,
+    AdminApartmentPatchView,
     SavedPropertyListView,
     PropertyFavoriteToggleView,
     RegionListView,
@@ -156,6 +158,16 @@ urlpatterns = [
         "admin/all/",
         AdminAllPropertiesListView.as_view(),
         name="admin-all-properties-list",
+    ),
+    path(
+        "admin/cottages/<uuid:cottage_id>/",
+        AdminCottagePatchView.as_view(),
+        name="admin-cottage-patch",
+    ),
+    path(
+        "admin/apartments/<uuid:apartment_id>/",
+        AdminApartmentPatchView.as_view(),
+        name="admin-apartment-patch",
     ),
     path(
         "partner/properties/<uuid:property_id>/analytics/",
