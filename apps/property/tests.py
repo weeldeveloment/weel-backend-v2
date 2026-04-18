@@ -373,6 +373,10 @@ class PropertyUrlsTests(SimpleTestCase):
         match = resolve("/api/property/partner/all/")
         self.assertEqual(match.func.view_class.__name__, "PartnerAllPropertyListView")
 
+    def test_admin_all_properties_url_resolves(self):
+        match = resolve("/api/property/admin/properties/all/")
+        self.assertEqual(match.func.view_class.__name__, "AdminAllPropertiesListView")
+
     def test_partner_property_analytics_url_resolves(self):
         match = resolve("/api/property/partner/properties/00000000-0000-0000-0000-000000000001/analytics/")
         self.assertEqual(match.func.view_class.__name__, "PartnerPropertyAnalyticsView")

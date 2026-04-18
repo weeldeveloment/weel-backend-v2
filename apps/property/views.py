@@ -20,11 +20,13 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.pagination import PageNumberPagination
 
 from shared.raw.db import fetch_all
 from shared.raw.compat import get_table_name
 
 from admin_auth.authentication import AdminJWTAuthentication
+from admin_auth.permissions import IsAdminUser
 from shared.permissions import IsClient, IsPartner, IsPartnerOrAdmin
 from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
 from users.raw_repository import get_user_by_id
@@ -70,6 +72,7 @@ from .cottage_repository import (
 from .apartment_serializers import (
     ApartmentListSerializer,
     ApartmentPartnerListSerializer,
+    ApartmentAdminListSerializer,
     ApartmentDetailSerializer,
     ApartmentCreateSerializer,
     ApartmentUpdateSerializer,
@@ -77,6 +80,7 @@ from .apartment_serializers import (
 from .cottage_serializers import (
     CottageListSerializer,
     CottagePartnerListSerializer,
+    CottageAdminListSerializer,
     CottageDetailSerializer,
     CottageCreateSerializer,
     CottageUpdateSerializer,
@@ -103,6 +107,18 @@ _DEFAULT_PUBLIC_LIST_LIMIT = 50
 _DEFAULT_PARTNER_LIST_LIMIT = 100
 
 
+class CottagePagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'limit'
+    max_page_size = 100
+
+
+class ApartmentPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'limit'
+    max_page_size = 100
+
+
 PROPERTY_LIST_QUERY_PARAMS = [
     openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
     openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
@@ -121,6 +137,7 @@ PROPERTY_LIST_QUERY_PARAMS = [
     openapi.Parameter("ordering", openapi.IN_QUERY, type=openapi.TYPE_STRING),
     openapi.Parameter("from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
     openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+    openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
 ]
 
 LOCATION_QUERY_PARAMS = [
@@ -522,6 +539,10 @@ def _extract_list_params(source):
     elif sort_value == "corporate_no":
         corporate_filter = False
 
+    limit = _parse_int(_source_get(source, "limit"))
+    if limit is not None:
+        limit = max(1, min(limit, 100))
+
     return {
         "search": _source_get(source, "search"),
         "region_id": _parse_int(_source_get(source, "region_id") or _source_get(source, "location_id")),
@@ -529,6 +550,7 @@ def _extract_list_params(source):
         "corporate": corporate_filter,
         "min_price": _parse_decimal(_source_get(source, "min_price")),
         "max_price": _parse_decimal(_source_get(source, "max_price")),
+        "limit": limit,
     }
 
 
@@ -549,16 +571,46 @@ def _extract_prepare_params(source, *, default_ordering="-created_at", default_l
     }
 
 
-def _list_apartment_rows(source, *, public_only, partner_user_id=None, recommended_only=False, default_ordering="-created_at", default_limit=None):
+def _list_apartment_rows(
+    source,
+    *,
+    public_only,
+    partner_user_id=None,
+    recommended_only=False,
+    default_ordering="-created_at",
+    default_limit=None,
+    include_all_records=False,
+):
     lp = _extract_list_params(source)
-    rows = list_apartments(public_only=public_only, partner_user_id=partner_user_id, recommended_only=recommended_only, **lp)
+    rows = list_apartments(
+        public_only=public_only,
+        include_all_records=include_all_records,
+        partner_user_id=partner_user_id,
+        recommended_only=recommended_only,
+        **lp,
+    )
     pp = _extract_prepare_params(source, default_ordering=default_ordering, default_limit=default_limit)
     return prepare_property_rows(rows, **pp)
 
 
-def _list_cottage_rows(source, *, public_only, partner_user_id=None, recommended_only=False, default_ordering="-created_at", default_limit=None):
+def _list_cottage_rows(
+    source,
+    *,
+    public_only,
+    partner_user_id=None,
+    recommended_only=False,
+    default_ordering="-created_at",
+    default_limit=None,
+    include_all_records=False,
+):
     lp = _extract_list_params(source)
-    rows = list_cottages(public_only=public_only, partner_user_id=partner_user_id, recommended_only=recommended_only, **lp)
+    rows = list_cottages(
+        public_only=public_only,
+        include_all_records=include_all_records,
+        partner_user_id=partner_user_id,
+        recommended_only=recommended_only,
+        **lp,
+    )
     pp = _extract_prepare_params(source, default_ordering=default_ordering, default_limit=default_limit)
     return prepare_property_rows(rows, **pp)
 
@@ -812,6 +864,7 @@ class UnifiedRecommendationsListView(APIView):
 
 class ApartmentPropertyListCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
+    pagination_class = ApartmentPagination
 
     def get_authenticators(self):
         if self.request.method == "GET":
@@ -828,13 +881,24 @@ class ApartmentPropertyListCreateView(APIView):
         responses={200: ApartmentListSerializer(many=True)},
     )
     def get(self, request, *args, **kwargs):
+        query_params = request.query_params.copy()
+        query_params.pop('limit', None)
+        
         rows = _list_apartment_rows(
-            request.query_params,
+            query_params,
             public_only=True,
-            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            default_limit=None,
         )
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        return Response(ApartmentListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
+        
+        paginator = self.pagination_class()
+        paginated_data = paginator.paginate_queryset(rows, request)
+        if paginated_data is not None:
+            serializer = ApartmentListSerializer(paginated_data, many=True, context=ctx)
+            return paginator.get_paginated_response(serializer.data)
+        
+        serializer = ApartmentListSerializer(rows, many=True, context=ctx)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         request_body=ApartmentCreateSerializer,
@@ -870,6 +934,7 @@ class ApartmentPropertyListCreateView(APIView):
 
 class CottagePropertyListCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
+    pagination_class = CottagePagination
 
     def get_authenticators(self):
         if self.request.method == "GET":
@@ -886,13 +951,24 @@ class CottagePropertyListCreateView(APIView):
         responses={200: CottageListSerializer(many=True)},
     )
     def get(self, request, *args, **kwargs):
+        query_params = request.query_params.copy()
+        query_params.pop('limit', None)
+        
         rows = _list_cottage_rows(
-            request.query_params,
+            query_params,
             public_only=True,
-            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            default_limit=None,
         )
         ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        return Response(CottageListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
+        
+        paginator = self.pagination_class()
+        paginated_data = paginator.paginate_queryset(rows, request)
+        if paginated_data is not None:
+            serializer = CottageListSerializer(paginated_data, many=True, context=ctx)
+            return paginator.get_paginated_response(serializer.data)
+        
+        serializer = CottageListSerializer(rows, many=True, context=ctx)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         request_body=CottageCreateSerializer,
@@ -1645,6 +1721,55 @@ class PartnerAllPropertyListView(APIView):
         data = (
             ApartmentPartnerListSerializer(apt_rows, many=True, context=ctx).data
             + CottagePartnerListSerializer(cot_rows, many=True, context=ctx).data
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class AdminAllPropertiesListView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        manual_parameters=(
+            PROPERTY_LIST_QUERY_PARAMS
+            + [
+                openapi.Parameter(
+                    "property_type",
+                    openapi.IN_QUERY,
+                    type=openapi.TYPE_STRING,
+                    enum=["apartment", "cottage", "apartments", "cottages"],
+                    required=False,
+                    description="Optional. Omit to return apartments and cottages together.",
+                ),
+            ]
+        ),
+        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+        operation_summary="List all properties (admin)",
+        operation_description=(
+            "Returns every apartment and cottage in the database, including unverified and archived. "
+            "Supports the same filters as public list (search, region, price, sort, limit, etc.)."
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+        ctx = {"request": request}
+        requested_kind = parse_property_kind(request.query_params.get("property_type"))
+        list_kwargs = dict(
+            public_only=False,
+            include_all_records=True,
+            default_limit=None,
+        )
+        if requested_kind == PROPERTY_KIND_APARTMENT:
+            rows = _list_apartment_rows(request.query_params, **list_kwargs)
+            return Response(ApartmentAdminListSerializer(rows, many=True, context=ctx).data)
+        if requested_kind == PROPERTY_KIND_COTTAGE:
+            rows = _list_cottage_rows(request.query_params, **list_kwargs)
+            return Response(CottageAdminListSerializer(rows, many=True, context=ctx).data)
+        apt_rows = _list_apartment_rows(request.query_params, **list_kwargs)
+        cot_rows = _list_cottage_rows(request.query_params, **list_kwargs)
+        data = (
+            ApartmentAdminListSerializer(apt_rows, many=True, context=ctx).data
+            + CottageAdminListSerializer(cot_rows, many=True, context=ctx).data
         )
         return Response(data, status=status.HTTP_200_OK)
 

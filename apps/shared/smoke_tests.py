@@ -242,6 +242,7 @@ class AuthenticatedAPIEndpointsSmokeTests(TestCase):
             EndpointCase("admin partners list", "get", "/api/admin-auth/users/partners/", "admin", expected_statuses=(200,)),
             EndpointCase("admin register invalid payload", "post", "/api/admin-auth/register/", "admin", data={}, expected_statuses=(400, 403)),
             EndpointCase("admin booking list", "get", "/api/booking/admin/bookings/", "admin", expected_statuses=(200,)),
+            EndpointCase("admin all properties list", "get", "/api/property/admin/properties/all/", "admin", expected_statuses=(200,)),
             EndpointCase("admin chat conversations", "get", "/api/chat/conversations/", "admin", expected_statuses=(200,)),
             EndpointCase("admin chat messages missing partner", "get", "/api/chat/messages/1/", "admin", expected_statuses=(404,)),
             EndpointCase("admin chat send invalid", "post", "/api/chat/send/", "admin", data={}, expected_statuses=(400,)),

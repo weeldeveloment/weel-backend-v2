@@ -17,6 +17,7 @@ from .views import (
     ApartmentPartnerPropertyListView,
     CottagePartnerPropertyListView,
     PartnerAllPropertyListView,
+    AdminAllPropertiesListView,
     SavedPropertyListView,
     PropertyFavoriteToggleView,
     RegionListView,
@@ -150,6 +151,11 @@ urlpatterns = [
         "partner/all/",
         PartnerAllPropertyListView.as_view(),
         name="partner-all-property-list",
+    ),
+    path(
+        "admin/all/",
+        AdminAllPropertiesListView.as_view(),
+        name="admin-all-properties-list",
     ),
     path(
         "partner/properties/<uuid:property_id>/analytics/",
