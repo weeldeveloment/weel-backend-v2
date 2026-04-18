@@ -480,3 +480,49 @@ class ApartmentUpdateSerializer(ApartmentCreateSerializer):
     entrance_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     floor_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     pass_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
+    """Admin-only partial updater that permits mutating every apartment field.
+
+    Extends the partner update flow with verification/archival flags and
+    owner reassignment that only administrators are allowed to touch.
+    """
+
+    is_verified = serializers.BooleanField(required=False)
+    verified_at = serializers.DateTimeField(required=False, allow_null=True)
+    verification_status = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    is_archived = serializers.BooleanField(required=False)
+    is_recommended = serializers.BooleanField(required=False)
+    partner_user_id = serializers.IntegerField(required=False, allow_null=True)
+    verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
+    comment_count = serializers.IntegerField(required=False, min_value=0)
+    legacy_property_id = serializers.IntegerField(required=False, allow_null=True)
+
+    _ADMIN_ONLY_FIELDS = (
+        "is_verified",
+        "verified_at",
+        "verification_status",
+        "is_archived",
+        "is_recommended",
+        "partner_user_id",
+        "verified_by_user_id",
+        "comment_count",
+        "legacy_property_id",
+    )
+
+    def validate(self, attrs):
+        admin_overrides = {
+            key: attrs.get(key) for key in self._ADMIN_ONLY_FIELDS if key in attrs
+        }
+        attrs = super().validate(attrs)
+        normalized = attrs.get("normalized_values") or {}
+        for key, value in admin_overrides.items():
+            if key == "verification_status":
+                if value in (None, ""):
+                    continue
+                normalized[key] = str(value).strip().lower()
+            else:
+                normalized[key] = value
+        attrs["normalized_values"] = normalized
+        return attrs

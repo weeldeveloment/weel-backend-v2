@@ -477,6 +477,100 @@ def delete_cottage(*, cottage_id: int, partner_user_id: int) -> int:
     )
 
 
+# ---------------------------------------------------------------------------
+# Admin-scoped operations (no partner_user_id restriction)
+# ---------------------------------------------------------------------------
+
+_COTTAGE_ADMIN_UPDATE_ALLOWED: set[str] = set(_COTTAGE_UPDATE_ALLOWED) | {
+    "is_verified",
+    "verified_at",
+    "verification_status",
+    "is_archived",
+    "is_recommended",
+    "partner_user_id",
+    "verified_by_user_id",
+    "comment_count",
+    "legacy_property_id",
+}
+
+
+def admin_get_cottage(cottage_guid: str) -> dict[str, Any] | None:
+    """Fetch a cottage by guid with no ownership/visibility filters (admin use)."""
+    return fetch_one(
+        f"""
+        {COTTAGE_SELECT}
+        WHERE c.guid = %s
+        LIMIT 1
+        """,
+        [cottage_guid],
+    )
+
+
+def admin_update_cottage(
+    *,
+    cottage_guid: str,
+    values: dict[str, Any],
+    admin_user_id: int | None = None,
+) -> dict[str, Any] | None:
+    """Update a cottage as admin. No partner ownership check.
+
+    Supports every writable column, including verification/archival flags.
+    Does NOT auto-reset verification (unlike partner-side `update_cottage`).
+    """
+    existing = fetch_one(
+        f"SELECT id FROM {COTTAGE_TABLE} WHERE guid = %s LIMIT 1",
+        [cottage_guid],
+    )
+    if not existing:
+        return None
+    cottage_id = int(existing["id"])
+
+    monthly_prices = values.get("price") if isinstance(values.get("price"), list) else None
+    updates: dict[str, Any] = {
+        k: v for k, v in values.items() if k in _COTTAGE_ADMIN_UPDATE_ALLOWED
+    }
+    if "services" in updates:
+        raw_services = updates.get("services") or []
+        updates["services"] = [str(service) for service in raw_services if service is not None]
+
+    if "is_verified" in updates:
+        if bool(updates["is_verified"]):
+            updates.setdefault("verified_at", timezone.now())
+            if admin_user_id is not None:
+                updates.setdefault("verified_by_user_id", int(admin_user_id))
+            updates.setdefault("verification_status", "accepted")
+        else:
+            updates.setdefault("verified_at", None)
+
+    updates["updated_at"] = timezone.now()
+
+    if updates:
+        assignments_parts: list[str] = []
+        for col in updates:
+            if col == "services" and is_postgresql():
+                assignments_parts.append("services = %s::uuid[]")
+            else:
+                assignments_parts.append(f"{col} = %s")
+        assignments = ", ".join(assignments_parts)
+        params = list(updates.values()) + [cottage_id]
+        fetch_one(
+            f"UPDATE {COTTAGE_TABLE} SET {assignments} WHERE id = %s RETURNING guid",
+            params,
+        )
+
+    if monthly_prices is not None:
+        replace_cottage_prices(cottage_id=cottage_id, price_rows=monthly_prices)
+
+    return admin_get_cottage(cottage_guid)
+
+
+def admin_delete_cottage(*, cottage_guid: str) -> int:
+    return execute(
+        f"DELETE FROM {COTTAGE_TABLE} WHERE guid = %s",
+        [cottage_guid],
+    )
+
+
 def set_cottage_primary_image(
     *,
     cottage_id: int,

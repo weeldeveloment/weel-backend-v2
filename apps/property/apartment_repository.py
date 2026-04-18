@@ -523,6 +523,97 @@ def delete_apartment(*, apartment_id: int, partner_user_id: int) -> int:
     )
 
 
+# ---------------------------------------------------------------------------
+# Admin-scoped operations (no partner_user_id restriction)
+# ---------------------------------------------------------------------------
+
+_APARTMENT_ADMIN_UPDATE_ALLOWED: set[str] = set(_APARTMENT_UPDATE_ALLOWED) | {
+    "is_verified",
+    "verified_at",
+    "verification_status",
+    "is_archived",
+    "is_recommended",
+    "partner_user_id",
+    "verified_by_user_id",
+    "comment_count",
+    "legacy_property_id",
+}
+
+
+def admin_get_apartment(apartment_guid: str) -> dict[str, Any] | None:
+    """Fetch an apartment by guid with no ownership/visibility filters (admin use)."""
+    return fetch_one(
+        f"""
+        {APARTMENT_SELECT}
+        WHERE a.guid = %s
+        LIMIT 1
+        """,
+        [apartment_guid],
+    )
+
+
+def admin_update_apartment(
+    *,
+    apartment_guid: str,
+    values: dict[str, Any],
+    admin_user_id: int | None = None,
+) -> dict[str, Any] | None:
+    """Update an apartment as admin. No partner ownership check.
+
+    Supports every writable column, including verification/archival flags.
+    Does NOT auto-reset verification (unlike partner-side `update_apartment`).
+    """
+    existing = fetch_one(
+        f"SELECT id FROM {APARTMENT_TABLE} WHERE guid = %s LIMIT 1",
+        [apartment_guid],
+    )
+    if not existing:
+        return None
+    apartment_id = int(existing["id"])
+
+    updates: dict[str, Any] = {
+        k: v for k, v in values.items() if k in _APARTMENT_ADMIN_UPDATE_ALLOWED
+    }
+    if "services" in updates:
+        raw_services = updates.get("services") or []
+        updates["services"] = [str(service) for service in raw_services if service is not None]
+
+    if "is_verified" in updates:
+        if bool(updates["is_verified"]):
+            updates.setdefault("verified_at", timezone.now())
+            if admin_user_id is not None:
+                updates.setdefault("verified_by_user_id", int(admin_user_id))
+            updates.setdefault("verification_status", "accepted")
+        else:
+            updates.setdefault("verified_at", None)
+
+    updates["updated_at"] = timezone.now()
+
+    if not updates:
+        return admin_get_apartment(apartment_guid)
+
+    assignments_parts: list[str] = []
+    for col in updates:
+        if col == "services" and is_postgresql():
+            assignments_parts.append("services = %s::uuid[]")
+        else:
+            assignments_parts.append(f"{col} = %s")
+    assignments = ", ".join(assignments_parts)
+    params = list(updates.values()) + [apartment_id]
+    fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET {assignments} WHERE id = %s RETURNING guid",
+        params,
+    )
+    return admin_get_apartment(apartment_guid)
+
+
+def admin_delete_apartment(*, apartment_guid: str) -> int:
+    return execute(
+        f"DELETE FROM {APARTMENT_TABLE} WHERE guid = %s",
+        [apartment_guid],
+    )
+
+
 def set_apartment_primary_image(
     *,
     apartment_id: int,
