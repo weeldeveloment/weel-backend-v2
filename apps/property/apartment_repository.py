@@ -309,6 +309,7 @@ APARTMENT_SELECT = f"""
 def list_apartments(
     *,
     public_only: bool = True,
+    include_all_records: bool = False,
     partner_user_id: int | None = None,
     recommended_only: bool = False,
     search: str | None = None,
@@ -317,14 +318,17 @@ def list_apartments(
     corporate: bool | None = None,
     min_price: Decimal | None = None,
     max_price: Decimal | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
 ) -> list[dict[str, Any]]:
     where = ["1 = 1"]
     params: list[Any] = []
 
-    if public_only:
-        where.append("COALESCE(a.is_verified, FALSE) = TRUE")
-    if public_only or partner_user_id is None:
-        where.append("COALESCE(a.is_archived, FALSE) = FALSE")
+    if not include_all_records:
+        if public_only:
+            where.append("COALESCE(a.is_verified, FALSE) = TRUE")
+        if public_only or partner_user_id is None:
+            where.append("COALESCE(a.is_archived, FALSE) = FALSE")
     if partner_user_id is not None:
         where.append("a.partner_user_id = %s")
         params.append(partner_user_id)
@@ -354,8 +358,10 @@ def list_apartments(
         {APARTMENT_SELECT}
         WHERE {' AND '.join(where)}
         ORDER BY a.created_at DESC, a.id DESC
+        {'LIMIT %s' if limit else ''}
+        {'OFFSET %s' if offset else ''}
         """,
-        params,
+        params + ([limit] if limit else []) + ([offset] if offset else []),
     )
 
 
