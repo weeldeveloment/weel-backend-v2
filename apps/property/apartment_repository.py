@@ -98,17 +98,27 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
     return result
 
 
-def list_property_services() -> list[dict[str, Any]]:
+def list_property_services(language: str = "uz") -> list[dict[str, Any]]:
     if table_exists("services"):
         try:
+            if language == "ru":
+                title_select = "COALESCE(NULLIF(s.title_ru, ''), NULLIF(s.title, ''))"
+                order_field = "COALESCE(NULLIF(s.title_ru, ''), NULLIF(s.title, ''))"
+            elif language == "en":
+                title_select = "COALESCE(NULLIF(s.title_en, ''), NULLIF(s.title, ''))"
+                order_field = "COALESCE(NULLIF(s.title_en, ''), NULLIF(s.title, ''))"
+            else:
+                title_select = "COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, ''))"
+                order_field = "COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, ''))"
+            
             return fetch_all(
-                """
+                f"""
                 SELECT
                     s.id AS guid,
-                    COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, '')) AS title,
+                    {title_select} AS title,
                     s.icon_url AS icon_url
                 FROM services s
-                ORDER BY COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, '')), s.id
+                ORDER BY {order_field}, s.id
                 """
             )
         except ProgrammingError:

@@ -651,8 +651,10 @@ class PropertyServiceListView(APIView):
 
     @swagger_auto_schema(responses={200: PropertyServiceListSerializer(many=True)})
     def get(self, request, *args, **kwargs):
+        language = _preferred_language(request)
+
         def _load():
-            rows = list_property_services()
+            rows = list_property_services(language)
             data = []
             for row in rows:
                 payload = dict(row)
@@ -663,7 +665,7 @@ class PropertyServiceListView(APIView):
 
         data = _get_or_set_cached_payload(
             request,
-            _public_cache_key(request, "property:service-list"),
+            _public_cache_key(request, f"property:service-list:{language}"),
             _PROPERTY_META_CACHE_TTL_SECONDS,
             _load,
         )
