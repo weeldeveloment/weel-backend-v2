@@ -629,11 +629,19 @@ class PropertyTypeListView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, *args, **kwargs):
+        language = _preferred_language(request)
+
+        def _load():
+            rows = list_property_types(language)
+            for row in rows:
+                row["icon_url"] = _build_media_url(request, row.get("icon_url"))
+            return RawPropertyTypeSerializer(rows, many=True).data
+
         data = _get_or_set_cached_payload(
             request,
-            _public_cache_key(request, "property:type-list"),
+            _public_cache_key(request, f"property:type-list:{language}"),
             _PROPERTY_META_CACHE_TTL_SECONDS,
-            lambda: RawPropertyTypeSerializer(list_property_types(), many=True).data,
+            _load,
         )
         return Response(data, status=status.HTTP_200_OK)
 

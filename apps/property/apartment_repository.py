@@ -65,11 +65,37 @@ def parse_property_kind(value: str | UUID | None) -> str | None:
     return TYPE_GUID_TO_KIND.get(raw)
 
 
-def list_property_types() -> list[dict[str, Any]]:
-    return [
-        {"guid": APARTMENT_TYPE_GUID, "title": "Apartment", "icon_url": None},
-        {"guid": COTTAGE_TYPE_GUID, "title": "Cottage", "icon_url": None},
+def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
+    data = [
+        {
+            "guid": str(APARTMENT_TYPE_GUID),
+            "title_en": "Apartment",
+            "title_ru": "Квартира",
+            "title_uz": "Kvartira",
+            "icon": "property/icons/building-skyscraper2.svg",
+        },
+        {
+            "guid": str(COTTAGE_TYPE_GUID),
+            "title_en": "Cottage",
+            "title_ru": "Коттедж",
+            "title_uz": "Kottejlar",
+            "icon": "property/icons/home-03.svg",
+        },
     ]
+    result = []
+    for row in data:
+        if language == "ru":
+            title = row["title_ru"]
+        elif language == "en":
+            title = row["title_en"]
+        else:
+            title = row["title_uz"]
+        result.append({
+            "guid": row["guid"],
+            "title": title,
+            "icon_url": row["icon"],
+        })
+    return result
 
 
 def list_property_services() -> list[dict[str, Any]]:
