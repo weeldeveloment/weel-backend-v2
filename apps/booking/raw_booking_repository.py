@@ -16,61 +16,30 @@ BOOKING_ALLOWED_STATUSES = {"pending", "confirmed", "cancelled", "completed"}
 def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        SELECT *
-        FROM (
-            SELECT
-                'apartment' AS property_kind,
-                a.id AS property_id,
-                a.guid,
-                a.partner_user_id,
-                a.title,
-                a.minimum_weekend_day_stay,
-                a.weekend_only_sunday_inclusive,
-                a.price_per_person,
-                a.currency,
-                a.latitude,
-                a.longitude,
-                a.city,
-                a.country,
-                u.username AS partner_username,
-                u.first_name AS partner_first_name,
-                u.last_name AS partner_last_name,
-                u.phone_number AS partner_phone_number
-            FROM {get_table_name("apartment")} a
-            LEFT JOIN {get_table_name("users")} u ON u.id = a.partner_user_id
-            WHERE a.guid = %s
-              AND COALESCE(a.is_verified, FALSE) = TRUE
-
-            UNION ALL
-
-            SELECT
-                'cottage' AS property_kind,
-                c.id AS property_id,
-                c.guid,
-                c.partner_user_id,
-                c.title,
-                c.minimum_weekend_day_stay,
-                c.weekend_only_sunday_inclusive,
-                c.price_per_person,
-                c.price_on_working_days,
-                c.price_on_weekends,
-                c.currency,
-                c.latitude,
-                c.longitude,
-                c.city,
-                c.country,
-                u.username AS partner_username,
-                u.first_name AS partner_first_name,
-                u.last_name AS partner_last_name,
-                u.phone_number AS partner_phone_number
-            FROM {get_table_name("cottage")} c
-            LEFT JOIN {get_table_name("users")} u ON u.id = c.partner_user_id
-            WHERE c.guid = %s
-              AND COALESCE(c.is_verified, FALSE) = TRUE
-        ) p
-        LIMIT 1
+        SELECT
+            'apartment' AS property_kind,
+            a.id AS property_id,
+            a.guid,
+            a.partner_user_id,
+            a.title,
+            a.minimum_weekend_day_stay,
+            a.weekend_only_sunday_inclusive,
+            a.price_per_person,
+            a.currency,
+            a.latitude,
+            a.longitude,
+            a.city,
+            a.country,
+            u.username AS partner_username,
+            u.first_name AS partner_first_name,
+            u.last_name AS partner_last_name,
+            u.phone_number AS partner_phone_number
+        FROM {get_table_name("apartment")} a
+        LEFT JOIN {get_table_name("users")} u ON u.id = a.partner_user_id
+        WHERE a.guid = %s
+          AND COALESCE(a.is_verified, FALSE) = TRUE
         """,
-        [property_guid, property_guid],
+        [property_guid],
     )
 
 BOOKING_BASE_SELECT = f"""
