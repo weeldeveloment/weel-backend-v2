@@ -52,6 +52,8 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
                 c.minimum_weekend_day_stay,
                 c.weekend_only_sunday_inclusive,
                 c.price_per_person,
+                c.price_on_working_days,
+                c.price_on_weekends,
                 c.currency,
                 c.latitude,
                 c.longitude,
