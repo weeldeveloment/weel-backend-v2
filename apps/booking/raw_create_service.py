@@ -123,17 +123,24 @@ class RawBookingCreateService:
         check_out: date,
     ) -> dict[str, Any]:
         guests = adults + children
+        property_kind = property_row.get("property_kind")
 
         base_total_price = Decimal("0")
-        for day in self._date_range(check_in, check_out):
-            base_day_value = (
-                property_row.get("price_on_weekends")
-                if day.weekday() >= 4
-                else property_row.get("price_on_working_days")
-            )
-            if base_day_value is None:
+        if property_kind == "apartment":
+            price_per_person = self._as_decimal(property_row.get("price_per_person"))
+            if price_per_person is None or price_per_person <= 0:
                 raise ValidationError(_("Pricing is not configured for this property"))
-            base_total_price += self._as_decimal(base_day_value)
+            base_total_price = price_per_person * guests
+        else:
+            for day in self._date_range(check_in, check_out):
+                base_day_value = (
+                    property_row.get("price_on_weekends")
+                    if day.weekday() >= 4
+                    else property_row.get("price_on_working_days")
+                )
+                if base_day_value is None:
+                    raise ValidationError(_("Pricing is not configured for this property"))
+                base_total_price += self._as_decimal(base_day_value)
 
         currency = str(property_row.get("currency") or "UZS").upper()
         if currency == "USD":

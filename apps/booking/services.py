@@ -249,17 +249,24 @@ class BookingPriceService:
         guests = adults + children
         included_guests = self._included_guests(property)
         extra_persons = max(guests - included_guests, 0)
+        property_kind = property_row.get("property_kind")
 
         base_total_price = Decimal("0")
         extra_total_price = Decimal("0")
 
-        for day in self._date_range(check_in, check_out):
-            if day.weekday() >= 4:
-                base_day = _to_decimal(property_row.get("price_on_weekends"))
-            else:
-                base_day = _to_decimal(property_row.get("price_on_working_days"))
-            base_total_price += base_day
-            extra_total_price += _to_decimal(property_row.get("price_per_person")) * extra_persons
+        if property_kind == "apartment":
+            price_per_person = _to_decimal(property_row.get("price_per_person"))
+            if price_per_person is None or price_per_person <= 0:
+                raise ValidationError(_("Pricing is not configured for this property"))
+            base_total_price = price_per_person * guests
+        else:
+            for day in self._date_range(check_in, check_out):
+                if day.weekday() >= 4:
+                    base_day = _to_decimal(property_row.get("price_on_weekends"))
+                else:
+                    base_day = _to_decimal(property_row.get("price_on_working_days"))
+                base_total_price += base_day
+            extra_total_price = _to_decimal(property_row.get("price_per_person")) * extra_persons
 
         raw_subtotal = base_total_price + extra_total_price
         currency = str(property_row.get("currency") or "UZS").upper()
