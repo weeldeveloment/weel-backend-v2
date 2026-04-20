@@ -1040,6 +1040,10 @@ class ClientCardViewSet(viewsets.ViewSet):
             properties={
                 "card_number": openapi.Schema(type=openapi.TYPE_STRING),
                 "expire_date": openapi.Schema(type=openapi.TYPE_STRING),
+                "phone_number": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Optional. If not provided, uses user's saved phone number",
+                ),
             },
         ),
     )
@@ -1047,6 +1051,7 @@ class ClientCardViewSet(viewsets.ViewSet):
         client = self.get_client()
         card_number = request.data.get("card_number")
         expire_date = request.data.get("expire_date")
+        phone_number = request.data.get("phone_number")
 
         if not card_number or not expire_date:
             return Response(
@@ -1054,8 +1059,8 @@ class ClientCardViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Always use the authenticated client's phone number for Plum (no client-side phone input).
-        normalized = str(client.phone_number)
+        # Use provided phone_number if present, otherwise use client's saved phone number
+        normalized = phone_number if phone_number else str(client.phone_number)
         service = PlumAPIService()
         try:
             result = service.add_client_card(
