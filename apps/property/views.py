@@ -882,11 +882,6 @@ class ApartmentPropertyListCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     pagination_class = ApartmentPagination
 
-    def get_authenticators(self):
-        if self.request.method == "GET":
-            return []
-        return super().get_authenticators()
-
     def get_permissions(self):
         if self.request.method == "POST":
             return [IsPartner()]
@@ -951,11 +946,6 @@ class ApartmentPropertyListCreateView(APIView):
 class CottagePropertyListCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     pagination_class = CottagePagination
-
-    def get_authenticators(self):
-        if self.request.method == "GET":
-            return []
-        return super().get_authenticators()
 
     def get_permissions(self):
         if self.request.method == "POST":
