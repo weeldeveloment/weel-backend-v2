@@ -1251,7 +1251,7 @@ class PropertyImageCreateView(APIView):
             _validate_image_upload(file)
 
         uploaded = uploaded_files[0]
-        saved_path = default_storage.save(f"property/{property_id}/{uuid4()}_{uploaded.name}", uploaded)
+        saved_path = default_storage.save(f"property/images/{uuid4()}_{uploaded.name}", uploaded)
 
         property_type = str(property_row["property_kind"])
         if property_type == PROPERTY_KIND_COTTAGE:
@@ -1289,7 +1289,7 @@ class PropertyImageUpdateDeleteView(APIView):
         image_path = property_row.get("img")
         if uploaded is not None:
             _validate_image_upload(uploaded)
-            image_path = default_storage.save(f"property/{property_id}/{uuid4()}_{uploaded.name}", uploaded)
+            image_path = default_storage.save(f"property/images/{uuid4()}_{uploaded.name}", uploaded)
             property_type = str(property_row["property_kind"])
             if property_type == PROPERTY_KIND_COTTAGE:
                 updated = set_cottage_primary_image(cottage_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=image_path)
