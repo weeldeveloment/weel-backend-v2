@@ -43,6 +43,21 @@ class StorySerializerTests(SimpleTestCase):
         self.assertEqual(data["property_type_guid"], "Cottages")
         self.assertEqual(data["property_title"], "Seaside cottage")
 
+    @patch("stories.serializers.default_storage.url", return_value="/media/property.jpg")
+    def test_story_serializer_supports_property_image_list(self, _mock_url):
+        row = {
+            "guid": uuid4(),
+            "property_guid": uuid4(),
+            "property_title": "City apartment",
+            "property_type_label": "Apartment",
+            "property_img": ["property.jpg"],
+            "media": [],
+        }
+        request = APIRequestFactory().get("/api/story/stories/")
+        data = StorySerializer(row, context={"request": request}).data
+
+        self.assertEqual(data["img"], "http://testserver/media/property.jpg")
+
 
 class StoryViewSetTests(SimpleTestCase):
     def setUp(self):
