@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 from django.core.cache import cache
 from django.core.files.storage import default_storage
@@ -20,7 +19,7 @@ from .raw_repository import (
 )
 
 
-def _build_media_url(request, media_path: Any) -> str | None:
+def _build_media_url(request, media_path: str | list[str] | None) -> str | None:
     if not media_path:
         return None
     value = media_path
@@ -28,7 +27,7 @@ def _build_media_url(request, media_path: Any) -> str | None:
         value = next((item for item in media_path if item), None)
         if not value:
             return None
-    url = default_storage.url(str(value))
+    url = default_storage.url(value)
     if not request:
         return url
     return request.build_absolute_uri(url)
