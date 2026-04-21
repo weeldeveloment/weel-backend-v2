@@ -28,7 +28,11 @@ from shared.raw.compat import get_table_name
 from admin_auth.authentication import AdminJWTAuthentication
 from admin_auth.permissions import IsAdminUser
 from shared.permissions import IsClient, IsPartner, IsPartnerOrAdmin
-from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
+from users.authentication import (
+    ClientJWTAuthentication,
+    OptionalClientOrPartnerJWTAuthentication,
+    PartnerJWTAuthentication,
+)
 from users.raw_repository import get_user_by_id
 
 from .apartment_repository import (
@@ -805,6 +809,7 @@ class LocationListView(APIView):
 
 
 class CategoryListView(APIView):
+    authentication_classes = [OptionalClientOrPartnerJWTAuthentication]
     permission_classes = [AllowAny]
     def get(self, request, *args, **kwargs):
         return Response([], status=status.HTTP_200_OK)
@@ -827,6 +832,7 @@ class CategoryPropertyRecommendationView(APIView):
 # ---------------------------------------------------------------------------
 
 class UnifiedRecommendationsListView(APIView):
+    authentication_classes = [OptionalClientOrPartnerJWTAuthentication]
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(

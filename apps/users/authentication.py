@@ -126,3 +126,16 @@ class ClientOrPartnerJWTAuthentication(JWTAuthentication):
             return result
         partner_auth = PartnerJWTAuthentication()
         return partner_auth.authenticate(request)
+
+
+class OptionalClientOrPartnerJWTAuthentication(ClientOrPartnerJWTAuthentication):
+    """
+    Best-effort auth for public endpoints.
+    If the Authorization header is malformed/invalid, treat as anonymous.
+    """
+
+    def authenticate(self, request: Request):
+        try:
+            return super().authenticate(request)
+        except exceptions.AuthenticationFailed:
+            return None
