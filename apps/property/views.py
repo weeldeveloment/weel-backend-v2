@@ -223,6 +223,8 @@ MIXED_PROPERTY_LIST_RESPONSE_SCHEMA = openapi.Schema(
 class RawPropertyTypeSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
+    title_en = serializers.CharField()
+    title_ru = serializers.CharField()
     icon_url = serializers.CharField(allow_null=True)
 
 
@@ -629,11 +631,23 @@ class PropertyTypeListView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, *args, **kwargs):
+        def _load():
+            rows = list_property_types()
+            data = []
+            for row in rows:
+                payload = dict(row)
+                icon = payload.get("icon_url")
+                if isinstance(icon, str) and icon.startswith("weel-media/"):
+                    icon = icon[len("weel-media/"):]
+                payload["icon_url"] = _build_media_url(request, icon)
+                data.append(payload)
+            return RawPropertyTypeSerializer(data, many=True).data
+
         data = _get_or_set_cached_payload(
             request,
             _public_cache_key(request, "property:type-list"),
             _PROPERTY_META_CACHE_TTL_SECONDS,
-            lambda: RawPropertyTypeSerializer(list_property_types(), many=True).data,
+            _load,
         )
         return Response(data, status=status.HTTP_200_OK)
 

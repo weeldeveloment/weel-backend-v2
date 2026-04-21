@@ -15,6 +15,8 @@ from .cottage_serializers import RawDistrictSerializer, RawRegionSerializer
 class RawPropertyTypeSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
+    title_en = serializers.CharField()
+    title_ru = serializers.CharField()
     icon_url = serializers.CharField(allow_null=True)
 
 
