@@ -416,6 +416,8 @@ _COTTAGE_UPDATE_ALLOWED = {
     "is_allowed_alcohol", "is_allowed_corporate", "is_allowed_pets", "is_quiet_hours",
 }
 
+_COTTAGE_PRICE_ONLY_FIELDS = {"price_per_person", "price_on_working_days", "price_on_weekends"}
+
 if HAS_COTTAGE_REGION_ID:
     _COTTAGE_UPDATE_ALLOWED.add("region_id")
 if HAS_COTTAGE_DISTRICT_ID:
@@ -448,8 +450,14 @@ def update_cottage(
         raw_services = updates.get("services") or []
         updates["services"] = [str(service) for service in raw_services if service is not None]
     updates["updated_at"] = timezone.now()
-    updates["is_verified"] = False
-    updates["verification_status"] = "pending"
+    changed_fields = set(updates.keys())
+    if monthly_prices is not None:
+        changed_fields.add("price")
+    changed_non_price_fields = changed_fields - _COTTAGE_PRICE_ONLY_FIELDS - {"price"}
+    should_send_to_moderation = bool(changed_non_price_fields)
+    if should_send_to_moderation:
+        updates["is_verified"] = False
+        updates["verification_status"] = "pending"
 
     assignments_parts: list[str] = []
     for col in updates:
@@ -579,8 +587,8 @@ def set_cottage_primary_image(
 ) -> dict[str, Any] | None:
     image_payload = [image_path] if image_path else []
     row = fetch_one(
-        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [image_payload, timezone.now(), cottage_id, partner_user_id],
+        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [image_payload, timezone.now(), False, "pending", cottage_id, partner_user_id],
     )
     if not row:
         return None

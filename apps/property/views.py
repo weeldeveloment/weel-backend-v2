@@ -1214,10 +1214,11 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             updated = update_apartment(apartment_id=int(current["id"]), partner_user_id=int(request.user.id), values=serializer.validated_data["normalized_values"])
         if not updated:
             raise NotFound(_("Property not found"))
-        return Response(
-            {"detail": "Your changes have been saved successfully", "warning": "Property has been sent for re-verification, please wait while we verify it", "status_code": 200},
-            status=status.HTTP_200_OK,
-        )
+        is_verified = bool(updated.get("is_verified"))
+        payload = {"detail": "Your changes have been saved successfully", "status_code": 200}
+        if not is_verified:
+            payload["warning"] = "Property has been sent for re-verification, please wait while we verify it"
+        return Response(payload, status=status.HTTP_200_OK)
 
     def delete(self, request, property_id, *args, **kwargs):
         current = self._partner_property_or_404(str(property_id))
