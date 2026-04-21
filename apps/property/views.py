@@ -519,14 +519,20 @@ def _get_or_set_cached_payload(request, cache_key: str, timeout: int, loader):
     return payload
 
 
+_BLOCKED_IMAGE_EXTENSIONS = {"heic", "heif"}
+_BLOCKED_IMAGE_CONTENT_TYPES = {"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"}
+
+
 def _validate_image_upload(uploaded):
     if uploaded is None:
         raise ValidationError({"image": [_("This field is required.")]})
     max_size = getattr(settings, "MAX_IMAGE_SIZE", 20 * 1024 * 1024)
-    allowed_ext = {ext.lower() for ext in getattr(settings, "ALLOWED_PHOTO_EXTENSION", [])}
+    allowed_ext = {ext.lower() for ext in getattr(settings, "ALLOWED_PHOTO_EXTENSION", [])} - _BLOCKED_IMAGE_EXTENSIONS
     name = (uploaded.name or "").lower()
     ext = name.rsplit(".", 1)[-1] if "." in name else ""
     content_type = (uploaded.content_type or "").lower()
+    if ext in _BLOCKED_IMAGE_EXTENSIONS or content_type in _BLOCKED_IMAGE_CONTENT_TYPES:
+        raise ValidationError({"image": [_("HEIC/HEIF images are not supported. Please upload JPG, JPEG or PNG.")]})
     if allowed_ext and ext not in allowed_ext:
         raise ValidationError({"image": [_("Unsupported file extension.")]})
     if content_type and not content_type.startswith("image/"):
@@ -1208,10 +1214,11 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             updated = update_apartment(apartment_id=int(current["id"]), partner_user_id=int(request.user.id), values=serializer.validated_data["normalized_values"])
         if not updated:
             raise NotFound(_("Property not found"))
-        return Response(
-            {"detail": "Your changes have been saved successfully", "warning": "Property has been sent for re-verification, please wait while we verify it", "status_code": 200},
-            status=status.HTTP_200_OK,
-        )
+        is_verified = bool(updated.get("is_verified"))
+        payload = {"detail": "Your changes have been saved successfully", "status_code": 200}
+        if not is_verified:
+            payload["warning"] = "Property has been sent for re-verification, please wait while we verify it"
+        return Response(payload, status=status.HTTP_200_OK)
 
     def delete(self, request, property_id, *args, **kwargs):
         current = self._partner_property_or_404(str(property_id))

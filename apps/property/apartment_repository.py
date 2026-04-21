@@ -503,6 +503,8 @@ _APARTMENT_UPDATE_ALLOWED = {
     "services",
 }
 
+_APARTMENT_PRICE_ONLY_FIELDS = {"price"}
+
 
 def update_apartment(
     *,
@@ -532,8 +534,12 @@ def update_apartment(
         len(str(updates.get("description_uz") or "")),
     )
     updates["updated_at"] = timezone.now()
-    updates["is_verified"] = False
-    updates["verification_status"] = "pending"
+    changed_fields = set(updates.keys())
+    changed_non_price_fields = changed_fields - _APARTMENT_PRICE_ONLY_FIELDS
+    should_send_to_moderation = bool(changed_non_price_fields)
+    if should_send_to_moderation:
+        updates["is_verified"] = False
+        updates["verification_status"] = "pending"
 
     assignments_parts: list[str] = []
     for col in updates:
@@ -658,8 +664,8 @@ def set_apartment_primary_image(
 ) -> dict[str, Any] | None:
     image_payload = [image_path] if image_path else []
     row = fetch_one(
-        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [image_payload, timezone.now(), apartment_id, partner_user_id],
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [image_payload, timezone.now(), False, "pending", apartment_id, partner_user_id],
     )
     if not row:
         return None
