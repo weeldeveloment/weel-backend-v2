@@ -12,7 +12,7 @@ from shared.raw.db import execute, fetch_all, fetch_one
 
 PROPERTY_GUID_EXPR = "COALESCE(a.guid, c.guid)"
 PROPERTY_TITLE_EXPR = "COALESCE(a.title, c.title)"
-PROPERTY_IMAGE_EXPR = "COALESCE(a.img, c.img)"
+PROPERTY_IMAGE_EXPR = "COALESCE(NULLIF(a.img[1], ''), NULLIF(c.img[1], ''))"
 PROPERTY_PARTNER_EXPR = "COALESCE(a.partner_user_id, c.partner_user_id)"
 PROPERTY_ARCHIVED_EXPR = "COALESCE(a.is_archived, c.is_archived, FALSE)"
 PROPERTY_KIND_EXPR = "CASE WHEN s.property_apartment_id IS NOT NULL THEN 'apartment' ELSE 'cottage' END"
