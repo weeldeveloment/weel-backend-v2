@@ -242,14 +242,19 @@ class ApartmentPartnerListSerializer(ApartmentListSerializer):
 class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
-    partner_user_id = serializers.IntegerField(allow_null=True, read_only=True)
+    partner_user = serializers.DictField(allow_null=True, read_only=True)
 
     def to_representation(self, instance):
-        data = super().to_representation(instance)
         row = dict(instance)
+        partner_payload = row.get("partner_user")
+        if isinstance(partner_payload, dict):
+            row["partner_user"] = partner_payload
+        else:
+            row["partner_user"] = None
+        data = super().to_representation(row)
         data["is_verified"] = bool(row.get("is_verified"))
         data["is_archived"] = bool(row.get("is_archived"))
-        data["partner_user_id"] = row.get("partner_user_id")
+        data["partner_user"] = row.get("partner_user")
         return data
 
 

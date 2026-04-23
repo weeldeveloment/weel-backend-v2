@@ -33,7 +33,7 @@ from users.authentication import (
     OptionalClientOrPartnerJWTAuthentication,
     PartnerJWTAuthentication,
 )
-from users.raw_repository import get_user_by_id
+from users.raw_repository import get_user_by_id, fetch_users_by_ids
 
 from .apartment_repository import (
     APARTMENT_TYPE_GUID,
@@ -629,6 +629,40 @@ def _list_cottage_rows(
     )
     pp = _extract_prepare_params(source, default_ordering=default_ordering, default_limit=default_limit)
     return prepare_property_rows(rows, **pp)
+
+
+def _serialize_partner_user(user) -> dict | None:
+    if user is None:
+        return None
+    return {
+        "id": int(user.id),
+        "role": user.role,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "phone_number": user.phone_number,
+        "email": user.email,
+        "username": user.username,
+        "avatar": user.avatar,
+        "is_active": bool(user.is_active),
+        "is_verified": bool(user.is_verified),
+    }
+
+
+def _attach_partner_users(rows: list[dict]) -> list[dict]:
+    partner_ids = {
+        int(row["partner_user_id"])
+        for row in rows
+        if row.get("partner_user_id") not in (None, "", "null")
+    }
+    users_by_id = fetch_users_by_ids(partner_ids)
+    enriched: list[dict] = []
+    for row in rows:
+        payload = dict(row)
+        raw_partner_id = row.get("partner_user_id")
+        partner_id = _parse_int(raw_partner_id)
+        payload["partner_user"] = _serialize_partner_user(users_by_id.get(partner_id)) if partner_id is not None else None
+        enriched.append(payload)
+    return enriched
 
 
 # ---------------------------------------------------------------------------
@@ -1779,13 +1813,13 @@ class AdminAllPropertiesListView(APIView):
             default_limit=None,
         )
         if requested_kind == PROPERTY_KIND_APARTMENT:
-            rows = _list_apartment_rows(request.query_params, **list_kwargs)
+            rows = _attach_partner_users(_list_apartment_rows(request.query_params, **list_kwargs))
             return Response(ApartmentAdminListSerializer(rows, many=True, context=ctx).data)
         if requested_kind == PROPERTY_KIND_COTTAGE:
-            rows = _list_cottage_rows(request.query_params, **list_kwargs)
+            rows = _attach_partner_users(_list_cottage_rows(request.query_params, **list_kwargs))
             return Response(CottageAdminListSerializer(rows, many=True, context=ctx).data)
-        apt_rows = _list_apartment_rows(request.query_params, **list_kwargs)
-        cot_rows = _list_cottage_rows(request.query_params, **list_kwargs)
+        apt_rows = _attach_partner_users(_list_apartment_rows(request.query_params, **list_kwargs))
+        cot_rows = _attach_partner_users(_list_cottage_rows(request.query_params, **list_kwargs))
         data = (
             ApartmentAdminListSerializer(apt_rows, many=True, context=ctx).data
             + CottageAdminListSerializer(cot_rows, many=True, context=ctx).data
@@ -1923,6 +1957,9 @@ class AdminApartmentPatchView(APIView):
         row = admin_get_apartment(str(apartment_id))
         if not row:
             raise NotFound(_("Apartment not found"))
+        partner_id = _parse_int(row.get("partner_user_id"))
+        row = dict(row)
+        row["partner_user"] = _serialize_partner_user(get_user_by_id(partner_id)) if partner_id is not None else None
         ctx = {"request": request}
         return Response(ApartmentAdminListSerializer(row, context=ctx).data, status=status.HTTP_200_OK)
 
@@ -1964,7 +2001,9 @@ class AdminApartmentPatchView(APIView):
         )
         if not updated:
             raise NotFound(_("Apartment not found"))
-
+        partner_id = _parse_int(updated.get("partner_user_id"))
+        updated = dict(updated)
+        updated["partner_user"] = _serialize_partner_user(get_user_by_id(partner_id)) if partner_id is not None else None
         ctx = {"request": request}
         return Response(ApartmentAdminListSerializer(updated, context=ctx).data, status=status.HTTP_200_OK)
 
@@ -1985,6 +2024,9 @@ class AdminCottagePatchView(APIView):
         row = admin_get_cottage(str(cottage_id))
         if not row:
             raise NotFound(_("Cottage not found"))
+        partner_id = _parse_int(row.get("partner_user_id"))
+        row = dict(row)
+        row["partner_user"] = _serialize_partner_user(get_user_by_id(partner_id)) if partner_id is not None else None
         ctx = {"request": request}
         return Response(CottageAdminListSerializer(row, context=ctx).data, status=status.HTTP_200_OK)
 
@@ -2026,7 +2068,9 @@ class AdminCottagePatchView(APIView):
         )
         if not updated:
             raise NotFound(_("Cottage not found"))
-
+        partner_id = _parse_int(updated.get("partner_user_id"))
+        updated = dict(updated)
+        updated["partner_user"] = _serialize_partner_user(get_user_by_id(partner_id)) if partner_id is not None else None
         ctx = {"request": request}
         return Response(CottageAdminListSerializer(updated, context=ctx).data, status=status.HTTP_200_OK)
 
