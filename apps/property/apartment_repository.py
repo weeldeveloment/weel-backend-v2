@@ -450,7 +450,8 @@ def create_apartment(
             description_en, description_ru, description_uz,
             check_in, check_out,
             is_allowed_alcohol, is_allowed_corporate, is_allowed_pets, is_quiet_hours,
-            apartment_number, home_number, entrance_number, floor_number, pass_code
+            apartment_number, home_number, entrance_number, floor_number, pass_code,
+            guests, rooms, beds, bathrooms
         ) VALUES (
             %s, %s, %s,
             %s, %s,
@@ -463,7 +464,8 @@ def create_apartment(
             %s, %s, %s,
             %s, %s,
             %s, %s, %s, %s,
-            %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s
         )
         RETURNING guid
         """,
@@ -487,6 +489,7 @@ def create_apartment(
             bool(values.get("is_quiet_hours", False)),
             values.get("apartment_number"), values.get("home_number"),
             values.get("entrance_number"), values.get("floor_number"), values.get("pass_code"),
+            values.get("guests"), values.get("rooms"), values.get("beds"), values.get("bathrooms"),
         ],
     )
     if not row:
@@ -504,6 +507,7 @@ _APARTMENT_UPDATE_ALLOWED = {
     "check_in", "check_out",
     "is_allowed_alcohol", "is_allowed_corporate", "is_allowed_pets", "is_quiet_hours",
     "apartment_number", "home_number", "entrance_number", "floor_number", "pass_code",
+    "guests", "rooms", "beds", "bathrooms",
     "services",
 }
 
