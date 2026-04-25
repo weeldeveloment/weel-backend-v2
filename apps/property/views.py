@@ -1169,6 +1169,15 @@ def _get_property_for_partner(guid: str, partner_user_id: int):
     return get_cottage_for_partner(guid, partner_user_id)
 
 
+def _property_kind_hint_from_path(path: str) -> str | None:
+    raw = str(path or "").lower()
+    if "/cottages/" in raw:
+        return PROPERTY_KIND_COTTAGE
+    if "/apartments/" in raw:
+        return PROPERTY_KIND_APARTMENT
+    return None
+
+
 class PropertyRetrieveUpdateDestroyView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
 
@@ -1178,7 +1187,13 @@ class PropertyRetrieveUpdateDestroyView(APIView):
         return [AllowAny()]
 
     def _partner_property_or_404(self, property_id: str):
-        row = _get_property_for_partner(str(property_id), int(self.request.user.id))
+        hinted_kind = _property_kind_hint_from_path(getattr(self.request, "path", ""))
+        if hinted_kind == PROPERTY_KIND_COTTAGE:
+            row = get_cottage_for_partner(str(property_id), int(self.request.user.id))
+        elif hinted_kind == PROPERTY_KIND_APARTMENT:
+            row = get_apartment_for_partner(str(property_id), int(self.request.user.id))
+        else:
+            row = _get_property_for_partner(str(property_id), int(self.request.user.id))
         if not row:
             raise NotFound(_("Property not found"))
         return row
@@ -1187,7 +1202,13 @@ class PropertyRetrieveUpdateDestroyView(APIView):
         user = getattr(self.request, "user", None)
         if user is not None and getattr(user, "role", None) == "partner":
             return self._partner_property_or_404(property_id)
-        row = _get_property_for_public(str(property_id))
+        hinted_kind = _property_kind_hint_from_path(getattr(self.request, "path", ""))
+        if hinted_kind == PROPERTY_KIND_COTTAGE:
+            row = get_cottage_for_public(str(property_id))
+        elif hinted_kind == PROPERTY_KIND_APARTMENT:
+            row = get_apartment_for_public(str(property_id))
+        else:
+            row = _get_property_for_public(str(property_id))
         if not row:
             raise NotFound(_("Property not found"))
         return row

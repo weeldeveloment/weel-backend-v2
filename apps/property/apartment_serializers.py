@@ -367,6 +367,10 @@ class ApartmentCreateSerializer(serializers.Serializer):
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     prefecture_id = serializers.UUIDField(required=False, allow_null=True)
+    guests = serializers.IntegerField(required=False, allow_null=True)
+    rooms = serializers.IntegerField(required=False, allow_null=True)
+    beds = serializers.IntegerField(required=False, allow_null=True)
+    bathrooms = serializers.IntegerField(required=False, allow_null=True)
     img = serializers.JSONField(required=False)
     apartment_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
     home_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
@@ -433,6 +437,9 @@ class ApartmentCreateSerializer(serializers.Serializer):
         ):
             if key in attrs:
                 normalized[key] = attrs.get(key)
+        for key in ("guests", "rooms", "beds", "bathrooms"):
+            if key in attrs:
+                normalized[key] = _parse_int_maybe(attrs.get(key))
         if "services" in attrs:
             normalized["services"] = _normalize_uuid_list(attrs.get("services"))
         if "property_services" in attrs:
