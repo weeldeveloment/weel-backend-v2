@@ -135,14 +135,24 @@ def list_property_services(language: str = "uz") -> list[dict[str, Any]]:
         if not table_exists(table_name):
             continue
         try:
+            if language == "ru":
+                legacy_title_select = "COALESCE(NULLIF(ps.title_ru, ''), NULLIF(ps.title_uz, ''), NULLIF(ps.title_en, ''))"
+                legacy_order = legacy_title_select
+            elif language == "en":
+                legacy_title_select = "COALESCE(NULLIF(ps.title_en, ''), NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''))"
+                legacy_order = legacy_title_select
+            else:
+                legacy_title_select = "COALESCE(NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''), NULLIF(ps.title_en, ''))"
+                legacy_order = legacy_title_select
+
             return fetch_all(
                 f"""
                 SELECT
                     ps.guid,
-                    COALESCE(NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''), NULLIF(ps.title_en, '')) AS title,
+                    {legacy_title_select} AS title,
                     ps.icon AS icon_url
                 FROM {table_name} ps
-                ORDER BY COALESCE(NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''), NULLIF(ps.title_en, '')), ps.id
+                ORDER BY {legacy_order}, ps.id
                 """
             )
         except ProgrammingError:
