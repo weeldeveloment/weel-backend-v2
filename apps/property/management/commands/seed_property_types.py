@@ -16,8 +16,8 @@ DEFAULT_ICON_PATH = "property/icons/default.svg"
 
 PROPERTY_TYPES = [
     {"title_en": "Apartment", "title_ru": "Квартира", "title_uz": "Kvartira"},
-    {"title_en": "Cottages", "title_ru": "Коттеджи", "title_uz": "Kottejlar"},
-    {"title_en": "House", "title_ru": "Дом", "title_uz": "Uy"},
+    {"title_en": "Cottages", "title_ru": "Дача", "title_uz": "Dacha"},
+
 ]
 
 SERVICES_BY_TYPE = {

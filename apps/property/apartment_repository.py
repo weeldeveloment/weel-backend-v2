@@ -77,8 +77,8 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
         {
             "guid": str(COTTAGE_TYPE_GUID),
             "title_en": "Cottage",
-            "title_ru": "Коттедж",
-            "title_uz": "Kottejlar",
+            "title_ru": "Дача",
+            "title_uz": "Dacha",
             "icon": "property/icons/home-03.svg",
         },
     ]
