@@ -286,10 +286,42 @@ class CottagePartnerListSerializer(CottageListSerializer):
     verification_status = serializers.CharField(allow_blank=True, allow_null=True)
 
 
+class CottagePartnerUserSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    role = serializers.CharField(allow_blank=True, allow_null=True)
+    first_name = serializers.CharField(allow_blank=True, allow_null=True)
+    last_name = serializers.CharField(allow_blank=True, allow_null=True)
+    phone_number = serializers.CharField(allow_blank=True, allow_null=True)
+    email = serializers.CharField(allow_blank=True, allow_null=True)
+    username = serializers.CharField(allow_blank=True, allow_null=True)
+    avatar = serializers.CharField(allow_blank=True, allow_null=True)
+    is_active = serializers.BooleanField()
+    is_verified = serializers.BooleanField()
+
+    class Meta:
+        ref_name = "CottagePartnerUser"
+
+
+class CottagePartnerUserUpdateSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False, allow_null=True)
+    role = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    first_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    last_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    email = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    username = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    avatar = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    is_active = serializers.BooleanField(required=False)
+    is_verified = serializers.BooleanField(required=False)
+
+    class Meta:
+        ref_name = "CottagePartnerUserUpdate"
+
+
 class CottageAdminListSerializer(CottagePartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
-    partner_user = serializers.DictField(allow_null=True, read_only=True)
+    partner_user = CottagePartnerUserSerializer(allow_null=True, read_only=True)
 
     def to_representation(self, instance):
         row = dict(instance)
@@ -640,7 +672,9 @@ class CottageAdminUpdateSerializer(CottageUpdateSerializer):
     verification_status = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
-    partner_user_id = serializers.IntegerField(required=False, allow_null=True)
+    services = serializers.ListField(required=False, allow_empty=True)
+    img = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
+    partner_user = CottagePartnerUserUpdateSerializer(required=False, allow_null=True)
     verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
     comment_count = serializers.IntegerField(required=False, min_value=0)
     legacy_property_id = serializers.IntegerField(required=False, allow_null=True)
@@ -651,11 +685,20 @@ class CottageAdminUpdateSerializer(CottageUpdateSerializer):
         "verification_status",
         "is_archived",
         "is_recommended",
-        "partner_user_id",
+        "partner_user",
         "verified_by_user_id",
         "comment_count",
         "legacy_property_id",
     )
+
+    def get_fields(self):
+        fields = super().get_fields()
+        # Admin update endpoint should not accept nested location/detail payloads.
+        fields.pop("property_location", None)
+        fields.pop("property_detail", None)
+        # Admin update endpoint uses `services` only.
+        fields.pop("property_services", None)
+        return fields
 
     def validate(self, attrs):
         admin_overrides = {
@@ -663,11 +706,23 @@ class CottageAdminUpdateSerializer(CottageUpdateSerializer):
         }
         attrs = super().validate(attrs)
         normalized = attrs.get("normalized_values") or {}
+        if "services" in attrs:
+            normalized["services"] = _normalize_uuid_list(attrs.get("services"))
         for key, value in admin_overrides.items():
             if key == "verification_status":
                 if value in (None, ""):
                     continue
                 normalized[key] = str(value).strip().lower()
+            elif key == "partner_user":
+                if value in (None, "", "null", "None", "undefined"):
+                    normalized["partner_user_id"] = None
+                elif isinstance(value, dict):
+                    partner_id = value.get("id")
+                    if partner_id in (None, "", "null", "None", "undefined"):
+                        raise serializers.ValidationError({"partner_user": {"id": _("This field is required.")}})
+                    normalized["partner_user_id"] = int(partner_id)
+                else:
+                    raise serializers.ValidationError({"partner_user": _("Expected an object payload.")})
             else:
                 normalized[key] = value
         attrs["normalized_values"] = normalized
