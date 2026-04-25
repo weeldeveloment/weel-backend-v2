@@ -52,38 +52,6 @@ PREFECTURE_TABLE = _table("prefecture", "property_prefecture")
 DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
-def _column_exists(table_name: str, column_name: str, schema: str = "public") -> bool:
-    try:
-        raw_table = str(table_name).split(".")[-1]
-        row = fetch_one(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_schema = %s
-                  AND table_name = %s
-                  AND column_name = %s
-            ) AS exists
-            """,
-            [schema, raw_table, column_name],
-        )
-        return bool(row and row.get("exists"))
-    except Exception:
-        logger.warning(
-            "column detection failed for %s.%s; using safe fallback",
-            table_name,
-            column_name,
-            exc_info=True,
-        )
-        return False
-
-
-HAS_APARTMENT_GUESTS = _column_exists(APARTMENT_TABLE, "guests")
-HAS_APARTMENT_ROOMS = _column_exists(APARTMENT_TABLE, "rooms")
-HAS_APARTMENT_BEDS = _column_exists(APARTMENT_TABLE, "beds")
-HAS_APARTMENT_BATHROOMS = _column_exists(APARTMENT_TABLE, "bathrooms")
-
-
 def parse_property_kind(value: str | UUID | None) -> str | None:
     if value is None:
         return None
@@ -351,10 +319,10 @@ APARTMENT_SELECT = f"""
         a.entrance_number,
         a.floor_number,
         a.pass_code,
-        {"a.guests" if HAS_APARTMENT_GUESTS else "NULL"} AS guests,
-        {"a.rooms" if HAS_APARTMENT_ROOMS else "NULL"} AS rooms,
-        {"a.beds" if HAS_APARTMENT_BEDS else "NULL"} AS beds,
-        {"a.bathrooms" if HAS_APARTMENT_BATHROOMS else "NULL"} AS bathrooms,
+        a.guests AS guests,
+        a.rooms AS rooms,
+        a.beds AS beds,
+        a.bathrooms AS bathrooms,
         u.username AS partner_username,
         u.first_name AS partner_first_name,
         u.last_name AS partner_last_name,
