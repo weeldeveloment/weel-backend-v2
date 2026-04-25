@@ -223,8 +223,8 @@ class ApartmentListSerializer(serializers.Serializer):
         row["price"] = _convert_price_for_output(row.get("price"), row_currency)
         row["services"] = row.get("services") or []
         row["property_location"] = _build_property_location(row)
-        row["guests"] = None
-        row["rooms"] = None
+        row["guests"] = _parse_int_maybe(row.get("guests"))
+        row["rooms"] = _parse_int_maybe(row.get("rooms"))
         row["property_type_id"] = str(APARTMENT_TYPE_GUID)
         row["property_type"] = {
             "guid": str(APARTMENT_TYPE_GUID),

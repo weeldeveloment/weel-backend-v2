@@ -270,8 +270,8 @@ class CottageListSerializer(serializers.Serializer):
                 "title": row.get("district_name"),
                 "region": row.get("region"),
             }
-        row["guests"] = None
-        row["rooms"] = None
+        row["guests"] = _parse_int_maybe(row.get("guests"))
+        row["rooms"] = _parse_int_maybe(row.get("rooms"))
         row["property_type_id"] = str(COTTAGE_TYPE_GUID)
         row["property_type"] = {
             "guid": str(COTTAGE_TYPE_GUID),
