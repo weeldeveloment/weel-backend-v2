@@ -239,10 +239,42 @@ class ApartmentPartnerListSerializer(ApartmentListSerializer):
     verification_status = serializers.CharField(allow_blank=True, allow_null=True)
 
 
+class ApartmentPartnerUserSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    role = serializers.CharField(allow_blank=True, allow_null=True)
+    first_name = serializers.CharField(allow_blank=True, allow_null=True)
+    last_name = serializers.CharField(allow_blank=True, allow_null=True)
+    phone_number = serializers.CharField(allow_blank=True, allow_null=True)
+    email = serializers.CharField(allow_blank=True, allow_null=True)
+    username = serializers.CharField(allow_blank=True, allow_null=True)
+    avatar = serializers.CharField(allow_blank=True, allow_null=True)
+    is_active = serializers.BooleanField()
+    is_verified = serializers.BooleanField()
+
+    class Meta:
+        ref_name = "ApartmentPartnerUser"
+
+
+class ApartmentPartnerUserUpdateSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False, allow_null=True)
+    role = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    first_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    last_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    email = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    username = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    avatar = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    is_active = serializers.BooleanField(required=False)
+    is_verified = serializers.BooleanField(required=False)
+
+    class Meta:
+        ref_name = "ApartmentPartnerUserUpdate"
+
+
 class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
-    partner_user = serializers.DictField(allow_null=True, read_only=True)
+    partner_user = ApartmentPartnerUserSerializer(allow_null=True, read_only=True)
 
     def to_representation(self, instance):
         row = dict(instance)
@@ -328,7 +360,6 @@ class ApartmentCreateSerializer(serializers.Serializer):
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     services = serializers.ListField(required=False, allow_empty=True)
-    property_services = serializers.ListField(required=False, allow_empty=True)
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     prefecture_id = serializers.UUIDField(required=False, allow_null=True)
@@ -502,7 +533,7 @@ class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
     verification_status = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
-    partner_user_id = serializers.IntegerField(required=False, allow_null=True)
+    partner_user = ApartmentPartnerUserUpdateSerializer(required=False, allow_null=True)
     verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
     comment_count = serializers.IntegerField(required=False, min_value=0)
     legacy_property_id = serializers.IntegerField(required=False, allow_null=True)
@@ -513,11 +544,19 @@ class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
         "verification_status",
         "is_archived",
         "is_recommended",
-        "partner_user_id",
+        "partner_user",
         "verified_by_user_id",
         "comment_count",
         "legacy_property_id",
     )
+
+    def get_fields(self):
+        fields = super().get_fields()
+        # Admin update endpoint should no longer accept nested location payloads.
+        fields.pop("property_location", None)
+        # Admin update endpoint should no longer accept nested detail payloads.
+        fields.pop("property_detail", None)
+        return fields
 
     def validate(self, attrs):
         admin_overrides = {
@@ -530,6 +569,16 @@ class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
                 if value in (None, ""):
                     continue
                 normalized[key] = str(value).strip().lower()
+            elif key == "partner_user":
+                if value in (None, "", "null", "None", "undefined"):
+                    normalized["partner_user_id"] = None
+                elif isinstance(value, dict):
+                    partner_id = value.get("id")
+                    if partner_id in (None, "", "null", "None", "undefined"):
+                        raise serializers.ValidationError({"partner_user": {"id": _("This field is required.")}})
+                    normalized["partner_user_id"] = int(partner_id)
+                else:
+                    raise serializers.ValidationError({"partner_user": _("Expected an object payload.")})
             else:
                 normalized[key] = value
         attrs["normalized_values"] = normalized
