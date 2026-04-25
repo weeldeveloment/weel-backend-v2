@@ -101,6 +101,7 @@ class ClientSendOTPLoginView(APIView):
             )
 
         otp_code = OTPRedisService.create_otp(phone_number, SmsPurpose.LOGIN)
+        logger.info("Generated OTP for =======================================> %s: %s", phone_number, otp_code)
         send_otp_sms_eskiz.delay(phone_number, SmsPurpose.LOGIN, otp_code)
 
         return Response(
@@ -176,13 +177,7 @@ class ClientSendOTPRegisterView(APIView):
 
         send_otp_sms_eskiz.delay(phone_number, SmsPurpose.REGISTER, otp_code)
 
-        # DEBUG: kod telefonga kelmasa terminal/logda ko‘ring yoki javobda (faqat dev)
-        if settings.DEBUG:
-            logger.warning(
-                "[DEBUG] Client register OTP for %s: %s (Celery worker ishlashi kerak, SMS Eskiz orqali yuboriladi)",
-                phone_number,
-                otp_code,
-            )
+        logger.info(otp_code)
 
         return Response(
             {

@@ -48,13 +48,7 @@ def send_otp_sms_eskiz(
                 )
                 return {"error": "OTP not found"}
 
-        if settings.DEBUG:
-            logger.warning(
-                "[DEBUG] OTP prepared for %s purpose=%s code=%s",
-                phone_number,
-                getattr(purpose, "value", purpose),
-                otp_code,
-            )
+        logger.info("Using OTP ===================================> %s for %s", otp_code, phone_number)
 
         eskiz_service = EskizService()
         result = eskiz_service.send_sms(phone_number, otp_code, message_template)
