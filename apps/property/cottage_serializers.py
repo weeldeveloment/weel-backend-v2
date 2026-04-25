@@ -234,6 +234,8 @@ class CottageListSerializer(serializers.Serializer):
     prefecture_id = serializers.CharField(allow_blank=True, allow_null=True)
     guests = serializers.IntegerField(allow_null=True)
     rooms = serializers.IntegerField(allow_null=True)
+    beds = serializers.IntegerField(allow_null=True)
+    bathrooms = serializers.IntegerField(allow_null=True)
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
     is_allowed_corporate = serializers.BooleanField()
@@ -272,6 +274,8 @@ class CottageListSerializer(serializers.Serializer):
             }
         row["guests"] = _parse_int_maybe(row.get("guests"))
         row["rooms"] = _parse_int_maybe(row.get("rooms"))
+        row["beds"] = _parse_int_maybe(row.get("beds"))
+        row["bathrooms"] = _parse_int_maybe(row.get("bathrooms"))
         row["property_type_id"] = str(COTTAGE_TYPE_GUID)
         row["property_type"] = {
             "guid": str(COTTAGE_TYPE_GUID),
