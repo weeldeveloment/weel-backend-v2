@@ -2,7 +2,7 @@ import logging
 
 from firebase_admin import messaging
 
-from shared.raw.db import execute, fetch_all, table_exists
+from shared.raw.db import execute, fetch_all
 from .raw_repository import create_notification
 
 
@@ -22,26 +22,16 @@ class FCMService:
     def _deactivate_invalid_tokens(tokens: list[str]):
         if not tokens:
             return
-        if table_exists("client_devices"):
-            execute(
-                """
-                UPDATE public.client_devices
-                SET is_active = FALSE
-                WHERE is_active = TRUE
-                  AND fcm_token = ANY(%s)
-                """,
-                [tokens],
-            )
-        if table_exists("partner_devices"):
-            execute(
-                """
-                UPDATE public.partner_devices
-                SET is_active = FALSE
-                WHERE is_active = TRUE
-                  AND fcm_token = ANY(%s)
-                """,
-                [tokens],
-            )
+        execute(
+            """
+            UPDATE public.users
+            SET fcm_token = NULL,
+                device_type = NULL,
+                updated_at = NOW()
+            WHERE fcm_token = ANY(%s)
+            """,
+            [tokens],
+        )
 
     @staticmethod
     def send_to_tokens(
@@ -167,17 +157,17 @@ class NotificationService:
         )
 
         tokens: list[str] = []
-        if table_exists("client_devices"):
-            token_rows = fetch_all(
-                """
-                SELECT fcm_token
-                FROM public.client_devices
-                WHERE client_id = %s
-                  AND is_active = TRUE
-                """,
-                [getattr(client, "id", None)],
-            )
-            tokens = [row["fcm_token"] for row in token_rows]
+        token_rows = fetch_all(
+            """
+            SELECT fcm_token
+            FROM public.users
+            WHERE id = %s
+              AND role = 'client'
+              AND fcm_token IS NOT NULL
+            """,
+            [getattr(client, "id", None)],
+        )
+        tokens = [row["fcm_token"] for row in token_rows]
 
         logger.info(
             "Client notification tokens loaded. client_id=%s tokens_total=%s",
@@ -252,17 +242,17 @@ class NotificationService:
 
         # Send push notification
         tokens: list[str] = []
-        if table_exists("partner_devices"):
-            token_rows = fetch_all(
-                """
-                SELECT fcm_token
-                FROM public.partner_devices
-                WHERE partner_id = %s
-                  AND is_active = TRUE
-                """,
-                [getattr(partner, "id", None)],
-            )
-            tokens = [row["fcm_token"] for row in token_rows]
+        token_rows = fetch_all(
+            """
+            SELECT fcm_token
+            FROM public.users
+            WHERE id = %s
+              AND role = 'partner'
+              AND fcm_token IS NOT NULL
+            """,
+            [getattr(partner, "id", None)],
+        )
+        tokens = [row["fcm_token"] for row in token_rows]
 
         logger.info(
             "Partner notification tokens loaded. partner_id=%s tokens_total=%s",
