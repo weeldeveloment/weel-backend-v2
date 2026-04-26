@@ -217,7 +217,7 @@ class AdminStorySerializer(serializers.Serializer):
     property_title = serializers.SerializerMethodField("get_property_title")
     property_kind = serializers.SerializerMethodField("get_property_kind")
     property_img = serializers.SerializerMethodField("get_property_img")
-    partner_user_id = serializers.IntegerField(source="partner_user_id", allow_null=True)
+    partner_user_id = serializers.IntegerField(allow_null=True)
     is_verified = serializers.BooleanField()
     verified_by_user_id = serializers.IntegerField(allow_null=True)
     verified_at = serializers.DateTimeField(allow_null=True)
