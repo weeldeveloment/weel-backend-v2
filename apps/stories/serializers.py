@@ -198,3 +198,53 @@ class StoryCreateSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
         return StorySerializer(instance, context=self.context).data
+
+
+class AdminStoryMediaSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    media_type = serializers.CharField()
+    media_url = serializers.SerializerMethodField("get_media_url")
+
+    def get_media_url(self, obj):
+        request = self.context.get("request")
+        media_path = obj.get("media") if isinstance(obj, dict) else getattr(obj, "media", None)
+        return _build_media_url(request, media_path)
+
+
+class AdminStorySerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    property_id = serializers.SerializerMethodField("get_property_id")
+    property_title = serializers.SerializerMethodField("get_property_title")
+    property_kind = serializers.SerializerMethodField("get_property_kind")
+    property_img = serializers.SerializerMethodField("get_property_img")
+    partner_user_id = serializers.IntegerField(source="partner_user_id", allow_null=True)
+    is_verified = serializers.BooleanField()
+    verified_by_user_id = serializers.IntegerField(allow_null=True)
+    verified_at = serializers.DateTimeField(allow_null=True)
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+    expires_at = serializers.DateTimeField(allow_null=True)
+    uploaded_at = serializers.DateTimeField(allow_null=True)
+    views = serializers.IntegerField()
+    media = serializers.SerializerMethodField("get_media")
+
+    def get_property_id(self, obj):
+        return str(obj.get("property_guid")) if obj.get("property_guid") else None
+
+    def get_property_title(self, obj):
+        return obj.get("property_title")
+
+    def get_property_kind(self, obj):
+        return obj.get("property_kind")
+
+    def get_property_img(self, obj):
+        request = self.context.get("request")
+        return _build_media_url(request, obj.get("property_img"))
+
+    def get_media(self, obj):
+        media_items = obj.get("media") or []
+        return AdminStoryMediaSerializer(media_items, many=True, context=self.context).data
+
+
+class AdminStoryModerateSerializer(serializers.Serializer):
+    is_verified = serializers.BooleanField(required=True)

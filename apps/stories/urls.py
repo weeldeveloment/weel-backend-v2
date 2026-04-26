@@ -1,6 +1,7 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
+from .admin_views import AdminStoryDeleteView, AdminStoryListView, AdminStoryModerateView
 from .views import StoryViewSet, PartnerStoryListView, PublicStoryListView
 
 router = DefaultRouter()
@@ -27,5 +28,21 @@ urlpatterns = [
         "public/stories/",
         PublicStoryListView.as_view(),
         name="public-story-list",
+    ),
+    # Admin moderation endpoints
+    path(
+        "admin/stories/",
+        AdminStoryListView.as_view(),
+        name="admin-story-list",
+    ),
+    path(
+        "admin/stories/<uuid:story_guid>/moderate/",
+        AdminStoryModerateView.as_view(),
+        name="admin-story-moderate",
+    ),
+    path(
+        "admin/stories/<uuid:story_guid>/delete/",
+        AdminStoryDeleteView.as_view(),
+        name="admin-story-delete",
     ),
 ]
