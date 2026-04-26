@@ -68,18 +68,18 @@ def parse_property_kind(value: str | UUID | None) -> str | None:
 def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
     data = [
         {
-            "guid": str(APARTMENT_TYPE_GUID),
-            "title_en": "Apartment",
-            "title_ru": "Квартира",
-            "title_uz": "Kvartira",
-            "icon": "property/icons/building-skyscraper2.svg",
-        },
-        {
             "guid": str(COTTAGE_TYPE_GUID),
             "title_en": "Cottage",
             "title_ru": "Дача",
             "title_uz": "Dacha",
             "icon": "property/icons/home-03.svg",
+        },
+        {
+            "guid": str(APARTMENT_TYPE_GUID),
+            "title_en": "Apartment",
+            "title_ru": "Квартира",
+            "title_uz": "Kvartira",
+            "icon": "property/icons/building-skyscraper2.svg",
         },
     ]
     result = []
@@ -723,7 +723,8 @@ def _convert_amount(amount: Decimal, from_currency: str, to_currency: str, rate:
 
 def _effective_price(row: dict[str, Any], reference_date) -> Decimal:
     if str(row.get("property_kind") or "") == PROPERTY_KIND_COTTAGE:
-        field = "price_on_weekends" if reference_date.weekday() >= 4 else "price_on_working_days"
+        # Weekend pricing is applied only on Saturday/Sunday.
+        field = "price_on_weekends" if reference_date.weekday() in {5, 6} else "price_on_working_days"
         value = row.get(field)
         if value is not None:
             try:
