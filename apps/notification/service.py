@@ -235,7 +235,7 @@ class NotificationService:
             sorted(normalized_data.keys()),
         )
 
-        create_notification(
+        notification = create_notification(
             recipient_user_id=getattr(partner, "id", None),
             recipient_role="partner",
             title=title,
@@ -288,7 +288,25 @@ class NotificationService:
                 "Partner notification send skipped or produced no response. partner_id=%s",
                 getattr(partner, "id", None),
             )
-        return response
+
+        if notification and response and response.success_count > 0:
+            execute(
+                """
+                UPDATE public.notification
+                SET status = 'sent'
+                WHERE id = %s
+                """,
+                [notification["id"]],
+            )
+            logger.info(
+                "Partner notification marked sent. partner_id=%s notification_id=%s success=%s failure=%s",
+                getattr(partner, "id", None),
+                notification.get("id"),
+                response.success_count,
+                response.failure_count,
+            )
+
+        return notification
 
     @staticmethod
     def send_broadcast(notification):

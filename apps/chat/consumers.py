@@ -373,6 +373,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             partner=target,
                             title=sender_name,
                             message=message_preview,
+                            notification_type="message",
                             data=notification_payload,
                         )
                     elif receiver_type == "client":
