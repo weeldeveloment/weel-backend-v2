@@ -138,6 +138,8 @@ def _resolve_property_row(property_value: Any) -> dict[str, Any]:
             else getattr(property_value, "price_per_person", None)
         ),
         "currency": currency,
+        # Flag that enforces a minimum 2-night stay for Friday check-ins.
+        # When True, bookings starting on Friday must include Saturday (no free nights).
         "minimum_weekend_day_stay": bool(
             property_value.get("minimum_weekend_day_stay")
             if isinstance(property_value, dict)

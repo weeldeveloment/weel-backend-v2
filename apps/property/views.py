@@ -210,6 +210,131 @@ PROPERTY_LOCATION_SCHEMA = openapi.Schema(
     },
 )
 
+PROPERTY_ROOM_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    nullable=True,
+    properties={
+        "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid", nullable=True),
+        "guests": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "rooms": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "beds": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "bathrooms": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+    },
+)
+
+COTTAGE_PRICE_ITEM_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    properties={
+        "month_from": openapi.Schema(type=openapi.TYPE_STRING, format="date"),
+        "month_to": openapi.Schema(type=openapi.TYPE_STRING, format="date"),
+        "price_per_person": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "price_on_working_days": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "price_on_weekends": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    },
+)
+
+PROPERTY_DETAIL_RESPONSE_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    properties={
+        "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+        "title": openapi.Schema(type=openapi.TYPE_STRING),
+        "img": openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_STRING)),
+        "created_at": openapi.Schema(type=openapi.TYPE_STRING, format="date-time"),
+        "currency": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "price": openapi.Schema(
+            type=openapi.TYPE_NUMBER,
+            format="decimal",
+            nullable=True,
+            description="Apartment price in UZS (converted from USD if needed). Null for cottages.",
+        ),
+        "price_per_person": openapi.Schema(
+            type=openapi.TYPE_NUMBER,
+            format="decimal",
+            nullable=True,
+            description="Cottage price per person in UZS. Null for apartments.",
+        ),
+        "price_on_working_days": openapi.Schema(
+            type=openapi.TYPE_NUMBER,
+            format="decimal",
+            nullable=True,
+            description="Cottage working-day price in UZS. Null for apartments.",
+        ),
+        "price_on_weekends": openapi.Schema(
+            type=openapi.TYPE_NUMBER,
+            format="decimal",
+            nullable=True,
+            description="Cottage weekend price in UZS. Null for apartments.",
+        ),
+        "monthly_prices": openapi.Schema(
+            type=openapi.TYPE_ARRAY,
+            items=COTTAGE_PRICE_ITEM_SCHEMA,
+            nullable=True,
+            description="Cottage monthly price breakdown. Empty/null for apartments.",
+        ),
+        "minimum_weekend_day_stay": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+        "weekend_only_sunday_inclusive": openapi.Schema(type=openapi.TYPE_BOOLEAN, nullable=True),
+        "description": openapi.Schema(
+            type=openapi.TYPE_STRING,
+            nullable=True,
+            description="Localized description for cottages.",
+        ),
+        "description_en": openapi.Schema(
+            type=openapi.TYPE_STRING,
+            nullable=True,
+            description="English description for apartments.",
+        ),
+        "description_ru": openapi.Schema(
+            type=openapi.TYPE_STRING,
+            nullable=True,
+            description="Russian description for apartments.",
+        ),
+        "description_uz": openapi.Schema(
+            type=openapi.TYPE_STRING,
+            nullable=True,
+            description="Uzbek description for apartments (falls back to en/ru if empty).",
+        ),
+        "comment_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+        "average_rating": openapi.Schema(type=openapi.TYPE_NUMBER, format="float", nullable=True),
+        "is_favorite": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+        "services": openapi.Schema(
+            type=openapi.TYPE_ARRAY,
+            items=openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+            nullable=True,
+            description="List of service UUIDs (apartments).",
+        ),
+        "property_services": openapi.Schema(
+            type=openapi.TYPE_ARRAY,
+            items=openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+            nullable=True,
+            description="List of service UUIDs (cottages).",
+        ),
+        "region_id": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "district_id": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "prefecture_id": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "latitude": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "longitude": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "country": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "city": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "property_location": PROPERTY_LOCATION_SCHEMA,
+        "apartment_number": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "home_number": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "entrance_number": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "floor_number": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "pass_code": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+        "check_in": openapi.Schema(type=openapi.TYPE_STRING, format="time", nullable=True),
+        "check_out": openapi.Schema(type=openapi.TYPE_STRING, format="time", nullable=True),
+        "is_allowed_alcohol": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+        "is_allowed_corporate": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+        "is_allowed_pets": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+        "is_quiet_hours": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+        "guests": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "rooms": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "beds": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "bathrooms": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+        "property_room": PROPERTY_ROOM_SCHEMA,
+    },
+)
+
 MIXED_PROPERTY_LIST_RESPONSE_SCHEMA = openapi.Schema(
     type=openapi.TYPE_ARRAY,
     items=openapi.Schema(
@@ -1231,14 +1356,7 @@ class PropertyRetrieveUpdateDestroyView(APIView):
 
     @swagger_auto_schema(
         responses={
-            200: openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
-                    "title": openapi.Schema(type=openapi.TYPE_STRING),
-                    "property_location": PROPERTY_LOCATION_SCHEMA,
-                },
-            )
+            200: PROPERTY_DETAIL_RESPONSE_SCHEMA,
         }
     )
     def get(self, request, property_id, *args, **kwargs):
