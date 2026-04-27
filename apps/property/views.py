@@ -897,20 +897,15 @@ class UnifiedRecommendationsListView(APIView):
             ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
 
             if property_type in {"apartment", "apartments"}:
-                rows = _list_apartment_rows(source_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
+                rows = _list_apartment_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
                 return ApartmentListSerializer(rows, many=True, context=ctx).data
 
             if property_type in {"cottage", "cottages"}:
-                rows = _list_cottage_rows(source_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
+                rows = _list_cottage_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
                 return CottageListSerializer(rows, many=True, context=ctx).data
 
-            apt_rows = _list_apartment_rows(source_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
-            cot_rows = _list_cottage_rows(source_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
-
-            if not apt_rows:
-                apt_rows = _list_apartment_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=20)
-            if not cot_rows:
-                cot_rows = _list_cottage_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=20)
+            apt_rows = _list_apartment_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
+            cot_rows = _list_cottage_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
             return (
                 ApartmentListSerializer(apt_rows, many=True, context=ctx).data
                 + CottageListSerializer(cot_rows, many=True, context=ctx).data

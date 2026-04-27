@@ -34,20 +34,33 @@ from drf_yasg import openapi
 
 from core import settings
 
-schema_view = get_schema_view(
-    openapi.Info(
-        "Weel API",
-        "v1",
-        "API documentation for the Weel backend",
-        contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
-        license=openapi.License(name="Proprietary"),
-    ),
-    # public=True shows endpoints even when they require authentication;
-    # otherwise drf_yasg hides them from the schema for anonymous users.
-    public=True,
-    url=settings.SWAGGER_URL,
-    permission_classes=[permissions.AllowAny],
+
+_SWAGGER_INFO = openapi.Info(
+    "Weel API",
+    "v1",
+    "API documentation for the Weel backend",
+    contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
+    license=openapi.License(name="Proprietary"),
 )
+
+
+def _is_local_request(request) -> bool:
+    host = (request.get_host() or "").split(":", 1)[0].strip().lower()
+    return host in {"127.0.0.1", "localhost"}
+
+
+def _build_schema_view(request=None):
+    # Force same-origin on localhost so Swagger "Try it out" doesn't call remote
+    # domains and fail with browser NetworkError/CORS issues.
+    swagger_url = None if (request is not None and _is_local_request(request)) else settings.SWAGGER_URL
+    return get_schema_view(
+        _SWAGGER_INFO,
+        # public=True shows endpoints even when they require authentication;
+        # otherwise drf_yasg hides them from the schema for anonymous users.
+        public=True,
+        url=swagger_url,
+        permission_classes=[permissions.AllowAny],
+    )
 
 _SWAGGER_LOCAL_AUTH_ATTEMPTS: dict[str, tuple[int, float]] = {}
 _SWAGGER_AUTH_COOKIE = "swagger_auth"
@@ -129,6 +142,7 @@ def _set_swagger_cookie(request, response):
 
 
 def _swagger_with_optional_basic_auth(request, *args, **kwargs):
+    schema_view = _build_schema_view(request)
     if not _swagger_auth_required():
         return schema_view.with_ui("swagger", cache_timeout=0)(request, *args, **kwargs)
 
@@ -212,6 +226,11 @@ def _swagger_with_optional_basic_auth(request, *args, **kwargs):
     return response
 
 
+def _redoc_view(request, *args, **kwargs):
+    schema_view = _build_schema_view(request)
+    return schema_view.with_ui("redoc", cache_timeout=0)(request, *args, **kwargs)
+
+
 urlpatterns = [
     path("health/", lambda request: JsonResponse({"status": "ok"})),
 ]
@@ -238,12 +257,12 @@ if settings.ENABLE_SWAGGER_UI:
         ),
         path(
             "redoc/",
-            schema_view.with_ui("redoc", cache_timeout=0),
+            _redoc_view,
             name="schema-redoc-ui",
         ),
         path(
             "api/redoc/",
-            schema_view.with_ui("redoc", cache_timeout=0),
+            _redoc_view,
             name="schema-redoc-ui-api-prefix",
         ),
     ]

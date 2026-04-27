@@ -227,11 +227,9 @@ class CottageListSerializer(serializers.Serializer):
     longitude = serializers.CharField(allow_blank=True, allow_null=True)
     country = serializers.CharField(allow_blank=True, allow_null=True)
     city = serializers.CharField(allow_blank=True, allow_null=True)
+    prefecture_id = serializers.IntegerField(allow_null=True)
     property_location = PropertyLocationOutputSerializer(required=False)
     services = serializers.ListField()
-    region = RawRegionSerializer(allow_null=True)
-    district = RawDistrictSerializer(allow_null=True)
-    prefecture_id = serializers.CharField(allow_blank=True, allow_null=True)
     guests = serializers.IntegerField(allow_null=True)
     rooms = serializers.IntegerField(allow_null=True)
     beds = serializers.IntegerField(allow_null=True)
@@ -240,7 +238,8 @@ class CottageListSerializer(serializers.Serializer):
     is_favorite = serializers.BooleanField()
     is_allowed_corporate = serializers.BooleanField()
     created_at = serializers.DateTimeField()
-    property_type_id = serializers.UUIDField()
+    region = RawRegionSerializer(allow_null=True)
+    district = RawDistrictSerializer(allow_null=True)
     property_type = serializers.DictField()
 
     def to_representation(self, instance):
@@ -276,7 +275,6 @@ class CottageListSerializer(serializers.Serializer):
         row["rooms"] = _parse_int_maybe(row.get("rooms"))
         row["beds"] = _parse_int_maybe(row.get("beds"))
         row["bathrooms"] = _parse_int_maybe(row.get("bathrooms"))
-        row["property_type_id"] = str(COTTAGE_TYPE_GUID)
         row["property_type"] = {
             "guid": str(COTTAGE_TYPE_GUID),
             "title": "Cottage",

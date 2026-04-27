@@ -52,6 +52,39 @@ PREFECTURE_TABLE = _table("prefecture", "property_prefecture")
 DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
+def _column_exists(table_name: str, column_name: str, schema: str = "public") -> bool:
+    try:
+        raw_table = str(table_name).split(".")[-1]
+        row = fetch_one(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = %s
+                  AND table_name = %s
+                  AND column_name = %s
+            ) AS exists
+            """,
+            [schema, raw_table, column_name],
+        )
+        return bool(row and row.get("exists"))
+    except Exception:
+        logger.warning(
+            "column detection failed for %s.%s; using safe fallback",
+            table_name,
+            column_name,
+            exc_info=True,
+        )
+        return False
+
+
+def _coalesce_text_expr(alias: str, columns: list[str]) -> str:
+    if not columns:
+        return "''"
+    candidates = [f"NULLIF({alias}.{column}, '')" for column in columns]
+    return f"COALESCE({', '.join(candidates)})"
+
+
 def parse_property_kind(value: str | UUID | None) -> str | None:
     if value is None:
         return None
@@ -101,26 +134,51 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
 def list_property_services(language: str = "uz") -> list[dict[str, Any]]:
     if table_exists("services"):
         try:
+            has_title = _column_exists("services", "title")
+            has_title_ru = _column_exists("services", "title_ru")
+            has_title_en = _column_exists("services", "title_en")
+            has_icon_url = _column_exists("services", "icon_url")
+
             if language == "ru":
-                title_select = "COALESCE(NULLIF(s.title_ru, ''), NULLIF(s.title, ''))"
-                order_field = "COALESCE(NULLIF(s.title_ru, ''), NULLIF(s.title, ''))"
+                title_columns = []
+                if has_title_ru:
+                    title_columns.append("title_ru")
+                if has_title:
+                    title_columns.append("title")
+                if has_title_en:
+                    title_columns.append("title_en")
             elif language == "en":
-                title_select = "COALESCE(NULLIF(s.title_en, ''), NULLIF(s.title, ''))"
-                order_field = "COALESCE(NULLIF(s.title_en, ''), NULLIF(s.title, ''))"
+                title_columns = []
+                if has_title_en:
+                    title_columns.append("title_en")
+                if has_title:
+                    title_columns.append("title")
+                if has_title_ru:
+                    title_columns.append("title_ru")
             else:
-                title_select = "COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, ''))"
-                order_field = "COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, ''))"
-            
-            return fetch_all(
+                title_columns = []
+                if has_title:
+                    title_columns.append("title")
+                if has_title_ru:
+                    title_columns.append("title_ru")
+                if has_title_en:
+                    title_columns.append("title_en")
+
+            title_expr = _coalesce_text_expr("s", title_columns)
+            icon_expr = "s.icon_url" if has_icon_url else "NULL"
+
+            rows = fetch_all(
                 f"""
                 SELECT
                     s.id AS guid,
-                    {title_select} AS title,
-                    s.icon_url AS icon_url
+                    {title_expr} AS title,
+                    {icon_expr} AS icon_url
                 FROM services s
-                ORDER BY {order_field}, s.id
+                ORDER BY {title_expr}, s.id
                 """
             )
+            if rows:
+                return rows
         except ProgrammingError:
             pass
 
