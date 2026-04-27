@@ -52,32 +52,6 @@ PREFECTURE_TABLE = _table("prefecture", "property_prefecture")
 DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
-def _column_exists(table_name: str, column_name: str, schema: str = "public") -> bool:
-    try:
-        raw_table = str(table_name).split(".")[-1]
-        row = fetch_one(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_schema = %s
-                  AND table_name = %s
-                  AND column_name = %s
-            ) AS exists
-            """,
-            [schema, raw_table, column_name],
-        )
-        return bool(row and row.get("exists"))
-    except Exception:
-        logger.warning(
-            "column detection failed for %s.%s; using safe fallback",
-            table_name,
-            column_name,
-            exc_info=True,
-        )
-        return False
-
-
 def _coalesce_text_expr(alias: str, columns: list[str]) -> str:
     if not columns:
         return "''"
@@ -134,10 +108,22 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
 def list_property_services(language: str = "uz") -> list[dict[str, Any]]:
     if table_exists("services"):
         try:
-            has_title = _column_exists("services", "title")
-            has_title_ru = _column_exists("services", "title_ru")
-            has_title_en = _column_exists("services", "title_en")
-            has_icon_url = _column_exists("services", "icon_url")
+            column_flags = fetch_one(
+                """
+                SELECT
+                    BOOL_OR(column_name = 'title') AS has_title,
+                    BOOL_OR(column_name = 'title_ru') AS has_title_ru,
+                    BOOL_OR(column_name = 'title_en') AS has_title_en,
+                    BOOL_OR(column_name = 'icon_url') AS has_icon_url
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'services'
+                """
+            ) or {}
+            has_title = bool(column_flags.get("has_title"))
+            has_title_ru = bool(column_flags.get("has_title_ru"))
+            has_title_en = bool(column_flags.get("has_title_en"))
+            has_icon_url = bool(column_flags.get("has_icon_url"))
 
             if language == "ru":
                 title_columns = []

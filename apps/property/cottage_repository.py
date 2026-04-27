@@ -39,38 +39,37 @@ PREFECTURE_TABLE = _table("prefecture", "property_prefecture")
 DISTRICT_PREFECTURE_TABLE = _table("district_prefecture")
 
 
-def _column_exists(table_name: str, column_name: str, schema: str = "public") -> bool:
-    try:
-        raw_table = str(table_name).split(".")[-1]
-        row = fetch_one(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_schema = %s
-                  AND table_name = %s
-                  AND column_name = %s
-            ) AS exists
-            """,
-            [schema, raw_table, column_name],
-        )
-        return bool(row and row.get("exists"))
-    except Exception:
-        logger.warning(
-            "column detection failed for %s.%s; using safe fallback",
-            table_name,
-            column_name,
-            exc_info=True,
-        )
-        return False
+try:
+    _raw_cottage_table = str(COTTAGE_TABLE).split(".")[-1]
+    _column_flags = fetch_one(
+        """
+        SELECT
+            BOOL_OR(column_name = 'region_id') AS has_region_id,
+            BOOL_OR(column_name = 'district_id') AS has_district_id,
+            BOOL_OR(column_name = 'guests') AS has_guests,
+            BOOL_OR(column_name = 'rooms') AS has_rooms,
+            BOOL_OR(column_name = 'beds') AS has_beds,
+            BOOL_OR(column_name = 'bathrooms') AS has_bathrooms
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+        """,
+        [_raw_cottage_table],
+    ) or {}
+except Exception:
+    logger.warning(
+        "column detection failed for %s; using safe fallback",
+        COTTAGE_TABLE,
+        exc_info=True,
+    )
+    _column_flags = {}
 
-
-HAS_COTTAGE_REGION_ID = _column_exists(COTTAGE_TABLE, "region_id")
-HAS_COTTAGE_DISTRICT_ID = _column_exists(COTTAGE_TABLE, "district_id")
-HAS_COTTAGE_GUESTS = _column_exists(COTTAGE_TABLE, "guests")
-HAS_COTTAGE_ROOMS = _column_exists(COTTAGE_TABLE, "rooms")
-HAS_COTTAGE_BEDS = _column_exists(COTTAGE_TABLE, "beds")
-HAS_COTTAGE_BATHROOMS = _column_exists(COTTAGE_TABLE, "bathrooms")
+HAS_COTTAGE_REGION_ID = bool(_column_flags.get("has_region_id"))
+HAS_COTTAGE_DISTRICT_ID = bool(_column_flags.get("has_district_id"))
+HAS_COTTAGE_GUESTS = bool(_column_flags.get("has_guests"))
+HAS_COTTAGE_ROOMS = bool(_column_flags.get("has_rooms"))
+HAS_COTTAGE_BEDS = bool(_column_flags.get("has_beds"))
+HAS_COTTAGE_BATHROOMS = bool(_column_flags.get("has_bathrooms"))
 
 REGION_SELECT_SQL = "COALESCE(c.region_id, d.region_id)" if HAS_COTTAGE_REGION_ID else "d.region_id"
 DISTRICT_SELECT_SQL = "COALESCE(c.district_id, dp.district_id)" if HAS_COTTAGE_DISTRICT_ID else "dp.district_id"
