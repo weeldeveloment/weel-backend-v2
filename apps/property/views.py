@@ -348,6 +348,24 @@ MIXED_PROPERTY_LIST_RESPONSE_SCHEMA = openapi.Schema(
     ),
 )
 
+# ---------------------------------------------------------------------------
+# Reusable error schemas
+# ---------------------------------------------------------------------------
+
+_ERROR_DETAIL_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    properties={
+        "detail": openapi.Schema(type=openapi.TYPE_STRING),
+    },
+)
+
+_ERROR_VALIDATION_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    properties={
+        "detail": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    },
+)
+
 
 class RawPropertyTypeSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
@@ -797,6 +815,26 @@ def _attach_partner_users(rows: list[dict]) -> list[dict]:
 class PropertyTypeListView(APIView):
     permission_classes = [AllowAny]
 
+    @swagger_auto_schema(
+        operation_id="listPropertyTypes",
+        operation_summary="List property types",
+        operation_description="Returns the two property types (Cottage and Apartment) with localized titles and icon URLs. Results are cached for 10 minutes.",
+        tags=["Property / Meta"],
+        manual_parameters=[
+            openapi.Parameter(
+                "Accept-Language",
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                enum=["en", "ru", "uz"],
+                default="uz",
+                description="Preferred language for localized titles. Defaults to Uzbek.",
+            ),
+        ],
+        responses={
+            200: RawPropertyTypeSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def get(self, request, *args, **kwargs):
         language = _preferred_language(request)
 
@@ -824,16 +862,24 @@ class PropertyServiceListView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
+        operation_id="listPropertyServices",
+        operation_summary="List property services",
+        operation_description="Returns all available property services (amenities) with localized titles and icon URLs. Results are cached for 10 minutes.",
+        tags=["Property / Meta"],
         manual_parameters=[
             openapi.Parameter(
                 "Accept-Language",
                 openapi.IN_HEADER,
-                description="Preferred language (en, ru, uz). Defaults to uz.",
                 type=openapi.TYPE_STRING,
-                required=False,
+                enum=["en", "ru", "uz"],
+                default="uz",
+                description="Preferred language for localized titles. Defaults to Uzbek.",
             ),
         ],
-        responses={200: PropertyServiceListSerializer(many=True)},
+        responses={
+            200: PropertyServiceListSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         language = _preferred_language(request)
@@ -860,7 +906,16 @@ class PropertyServiceListView(APIView):
 class RegionListView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(responses={200: RegionListSerializer(many=True)})
+    @swagger_auto_schema(
+        operation_id="listRegions",
+        operation_summary="List regions",
+        operation_description="Returns all regions with titles and image URLs. Results are cached for 10 minutes.",
+        tags=["Property / Meta"],
+        responses={
+            200: RegionListSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def get(self, request, *args, **kwargs):
         def _load():
             rows = list_regions()
@@ -885,10 +940,23 @@ class DistrictListView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
+        operation_id="listDistricts",
+        operation_summary="List districts",
+        operation_description="Returns all districts, optionally filtered by region_id or region GUID. Results are cached for 10 minutes.",
+        tags=["Property / Meta"],
         manual_parameters=[
-            openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter(
+                "region_id",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description="Filter by region database id or region GUID.",
+            ),
         ],
-        responses={200: DistrictListSerializer(many=True)},
+        responses={
+            200: DistrictListSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         def _load():
@@ -926,11 +994,31 @@ class PrefectureListView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
+        operation_id="listPrefectures",
+        operation_summary="List prefectures",
+        operation_description="Returns all prefectures, optionally filtered by district_id or district_guid. Results are cached for 10 minutes.",
+        tags=["Property / Meta"],
         manual_parameters=[
-            openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
-            openapi.Parameter("district_guid", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter(
+                "district_id",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="Filter by district database id.",
+            ),
+            openapi.Parameter(
+                "district_guid",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                required=False,
+                description="Filter by district GUID.",
+            ),
         ],
-        responses={200: PrefectureListSerializer(many=True)},
+        responses={
+            200: PrefectureListSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         def _load():
@@ -966,7 +1054,26 @@ class PrefectureListView(APIView):
 class LocationListView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(responses={200: RegionsResponseSerializer()})
+    @swagger_auto_schema(
+        operation_id="listLocations",
+        operation_summary="List location tree",
+        operation_description="Returns the full hierarchical location tree: regions → districts → prefectures. Results are cached for 10 minutes.",
+        tags=["Property / Meta"],
+        manual_parameters=[
+            openapi.Parameter(
+                "Accept-Language",
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                enum=["en", "ru", "uz"],
+                default="uz",
+                description="Preferred language for localized titles. Defaults to Uzbek.",
+            ),
+        ],
+        responses={
+            200: RegionsResponseSerializer(),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def get(self, request, *args, **kwargs):
         def _load():
             language = _preferred_language(request)
@@ -986,18 +1093,48 @@ class LocationListView(APIView):
 class CategoryListView(APIView):
     authentication_classes = [OptionalClientOrPartnerJWTAuthentication]
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id="listCategories",
+        operation_summary="List categories",
+        operation_description="Returns an empty list. Categories are not yet implemented.",
+        tags=["Property / Meta"],
+        responses={
+            200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+        },
+    )
     def get(self, request, *args, **kwargs):
         return Response([], status=status.HTTP_200_OK)
 
 
 class CategoryLatestPropertyListView(APIView):
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id="listCategoryLatestProperties",
+        operation_summary="List latest properties by category",
+        operation_description="Returns an empty list. Category-based latest properties are not yet implemented.",
+        tags=["Property / Meta"],
+        responses={
+            200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+        },
+    )
     def get(self, request, *args, **kwargs):
         return Response([], status=status.HTTP_200_OK)
 
 
 class CategoryPropertyRecommendationView(APIView):
     permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id="listCategoryPropertyRecommendations",
+        operation_summary="List property recommendations by category",
+        operation_description="Returns an empty list. Category-based recommendations are not yet implemented.",
+        tags=["Property / Meta"],
+        responses={
+            200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+        },
+    )
     def get(self, request, *args, **kwargs):
         return Response([], status=status.HTTP_200_OK)
 
@@ -1011,8 +1148,15 @@ class UnifiedRecommendationsListView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
+        operation_id="listRecommendations",
+        operation_summary="List recommended properties",
+        operation_description="Returns featured, best-reviewed, or most-booked properties. Supports filtering by kind (apartment, cottage, or both). Results are cached for 60 seconds.",
+        tags=["Property / Public"],
         manual_parameters=RECOMMENDATIONS_QUERY_PARAMS,
-        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+        responses={
+            200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
+            500: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         def _load():
@@ -1075,8 +1219,15 @@ class ApartmentPropertyListCreateView(APIView):
         return [AllowAny()]
 
     @swagger_auto_schema(
+        operation_id="listApartments",
+        operation_summary="List apartments",
+        operation_description="Returns a paginated list of verified public apartments. Supports search, filtering, sorting, and pagination.",
+        tags=["Property / Public"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
-        responses={200: ApartmentListSerializer(many=True)},
+        responses={
+            200: ApartmentListSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         query_params = request.query_params.copy()
@@ -1099,6 +1250,10 @@ class ApartmentPropertyListCreateView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
+        operation_id="createApartment",
+        operation_summary="Create an apartment",
+        operation_description="Partner-only. Creates a new apartment listing. The property is created with verification_status=pending.",
+        tags=["Property / Partner"],
         request_body=ApartmentCreateSerializer,
         responses={
             201: openapi.Schema(
@@ -1108,7 +1263,10 @@ class ApartmentPropertyListCreateView(APIView):
                     "property_id": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
                     "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
                 },
-            )
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
         },
     )
     def post(self, request, *args, **kwargs):
@@ -1140,8 +1298,15 @@ class CottagePropertyListCreateView(APIView):
         return [AllowAny()]
 
     @swagger_auto_schema(
+        operation_id="listCottages",
+        operation_summary="List cottages",
+        operation_description="Returns a paginated list of verified public cottages. Supports search, filtering, sorting, and pagination.",
+        tags=["Property / Public"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
-        responses={200: CottageListSerializer(many=True)},
+        responses={
+            200: CottageListSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         query_params = request.query_params.copy()
@@ -1164,6 +1329,10 @@ class CottagePropertyListCreateView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
+        operation_id="createCottage",
+        operation_summary="Create a cottage",
+        operation_description="Partner-only. Creates a new cottage listing. The property is created with verification_status=pending.",
+        tags=["Property / Partner"],
         request_body=CottageCreateSerializer,
         responses={
             201: openapi.Schema(
@@ -1173,7 +1342,10 @@ class CottagePropertyListCreateView(APIView):
                     "property_id": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
                     "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
                 },
-            )
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
         },
     )
     def post(self, request, *args, **kwargs):
@@ -1252,7 +1424,22 @@ class PropertyListCreateView(APIView):
 class PropertyFilterByLinkView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(request_body=PROPERTY_FILTER_BY_LINK_SCHEMA)
+    @swagger_auto_schema(
+        operation_id="filterPropertyByLink",
+        operation_summary="Filter property by link",
+        operation_description="Accepts a property URL or link and returns the matching property GUID if found.",
+        tags=["Property / Public"],
+        request_body=PROPERTY_FILTER_BY_LINK_SCHEMA,
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid", nullable=True),
+                },
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+        },
+    )
     def post(self, request, *args, **kwargs):
         payload = request.data or {}
         url = str(payload.get("url") or payload.get("link") or "").strip()
@@ -1273,8 +1460,15 @@ class RegionPropertyListView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
+        operation_id="listPropertiesByRegion",
+        operation_summary="List properties by region",
+        operation_description="Returns apartments and cottages filtered by a specific region. Supports the same query filters as the public list.",
+        tags=["Property / Public"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
-        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+        responses={
+            200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
+            500: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         region_id = _parse_int(self.kwargs.get("region_id"))
@@ -1369,9 +1563,27 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             serializer = ApartmentDetailSerializer(row, context=ctx)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    def put(self, request, property_id, *args, **kwargs):
-        return self._update(request, property_id, partial=False)
-
+    @swagger_auto_schema(
+        operation_id="partialUpdateProperty",
+        operation_summary="Partially update a property",
+        operation_description="Partner-only partial update for an apartment or cottage. Mutating fields resets verification status to pending.",
+        tags=["Property / Partner"],
+        request_body=ApartmentUpdateSerializer,
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                },
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def patch(self, request, property_id, *args, **kwargs):
         return self._update(request, property_id, partial=True)
 
@@ -1415,6 +1627,18 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             payload["warning"] = "Property has been sent for re-verification, please wait while we verify it"
         return Response(payload, status=status.HTTP_200_OK)
 
+    @swagger_auto_schema(
+        operation_id="deleteProperty",
+        operation_summary="Delete a property",
+        operation_description="Partner-only hard delete of an apartment or cottage.",
+        tags=["Property / Partner"],
+        responses={
+            204: None,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def delete(self, request, property_id, *args, **kwargs):
         current = self._partner_property_or_404(str(property_id))
         property_type = str(current["property_kind"])
@@ -1436,6 +1660,53 @@ class PropertyImageCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
 
+    @swagger_auto_schema(
+        operation_id="createPropertyImage",
+        operation_summary="Upload a property image",
+        operation_description="Partner-only. Uploads a single image file and sets it as the primary image for the property. If the property is not yet verified, the image is marked as pending approval.",
+        tags=["Property / Partner"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+            openapi.Parameter(
+                "image",
+                openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=True,
+                description="Image file to upload (JPEG/PNG/WebP).",
+            ),
+        ],
+        responses={
+            201: openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                        "order": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "is_pending": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                        "image_url": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "status": openapi.Schema(type=openapi.TYPE_STRING),
+                },
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def post(self, request, property_id, *args, **kwargs):
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
@@ -1478,6 +1749,48 @@ class PropertyImageUpdateDeleteView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
 
+    @swagger_auto_schema(
+        operation_id="updatePropertyImage",
+        operation_summary="Update property primary image",
+        operation_description="Partner-only. Replaces the property's primary image with a newly uploaded file. If the property is not yet verified, the image is marked as pending approval.",
+        tags=["Property / Partner"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+            openapi.Parameter(
+                "image_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Image GUID (for URL compatibility; the primary image is always replaced).",
+            ),
+            openapi.Parameter(
+                "image",
+                openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=True,
+                description="New image file to upload (JPEG/PNG/WebP).",
+            ),
+        ],
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "status": openapi.Schema(type=openapi.TYPE_STRING),
+                },
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def patch(self, request, property_id, image_id, *args, **kwargs):
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
@@ -1504,6 +1817,34 @@ class PropertyImageUpdateDeleteView(APIView):
 
         return Response({"detail": _("Your image has been updated and is pending approval"), "status": "pending"}, status=status.HTTP_200_OK)
 
+    @swagger_auto_schema(
+        operation_id="deletePropertyImage",
+        operation_summary="Delete property primary image",
+        operation_description="Partner-only. Removes the property's primary image.",
+        tags=["Property / Partner"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+            openapi.Parameter(
+                "image_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Image GUID (for URL compatibility; the primary image is always deleted).",
+            ),
+        ],
+        responses={
+            204: None,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def delete(self, request, property_id, image_id, *args, **kwargs):
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
@@ -1544,11 +1885,53 @@ class PropertyReviewListCreateView(APIView):
             raise NotFound(_("Property not found"))
         return row
 
+    @swagger_auto_schema(
+        operation_id="listPropertyReviews",
+        operation_summary="List property reviews",
+        operation_description="Returns public reviews for a property. No authentication required.",
+        tags=["Property / Reviews"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+        ],
+        responses={
+            200: RawPropertyReviewSerializer(many=True),
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def get(self, request, property_id, *args, **kwargs):
         property_row = self._get_property_or_404(str(property_id))
         rows = list_reviews(property_kind=str(property_row["property_kind"]), property_id=int(property_row["id"]), include_hidden=False)
         return Response(RawPropertyReviewSerializer(rows, many=True).data, status=status.HTTP_200_OK)
 
+    @swagger_auto_schema(
+        operation_id="createPropertyReview",
+        operation_summary="Create a property review",
+        operation_description="Client-only. Creates a review for a property the client has an eligible completed or accepted booking for.",
+        tags=["Property / Reviews"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+        ],
+        request_body=RawPropertyReviewCreateSerializer,
+        responses={
+            201: RawPropertyReviewSerializer,
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def post(self, request, property_id, *args, **kwargs):
         property_row = self._get_property_or_404(str(property_id))
         serializer = RawPropertyReviewCreateSerializer(data=request.data)
@@ -1574,6 +1957,27 @@ class PartnerPropertyReviewListView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
 
+    @swagger_auto_schema(
+        operation_id="listPartnerPropertyReviews",
+        operation_summary="List all reviews for a property (partner)",
+        operation_description="Partner-only. Returns all reviews for a property, including hidden ones.",
+        tags=["Property / Partner"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+        ],
+        responses={
+            200: RawPropertyReviewSerializer(many=True),
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def get(self, request, property_id, *args, **kwargs):
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
@@ -1696,9 +2100,57 @@ class PartnerPropertyAnalyticsView(APIView):
     permission_classes = [IsPartner]
 
     @swagger_auto_schema(
+        operation_id="getPropertyAnalytics",
+        operation_summary="Get property analytics",
+        operation_description="Partner-only. Returns booking statistics, cancellation metrics, and income breakdown for a specific property over a given time range.",
+        tags=["Property / Partner"],
         manual_parameters=[
-            openapi.Parameter("range", openapi.IN_QUERY, type=openapi.TYPE_STRING, enum=["week", "month", "quarter", "year"]),
-        ]
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+            openapi.Parameter(
+                "range",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                enum=["week", "month", "quarter", "year"],
+                default="month",
+                description="Time range for analytics.",
+            ),
+        ],
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "property": openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                            "title": openapi.Schema(type=openapi.TYPE_STRING),
+                            "image_url": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                            "city": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                        },
+                    ),
+                    "range": openapi.Schema(type=openapi.TYPE_STRING),
+                    "bookings_overview": openapi.Schema(type=openapi.TYPE_OBJECT),
+                    "bookings_activity": openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+                    "income_overview": openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            "balance_amount": openapi.Schema(type=openapi.TYPE_STRING),
+                            "currency": openapi.Schema(type=openapi.TYPE_STRING),
+                            "bars": openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+                        },
+                    ),
+                },
+            ),
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, property_id, *args, **kwargs):
         partner_id = int(request.user.id)
@@ -1835,8 +2287,25 @@ class PartnerPropertyListView(APIView):
     permission_classes = [IsPartner]
 
     @swagger_auto_schema(
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [openapi.Parameter("property_type", openapi.IN_QUERY, type=openapi.TYPE_STRING)],
-        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+        operation_id="listPartnerProperties",
+        operation_summary="List partner properties",
+        operation_description="Partner-only. Returns the authenticated partner's own apartments and cottages, including unverified and archived. Supports the same filters as public list.",
+        tags=["Property / Partner"],
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [
+            openapi.Parameter(
+                "property_type",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                enum=["apartment", "cottage"],
+                required=False,
+                description="Filter by property kind. Omit to return both.",
+            ),
+        ],
+        responses={
+            200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         property_type = parse_property_kind(request.query_params.get("property_type"))
@@ -1884,7 +2353,11 @@ class PartnerAllPropertyListView(APIView):
     permission_classes = [IsPartnerOrAdmin]
 
     @swagger_auto_schema(
-        manual_parameters=[
+        operation_id="listAllPartnerProperties",
+        operation_summary="List all properties for a partner",
+        operation_description="Admin or Partner. Returns every property owned by a partner (or the authenticated partner). Admins can pass partner_id to query another partner's listings.",
+        tags=["Property / Partner"],
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [
             openapi.Parameter(
                 "partner_id",
                 openapi.IN_QUERY,
@@ -1893,7 +2366,11 @@ class PartnerAllPropertyListView(APIView):
                 description="Admin only: target partner user id. Partners ignore this and always use the JWT subject.",
             ),
         ],
-        responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
+        responses={
+            200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         ctx = {"request": request}
@@ -2235,8 +2712,16 @@ class ApartmentPartnerPropertyListView(APIView):
     permission_classes = [IsPartner]
 
     @swagger_auto_schema(
+        operation_id="listPartnerApartments",
+        operation_summary="List partner apartments",
+        operation_description="Partner-only. Returns the authenticated partner's own apartments, including unverified and archived. Supports the same filters as public list.",
+        tags=["Property / Partner"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
-        responses={200: ApartmentPartnerListSerializer(many=True)},
+        responses={
+            200: ApartmentPartnerListSerializer(many=True),
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         ctx = {"request": request}
@@ -2254,8 +2739,16 @@ class CottagePartnerPropertyListView(APIView):
     permission_classes = [IsPartner]
 
     @swagger_auto_schema(
+        operation_id="listPartnerCottages",
+        operation_summary="List partner cottages",
+        operation_description="Partner-only. Returns the authenticated partner's own cottages, including unverified and archived. Supports the same filters as public list.",
+        tags=["Property / Partner"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
-        responses={200: CottagePartnerListSerializer(many=True)},
+        responses={
+            200: CottagePartnerListSerializer(many=True),
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+        },
     )
     def get(self, request, *args, **kwargs):
         ctx = {"request": request}
@@ -2276,7 +2769,18 @@ class SavedPropertyListView(APIView):
     authentication_classes = [ClientJWTAuthentication]
     permission_classes = [IsClient]
 
-    @swagger_auto_schema(responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA})
+    @swagger_auto_schema(
+        operation_id="listSavedProperties",
+        operation_summary="List saved (favorite) properties",
+        operation_description="Client-only. Returns the authenticated client's favorited properties (apartments and cottages). Supports the same filters as public list.",
+        tags=["Property / Client"],
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        responses={
+            200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def get(self, request, *args, **kwargs):
         favorite_guids = _load_favorite_guids(int(request.user.id))
         if not favorite_guids:
@@ -2295,6 +2799,40 @@ class PropertyFavoriteToggleView(APIView):
     authentication_classes = [ClientJWTAuthentication]
     permission_classes = [IsClient]
 
+    @swagger_auto_schema(
+        operation_id="togglePropertyFavorite",
+        operation_summary="Toggle property favorite",
+        operation_description="Client-only. Adds the property to favorites if not present, or removes it if already favorited. Returns the new is_favorite state.",
+        tags=["Property / Client"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+        ],
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "is_favorite": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                },
+            ),
+            201: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "is_favorite": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                },
+            ),
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def post(self, request, property_id, *args, **kwargs):
         row = _get_property_for_public(str(property_id))
         if not row:
@@ -2309,6 +2847,33 @@ class PropertyFavoriteToggleView(APIView):
         _store_favorite_guids(int(request.user.id), favorite_guids)
         return Response({"detail": _("Added to favorites"), "is_favorite": True}, status=status.HTTP_201_CREATED)
 
+    @swagger_auto_schema(
+        operation_id="removePropertyFavorite",
+        operation_summary="Remove property from favorites",
+        operation_description="Client-only. Removes a property from the authenticated client's favorites.",
+        tags=["Property / Client"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+        ],
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "is_favorite": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                },
+            ),
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def delete(self, request, property_id, *args, **kwargs):
         row = _get_property_for_public(str(property_id))
         if not row:
