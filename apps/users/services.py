@@ -19,6 +19,7 @@ from .models.logs import SmsPurpose
 from shared.utility import PASSWORD_REGEX
 from shared.raw.entities import RawUser
 from .raw_repository import table_capability_snapshot
+from shared.raw.db import execute
 
 logger = logging.getLogger(__name__)
 
@@ -512,22 +513,32 @@ class ClientDeviceService:
         fcm_token: str,
         device_type: str,
     ):
+        client_id = getattr(client, "id", None)
         if not fcm_token:
             logger.warning(
                 "Client device registration skipped: empty token. client_id=%s device_type=%s",
-                getattr(client, "id", None),
+                client_id,
                 device_type,
             )
             return None
 
-        caps = table_capability_snapshot()
-        if not caps.get("client_devices"):
-            logger.info(
-                "Client device registration skipped: client_devices table is absent in normalized schema."
-            )
-            return None
-        logger.info("client_devices table exists but ORM path is disabled in raw-sql mode.")
-        return None
+        execute(
+            """
+            UPDATE public.users
+            SET fcm_token = %s,
+                device_type = %s,
+                updated_at = NOW()
+            WHERE id = %s
+              AND role = 'client'
+            """,
+            [fcm_token, device_type, client_id],
+        )
+        logger.info(
+            "Client FCM token saved to users table. client_id=%s device_type=%s",
+            client_id,
+            device_type,
+        )
+        return True
 
 
 class PartnerDeviceService:
@@ -537,22 +548,32 @@ class PartnerDeviceService:
         fcm_token: str,
         device_type: str,
     ):
+        partner_id = getattr(partner, "id", None)
         if not fcm_token:
             logger.warning(
                 "Partner device registration skipped: empty token. partner_id=%s device_type=%s",
-                getattr(partner, "id", None),
+                partner_id,
                 device_type,
             )
             return None
 
-        caps = table_capability_snapshot()
-        if not caps.get("partner_devices"):
-            logger.info(
-                "Partner device registration skipped: partner_devices table is absent in normalized schema."
-            )
-            return None
-        logger.info("partner_devices table exists but ORM path is disabled in raw-sql mode.")
-        return None
+        execute(
+            """
+            UPDATE public.users
+            SET fcm_token = %s,
+                device_type = %s,
+                updated_at = NOW()
+            WHERE id = %s
+              AND role = 'partner'
+            """,
+            [fcm_token, device_type, partner_id],
+        )
+        logger.info(
+            "Partner FCM token saved to users table. partner_id=%s device_type=%s",
+            partner_id,
+            device_type,
+        )
+        return True
 
 
 class TelegramService:

@@ -103,8 +103,8 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
         {
             "guid": str(COTTAGE_TYPE_GUID),
             "title_en": "Cottage",
-            "title_ru": "Коттедж",
-            "title_uz": "Kottejlar",
+            "title_ru": "Дача",
+            "title_uz": "Dacha",
             "icon": "property/icons/home-03.svg",
         },
         {
@@ -193,14 +193,24 @@ def list_property_services(language: str = "uz") -> list[dict[str, Any]]:
         if not table_exists(table_name):
             continue
         try:
+            if language == "ru":
+                legacy_title_select = "COALESCE(NULLIF(ps.title_ru, ''), NULLIF(ps.title_uz, ''), NULLIF(ps.title_en, ''))"
+                legacy_order = legacy_title_select
+            elif language == "en":
+                legacy_title_select = "COALESCE(NULLIF(ps.title_en, ''), NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''))"
+                legacy_order = legacy_title_select
+            else:
+                legacy_title_select = "COALESCE(NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''), NULLIF(ps.title_en, ''))"
+                legacy_order = legacy_title_select
+
             return fetch_all(
                 f"""
                 SELECT
                     ps.guid,
-                    COALESCE(NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''), NULLIF(ps.title_en, '')) AS title,
+                    {legacy_title_select} AS title,
                     ps.icon AS icon_url
                 FROM {table_name} ps
-                ORDER BY COALESCE(NULLIF(ps.title_uz, ''), NULLIF(ps.title_ru, ''), NULLIF(ps.title_en, '')), ps.id
+                ORDER BY {legacy_order}, ps.id
                 """
             )
         except ProgrammingError:
@@ -508,7 +518,8 @@ def create_apartment(
             description_en, description_ru, description_uz,
             check_in, check_out,
             is_allowed_alcohol, is_allowed_corporate, is_allowed_pets, is_quiet_hours,
-            apartment_number, home_number, entrance_number, floor_number, pass_code
+            apartment_number, home_number, entrance_number, floor_number, pass_code,
+            guests, rooms, beds, bathrooms
         ) VALUES (
             %s, %s, %s,
             %s, %s,
@@ -521,7 +532,8 @@ def create_apartment(
             %s, %s, %s,
             %s, %s,
             %s, %s, %s, %s,
-            %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s
         )
         RETURNING guid
         """,
@@ -545,6 +557,7 @@ def create_apartment(
             bool(values.get("is_quiet_hours", False)),
             values.get("apartment_number"), values.get("home_number"),
             values.get("entrance_number"), values.get("floor_number"), values.get("pass_code"),
+            values.get("guests"), values.get("rooms"), values.get("beds"), values.get("bathrooms"),
         ],
     )
     if not row:
@@ -562,6 +575,7 @@ _APARTMENT_UPDATE_ALLOWED = {
     "check_in", "check_out",
     "is_allowed_alcohol", "is_allowed_corporate", "is_allowed_pets", "is_quiet_hours",
     "apartment_number", "home_number", "entrance_number", "floor_number", "pass_code",
+    "guests", "rooms", "beds", "bathrooms",
     "services",
 }
 

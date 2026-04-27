@@ -605,31 +605,29 @@ FRONTEND_LOG_TOKEN = (os.getenv("FRONTEND_LOG_TOKEN") or "").strip()
 
 # Firebase
 FIREBASE_APP = None
-firebase_credentials_path = Path(
-    os.getenv("FIREBASE_CREDENTIALS_PATH", BASE_DIR / "certificates/certificate.json")
-)
+FIREBASE_CREDENTIALS_PATH = BASE_DIR / "certificates" / "certificate.json"
 
 if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(firebase_credentials_path)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(FIREBASE_CREDENTIALS_PATH)
 
 try:
     FIREBASE_APP = get_app()
 except ValueError:
-    if firebase_credentials_path.exists():
+    if FIREBASE_CREDENTIALS_PATH.exists():
         try:
             FIREBASE_APP = initialize_app(
-                credentials.Certificate(str(firebase_credentials_path))
+                credentials.Certificate(str(FIREBASE_CREDENTIALS_PATH))
             )
         except Exception as firebase_error:
             logging.exception(
                 "Failed to initialize Firebase app from %s: %s",
-                firebase_credentials_path,
+                FIREBASE_CREDENTIALS_PATH,
                 firebase_error,
             )
     else:
         logging.warning(
             "Firebase credentials file not found at %s. Firebase features are disabled.",
-            firebase_credentials_path,
+            FIREBASE_CREDENTIALS_PATH,
         )
 
 # Security settings

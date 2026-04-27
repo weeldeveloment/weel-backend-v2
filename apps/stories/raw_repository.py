@@ -6,13 +6,13 @@ from typing import Any
 
 from django.utils import timezone
 
-from shared.raw.compat import get_table_name, is_postgresql, return_star
+from shared.raw.compat import get_table_name, is_postgresql, return_star, case_insensitive_like_sql
 from shared.raw.db import execute, fetch_all, fetch_one
 
 
 PROPERTY_GUID_EXPR = "COALESCE(a.guid, c.guid)"
 PROPERTY_TITLE_EXPR = "COALESCE(a.title, c.title)"
-PROPERTY_IMAGE_EXPR = "COALESCE(a.img, c.img)"
+PROPERTY_IMAGE_EXPR = "COALESCE(NULLIF(a.img[1], ''), NULLIF(c.img[1], ''))"
 PROPERTY_PARTNER_EXPR = "COALESCE(a.partner_user_id, c.partner_user_id)"
 PROPERTY_ARCHIVED_EXPR = "COALESCE(a.is_archived, c.is_archived, FALSE)"
 PROPERTY_KIND_EXPR = "CASE WHEN s.property_apartment_id IS NOT NULL THEN 'apartment' ELSE 'cottage' END"
@@ -317,4 +317,136 @@ def increment_story_views(story_guid: uuid.UUID | str, increment_by: int) -> int
         WHERE guid = %s
         """,
         [increment_by, timezone.now(), story_guid],
+    )
+
+
+# ── Admin moderation helpers ──────────────────────────────────────────
+
+
+def count_stories_for_admin(
+    *,
+    is_verified: bool | None = None,
+    search: str | None = None,
+) -> int:
+    where_clauses: list[str] = []
+    params: list[Any] = []
+
+    if is_verified is not None:
+        where_clauses.append("s.is_verified = %s")
+        params.append(is_verified)
+
+    search_sql = ""
+    if search:
+        term = f"%{search.strip()}%"
+        search_sql = (
+            " AND ("
+            f"{case_insensitive_like_sql('COALESCE(a.title, c.title)', '%s')} "
+            f"OR {case_insensitive_like_sql('COALESCE(a.partner_user_id::text, c.partner_user_id::text)', '%s')} "
+            f"OR {case_insensitive_like_sql('s.guid::text', '%s')}"
+            ")"
+        )
+        params.extend([term, term, term])
+
+    where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    row = fetch_one(
+        f"""
+        SELECT COUNT(*) AS total
+        FROM {get_table_name("stories")} s
+        LEFT JOIN {get_table_name("apartment")} a ON a.id = s.property_apartment_id
+        LEFT JOIN {get_table_name("cottage")} c ON c.id = s.property_cottage_id
+        {where}{search_sql}
+        """,
+        params,
+    )
+    return int(row["total"]) if row else 0
+
+
+def list_stories_for_admin(
+    *,
+    is_verified: bool | None = None,
+    search: str | None = None,
+    ordering: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    where_clauses: list[str] = []
+    params: list[Any] = []
+
+    if is_verified is not None:
+        where_clauses.append("s.is_verified = %s")
+        params.append(is_verified)
+
+    search_sql = ""
+    if search:
+        term = f"%{search.strip()}%"
+        search_sql = (
+            " AND ("
+            f"{case_insensitive_like_sql('COALESCE(a.title, c.title)', '%s')} "
+            f"OR {case_insensitive_like_sql('COALESCE(a.partner_user_id::text, c.partner_user_id::text)', '%s')} "
+            f"OR {case_insensitive_like_sql('s.guid::text', '%s')}"
+            ")"
+        )
+        params.extend([term, term, term])
+
+    where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    order_field = "s.created_at"
+    order_direction = "DESC"
+    if ordering:
+        direction = "DESC" if ordering.startswith("-") else "ASC"
+        field_raw = ordering.lstrip("-+").strip()
+        allowed = {"created_at", "uploaded_at", "expires_at", "views"}
+        if field_raw in allowed:
+            order_field = f"s.{field_raw}"
+            order_direction = direction
+
+    params.extend([limit, offset])
+
+    rows = fetch_all(
+        f"""
+        {STORY_SELECT}
+        {where}{search_sql}
+        ORDER BY {order_field} {order_direction}, s.id {order_direction}
+        LIMIT %s OFFSET %s
+        """,
+        params,
+    )
+    return _attach_media(rows)
+
+
+def update_story_verification(
+    story_guid: uuid.UUID | str,
+    *,
+    is_verified: bool,
+    verified_by_user_id: int | None = None,
+) -> dict[str, Any] | None:
+    verified_at = timezone.now() if is_verified else None
+    row = fetch_one(
+        f"""
+        UPDATE {get_table_name("stories")}
+        SET is_verified = %s,
+            verified_by_user_id = %s,
+            verified_at = %s,
+            updated_at = %s
+        WHERE guid = %s
+        {"RETURNING *" if return_star() else ""}
+        """,
+        [is_verified, verified_by_user_id, verified_at, timezone.now(), story_guid],
+    )
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {get_table_name('stories')} WHERE guid = %s LIMIT 1",
+            [story_guid],
+        )
+    return row
+
+
+def delete_story_by_guid(story_guid: uuid.UUID | str) -> int:
+    return execute(
+        f"""
+        DELETE FROM {get_table_name("stories")}
+        WHERE guid = %s
+        """,
+        [story_guid],
     )

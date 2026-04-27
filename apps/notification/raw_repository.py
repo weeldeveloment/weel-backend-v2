@@ -104,7 +104,7 @@ def mark_partner_notifications_as_read(partner_user_id: int, notification_guids:
                 updated_at = %s
             WHERE recipient_role = 'partner'
               AND recipient_user_id = %s
-              AND guid = __ANY_MARKER__(%s)
+              AND guid = ANY(%s::uuid[])
               AND COALESCE(status, '') <> 'read'
             """,
             [now, partner_user_id, notification_guids],

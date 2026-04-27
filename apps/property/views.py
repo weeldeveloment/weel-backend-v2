@@ -698,7 +698,18 @@ class PropertyTypeListView(APIView):
 class PropertyServiceListView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(responses={200: PropertyServiceListSerializer(many=True)})
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                "Accept-Language",
+                openapi.IN_HEADER,
+                description="Preferred language (en, ru, uz). Defaults to uz.",
+                type=openapi.TYPE_STRING,
+                required=False,
+            ),
+        ],
+        responses={200: PropertyServiceListSerializer(many=True)},
+    )
     def get(self, request, *args, **kwargs):
         language = _preferred_language(request)
 

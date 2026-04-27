@@ -334,6 +334,10 @@ class ApartmentDetailSerializer(serializers.Serializer):
     is_allowed_corporate = serializers.BooleanField()
     is_allowed_pets = serializers.BooleanField()
     is_quiet_hours = serializers.BooleanField()
+    guests = serializers.IntegerField(allow_null=True)
+    rooms = serializers.IntegerField(allow_null=True)
+    beds = serializers.IntegerField(allow_null=True)
+    bathrooms = serializers.IntegerField(allow_null=True)
 
     def to_representation(self, instance):
         request = self.context.get("request")
@@ -353,6 +357,10 @@ class ApartmentDetailSerializer(serializers.Serializer):
         row["is_favorite"] = str(row.get("guid")) in favorites
         row["services"] = row.get("services") or []
         row["property_location"] = _build_property_location(row)
+        row["guests"] = _parse_int_maybe(row.get("guests"))
+        row["rooms"] = _parse_int_maybe(row.get("rooms"))
+        row["beds"] = _parse_int_maybe(row.get("beds"))
+        row["bathrooms"] = _parse_int_maybe(row.get("bathrooms"))
         return super().to_representation(row)
 
 
