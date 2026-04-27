@@ -214,10 +214,10 @@ def list_cottages(
         params.append(bool(corporate))
     # For cottages, check if at least one price falls within the range
     if min_price is not None:
-        where.append("(COALESCE(c.price_on_working_days, 0) >= %s OR COALESCE(c.price_on_weekends, 0) >= %s)")
+        where.append("(COALESCE(c.price_on_working_days, 0) >= %s AND COALESCE(c.price_on_weekends, 0) >= %s)")
         params.extend([min_price, min_price])
     if max_price is not None:
-        where.append("(COALESCE(c.price_on_working_days, 0) <= %s OR COALESCE(c.price_on_weekends, 0) <= %s)")
+        where.append("(COALESCE(c.price_on_working_days, 0) <= %s AND COALESCE(c.price_on_weekends, 0) <= %s)")
         params.extend([max_price, max_price])
 
     return fetch_all(

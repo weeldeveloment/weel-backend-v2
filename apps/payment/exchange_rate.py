@@ -40,14 +40,21 @@ def _fetch_live_rate() -> Decimal:
 
 
 def exchange_rate():
-    rate = cache.get("usd_to_uzs_rate")
+    rate = None
+    try:
+        rate = cache.get("usd_to_uzs_rate")
+    except Exception:
+        rate = None
     if rate:
         return Decimal(str(rate))
 
     try:
         live_rate = _fetch_live_rate()
-        cache.set("usd_to_uzs_rate", live_rate, timeout=86400)
-        cache.set("usd_to_uzs_rate_date", str(date.today()), timeout=86400)
+        try:
+            cache.set("usd_to_uzs_rate", live_rate, timeout=86400)
+            cache.set("usd_to_uzs_rate_date", str(date.today()), timeout=86400)
+        except Exception:
+            pass
         return live_rate
     except Exception:
         raise ValidationError(_("Exchange rate isn't synchronized today"))

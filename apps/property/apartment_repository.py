@@ -758,16 +758,26 @@ def effective_apartment_price(row: dict[str, Any]) -> Decimal:
     return Decimal("0")
 
 
+_FALLBACK_USD_TO_UZS_RATE = Decimal("12700")
+
+
 def _exchange_rate_safe() -> Decimal:
     try:
-        return Decimal(str(exchange_rate()))
+        rate = Decimal(str(exchange_rate()))
+        # `exchange_rate()` should be USD->UZS. Some providers may return the inverse
+        # (UZS->USD), so normalize to a stable USD->UZS value for sorting/filtering.
+        if rate <= 0:
+            return _FALLBACK_USD_TO_UZS_RATE
+        if rate < 1:
+            return Decimal("1") / rate
+        return rate
     except Exception:
-        return Decimal("1")
+        return _FALLBACK_USD_TO_UZS_RATE
 
 
 def _convert_amount(amount: Decimal, from_currency: str, to_currency: str, rate: Decimal) -> Decimal:
-    source = (from_currency or "UZS").upper()
-    target = (to_currency or "UZS").upper()
+    source = str(from_currency or "UZS").strip().upper()
+    target = str(to_currency or "UZS").strip().upper()
     if source == target:
         return amount
     if source == "USD" and target == "UZS":

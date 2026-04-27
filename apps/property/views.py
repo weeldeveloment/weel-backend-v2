@@ -130,13 +130,48 @@ class ApartmentPagination(PageNumberPagination):
 
 
 PROPERTY_LIST_QUERY_PARAMS = [
-    openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
-    openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
-    openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
-    openapi.Parameter("corporate", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN),
-    openapi.Parameter("min_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
-    openapi.Parameter("max_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
-    openapi.Parameter("currency", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+    openapi.Parameter(
+        "search",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        description="Search by property title.",
+    ),
+    openapi.Parameter(
+        "region_id",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_INTEGER,
+        description="Filter by region id.",
+    ),
+    openapi.Parameter(
+        "district_id",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_INTEGER,
+        description="Filter by district id.",
+    ),
+    openapi.Parameter(
+        "corporate",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_BOOLEAN,
+        description="Filter by corporate-allowed properties only.",
+    ),
+    openapi.Parameter(
+        "min_price",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_NUMBER,
+        description="Minimum effective price (converted using selected currency if provided).",
+    ),
+    openapi.Parameter(
+        "max_price",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_NUMBER,
+        description="Maximum effective price (converted using selected currency if provided).",
+    ),
+    openapi.Parameter(
+        "currency",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        description="Currency used for min/max filtering. Allowed: UZS, USD.",
+    ),
     openapi.Parameter("sort", openapi.IN_QUERY, type=openapi.TYPE_STRING, enum=[
         "price_high", "price_low",
         "rating_high", "rating_low",
@@ -144,10 +179,31 @@ PROPERTY_LIST_QUERY_PARAMS = [
         "title_asc", "title_desc",
         "corporate_yes", "corporate_no",
     ]),
-    openapi.Parameter("ordering", openapi.IN_QUERY, type=openapi.TYPE_STRING),
-    openapi.Parameter("from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
-    openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
-    openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+    openapi.Parameter(
+        "ordering",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        description="Fallback ordering key (used when sort is not provided).",
+    ),
+    openapi.Parameter(
+        "from_date",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        format="date",
+        description="Reference date (YYYY-MM-DD) used for effective price calculations.",
+    ),
+    openapi.Parameter(
+        "limit",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_INTEGER,
+        description="Page size for paginated list responses.",
+    ),
+    openapi.Parameter(
+        "page",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_INTEGER,
+        description="Page number for paginated list responses.",
+    ),
 ]
 
 LOCATION_QUERY_PARAMS = [
@@ -945,6 +1001,12 @@ class ApartmentPropertyListCreateView(APIView):
         return [AllowAny()]
 
     @swagger_auto_schema(
+        tags=["Property / Apartments"],
+        operation_summary="List apartments",
+        operation_description=(
+            "Returns public apartment listings. Supports filtering by location, price range, "
+            "corporate availability, and multiple sort modes."
+        ),
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
         responses={200: ApartmentListSerializer(many=True)},
     )
@@ -969,6 +1031,12 @@ class ApartmentPropertyListCreateView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
+        tags=["Property / Apartments"],
+        operation_summary="Create apartment",
+        operation_description=(
+            "Creates a new apartment for the authenticated partner account. "
+            "Newly created properties are returned in pending verification flow."
+        ),
         request_body=ApartmentCreateSerializer,
         responses={
             201: openapi.Schema(
@@ -1225,6 +1293,12 @@ class PropertyRetrieveUpdateDestroyView(APIView):
         return row
 
     @swagger_auto_schema(
+        tags=["Property / Apartments", "Property / Cottages"],
+        operation_summary="Retrieve property details",
+        operation_description=(
+            "Returns a single property by guid. Works for both apartments and cottages. "
+            "When called through /apartments/... path, apartment record is prioritized."
+        ),
         responses={
             200: openapi.Schema(
                 type=openapi.TYPE_OBJECT,
@@ -1246,9 +1320,47 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             serializer = ApartmentDetailSerializer(row, context=ctx)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @swagger_auto_schema(
+        tags=["Property / Apartments", "Property / Cottages"],
+        operation_summary="Replace property",
+        operation_description=(
+            "Replaces property fields for the authenticated partner who owns this property. "
+            "For apartment paths, ApartmentUpdateSerializer validation is applied."
+        ),
+        request_body=ApartmentUpdateSerializer,
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                    "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
+                },
+            )
+        },
+    )
     def put(self, request, property_id, *args, **kwargs):
         return self._update(request, property_id, partial=False)
 
+    @swagger_auto_schema(
+        tags=["Property / Apartments", "Property / Cottages"],
+        operation_summary="Partially update property",
+        operation_description=(
+            "Partially updates property fields for the authenticated partner who owns this property. "
+            "For apartment paths, ApartmentUpdateSerializer validation is applied."
+        ),
+        request_body=ApartmentUpdateSerializer,
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                    "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
+                },
+            )
+        },
+    )
     def patch(self, request, property_id, *args, **kwargs):
         return self._update(request, property_id, partial=True)
 
@@ -1292,6 +1404,14 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             payload["warning"] = "Property has been sent for re-verification, please wait while we verify it"
         return Response(payload, status=status.HTTP_200_OK)
 
+    @swagger_auto_schema(
+        tags=["Property / Apartments", "Property / Cottages"],
+        operation_summary="Delete property",
+        operation_description=(
+            "Deletes a property that belongs to the authenticated partner account."
+        ),
+        responses={204: "No Content"},
+    )
     def delete(self, request, property_id, *args, **kwargs):
         current = self._partner_property_or_404(str(property_id))
         property_type = str(current["property_kind"])
@@ -2112,6 +2232,12 @@ class ApartmentPartnerPropertyListView(APIView):
     permission_classes = [IsPartner]
 
     @swagger_auto_schema(
+        tags=["Property / Apartments"],
+        operation_summary="List partner apartments",
+        operation_description=(
+            "Returns apartments owned by the authenticated partner. "
+            "Supports the same filtering and sorting options as public list."
+        ),
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
         responses={200: ApartmentPartnerListSerializer(many=True)},
     )
