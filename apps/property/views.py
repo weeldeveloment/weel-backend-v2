@@ -135,55 +135,70 @@ PROPERTY_LIST_QUERY_PARAMS = [
         openapi.IN_QUERY,
         type=openapi.TYPE_STRING,
         description="Search by property title.",
+        example="Hilton",
     ),
     openapi.Parameter(
         "region_id",
         openapi.IN_QUERY,
         type=openapi.TYPE_INTEGER,
         description="Filter by region id.",
+        example=1,
     ),
     openapi.Parameter(
         "district_id",
         openapi.IN_QUERY,
         type=openapi.TYPE_INTEGER,
         description="Filter by district id.",
+        example=10,
     ),
     openapi.Parameter(
         "corporate",
         openapi.IN_QUERY,
         type=openapi.TYPE_BOOLEAN,
         description="Filter by corporate-allowed properties only.",
+        example=True,
     ),
     openapi.Parameter(
         "min_price",
         openapi.IN_QUERY,
         type=openapi.TYPE_NUMBER,
         description="Minimum effective price (converted using selected currency if provided).",
+        example=500000,
     ),
     openapi.Parameter(
         "max_price",
         openapi.IN_QUERY,
         type=openapi.TYPE_NUMBER,
         description="Maximum effective price (converted using selected currency if provided).",
+        example=3000000,
     ),
     openapi.Parameter(
         "currency",
         openapi.IN_QUERY,
         type=openapi.TYPE_STRING,
         description="Currency used for min/max filtering. Allowed: UZS, USD.",
+        example="UZS",
     ),
-    openapi.Parameter("sort", openapi.IN_QUERY, type=openapi.TYPE_STRING, enum=[
-        "price_high", "price_low",
-        "rating_high", "rating_low",
-        "reviews_high", "reviews_low",
-        "title_asc", "title_desc",
-        "corporate_yes", "corporate_no",
-    ]),
+    openapi.Parameter(
+        "sort",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        description="Predefined sort mode.",
+        enum=[
+            "price_high", "price_low",
+            "rating_high", "rating_low",
+            "reviews_high", "reviews_low",
+            "title_asc", "title_desc",
+            "corporate_yes", "corporate_no",
+        ],
+        example="price_high",
+    ),
     openapi.Parameter(
         "ordering",
         openapi.IN_QUERY,
         type=openapi.TYPE_STRING,
         description="Fallback ordering key (used when sort is not provided).",
+        example="-created_at",
     ),
     openapi.Parameter(
         "from_date",
@@ -191,18 +206,21 @@ PROPERTY_LIST_QUERY_PARAMS = [
         type=openapi.TYPE_STRING,
         format="date",
         description="Reference date (YYYY-MM-DD) used for effective price calculations.",
+        example="2026-04-27",
     ),
     openapi.Parameter(
         "limit",
         openapi.IN_QUERY,
         type=openapi.TYPE_INTEGER,
         description="Page size for paginated list responses.",
+        example=20,
     ),
     openapi.Parameter(
         "page",
         openapi.IN_QUERY,
         type=openapi.TYPE_INTEGER,
         description="Page number for paginated list responses.",
+        example=1,
     ),
 ]
 
@@ -278,6 +296,83 @@ MIXED_PROPERTY_LIST_RESPONSE_SCHEMA = openapi.Schema(
         },
     ),
 )
+
+APARTMENT_LIST_ITEM_EXAMPLE = {
+    "guid": "2e7c6873-d254-4981-8533-e6e3f9e9fbba",
+    "title": "Sample Apartment",
+    "img": ["https://media.weel.uz/weel-media/property/images/sample.jpg"],
+    "price_per_person": "120000.00",
+    "price_on_working_days": "6700000.00",
+    "price_on_weekends": "6700000.00",
+    "currency": "USD",
+    "latitude": "41.31108100000000",
+    "longitude": "69.24056200000000",
+    "country": "Uzbekistan",
+    "city": "Tashkent",
+    "property_location": {
+        "latitude": "41.31108100000000",
+        "longitude": "69.24056200000000",
+        "country": "Uzbekistan",
+        "city": "Tashkent",
+        "region": None,
+        "district": None,
+        "prefecture": None,
+    },
+    "services": ["01b69af4-b0c2-46b1-a3a4-3bb9d7345113"],
+    "guests": 4,
+    "rooms": 2,
+    "beds": 2,
+    "bathrooms": 1,
+    "average_rating": 4.8,
+    "is_favorite": False,
+    "is_allowed_corporate": True,
+    "created_at": "2026-04-06 17:06:49",
+    "region": None,
+    "district": None,
+    "property_type": {
+        "guid": "11111111-1111-1111-1111-111111111111",
+        "title": "Apartment",
+    },
+}
+
+APARTMENT_LIST_RESPONSE_EXAMPLE = {
+    "count": 58,
+    "next": "http://127.0.0.1:8000/api/property/apartments/?page=2&sort=price_high",
+    "previous": None,
+    "results": [APARTMENT_LIST_ITEM_EXAMPLE],
+}
+
+APARTMENT_CREATE_REQUEST_EXAMPLE = {
+    "title": "My New Apartment",
+    "description_uz": "Shinam kvartira",
+    "description_ru": "Ujutnaya kvartira",
+    "latitude": "41.311081",
+    "longitude": "69.240562",
+    "country": "Uzbekistan",
+    "city": "Tashkent",
+    "price_per_person": "120000.00",
+    "price_on_working_days": "1500000.00",
+    "price_on_weekends": "1800000.00",
+    "currency": "UZS",
+    "guests": 4,
+    "rooms": 2,
+    "beds": 2,
+    "bathrooms": 1,
+    "is_allowed_corporate": True,
+    "services": ["01b69af4-b0c2-46b1-a3a4-3bb9d7345113"],
+}
+
+APARTMENT_CREATE_RESPONSE_EXAMPLE = {
+    "detail": "Property has been created successfully, please wait while we verify it",
+    "property_id": "2e7c6873-d254-4981-8533-e6e3f9e9fbba",
+    "status_code": 201,
+}
+
+PROPERTY_UPDATE_RESPONSE_EXAMPLE = {
+    "detail": "Your changes have been saved successfully",
+    "warning": "Property has been sent for re-verification, please wait while we verify it",
+    "status_code": 200,
+}
 
 
 class RawPropertyTypeSerializer(serializers.Serializer):
@@ -1008,7 +1103,18 @@ class ApartmentPropertyListCreateView(APIView):
             "corporate availability, and multiple sort modes."
         ),
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
-        responses={200: ApartmentListSerializer(many=True)},
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "next": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                    "previous": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                    "results": openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+                },
+                example=APARTMENT_LIST_RESPONSE_EXAMPLE,
+            )
+        },
     )
     def get(self, request, *args, **kwargs):
         query_params = request.query_params.copy()
@@ -1035,7 +1141,8 @@ class ApartmentPropertyListCreateView(APIView):
         operation_summary="Create apartment",
         operation_description=(
             "Creates a new apartment for the authenticated partner account. "
-            "Newly created properties are returned in pending verification flow."
+            "Newly created properties are returned in pending verification flow. "
+            f"Example request body: {APARTMENT_CREATE_REQUEST_EXAMPLE}"
         ),
         request_body=ApartmentCreateSerializer,
         responses={
@@ -1046,6 +1153,7 @@ class ApartmentPropertyListCreateView(APIView):
                     "property_id": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
                     "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
                 },
+                example=APARTMENT_CREATE_RESPONSE_EXAMPLE,
             )
         },
     )
@@ -1307,6 +1415,7 @@ class PropertyRetrieveUpdateDestroyView(APIView):
                     "title": openapi.Schema(type=openapi.TYPE_STRING),
                     "property_location": PROPERTY_LOCATION_SCHEMA,
                 },
+                example=APARTMENT_LIST_ITEM_EXAMPLE,
             )
         }
     )
@@ -1336,6 +1445,7 @@ class PropertyRetrieveUpdateDestroyView(APIView):
                     "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
                     "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
                 },
+                example=PROPERTY_UPDATE_RESPONSE_EXAMPLE,
             )
         },
     )
@@ -1358,6 +1468,7 @@ class PropertyRetrieveUpdateDestroyView(APIView):
                     "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
                     "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
                 },
+                example=PROPERTY_UPDATE_RESPONSE_EXAMPLE,
             )
         },
     )
@@ -2239,7 +2350,13 @@ class ApartmentPartnerPropertyListView(APIView):
             "Supports the same filtering and sorting options as public list."
         ),
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
-        responses={200: ApartmentPartnerListSerializer(many=True)},
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                example=[APARTMENT_LIST_ITEM_EXAMPLE],
+            )
+        },
     )
     def get(self, request, *args, **kwargs):
         ctx = {"request": request}
