@@ -255,10 +255,10 @@ class BookingPriceService:
         extra_total_price = Decimal("0")
 
         if property_kind == "apartment":
-            price_per_person = _to_decimal(property_row.get("price_per_person"))
-            if price_per_person is None or price_per_person <= 0:
+            price = _to_decimal(property_row.get("price"))
+            if price is None or price <= 0:
                 raise ValidationError(_("Pricing is not configured for this property"))
-            base_total_price = price_per_person * guests
+            base_total_price = price
         else:
             for day in self._date_range(check_in, check_out):
                 if day.weekday() >= 4:
