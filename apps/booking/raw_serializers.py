@@ -128,27 +128,51 @@ class RawClientBookingCreateSerializer(
                 _("The total number of adults and children shouldn't greater than 15")
             )
 
-        if property_row.get("weekend_only_sunday_inclusive"):
-            if check_in.weekday() not in (4, 5):
+        nights = (check_out - check_in).days
+        if property_row.get("minimum_weekend_day_stay"):
+            if check_in.weekday() == 4 and nights < 2:
                 raise serializers.ValidationError(
                     _(
-                        "This property can only be booked with check-in on Friday or Saturday."
+                        "This property requires minimum 2 nights stay, when booking starts on Friday"
                     )
                 )
+
+        if property_row.get("property_kind") == "cottage" and property_row.get("weekend_only_sunday_inclusive"):
+            from .raw_repository import fetch_calendar_dates_by_status
+
+            property_id = property_row.get("property_id")
+            property_kind = property_row.get("property_kind")
+
             day = check_in
-            has_sunday = False
-            while day < check_out:
-                if day.weekday() == 6:
-                    has_sunday = True
-                    break
-                day += timedelta(days=1)
-            if not has_sunday:
-                raise serializers.ValidationError(
-                    _(
-                        "This property requires the stay to include Sunday. "
-                        "Please choose check-out on Monday or later."
+            while day <= check_out:
+                if day.weekday() in (4, 5):  # Friday or Saturday
+                    following_sunday = day + timedelta(days=(6 - day.weekday()) % 7)
+
+                    # If the Sunday is already inside the requested range, we're good.
+                    if following_sunday < check_out:
+                        day += timedelta(days=1)
+                        continue
+
+                    # Sunday is outside the range — check if partner blocked it externally.
+                    blocked_or_booked = fetch_calendar_dates_by_status(
+                        property_kind=property_kind,
+                        property_id=property_id,
+                        from_date=following_sunday,
+                        to_date=following_sunday,
+                        statuses=["booked", "blocked"],
                     )
-                )
+                    if blocked_or_booked:
+                        day += timedelta(days=1)
+                        continue
+
+                    raise serializers.ValidationError(
+                        _(
+                            "This property requires the stay to include Sunday for any weekend night booked. "
+                            "Please extend your check-out to %(sunday_date)s or later."
+                        )
+                        % {"sunday_date": following_sunday.isoformat()}
+                    )
+                day += timedelta(days=1)
 
         return attrs
 

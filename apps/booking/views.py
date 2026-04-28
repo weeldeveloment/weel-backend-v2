@@ -450,7 +450,7 @@ class ClientBookingListCreateView(ListCreateAPIView):
         property_row = get_verified_property_for_booking(str(property_id))
         if not property_row:
             raise NotFound(
-                _("Property not found or is not a verified apartment"))
+                _("Property not found or is not a verified property"))
         return property_row
 
     def create(self, request, *args, **kwargs):
