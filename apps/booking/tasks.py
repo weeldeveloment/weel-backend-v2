@@ -3,8 +3,6 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 from django.utils import timezone
-
-from core.celery import app
 from notification.service import NotificationService
 from payment.raw_repository import (
     create_charge_transaction_from_latest,
@@ -13,10 +11,13 @@ from payment.raw_repository import (
 )
 from payment.services import PlumAPIError, PlumAPIService
 
+from core.celery import app
+
 from .raw_booking_repository import (
     get_booking_by_guid,
     list_pending_bookings_for_payment_reminders,
     release_calendar_for_booking,
+    set_cottage_weekend_only_sunday_inclusive,
     update_booking_payment_reminder_stage,
     update_booking_status,
 )
@@ -32,6 +33,37 @@ def _client_ref(user_id: int):
 
 def _partner_ref(user_id: int):
     return SimpleNamespace(id=user_id)
+
+
+@app.task(
+    name="booking.reset_cottage_weekend_only_sunday_inclusive",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def reset_cottage_weekend_only_sunday_inclusive(self, cottage_id: int):
+    """
+    Re-enables weekend_only_sunday_inclusive flag on a cottage after the booked
+    check_in date has passed. This is scheduled automatically when a booking is
+    created for a cottage that had this flag enabled.
+    """
+    logger.info(
+        "reset_cottage_weekend_only_sunday_inclusive: re-enabling flag",
+        extra={"cottage_id": cottage_id},
+    )
+    try:
+        set_cottage_weekend_only_sunday_inclusive(cottage_id, True)
+        logger.info(
+            "reset_cottage_weekend_only_sunday_inclusive: flag re-enabled successfully",
+            extra={"cottage_id": cottage_id},
+        )
+    except Exception:
+        logger.exception(
+            "reset_cottage_weekend_only_sunday_inclusive: failed to re-enable flag",
+            extra={"cottage_id": cottage_id},
+        )
+        raise
 
 
 @app.task(
@@ -159,7 +191,8 @@ def auto_complete_booking(self, booking_id):
             )
             create_charge_transaction_from_latest(
                 booking_row=booking,
-                transaction_id=(charge_transaction or {}).get("transactionId") or tx.get("transaction_id"),
+                transaction_id=(charge_transaction or {}).get("transactionId")
+                or tx.get("transaction_id"),
                 hold_id=(charge_transaction or {}).get("holdId") or tx.get("hold_id"),
                 amount=(charge_transaction or {}).get("amount") or charge_amount,
                 card_id=(charge_transaction or {}).get("cardId") or tx.get("card_id"),
@@ -207,7 +240,10 @@ def auto_complete_booking(self, booking_id):
                 f"was completed."
             ),
             notification_type="system",
-            data={"booking_id": str(booking["guid"]), "event": "booking_auto_completed"},
+            data={
+                "booking_id": str(booking["guid"]),
+                "event": "booking_auto_completed",
+            },
         )
 
     logger.info(

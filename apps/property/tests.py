@@ -8,12 +8,24 @@ from uuid import uuid4
 from django.test import SimpleTestCase
 from django.urls import resolve
 from django.utils import timezone
-
+from property.apartment_repository import (
+    APARTMENT_TYPE_GUID,
+    COTTAGE_TYPE_GUID,
+    list_property_types,
+    parse_property_kind,
+)
+from property.apartment_serializers import (
+    ApartmentCreateSerializer,
+    ApartmentDetailSerializer,
+    ApartmentListSerializer,
+    _parse_int_maybe,
+)
+from property.cottage_serializers import (
+    CottageCreateSerializer,
+    CottageDetailSerializer,
+    CottageListSerializer,
+)
 from rest_framework.test import APIRequestFactory
-
-from property.apartment_repository import APARTMENT_TYPE_GUID, COTTAGE_TYPE_GUID, list_property_types, parse_property_kind
-from property.apartment_serializers import ApartmentCreateSerializer, ApartmentListSerializer, ApartmentDetailSerializer, _parse_int_maybe
-from property.cottage_serializers import CottageCreateSerializer, CottageListSerializer, CottageDetailSerializer
 
 
 class PropertyRepositoryHelpersTests(SimpleTestCase):
@@ -34,10 +46,18 @@ class PropertyRepositoryHelpersTests(SimpleTestCase):
 
 
 class ApartmentSerializerTests(SimpleTestCase):
-    @patch("property.apartment_serializers.to_uzs", side_effect=lambda amount: amount * Decimal("12000"))
-    @patch("property.apartment_serializers.default_storage.url", return_value="/media/test.jpg")
+    @patch(
+        "property.apartment_serializers.to_uzs",
+        side_effect=lambda amount: amount * Decimal("12000"),
+    )
+    @patch(
+        "property.apartment_serializers.default_storage.url",
+        return_value="/media/test.jpg",
+    )
     def test_apartment_list_serializer_converts_usd_price_and_marks_favorite(
-        self, _mock_storage_url, _mock_to_uzs,
+        self,
+        _mock_storage_url,
+        _mock_to_uzs,
     ):
         guid = uuid4()
         row = {
@@ -57,7 +77,9 @@ class ApartmentSerializerTests(SimpleTestCase):
             "created_at": timezone.now(),
         }
         request = APIRequestFactory().get("/api/property/apartments/")
-        serializer = ApartmentListSerializer(row, context={"request": request, "favorite_guids": [str(guid)]})
+        serializer = ApartmentListSerializer(
+            row, context={"request": request, "favorite_guids": [str(guid)]}
+        )
         data = serializer.data
 
         self.assertEqual(data["title"], "Test apartment")
@@ -77,9 +99,17 @@ class ApartmentSerializerTests(SimpleTestCase):
 
 
 class CottageSerializerTests(SimpleTestCase):
-    @patch("property.cottage_serializers.to_uzs", side_effect=lambda amount: amount * Decimal("12000"))
-    @patch("property.cottage_serializers.default_storage.url", return_value="/media/test.jpg")
-    def test_cottage_list_serializer_has_three_prices(self, _mock_storage_url, _mock_to_uzs):
+    @patch(
+        "property.cottage_serializers.to_uzs",
+        side_effect=lambda amount: amount * Decimal("12000"),
+    )
+    @patch(
+        "property.cottage_serializers.default_storage.url",
+        return_value="/media/test.jpg",
+    )
+    def test_cottage_list_serializer_has_three_prices(
+        self, _mock_storage_url, _mock_to_uzs
+    ):
         guid = uuid4()
         row = {
             "guid": guid,
@@ -100,7 +130,9 @@ class CottageSerializerTests(SimpleTestCase):
             "created_at": timezone.now(),
         }
         request = APIRequestFactory().get("/api/property/cottages/")
-        serializer = CottageListSerializer(row, context={"request": request, "favorite_guids": []})
+        serializer = CottageListSerializer(
+            row, context={"request": request, "favorite_guids": []}
+        )
         data = serializer.data
 
         self.assertEqual(str(data["price_per_person"]), "60000.00")
@@ -110,7 +142,10 @@ class CottageSerializerTests(SimpleTestCase):
 
 
 class DetailSerializerTests(SimpleTestCase):
-    @patch("property.apartment_serializers.default_storage.url", return_value="/media/test.jpg")
+    @patch(
+        "property.apartment_serializers.default_storage.url",
+        return_value="/media/test.jpg",
+    )
     def test_apartment_detail_uses_db_field_names(self, _mock_url):
         row = {
             "guid": uuid4(),
@@ -121,7 +156,6 @@ class DetailSerializerTests(SimpleTestCase):
             "price": Decimal("100000"),
             "property_kind": "apartment",
             "minimum_weekend_day_stay": False,
-            "weekend_only_sunday_inclusive": False,
             "comment_count": 3,
             "review_count": 3,
             "average_rating": 4.5,
@@ -144,7 +178,11 @@ class DetailSerializerTests(SimpleTestCase):
             "is_allowed_pets": False,
             "is_quiet_hours": False,
         }
-        request = type("Req", (), {"build_absolute_uri": staticmethod(lambda url: f"http://testserver{url}")})()
+        request = type(
+            "Req",
+            (),
+            {"build_absolute_uri": staticmethod(lambda url: f"http://testserver{url}")},
+        )()
         data = ApartmentDetailSerializer(row, context={"request": request}).data
         self.assertEqual(data["description_en"], "English text")
         self.assertEqual(data["description_ru"], "Русский текст")
@@ -153,7 +191,10 @@ class DetailSerializerTests(SimpleTestCase):
         self.assertEqual(data["img"], ["http://testserver/media/test.jpg"])
         self.assertNotIn("property_room", data)
 
-    @patch("property.apartment_serializers.default_storage.url", return_value="/media/test.jpg")
+    @patch(
+        "property.apartment_serializers.default_storage.url",
+        return_value="/media/test.jpg",
+    )
     def test_apartment_detail_defaults_uzbek_description(self, _mock_url):
         row = {
             "guid": uuid4(),
@@ -164,7 +205,6 @@ class DetailSerializerTests(SimpleTestCase):
             "price": Decimal("100000"),
             "property_kind": "apartment",
             "minimum_weekend_day_stay": False,
-            "weekend_only_sunday_inclusive": False,
             "review_count": 0,
             "average_rating": 5.0,
             "description_en": "English fallback",
@@ -186,11 +226,18 @@ class DetailSerializerTests(SimpleTestCase):
             "is_allowed_pets": False,
             "is_quiet_hours": False,
         }
-        request = type("Req", (), {"build_absolute_uri": staticmethod(lambda url: f"http://testserver{url}")})()
+        request = type(
+            "Req",
+            (),
+            {"build_absolute_uri": staticmethod(lambda url: f"http://testserver{url}")},
+        )()
         data = ApartmentDetailSerializer(row, context={"request": request}).data
         self.assertEqual(data["description_uz"], "English fallback")
 
-    @patch("property.cottage_serializers.default_storage.url", return_value="/media/cottage.jpg")
+    @patch(
+        "property.cottage_serializers.default_storage.url",
+        return_value="/media/cottage.jpg",
+    )
     def test_cottage_detail_has_three_prices(self, _mock_url):
         row = {
             "guid": uuid4(),
@@ -219,11 +266,17 @@ class DetailSerializerTests(SimpleTestCase):
             "is_allowed_pets": True,
             "is_quiet_hours": False,
         }
-        request = type("Req", (), {
-            "query_params": {"lang": "en"},
-            "headers": {},
-            "build_absolute_uri": staticmethod(lambda url: f"http://testserver{url}"),
-        })()
+        request = type(
+            "Req",
+            (),
+            {
+                "query_params": {"lang": "en"},
+                "headers": {},
+                "build_absolute_uri": staticmethod(
+                    lambda url: f"http://testserver{url}"
+                ),
+            },
+        )()
         data = CottageDetailSerializer(row, context={"request": request}).data
         self.assertEqual(str(data["price_per_person"]), "200000.00")
         self.assertEqual(str(data["price_on_working_days"]), "1500000.00")
@@ -236,7 +289,9 @@ class UtilTests(SimpleTestCase):
         self.assertIsNone(_parse_int_maybe("abc"))
         self.assertIsNone(_parse_int_maybe(None))
 
-    def test_apartment_create_serializer_normalizes_blank_property_location_coordinates(self):
+    def test_apartment_create_serializer_normalizes_blank_property_location_coordinates(
+        self,
+    ):
         serializer = ApartmentCreateSerializer(
             data={
                 "title": "Test apartment",
@@ -258,7 +313,9 @@ class UtilTests(SimpleTestCase):
         self.assertIsNone(normalized["latitude"])
         self.assertIsNone(normalized["longitude"])
 
-    def test_cottage_create_serializer_normalizes_blank_property_location_coordinates(self):
+    def test_cottage_create_serializer_normalizes_blank_property_location_coordinates(
+        self,
+    ):
         serializer = CottageCreateSerializer(
             data={
                 "title": "Test cottage",
@@ -355,11 +412,15 @@ class UtilTests(SimpleTestCase):
 class PropertyUrlsTests(SimpleTestCase):
     def test_apartment_list_url_resolves(self):
         match = resolve("/api/property/apartments/")
-        self.assertEqual(match.func.view_class.__name__, "ApartmentPropertyListCreateView")
+        self.assertEqual(
+            match.func.view_class.__name__, "ApartmentPropertyListCreateView"
+        )
 
     def test_cottage_list_url_resolves(self):
         match = resolve("/api/property/cottages/")
-        self.assertEqual(match.func.view_class.__name__, "CottagePropertyListCreateView")
+        self.assertEqual(
+            match.func.view_class.__name__, "CottagePropertyListCreateView"
+        )
 
     def test_property_types_url_resolves(self):
         match = resolve("/api/property/types/")
@@ -378,21 +439,33 @@ class PropertyUrlsTests(SimpleTestCase):
         self.assertEqual(match.func.view_class.__name__, "AdminAllPropertiesListView")
 
     def test_partner_property_analytics_url_resolves(self):
-        match = resolve("/api/property/partner/properties/00000000-0000-0000-0000-000000000001/analytics/")
+        match = resolve(
+            "/api/property/partner/properties/00000000-0000-0000-0000-000000000001/analytics/"
+        )
         self.assertEqual(match.func.view_class.__name__, "PartnerPropertyAnalyticsView")
 
     def test_partner_apartments_url_resolves(self):
         match = resolve("/api/property/partner/apartments/")
-        self.assertEqual(match.func.view_class.__name__, "ApartmentPartnerPropertyListView")
+        self.assertEqual(
+            match.func.view_class.__name__, "ApartmentPartnerPropertyListView"
+        )
 
     def test_partner_cottages_url_resolves(self):
         match = resolve("/api/property/partner/cottages/")
-        self.assertEqual(match.func.view_class.__name__, "CottagePartnerPropertyListView")
+        self.assertEqual(
+            match.func.view_class.__name__, "CottagePartnerPropertyListView"
+        )
 
     def test_apartment_detail_url_resolves(self):
-        match = resolve("/api/property/apartments/00000000-0000-0000-0000-000000000001/")
-        self.assertEqual(match.func.view_class.__name__, "PropertyRetrieveUpdateDestroyView")
+        match = resolve(
+            "/api/property/apartments/00000000-0000-0000-0000-000000000001/"
+        )
+        self.assertEqual(
+            match.func.view_class.__name__, "PropertyRetrieveUpdateDestroyView"
+        )
 
     def test_cottage_detail_url_resolves(self):
         match = resolve("/api/property/cottages/00000000-0000-0000-0000-000000000001/")
-        self.assertEqual(match.func.view_class.__name__, "PropertyRetrieveUpdateDestroyView")
+        self.assertEqual(
+            match.func.view_class.__name__, "PropertyRetrieveUpdateDestroyView"
+        )

@@ -7,9 +7,6 @@ from types import SimpleNamespace
 from typing import Any
 
 from django.utils.translation import gettext_lazy as _
-from rest_framework.exceptions import PermissionDenied, ValidationError
-
-from core import settings
 from payment.exchange_rate import to_uzs
 from payment.raw_repository import (
     create_charge_transaction_from_latest,
@@ -18,7 +15,10 @@ from payment.raw_repository import (
 )
 from payment.services import PlumAPIError, PlumAPIService
 from property.apartment_repository import parse_property_kind
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from users.raw_repository import get_user_by_id
+
+from core import settings
 
 from .helpers import client_can_cancel, get_cancellation_error_message
 from .raw_booking_repository import (
@@ -145,10 +145,15 @@ def _resolve_property_row(property_value: Any) -> dict[str, Any]:
             if isinstance(property_value, dict)
             else getattr(property_value, "minimum_weekend_day_stay", False)
         ),
-        "weekend_only_sunday_inclusive": bool(
-            property_value.get("weekend_only_sunday_inclusive")
+        "weekend_only_sunday_inclusive": (
+            bool(property_value.get("weekend_only_sunday_inclusive"))
             if isinstance(property_value, dict)
-            else getattr(property_value, "weekend_only_sunday_inclusive", False)
+            and property_value.get("property_kind") == "cottage"
+            else (
+                bool(getattr(property_value, "weekend_only_sunday_inclusive", False))
+                if getattr(property_value, "property_kind", None) == "cottage"
+                else False
+            )
         ),
     }
 
@@ -214,7 +219,9 @@ class BookingPriceService:
         try:
             self.server_fee = Decimal(str(raw_service_fee or "20"))
         except (InvalidOperation, TypeError, ValueError):
-            logger.warning("Invalid SERVICE_FEE=%r. Falling back to 20.", raw_service_fee)
+            logger.warning(
+                "Invalid SERVICE_FEE=%r. Falling back to 20.", raw_service_fee
+            )
             self.server_fee = Decimal("20")
 
     @staticmethod
@@ -268,7 +275,9 @@ class BookingPriceService:
                 else:
                     base_day = _to_decimal(property_row.get("price_on_working_days"))
                 base_total_price += base_day
-            extra_total_price = _to_decimal(property_row.get("price_per_person")) * extra_persons
+            extra_total_price = (
+                _to_decimal(property_row.get("price_per_person")) * extra_persons
+            )
 
         raw_subtotal = base_total_price + extra_total_price
         currency = str(property_row.get("currency") or "UZS").upper()
@@ -316,8 +325,12 @@ class BookingService:
             return raw_user
         return SimpleNamespace(
             id=int(client_id),
-            first_name=getattr(self.client, "first_name", "") if not isinstance(self.client, dict) else self.client.get("first_name", ""),
-            last_name=getattr(self.client, "last_name", "") if not isinstance(self.client, dict) else self.client.get("last_name", ""),
+            first_name=getattr(self.client, "first_name", "")
+            if not isinstance(self.client, dict)
+            else self.client.get("first_name", ""),
+            last_name=getattr(self.client, "last_name", "")
+            if not isinstance(self.client, dict)
+            else self.client.get("last_name", ""),
         )
 
     def create_booking(self, check_in: date, check_out: date, data):
@@ -370,7 +383,9 @@ class BookingService:
     def partner_accept(self, booking, notify_partner: bool = True):
         booking_row = _resolve_booking_row(booking)
         if booking_row["status"] != "pending":
-            raise ValidationError(_("You can only accept bookings with **pending** statuses"))
+            raise ValidationError(
+                _("You can only accept bookings with **pending** statuses")
+            )
 
         updated = update_booking_status(
             booking_id=int(booking_row["id"]),
@@ -382,7 +397,9 @@ class BookingService:
     def partner_cancel(self, booking, notify_partner: bool = True):
         booking_row = _resolve_booking_row(booking)
         if booking_row["status"] != "pending":
-            raise ValidationError(_("Partner can cancel only bookings with status `PENDING`"))
+            raise ValidationError(
+                _("Partner can cancel only bookings with status `PENDING`")
+            )
 
         tx = get_latest_transaction_history_for_booking(int(booking_row["id"]))
         if tx and tx.get("transaction_id") and tx.get("hold_id"):
@@ -451,7 +468,8 @@ class BookingService:
                 result = (charge_transaction or {}).get("result") or {}
                 create_charge_transaction_from_latest(
                     booking_row=booking_row,
-                    transaction_id=result.get("transactionId") or tx.get("transaction_id"),
+                    transaction_id=result.get("transactionId")
+                    or tx.get("transaction_id"),
                     hold_id=result.get("holdId") or tx.get("hold_id"),
                     amount=result.get("amount") or charge_amount,
                     card_id=result.get("cardId") or tx.get("card_id"),
@@ -524,7 +542,8 @@ class BookingService:
                 result = (charge_transaction or {}).get("result") or {}
                 create_charge_transaction_from_latest(
                     booking_row=booking_row,
-                    transaction_id=result.get("transactionId") or tx.get("transaction_id"),
+                    transaction_id=result.get("transactionId")
+                    or tx.get("transaction_id"),
                     hold_id=result.get("holdId") or tx.get("hold_id"),
                     amount=result.get("amount") or hold_amount,
                     card_id=result.get("cardId") or tx.get("card_id"),

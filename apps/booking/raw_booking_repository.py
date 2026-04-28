@@ -5,15 +5,17 @@ from typing import Any
 from uuid import uuid4
 
 from django.utils import timezone
-
 from shared.raw.compat import get_table_name, is_postgresql, return_star
 from shared.raw.db import execute, fetch_all, fetch_one
-
 
 BOOKING_ALLOWED_STATUSES = {"pending", "confirmed", "cancelled", "completed"}
 
 
 def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | None:
+    """
+    Fetch a verified property (apartment or cottage) by GUID for booking purposes.
+    Returns a unified dict with all fields needed for booking validation and price calculation.
+    """
     return fetch_one(
         f"""
         SELECT
@@ -23,7 +25,7 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
             a.partner_user_id,
             a.title,
             a.minimum_weekend_day_stay,
-            a.weekend_only_sunday_inclusive,
+            NULL AS weekend_only_sunday_inclusive,
             a.price_per_person,
             a.currency,
             a.latitude,
@@ -33,14 +35,59 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
             u.username AS partner_username,
             u.first_name AS partner_first_name,
             u.last_name AS partner_last_name,
-            u.phone_number AS partner_phone_number
+            u.phone_number AS partner_phone_number,
+            NULL AS price_on_working_days,
+            NULL AS price_on_weekends
         FROM {get_table_name("apartment")} a
         LEFT JOIN {get_table_name("users")} u ON u.id = a.partner_user_id
         WHERE a.guid = %s
           AND COALESCE(a.is_verified, FALSE) = TRUE
+
+        UNION ALL
+
+        SELECT
+            'cottage' AS property_kind,
+            c.id AS property_id,
+            c.guid,
+            c.partner_user_id,
+            c.title,
+            NULL AS minimum_weekend_day_stay,
+            c.weekend_only_sunday_inclusive,
+            c.price_per_person,
+            c.currency,
+            c.latitude,
+            c.longitude,
+            c.city,
+            c.country,
+            u.username AS partner_username,
+            u.first_name AS partner_first_name,
+            u.last_name AS partner_last_name,
+            u.phone_number AS partner_phone_number,
+            c.price_on_working_days,
+            c.price_on_weekends
+        FROM {get_table_name("cottage")} c
+        LEFT JOIN {get_table_name("users")} u ON u.id = c.partner_user_id
+        WHERE c.guid = %s
+          AND COALESCE(c.is_verified, FALSE) = TRUE
+
+        LIMIT 1
         """,
-        [property_guid],
+        [property_guid, property_guid],
     )
+
+
+def set_cottage_weekend_only_sunday_inclusive(cottage_id: int, value: bool) -> None:
+    """Enable or disable the weekend_only_sunday_inclusive flag for a cottage."""
+    execute(
+        f"""
+        UPDATE {get_table_name("cottage")}
+        SET weekend_only_sunday_inclusive = %s,
+            updated_at = %s
+        WHERE id = %s
+        """,
+        [value, timezone.now(), cottage_id],
+    )
+
 
 BOOKING_BASE_SELECT = f"""
     SELECT
@@ -115,7 +162,9 @@ BOOKING_BASE_SELECT = f"""
 def _normalize_statuses(statuses: list[str] | None) -> list[str]:
     if not statuses:
         return []
-    normalized = [str(value).strip().lower() for value in statuses if str(value).strip()]
+    normalized = [
+        str(value).strip().lower() for value in statuses if str(value).strip()
+    ]
     invalid = [value for value in normalized if value not in BOOKING_ALLOWED_STATUSES]
     if invalid:
         raise ValueError(
@@ -124,7 +173,9 @@ def _normalize_statuses(statuses: list[str] | None) -> list[str]:
     return normalized
 
 
-def list_client_bookings(client_user_id: int, statuses: list[str] | None = None) -> list[dict[str, Any]]:
+def list_client_bookings(
+    client_user_id: int, statuses: list[str] | None = None
+) -> list[dict[str, Any]]:
     normalized_statuses = _normalize_statuses(statuses)
     where = ["b.client_user_id = %s"]
     params: list[Any] = [client_user_id]
@@ -133,21 +184,23 @@ def list_client_bookings(client_user_id: int, statuses: list[str] | None = None)
             where.append("b.status = ANY(%s)")
             params.append(normalized_statuses)
         else:
-            placeholders = ','.join(['%s'] * len(normalized_statuses))
+            placeholders = ",".join(["%s"] * len(normalized_statuses))
             where.append(f"b.status IN ({placeholders})")
             params.extend(normalized_statuses)
 
     return fetch_all(
         f"""
         {BOOKING_BASE_SELECT}
-        WHERE {' AND '.join(where)}
+        WHERE {" AND ".join(where)}
         ORDER BY b.created_at DESC, b.id DESC
         """,
         params,
     )
 
 
-def get_client_booking_by_guid(booking_guid: str, client_user_id: int) -> dict[str, Any] | None:
+def get_client_booking_by_guid(
+    booking_guid: str, client_user_id: int
+) -> dict[str, Any] | None:
     return fetch_one(
         f"""
         {BOOKING_BASE_SELECT}
@@ -170,7 +223,9 @@ def list_client_booking_history(client_user_id: int) -> list[dict[str, Any]]:
     )
 
 
-def get_client_booking_history_detail(booking_guid: str, client_user_id: int) -> dict[str, Any] | None:
+def get_client_booking_history_detail(
+    booking_guid: str, client_user_id: int
+) -> dict[str, Any] | None:
     return fetch_one(
         f"""
         {BOOKING_BASE_SELECT}
@@ -182,7 +237,9 @@ def get_client_booking_history_detail(booking_guid: str, client_user_id: int) ->
     )
 
 
-def list_partner_bookings(partner_user_id: int, statuses: list[str] | None = None) -> list[dict[str, Any]]:
+def list_partner_bookings(
+    partner_user_id: int, statuses: list[str] | None = None
+) -> list[dict[str, Any]]:
     normalized_statuses = _normalize_statuses(statuses)
     where = ["partner_u.id = %s"]
     params: list[Any] = [partner_user_id]
@@ -191,21 +248,23 @@ def list_partner_bookings(partner_user_id: int, statuses: list[str] | None = Non
             where.append("b.status = ANY(%s)")
             params.append(normalized_statuses)
         else:
-            placeholders = ','.join(['%s'] * len(normalized_statuses))
+            placeholders = ",".join(["%s"] * len(normalized_statuses))
             where.append(f"b.status IN ({placeholders})")
             params.extend(normalized_statuses)
 
     return fetch_all(
         f"""
         {BOOKING_BASE_SELECT}
-        WHERE {' AND '.join(where)}
+        WHERE {" AND ".join(where)}
         ORDER BY b.created_at DESC, b.id DESC
         """,
         params,
     )
 
 
-def get_booking_for_client_action(booking_guid: str, client_user_id: int) -> dict[str, Any] | None:
+def get_booking_for_client_action(
+    booking_guid: str, client_user_id: int
+) -> dict[str, Any] | None:
     return fetch_one(
         f"""
         {BOOKING_BASE_SELECT}
@@ -217,7 +276,9 @@ def get_booking_for_client_action(booking_guid: str, client_user_id: int) -> dic
     )
 
 
-def get_booking_for_partner_action(booking_guid: str, partner_user_id: int) -> dict[str, Any] | None:
+def get_booking_for_partner_action(
+    booking_guid: str, partner_user_id: int
+) -> dict[str, Any] | None:
     return fetch_one(
         f"""
         {BOOKING_BASE_SELECT}
@@ -248,7 +309,9 @@ def _property_column_from_booking(booking_row: dict[str, Any]) -> tuple[str, int
     raise ValueError("Booking has no property reference")
 
 
-def _property_ids(property_kind: str, property_id: int) -> tuple[int | None, int | None]:
+def _property_ids(
+    property_kind: str, property_id: int
+) -> tuple[int | None, int | None]:
     if property_kind == "apartment":
         return property_id, None
     if property_kind == "cottage":
@@ -343,7 +406,7 @@ def list_pending_bookings_for_payment_reminders() -> list[dict[str, Any]]:
 
 def update_booking_payment_reminder_stage(booking_id: int, stage: str) -> int:
     return execute(
-        """
+        f"""
         UPDATE {get_table_name("booking")}
         SET payment_reminder_stage = %s,
             updated_at = %s
@@ -396,7 +459,7 @@ def update_booking_status(
     row = fetch_one(
         f"""
         UPDATE {get_table_name("booking")}
-        SET {', '.join(fields)}
+        SET {", ".join(fields)}
         WHERE id = %s
         {returning_clause}
         """,
@@ -484,7 +547,7 @@ def list_admin_bookings(
     return fetch_all(
         f"""
         {BOOKING_BASE_SELECT}
-        WHERE {' AND '.join(where)}
+        WHERE {" AND ".join(where)}
         ORDER BY {order_column} {direction}, b.id DESC
         LIMIT %s OFFSET %s
         """,

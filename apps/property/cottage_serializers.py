@@ -351,7 +351,6 @@ class CottageDetailSerializer(serializers.Serializer):
     price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price = serializers.ListField(required=False, allow_empty=True)
-    minimum_weekend_day_stay = serializers.BooleanField()
     description = serializers.CharField(allow_blank=True, allow_null=True)
     comment_count = serializers.IntegerField()
     average_rating = serializers.FloatField(allow_null=True)
@@ -440,26 +439,13 @@ class CottageDetailSerializer(serializers.Serializer):
 
 class CottageCreateSerializer(serializers.Serializer):
     title = serializers.CharField(required=False, allow_blank=True)
-    price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, required=False)
-    price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, required=False)
-    price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, required=False)
     currency = serializers.ChoiceField(required=False, choices=["USD", "UZS"])
-    minimum_weekend_day_stay = serializers.BooleanField(required=False, default=False)
     weekend_only_sunday_inclusive = serializers.BooleanField(required=False, default=False)
-    price = serializers.ListField(required=False, allow_empty=False)
+    price = serializers.DictField(required=True, allow_empty=True)
     property_location = serializers.DictField(required=False)
-    property_detail = serializers.DictField(required=False)
-    property_services = serializers.ListField(required=False, allow_empty=True)
-    property_room = serializers.DictField(required=False)
-    guests = serializers.IntegerField(required=False, allow_null=True)
-    rooms = serializers.IntegerField(required=False, allow_null=True)
-    beds = serializers.IntegerField(required=False, allow_null=True)
-    bathrooms = serializers.IntegerField(required=False, allow_null=True)
-    region = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    district = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    prefecture_id = serializers.UUIDField(required=False, allow_null=True)
+    property_detail = serializers.DictField(required=True)
+    property_services = serializers.ListField(required=True, allow_empty=True)
+    property_room = serializers.DictField(required=True)
     img = serializers.JSONField(required=False)
 
     def validate(self, attrs):
@@ -570,10 +556,6 @@ class CottageCreateSerializer(serializers.Serializer):
         if title:
             normalized["title"] = title
             normalized["title_sort"] = title.lower()
-        if "minimum_weekend_day_stay" in attrs:
-            normalized["minimum_weekend_day_stay"] = bool(attrs.get("minimum_weekend_day_stay"))
-        elif not is_update:
-            normalized["minimum_weekend_day_stay"] = False
         if "weekend_only_sunday_inclusive" in attrs:
             normalized["weekend_only_sunday_inclusive"] = bool(attrs.get("weekend_only_sunday_inclusive"))
         elif not is_update:

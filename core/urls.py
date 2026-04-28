@@ -30,18 +30,12 @@ from django.core.signing import BadSignature, SignatureExpired
 from rest_framework import permissions
 
 from drf_yasg.views import get_schema_view
-from drf_yasg import openapi
+from core.swagger import api_info
 
 from core import settings
 
 schema_view = get_schema_view(
-    openapi.Info(
-        "Weel API",
-        "v1",
-        "API documentation for the Weel backend",
-        contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
-        license=openapi.License(name="Proprietary"),
-    ),
+    api_info,
     # public=True shows endpoints even when they require authentication;
     # otherwise drf_yasg hides them from the schema for anonymous users.
     public=True,

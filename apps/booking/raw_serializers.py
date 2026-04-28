@@ -4,9 +4,7 @@ from datetime import timedelta
 
 from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
-
 from rest_framework import serializers
-
 from shared.raw.compat import get_table_name
 from shared.raw.db import fetch_one
 
@@ -64,10 +62,18 @@ def _resolve_property_average_rating(obj) -> float:
 
 class RawBookingPriceSerializer(serializers.Serializer):
     guid = serializers.UUIDField(required=False, allow_null=True)
-    subtotal = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
-    hold_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
-    charge_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
-    service_fee = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
+    subtotal = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    hold_amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    charge_amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    service_fee = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
     service_fee_percentage = serializers.IntegerField(required=False, allow_null=True)
 
     def to_representation(self, instance):
@@ -109,7 +115,9 @@ class RawClientBookingCreateSerializer(
     check_out = serializers.DateField()
     adults = serializers.IntegerField(min_value=1)
     children = serializers.IntegerField(min_value=0, required=False, default=0)
-    babies = serializers.IntegerField(min_value=0, max_value=5, required=False, default=0)
+    babies = serializers.IntegerField(
+        min_value=0, max_value=5, required=False, default=0
+    )
 
     start_field = "check_in"
     end_field = "check_out"
@@ -142,26 +150,32 @@ class RawClientBookingCreateSerializer(
                 )
 
         if property_row.get("weekend_only_sunday_inclusive"):
-            if check_in.weekday() not in (4, 5):
-                raise serializers.ValidationError(
-                    _(
-                        "This property can only be booked with check-in on Friday or Saturday."
+            property_kind = property_row.get("property_kind", "")
+            # Auto-disable: if check_in is Saturday or Sunday, treat as normal booking
+            if property_kind == "cottage" and check_in.weekday() in (5, 6):
+                # Saturday or Sunday check-in → weekend_only_sunday_inclusive is auto-disabled
+                pass  # allow booking normally
+            else:
+                if check_in.weekday() not in (4, 5):
+                    raise serializers.ValidationError(
+                        _(
+                            "This property can only be booked with check-in on Friday or Saturday."
+                        )
                     )
-                )
-            day = check_in
-            has_sunday = False
-            while day < check_out:
-                if day.weekday() == 6:
-                    has_sunday = True
-                    break
-                day += timedelta(days=1)
-            if not has_sunday:
-                raise serializers.ValidationError(
-                    _(
-                        "This property requires the stay to include Sunday. "
-                        "Please choose check-out on Monday or later."
+                day = check_in
+                has_sunday = False
+                while day < check_out:
+                    if day.weekday() == 6:
+                        has_sunday = True
+                        break
+                    day += timedelta(days=1)
+                if not has_sunday:
+                    raise serializers.ValidationError(
+                        _(
+                            "This property requires the stay to include Sunday. "
+                            "Please choose check-out on Monday or later."
+                        )
                     )
-                )
 
         return attrs
 
@@ -177,15 +191,27 @@ class RawPropertyBookingSerializer(serializers.Serializer):
 
 
 class RawClientBookingSerializer(serializers.Serializer):
-    first_name = serializers.CharField(source="client_first_name", read_only=True, allow_blank=True, allow_null=True)
-    last_name = serializers.CharField(source="client_last_name", read_only=True, allow_blank=True, allow_null=True)
+    first_name = serializers.CharField(
+        source="client_first_name", read_only=True, allow_blank=True, allow_null=True
+    )
+    last_name = serializers.CharField(
+        source="client_last_name", read_only=True, allow_blank=True, allow_null=True
+    )
 
 
 class RawPartnerBookingSerializer(serializers.Serializer):
-    username = serializers.CharField(source="partner_username", read_only=True, allow_blank=True, allow_null=True)
-    first_name = serializers.CharField(source="partner_first_name", read_only=True, allow_blank=True, allow_null=True)
-    last_name = serializers.CharField(source="partner_last_name", read_only=True, allow_blank=True, allow_null=True)
-    phone_number = serializers.CharField(source="partner_phone_number", read_only=True, allow_blank=True, allow_null=True)
+    username = serializers.CharField(
+        source="partner_username", read_only=True, allow_blank=True, allow_null=True
+    )
+    first_name = serializers.CharField(
+        source="partner_first_name", read_only=True, allow_blank=True, allow_null=True
+    )
+    last_name = serializers.CharField(
+        source="partner_last_name", read_only=True, allow_blank=True, allow_null=True
+    )
+    phone_number = serializers.CharField(
+        source="partner_phone_number", read_only=True, allow_blank=True, allow_null=True
+    )
 
 
 class RawClientBookingListSerializer(serializers.Serializer):
@@ -202,10 +228,18 @@ class RawClientBookingListSerializer(serializers.Serializer):
 
 
 class RawPropertyLocationBookingSerializer(serializers.Serializer):
-    latitude = serializers.CharField(source="property_latitude", read_only=True, allow_null=True)
-    longitude = serializers.CharField(source="property_longitude", read_only=True, allow_null=True)
-    city = serializers.CharField(source="property_city", read_only=True, allow_blank=True, allow_null=True)
-    country = serializers.CharField(source="property_country", read_only=True, allow_blank=True, allow_null=True)
+    latitude = serializers.CharField(
+        source="property_latitude", read_only=True, allow_null=True
+    )
+    longitude = serializers.CharField(
+        source="property_longitude", read_only=True, allow_null=True
+    )
+    city = serializers.CharField(
+        source="property_city", read_only=True, allow_blank=True, allow_null=True
+    )
+    country = serializers.CharField(
+        source="property_country", read_only=True, allow_blank=True, allow_null=True
+    )
 
 
 class RawClientBookingDetailSerializer(serializers.Serializer):
@@ -295,7 +329,9 @@ class RawPartnerBookingListSerializer(serializers.Serializer):
     booking_price = serializers.SerializerMethodField("get_booking_price")
     booking_number = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
-    cancellation_reason = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
+    cancellation_reason = serializers.CharField(
+        read_only=True, allow_blank=True, allow_null=True
+    )
     confirmed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     cancelled_at = serializers.DateTimeField(read_only=True, allow_null=True)
     completed_at = serializers.DateTimeField(read_only=True, allow_null=True)
@@ -320,9 +356,15 @@ class RawPartnerBookingListSerializer(serializers.Serializer):
 
 class RawAdminBookingClientSerializer(serializers.Serializer):
     id = serializers.IntegerField(source="client_user_id", read_only=True)
-    first_name = serializers.CharField(source="client_first_name", read_only=True, allow_blank=True, allow_null=True)
-    last_name = serializers.CharField(source="client_last_name", read_only=True, allow_blank=True, allow_null=True)
-    phone_number = serializers.CharField(source="client_phone_number", read_only=True, allow_blank=True, allow_null=True)
+    first_name = serializers.CharField(
+        source="client_first_name", read_only=True, allow_blank=True, allow_null=True
+    )
+    last_name = serializers.CharField(
+        source="client_last_name", read_only=True, allow_blank=True, allow_null=True
+    )
+    phone_number = serializers.CharField(
+        source="client_phone_number", read_only=True, allow_blank=True, allow_null=True
+    )
 
 
 class RawAdminBookingPropertySerializer(serializers.Serializer):
@@ -332,10 +374,18 @@ class RawAdminBookingPropertySerializer(serializers.Serializer):
 
 
 class RawAdminBookingPriceSerializer(serializers.Serializer):
-    subtotal = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
-    hold_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
-    charge_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
-    service_fee = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
+    subtotal = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    hold_amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    charge_amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    service_fee = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
 
     def to_representation(self, instance):
         if not instance:
@@ -357,7 +407,9 @@ class RawAdminBookingListSerializer(serializers.Serializer):
     children = serializers.IntegerField(read_only=True)
     babies = serializers.IntegerField(read_only=True)
     status = serializers.CharField(read_only=True)
-    cancellation_reason = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
+    cancellation_reason = serializers.CharField(
+        read_only=True, allow_blank=True, allow_null=True
+    )
     confirmed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     cancelled_at = serializers.DateTimeField(read_only=True, allow_null=True)
     completed_at = serializers.DateTimeField(read_only=True, allow_null=True)

@@ -306,8 +306,6 @@ class ApartmentDetailSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
     currency = serializers.CharField(allow_blank=True, allow_null=True)
     price = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    minimum_weekend_day_stay = serializers.BooleanField()
-    weekend_only_sunday_inclusive = serializers.BooleanField()
     description_en = serializers.CharField(allow_blank=True, allow_null=True)
     description_ru = serializers.CharField(allow_blank=True, allow_null=True)
     description_uz = serializers.CharField(allow_blank=True, allow_null=True)
@@ -368,8 +366,6 @@ class ApartmentCreateSerializer(serializers.Serializer):
     title = serializers.CharField(required=False, allow_blank=True)
     price = serializers.DecimalField(max_digits=18, decimal_places=2, required=False)
     currency = serializers.ChoiceField(required=False, choices=["USD", "UZS"])
-    minimum_weekend_day_stay = serializers.BooleanField(required=False, default=False)
-    weekend_only_sunday_inclusive = serializers.BooleanField(required=False, default=False)
     property_location = serializers.DictField(required=False)
     property_detail = serializers.DictField(required=False)
     latitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
@@ -409,14 +405,6 @@ class ApartmentCreateSerializer(serializers.Serializer):
         if title:
             normalized["title"] = title
             normalized["title_sort"] = title.lower()
-        if "minimum_weekend_day_stay" in attrs:
-            normalized["minimum_weekend_day_stay"] = bool(attrs.get("minimum_weekend_day_stay"))
-        elif not is_update:
-            normalized["minimum_weekend_day_stay"] = False
-        if "weekend_only_sunday_inclusive" in attrs:
-            normalized["weekend_only_sunday_inclusive"] = bool(attrs.get("weekend_only_sunday_inclusive"))
-        elif not is_update:
-            normalized["weekend_only_sunday_inclusive"] = False
         if "currency" in attrs:
             normalized["currency"] = attrs.get("currency") or "UZS"
         elif not is_update:

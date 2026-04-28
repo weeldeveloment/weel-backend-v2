@@ -10,23 +10,22 @@ from typing import Any
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.utils.translation import gettext_lazy as _
-
-from rest_framework.exceptions import PermissionDenied, ValidationError
-
-from core import settings
 from notification.service import NotificationService
 from payment.exchange_rate import to_uzs
 from payment.raw_repository import create_hold_transaction
 from payment.services import PlumAPIError, PlumAPIService
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from shared.raw.entities import RawUser
 from users.tasks import send_partner_telegram_msg
 
+from core import settings
+
 from .raw_booking_repository import (
     create_booking_row,
+    set_cottage_weekend_only_sunday_inclusive,
 )
 from .raw_calendar_service import RawCalendarStatus
 from .raw_repository import fetch_calendar_dates_by_status, upsert_calendar_days
-
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +83,9 @@ class RawBookingCreateService:
             statuses=[RawCalendarStatus.BOOKED, RawCalendarStatus.BLOCKED],
         )
         if unavailable_days:
-            unavailable_days_str = ", ".join(day.isoformat() for day in unavailable_days)
+            unavailable_days_str = ", ".join(
+                day.isoformat() for day in unavailable_days
+            )
             raise ValidationError(
                 _(
                     "This property is temporarily reserved for these dates. "
@@ -139,7 +140,9 @@ class RawBookingCreateService:
                     else property_row.get("price_on_working_days")
                 )
                 if base_day_value is None:
-                    raise ValidationError(_("Pricing is not configured for this property"))
+                    raise ValidationError(
+                        _("Pricing is not configured for this property")
+                    )
                 base_total_price += self._as_decimal(base_day_value)
 
         currency = str(property_row.get("currency") or "UZS").upper()
@@ -298,12 +301,51 @@ class RawBookingCreateService:
             },
         )
 
-        from .tasks import auto_cancel_booking
+        from .tasks import (
+            auto_cancel_booking,
+            reset_cottage_weekend_only_sunday_inclusive,
+        )
 
         auto_cancel_booking.apply_async(
             kwargs={"booking_id": str(booking["guid"])},
             countdown=60 * 30,
         )
+
+        # If this cottage has weekend_only_sunday_inclusive enabled, temporarily
+        # disable it so that the booked weekend slot cannot be double-booked by
+        # another guest trying to book Friday/Saturday of the same week.
+        # The flag will be automatically re-enabled once the check_in date arrives
+        # (i.e. the booking period has started and the rule resets for future weeks).
+        if (
+            property_kind == "cottage"
+            and property_row.get("weekend_only_sunday_inclusive")
+            and check_in.weekday() not in (5, 6)  # not auto-disabled slot
+        ):
+            import datetime as _dt
+
+            from django.utils import timezone as _tz
+
+            set_cottage_weekend_only_sunday_inclusive(property_id, False)
+            logger.info(
+                "create_booking: cottage weekend_only_sunday_inclusive temporarily disabled",
+                extra={"cottage_id": property_id, "check_in": str(check_in)},
+            )
+
+            # Schedule re-enable at the start of check_in day (midnight local time)
+            check_in_datetime = _dt.datetime.combine(
+                check_in,
+                _dt.time.min,
+                tzinfo=_tz.get_current_timezone(),
+            )
+            delay_seconds = max(0, int((check_in_datetime - _tz.now()).total_seconds()))
+            reset_cottage_weekend_only_sunday_inclusive.apply_async(
+                kwargs={"cottage_id": property_id},
+                countdown=delay_seconds,
+            )
+            logger.info(
+                "create_booking: reset_cottage_weekend_only_sunday_inclusive scheduled",
+                extra={"cottage_id": property_id, "delay_seconds": delay_seconds},
+            )
         send_partner_telegram_msg.delay(
             partner_id=int(property_row["partner_user_id"]),
             message=(

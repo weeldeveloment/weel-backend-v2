@@ -293,8 +293,6 @@ APARTMENT_SELECT = f"""
         a.verification_status,
         a.is_archived,
         a.is_recommended,
-        a.minimum_weekend_day_stay,
-        a.weekend_only_sunday_inclusive,
         a.comment_count,
         a.price,
         a.currency,
@@ -452,7 +450,7 @@ def create_apartment(
             guid, created_at, updated_at,
             title, title_sort,
             is_verified, verification_status, is_archived, is_recommended,
-            minimum_weekend_day_stay, weekend_only_sunday_inclusive, comment_count,
+            comment_count,
             price, currency, img, partner_user_id,
             services,
             latitude, longitude, city, country,
@@ -466,7 +464,7 @@ def create_apartment(
             %s, %s, %s,
             %s, %s,
             FALSE, 'pending', FALSE, FALSE,
-            %s, %s, %s,
+            %s,
             %s, %s, %s, %s,
             %s,
             %s, %s, %s, %s,
@@ -482,8 +480,6 @@ def create_apartment(
         [
             uuid4(), now, now,
             values["title"], values["title_sort"],
-            bool(values.get("minimum_weekend_day_stay", False)),
-            bool(values.get("weekend_only_sunday_inclusive", False)),
             int(values.get("comment_count", 0)),
             values.get("price"), values.get("currency"), values.get("img"),
             partner_user_id,
@@ -509,7 +505,6 @@ def create_apartment(
 
 _APARTMENT_UPDATE_ALLOWED = {
     "title", "title_sort",
-    "minimum_weekend_day_stay", "weekend_only_sunday_inclusive",
     "price", "currency", "img",
     "latitude", "longitude", "city", "country",
     "region_id", "district_id", "prefecture_id",
