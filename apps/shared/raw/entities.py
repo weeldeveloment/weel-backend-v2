@@ -92,7 +92,6 @@ class RawPropertyBase(RowEntity):
     verification_status: str | None
     is_archived: bool | None
     is_recommended: bool | None
-    minimum_weekend_day_stay: bool | None
     weekend_only_sunday_inclusive: bool | None
     comment_count: int | None
     price: Decimal | None

@@ -271,7 +271,6 @@ PROPERTY_DETAIL_RESPONSE_SCHEMA = openapi.Schema(
             nullable=True,
             description="Cottage monthly price breakdown. Empty/null for apartments.",
         ),
-        "minimum_weekend_day_stay": openapi.Schema(type=openapi.TYPE_BOOLEAN),
         "weekend_only_sunday_inclusive": openapi.Schema(type=openapi.TYPE_BOOLEAN, nullable=True),
         "description": openapi.Schema(
             type=openapi.TYPE_STRING,
