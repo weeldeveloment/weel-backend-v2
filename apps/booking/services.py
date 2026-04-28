@@ -122,6 +122,11 @@ def _resolve_property_row(property_value: Any) -> dict[str, Any]:
         "property_id": property_id,
         "partner_user_id": None,
         "title": title,
+        "price": (
+            property_value.get("price")
+            if isinstance(property_value, dict)
+            else getattr(property_value, "price", None)
+        ),
         "price_on_working_days": (
             property_value.get("price_on_working_days")
             if isinstance(property_value, dict)
@@ -138,11 +143,6 @@ def _resolve_property_row(property_value: Any) -> dict[str, Any]:
             else getattr(property_value, "price_per_person", None)
         ),
         "currency": currency,
-        "minimum_weekend_day_stay": bool(
-            property_value.get("minimum_weekend_day_stay")
-            if isinstance(property_value, dict)
-            else getattr(property_value, "minimum_weekend_day_stay", False)
-        ),
         "weekend_only_sunday_inclusive": bool(
             property_value.get("weekend_only_sunday_inclusive")
             if isinstance(property_value, dict)

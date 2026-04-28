@@ -256,14 +256,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({"type": "message", "data": event["message"]}))
 
     async def messages_read(self, event):
+        data = event.get("message") or event
         await self.send(
             text_data=json.dumps(
                 {
                     "type": "read",
                     "data": {
-                        "partnerId": event["partner_id"],
-                        "partnerType": event["partner_type"],
-                        "messageIds": event["message_ids"],
+                        "partnerId": data["partner_id"],
+                        "partnerType": data["partner_type"],
+                        "messageIds": data["message_ids"],
                     },
                 }
             )
@@ -373,6 +374,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             partner=target,
                             title=sender_name,
                             message=message_preview,
+                            notification_type="message",
                             data=notification_payload,
                         )
                     elif receiver_type == "client":

@@ -68,18 +68,18 @@ def parse_property_kind(value: str | UUID | None) -> str | None:
 def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
     data = [
         {
-            "guid": str(APARTMENT_TYPE_GUID),
-            "title_en": "Apartment",
-            "title_ru": "Квартира",
-            "title_uz": "Kvartira",
-            "icon": "property/icons/building-skyscraper2.svg",
-        },
-        {
             "guid": str(COTTAGE_TYPE_GUID),
             "title_en": "Cottage",
             "title_ru": "Дача",
             "title_uz": "Dacha",
             "icon": "property/icons/home-03.svg",
+        },
+        {
+            "guid": str(APARTMENT_TYPE_GUID),
+            "title_en": "Apartment",
+            "title_ru": "Квартира",
+            "title_uz": "Kvartira",
+            "icon": "property/icons/building-skyscraper2.svg",
         },
     ]
     result = []
@@ -293,8 +293,6 @@ APARTMENT_SELECT = f"""
         a.verification_status,
         a.is_archived,
         a.is_recommended,
-        a.minimum_weekend_day_stay,
-        a.weekend_only_sunday_inclusive,
         a.comment_count,
         a.price,
         a.currency,
@@ -452,7 +450,7 @@ def create_apartment(
             guid, created_at, updated_at,
             title, title_sort,
             is_verified, verification_status, is_archived, is_recommended,
-            minimum_weekend_day_stay, weekend_only_sunday_inclusive, comment_count,
+            comment_count,
             price, currency, img, partner_user_id,
             services,
             latitude, longitude, city, country,
@@ -466,7 +464,7 @@ def create_apartment(
             %s, %s, %s,
             %s, %s,
             FALSE, 'pending', FALSE, FALSE,
-            %s, %s, %s,
+            %s,
             %s, %s, %s, %s,
             %s,
             %s, %s, %s, %s,
@@ -482,8 +480,6 @@ def create_apartment(
         [
             uuid4(), now, now,
             values["title"], values["title_sort"],
-            bool(values.get("minimum_weekend_day_stay", False)),
-            bool(values.get("weekend_only_sunday_inclusive", False)),
             int(values.get("comment_count", 0)),
             values.get("price"), values.get("currency"), values.get("img"),
             partner_user_id,
@@ -509,7 +505,6 @@ def create_apartment(
 
 _APARTMENT_UPDATE_ALLOWED = {
     "title", "title_sort",
-    "minimum_weekend_day_stay", "weekend_only_sunday_inclusive",
     "price", "currency", "img",
     "latitude", "longitude", "city", "country",
     "region_id", "district_id", "prefecture_id",
@@ -723,7 +718,8 @@ def _convert_amount(amount: Decimal, from_currency: str, to_currency: str, rate:
 
 def _effective_price(row: dict[str, Any], reference_date) -> Decimal:
     if str(row.get("property_kind") or "") == PROPERTY_KIND_COTTAGE:
-        field = "price_on_weekends" if reference_date.weekday() >= 4 else "price_on_working_days"
+        # Weekend pricing is applied only on Saturday/Sunday.
+        field = "price_on_weekends" if reference_date.weekday() in {5, 6} else "price_on_working_days"
         value = row.get(field)
         if value is not None:
             try:
