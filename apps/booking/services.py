@@ -122,6 +122,11 @@ def _resolve_property_row(property_value: Any) -> dict[str, Any]:
         "property_id": property_id,
         "partner_user_id": None,
         "title": title,
+        "price": (
+            property_value.get("price")
+            if isinstance(property_value, dict)
+            else getattr(property_value, "price", None)
+        ),
         "price_on_working_days": (
             property_value.get("price_on_working_days")
             if isinstance(property_value, dict)
@@ -138,13 +143,6 @@ def _resolve_property_row(property_value: Any) -> dict[str, Any]:
             else getattr(property_value, "price_per_person", None)
         ),
         "currency": currency,
-        # Flag that enforces a minimum 2-night stay for Friday check-ins.
-        # When True, bookings starting on Friday must include Saturday (no free nights).
-        "minimum_weekend_day_stay": bool(
-            property_value.get("minimum_weekend_day_stay")
-            if isinstance(property_value, dict)
-            else getattr(property_value, "minimum_weekend_day_stay", False)
-        ),
         "weekend_only_sunday_inclusive": bool(
             property_value.get("weekend_only_sunday_inclusive")
             if isinstance(property_value, dict)
@@ -257,10 +255,10 @@ class BookingPriceService:
         extra_total_price = Decimal("0")
 
         if property_kind == "apartment":
-            price_per_person = _to_decimal(property_row.get("price_per_person"))
-            if price_per_person is None or price_per_person <= 0:
+            apartment_price = _to_decimal(property_row.get("price"))
+            if apartment_price is None or apartment_price <= 0:
                 raise ValidationError(_("Pricing is not configured for this property"))
-            base_total_price = price_per_person * guests
+            base_total_price = apartment_price
         else:
             for day in self._date_range(check_in, check_out):
                 if day.weekday() >= 4:

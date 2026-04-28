@@ -127,10 +127,12 @@ class RawBookingCreateService:
 
         base_total_price = Decimal("0")
         if property_kind == "apartment":
-            price_per_person = self._as_decimal(property_row.get("price_per_person"))
-            if price_per_person is None or price_per_person <= 0:
+            apartment_price = property_row.get("price")
+            if apartment_price is None:
                 raise ValidationError(_("Pricing is not configured for this property"))
-            base_total_price = price_per_person * guests
+            base_total_price = self._as_decimal(apartment_price)
+            if base_total_price <= 0:
+                raise ValidationError(_("Pricing is not configured for this property"))
         else:
             for day in self._date_range(check_in, check_out):
                 base_day_value = (

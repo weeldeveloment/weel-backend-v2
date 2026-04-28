@@ -128,19 +128,6 @@ class RawClientBookingCreateSerializer(
                 _("The total number of adults and children shouldn't greater than 15")
             )
 
-        nights = (check_out - check_in).days
-        # Business rule: if the property enforces a minimum weekend stay,
-        # guests who check in on Friday must book at least 2 nights
-        # (i.e., the stay must include Saturday). This prevents single-night
-        # Friday bookings without giving any free nights.
-        if property_row.get("minimum_weekend_day_stay"):
-            if check_in.weekday() == 4 and nights < 2:
-                raise serializers.ValidationError(
-                    _(
-                        "This property requires minimum 2 nights stay, when booking starts on Friday"
-                    )
-                )
-
         if property_row.get("weekend_only_sunday_inclusive"):
             if check_in.weekday() not in (4, 5):
                 raise serializers.ValidationError(
