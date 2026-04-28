@@ -94,7 +94,8 @@ class BookingSerializersTests(SimpleTestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("shouldn't greater than 15", str(serializer.errors))
 
-    def test_client_booking_create_serializer_requires_sunday_when_weekend_only_flag_enabled(self):
+    @patch("booking.raw_repository.fetch_calendar_dates_by_status", return_value=[])
+    def test_client_booking_create_serializer_requires_sunday_when_weekend_only_flag_enabled(self, _mock_calendar):
         today = date.today()
         # Friday -> Saturday stay does not include Sunday
         friday = today + timedelta(days=(4 - today.weekday()) % 7)
@@ -110,7 +111,136 @@ class BookingSerializersTests(SimpleTestCase):
                 "children": 0,
                 "babies": 0,
             },
-            context={"property_row": {"weekend_only_sunday_inclusive": True}},
+            context={
+                "property_row": {
+                    "property_kind": "cottage",
+                    "property_id": 1,
+                    "weekend_only_sunday_inclusive": True,
+                }
+            },
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("include Sunday", str(serializer.errors))
+
+    @patch("booking.raw_repository.fetch_calendar_dates_by_status", return_value=[])
+    def test_sunday_required_when_friday_in_range(self, _mock_calendar):
+        today = date.today()
+        # Pick a future Monday
+        monday = today + timedelta(days=(0 - today.weekday()) % 7 + 7)
+        friday = monday + timedelta(days=4)
+
+        serializer = RawClientBookingCreateSerializer(
+            data={
+                "property_id": "11111111-1111-1111-1111-111111111111",
+                "card_id": "card_1",
+                "check_in": monday,
+                "check_out": friday,
+                "adults": 2,
+            },
+            context={
+                "property_row": {
+                    "property_kind": "cottage",
+                    "property_id": 1,
+                    "weekend_only_sunday_inclusive": True,
+                }
+            },
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("include Sunday", str(serializer.errors))
+
+    @patch("booking.raw_repository.fetch_calendar_dates_by_status", return_value=[date(2099, 1, 4)])
+    def test_friday_to_saturday_allowed_when_sunday_blocked_externally(self, _mock_calendar):
+        # Simulate a future Friday where the following Sunday is blocked by partner
+        today = date.today()
+        friday = today + timedelta(days=(4 - today.weekday()) % 7 + 7)
+        saturday = friday + timedelta(days=1)
+
+        serializer = RawClientBookingCreateSerializer(
+            data={
+                "property_id": "11111111-1111-1111-1111-111111111111",
+                "card_id": "card_1",
+                "check_in": friday,
+                "check_out": saturday,
+                "adults": 2,
+            },
+            context={
+                "property_row": {
+                    "property_kind": "cottage",
+                    "property_id": 1,
+                    "weekend_only_sunday_inclusive": True,
+                }
+            },
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_sunday_to_monday_allowed_no_weekend_in_range(self):
+        today = date.today()
+        # Pick a future Sunday
+        sunday = today + timedelta(days=(6 - today.weekday()) % 7 + 7)
+        monday = sunday + timedelta(days=1)
+
+        serializer = RawClientBookingCreateSerializer(
+            data={
+                "property_id": "11111111-1111-1111-1111-111111111111",
+                "card_id": "card_1",
+                "check_in": sunday,
+                "check_out": monday,
+                "adults": 2,
+            },
+            context={
+                "property_row": {
+                    "property_kind": "cottage",
+                    "property_id": 1,
+                    "weekend_only_sunday_inclusive": True,
+                }
+            },
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_friday_to_monday_allowed_because_sunday_included(self):
+        today = date.today()
+        friday = today + timedelta(days=(4 - today.weekday()) % 7 + 7)
+        monday = friday + timedelta(days=3)
+
+        serializer = RawClientBookingCreateSerializer(
+            data={
+                "property_id": "11111111-1111-1111-1111-111111111111",
+                "card_id": "card_1",
+                "check_in": friday,
+                "check_out": monday,
+                "adults": 2,
+            },
+            context={
+                "property_row": {
+                    "property_kind": "cottage",
+                    "property_id": 1,
+                    "weekend_only_sunday_inclusive": True,
+                }
+            },
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    @patch("booking.raw_repository.fetch_calendar_dates_by_status", return_value=[])
+    def test_thursday_to_friday_rejected_because_sunday_missing(self, _mock_calendar):
+        today = date.today()
+        thursday = today + timedelta(days=(3 - today.weekday()) % 7 + 7)
+        friday = thursday + timedelta(days=1)
+
+        serializer = RawClientBookingCreateSerializer(
+            data={
+                "property_id": "11111111-1111-1111-1111-111111111111",
+                "card_id": "card_1",
+                "check_in": thursday,
+                "check_out": friday,
+                "adults": 2,
+            },
+            context={
+                "property_row": {
+                    "property_kind": "cottage",
+                    "property_id": 1,
+                    "weekend_only_sunday_inclusive": True,
+                }
+            },
         )
         self.assertFalse(serializer.is_valid())
         self.assertIn("include Sunday", str(serializer.errors))
