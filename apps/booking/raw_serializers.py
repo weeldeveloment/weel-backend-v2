@@ -25,6 +25,22 @@ def _build_media_url(request, media_path: str | None) -> str | None:
     return request.build_absolute_uri(url)
 
 
+def _build_media_urls(request, media_paths) -> list[str]:
+    if not media_paths:
+        return []
+    if isinstance(media_paths, str):
+        media_paths = [media_paths]
+    if not isinstance(media_paths, (list, tuple)):
+        return []
+
+    urls: list[str] = []
+    for media_path in media_paths:
+        url = _build_media_url(request, media_path)
+        if url:
+            urls.append(url)
+    return urls
+
+
 def _resolve_property_average_rating(obj) -> float:
     apartment_id = obj.get("property_apartment_id")
     cottage_id = obj.get("property_cottage_id")
@@ -236,11 +252,11 @@ class RawClientBookingDetailSerializer(serializers.Serializer):
 class RawPropertyBookingHistorySerializer(serializers.Serializer):
     guid = serializers.UUIDField(source="property_guid", read_only=True)
     title = serializers.CharField(source="property_title", read_only=True)
-    image_url = serializers.SerializerMethodField("get_image_url")
+    img = serializers.SerializerMethodField("get_img")
 
-    def get_image_url(self, obj):
+    def get_img(self, obj):
         request = self.context.get("request")
-        return _build_media_url(request, obj.get("property_img"))
+        return _build_media_urls(request, obj.get("property_img"))
 
 
 class RawClientBookingHistoryListSerializer(serializers.Serializer):
