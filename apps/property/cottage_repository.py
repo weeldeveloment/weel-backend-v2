@@ -200,7 +200,7 @@ def list_cottages(
     if recommended_only:
         where.append("COALESCE(c.is_recommended, FALSE) = TRUE")
     if search:
-        where.append("COALESCE(c.title, '') LIKE %s")
+        where.append("LOWER(COALESCE(c.title, '')) LIKE LOWER(%s)")
         params.append(f"%{search.strip()}%")
     if region_id is not None:
         where.append(f"{REGION_SELECT_SQL} = %s")

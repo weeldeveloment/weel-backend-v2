@@ -383,7 +383,7 @@ def list_apartments(
     if recommended_only:
         where.append("COALESCE(a.is_recommended, FALSE) = TRUE")
     if search:
-        where.append("COALESCE(a.title, '') LIKE %s")
+        where.append("LOWER(COALESCE(a.title, '')) LIKE LOWER(%s)")
         params.append(f"%{search.strip()}%")
     if region_id is not None:
         where.append("a.region_id = %s")
