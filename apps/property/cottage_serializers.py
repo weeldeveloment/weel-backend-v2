@@ -364,7 +364,7 @@ class CottageDetailSerializer(serializers.Serializer):
     price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price = serializers.ListField(required=False, allow_empty=True)
-    minimum_weekend_day_stay = serializers.BooleanField(required=False)
+    minimum_weekend_day_stay = serializers.BooleanField(required=False, default=False)
     description = serializers.CharField(allow_blank=True, allow_null=True)
     comment_count = serializers.IntegerField()
     average_rating = serializers.FloatField(allow_null=True)

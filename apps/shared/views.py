@@ -3,10 +3,10 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
-from rest_framework.throttling import ScopedRateThrottle
 import logging
 from datetime import datetime, timezone
 from django.conf import settings
+from .throttles import ResilientScopedRateThrottle
 
 logger = logging.getLogger("frontend")
 
@@ -15,7 +15,7 @@ class FrontendLogView(APIView):
     """Frontend (brauzer) loglarini qabul qiladi – Grafana/Loki da ko'rsatiladi."""
     permission_classes = [AllowAny]
     throttle_scope = "frontend_log"
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ResilientScopedRateThrottle]
 
     def post(self, request):
         expected_token = getattr(settings, "FRONTEND_LOG_TOKEN", "")
