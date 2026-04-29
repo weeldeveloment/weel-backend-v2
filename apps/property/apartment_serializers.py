@@ -485,12 +485,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
             normalized["prefecture_id"] = str(pref_val) if pref_val not in (None, "", "null", "None", "undefined") else None
 
         if not is_admin:
-            if not is_update:
-                if normalized.get("region_id") is None:
-                    raise serializers.ValidationError({"region_id": _("This field is required.")})
-                if normalized.get("district_id") is None:
-                    raise serializers.ValidationError({"district_id": _("This field is required.")})
-            else:
+            if is_update:
                 touches_location = any(
                     key in attrs
                     for key in (

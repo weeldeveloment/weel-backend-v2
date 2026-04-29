@@ -645,12 +645,6 @@ class CottageCreateSerializer(serializers.Serializer):
         if prefecture_value is not None:
             normalized["prefecture_id"] = str(prefecture_value)
 
-        if not is_admin and not is_update:
-            if normalized.get("region_id") is None:
-                raise serializers.ValidationError({"region_id": _("This field is required.")})
-            if normalized.get("district_id") is None:
-                raise serializers.ValidationError({"district_id": _("This field is required.")})
-
         district_id = normalized.get("district_id")
         prefecture_id = normalized.get("prefecture_id")
         if not is_admin:
