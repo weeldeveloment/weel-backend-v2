@@ -456,9 +456,9 @@ class PropertyLocation(serializers.Serializer):
     longitude = serializers.CharField(required=True, allow_blank=True, allow_null=True)
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    region_id = serializers.CharField(required=False, allow_empty=True)
-    district_id = serializers.CharField(required=False, allow_empty=True)
-    prefecture_id = serializers.CharField(required=False, allow_empty=True)
+    region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    prefecture_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 class CottageCreateSerializer(serializers.Serializer):
     title = serializers.CharField(required=False, allow_blank=True)
