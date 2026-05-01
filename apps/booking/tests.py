@@ -24,43 +24,34 @@ class BookingCancellationRulesTests(SimpleTestCase):
     def _booking(self, *, check_in: date, created_at: datetime, status: str = "pending"):
         return SimpleNamespace(check_in=check_in, created_at=created_at, status=status)
 
-    @patch("booking.helpers.timezone.localdate")
-    def test_cancellation_window_none_when_checkin_is_today(self, mock_localdate):
+    def test_cancellation_window_always_thirty_minutes(self):
         today = date(2026, 4, 3)
-        mock_localdate.return_value = today
-        booking = self._booking(check_in=today, created_at=timezone.now())
+        booking_today = self._booking(check_in=today, created_at=timezone.now())
+        booking_later = self._booking(
+            check_in=today + timedelta(days=5), created_at=timezone.now()
+        )
+        self.assertEqual(_get_cancellation_window(booking_today), timedelta(minutes=30))
+        self.assertEqual(_get_cancellation_window(booking_later), timedelta(minutes=30))
 
-        self.assertIsNone(_get_cancellation_window(booking))
-
-    @patch("booking.helpers.timezone.localdate")
-    def test_cancellation_window_one_hour_when_checkin_tomorrow(self, mock_localdate):
-        today = date(2026, 4, 3)
-        mock_localdate.return_value = today
-        booking = self._booking(check_in=today + timedelta(days=1), created_at=timezone.now())
-
-        self.assertEqual(_get_cancellation_window(booking), timedelta(hours=1))
-
-    @patch("booking.helpers.timezone.localdate")
     @patch("booking.helpers.timezone.now")
-    def test_client_can_cancel_respects_status_and_expiry(self, mock_now, mock_localdate):
+    def test_client_can_cancel_respects_status_and_expiry(self, mock_now):
         today = date(2026, 4, 3)
         now = datetime(2026, 4, 3, 10, 0, 0, tzinfo=timezone.get_current_timezone())
-        mock_localdate.return_value = today
         mock_now.return_value = now
 
         recent = self._booking(
-            check_in=today + timedelta(days=2),
-            created_at=now - timedelta(hours=2),
+            check_in=today,
+            created_at=now - timedelta(minutes=15),
             status="confirmed",
         )
         expired = self._booking(
-            check_in=today + timedelta(days=2),
-            created_at=now - timedelta(hours=8),
+            check_in=today,
+            created_at=now - timedelta(minutes=45),
             status="confirmed",
         )
         bad_status = self._booking(
-            check_in=today + timedelta(days=2),
-            created_at=now - timedelta(hours=1),
+            check_in=today,
+            created_at=now - timedelta(minutes=5),
             status="completed",
         )
 
@@ -68,12 +59,11 @@ class BookingCancellationRulesTests(SimpleTestCase):
         self.assertFalse(client_can_cancel(expired))
         self.assertFalse(client_can_cancel(bad_status))
 
-    @patch("booking.helpers.timezone.localdate")
-    def test_cancellation_error_message_for_today_checkin(self, mock_localdate):
+    def test_cancellation_error_message_mentions_minutes(self):
         today = date(2026, 4, 3)
-        mock_localdate.return_value = today
         booking = self._booking(check_in=today, created_at=timezone.now())
-        self.assertIn("check-in is today", get_cancellation_error_message(booking))
+        self.assertIn("30", get_cancellation_error_message(booking))
+        self.assertIn("minute", get_cancellation_error_message(booking).lower())
 
 
 class BookingSerializersTests(SimpleTestCase):

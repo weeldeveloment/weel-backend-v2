@@ -7,42 +7,22 @@ from django.utils.translation import gettext_lazy as _
 CLIENT_CANCELLABLE_STATUSES = {"pending", "confirmed"}
 
 
-def _get_cancellation_window(booking) -> timedelta | None:
-    today = timezone.localdate()
-
-    if booking.check_in <= today:
-        """The client can't cancel the booking, if check-in is scheduled for today"""
-        return None
-
-    if booking.check_in == today + timedelta(days=1):
-        """The client can cancel within 1 hours, after 1 hour the client can't"""
-        return timedelta(hours=1)
-
-    # on other days, after 6 hours
-    return timedelta(hours=6)
+def _get_cancellation_window(_booking) -> timedelta:
+    # Within this duration after `created_at`, the client may cancel; after that, they may not.
+    return timedelta(minutes=30)
 
 
 def _is_cancellation_expired(booking) -> bool:
     window = _get_cancellation_window(booking)
-
-    if window is None:
-        return True
-
     return timezone.now() - booking.created_at > window
 
 
 def get_cancellation_error_message(booking) -> str:
     window = _get_cancellation_window(booking)
-    if window is None:
-        return _("This booking can't be cancelled because check-in is today")
-
-    hours = int(window.total_seconds() // 3600)
-    if hours == 1:
-        return _("You can cancel this booking only within 1 hour after booking")
-
+    minutes = int(window.total_seconds() // 60)
     return _(
-        "You can cancel this booking only within %(hours)s hours after booking"
-    ) % {"hours": hours}
+        "You can cancel this booking only within %(minutes)s minutes after booking"
+    ) % {"minutes": minutes}
 
 
 def client_can_cancel(booking):
