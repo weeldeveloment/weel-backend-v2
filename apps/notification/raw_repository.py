@@ -76,6 +76,20 @@ def list_partner_notifications(partner_user_id: int, *, limit: int, offset: int)
     )
 
 
+def list_client_notifications(client_user_id: int, *, limit: int, offset: int) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"""
+        SELECT *
+        FROM {NOTIFICATION_TABLE}
+        WHERE recipient_role = 'client'
+          AND recipient_user_id = %s
+        ORDER BY created_at DESC
+        LIMIT %s OFFSET %s
+        """,
+        [client_user_id, limit, offset],
+    )
+
+
 def count_partner_notifications(partner_user_id: int) -> dict[str, int]:
     row = fetch_one(
         f"""
@@ -87,6 +101,24 @@ def count_partner_notifications(partner_user_id: int) -> dict[str, int]:
           AND recipient_user_id = %s
         """,
         [partner_user_id],
+    )
+    return {
+        "total": _safe_int((row or {}).get("total", 0), 0),
+        "unread_count": _safe_int((row or {}).get("unread_count", 0), 0),
+    }
+
+
+def count_client_notifications(client_user_id: int) -> dict[str, int]:
+    row = fetch_one(
+        f"""
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN COALESCE(status, '') <> 'read' THEN 1 ELSE 0 END) AS unread_count
+        FROM {NOTIFICATION_TABLE}
+        WHERE recipient_role = 'client'
+          AND recipient_user_id = %s
+        """,
+        [client_user_id],
     )
     return {
         "total": _safe_int((row or {}).get("total", 0), 0),
