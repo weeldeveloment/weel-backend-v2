@@ -18,7 +18,9 @@ from shared.permissions import IsClient, IsPartner
 from users.services import ClientDeviceService, PartnerDeviceService
 from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
 from .raw_repository import (
+    count_client_notifications,
     count_partner_notifications,
+    list_client_notifications,
     list_partner_notifications,
     mark_partner_notifications_as_read,
 )
@@ -196,6 +198,80 @@ class PartnerNotificationListView(APIView):
         )
         serializer = PartnerNotificationSerializer(notifications, many=True)
         counts = count_partner_notifications(partner.id)
+
+        return Response({
+            "notifications": serializer.data,
+            "total": counts["total"],
+            "unread_count": counts["unread_count"]
+        })
+
+
+class ClientNotificationListView(APIView):
+    """Get client notification history"""
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [IsClient]
+    pagination_class = StandardResultsSetPagination
+
+    @swagger_auto_schema(
+        tags=["Notification"],
+        operation_summary="Get client notifications",
+        operation_description="Get paginated list of client notifications with read status",
+        manual_parameters=[
+            openapi.Parameter(
+                'page',
+                openapi.IN_QUERY,
+                description="Page number",
+                type=openapi.TYPE_INTEGER,
+                default=1
+            ),
+            openapi.Parameter(
+                'limit',
+                openapi.IN_QUERY,
+                description="Items per page (max 100)",
+                type=openapi.TYPE_INTEGER,
+                default=20
+            ),
+        ],
+        responses={
+            status.HTTP_200_OK: openapi.Response(
+                description="List of notifications",
+                examples={
+                    "application/json": {
+                        "notifications": [
+                            {
+                                "guid": "uuid-string",
+                                "title": "Booking confirmed",
+                                "body": "Your booking is confirmed",
+                                "notification_type": "booking_confirmed",
+                                "data": {},
+                                "is_read": False,
+                                "created_at": "2024-01-15T10:30:00Z"
+                            }
+                        ],
+                        "total": 50,
+                        "unread_count": 3
+                    }
+                },
+            ),
+            status.HTTP_401_UNAUTHORIZED: "Unauthorized",
+        },
+    )
+    def get(self, request):
+        client = request.user
+
+        page_number = int(request.query_params.get("page", 1) or 1)
+        limit = int(request.query_params.get("limit", self.pagination_class.page_size) or self.pagination_class.page_size)
+        limit = max(1, min(limit, self.pagination_class.max_page_size))
+        page_number = max(1, page_number)
+        offset = (page_number - 1) * limit
+
+        notifications = list_client_notifications(
+            client_user_id=client.id,
+            limit=limit,
+            offset=offset,
+        )
+        serializer = PartnerNotificationSerializer(notifications, many=True)
+        counts = count_client_notifications(client.id)
 
         return Response({
             "notifications": serializer.data,

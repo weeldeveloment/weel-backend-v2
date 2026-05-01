@@ -214,6 +214,7 @@ class AuthenticatedAPIEndpointsSmokeTests(TestCase):
             EndpointCase("client booking history", "get", "/api/booking/client/history/", "client", expected_statuses=(200,)),
             EndpointCase("client booking detail missing", "get", f"/api/booking/client/{DUMMY_UUID}/", "client", expected_statuses=(404,)),
             EndpointCase("client booking cancel missing", "post", f"/api/booking/client/{DUMMY_UUID}/cancel/", "client", expected_statuses=(404,)),
+            EndpointCase("client notifications", "get", "/api/notification/client/", "client", expected_statuses=(200,)),
             EndpointCase("client fcm update", "post", "/api/notification/device/", "client", data={"fcm_token": "smoke-client-token", "device_type": "ios"}, expected_statuses=(200,)),
             EndpointCase("partner profile", "get", "/api/user/partner/profile/", "partner", expected_statuses=(200,)),
             EndpointCase("partner profile update", "patch", "/api/user/partner/profile/update/", "partner", data={"first_name": "Smoke2"}, expected_statuses=(200,)),

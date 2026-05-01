@@ -1167,33 +1167,30 @@ class UnifiedRecommendationsListView(APIView):
             source_params.pop("type", None)
 
             rec_type = str(request.query_params.get("type") or "featured").strip().lower()
-            ordering = "-created_at"
             if rec_type == "best-by-reviews":
                 ordering = "-average_rating"
             elif rec_type == "most-booked":
-                ordering = "-review_count"
+                ordering = "order_price_uzs"
+            else:
+                ordering = "-created_at"
 
             ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
 
             if property_type in {"apartment", "apartments"}:
-                rows = _list_apartment_rows(source_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
+                rows = _list_apartment_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
                 return ApartmentListSerializer(rows, many=True, context=ctx).data
 
             if property_type in {"cottage", "cottages"}:
-                rows = _list_cottage_rows(source_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
+                rows = _list_cottage_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
                 return CottageListSerializer(rows, many=True, context=ctx).data
 
-            apt_rows = _list_apartment_rows(source_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
-            cot_rows = _list_cottage_rows(source_params, public_only=True, recommended_only=True, default_ordering=ordering, default_limit=20)
-
-            if not apt_rows:
-                apt_rows = _list_apartment_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=20)
-            if not cot_rows:
-                cot_rows = _list_cottage_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=20)
-            return (
+            apt_rows = _list_apartment_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
+            cot_rows = _list_cottage_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
+            combined = (
                 ApartmentListSerializer(apt_rows, many=True, context=ctx).data
                 + CottageListSerializer(cot_rows, many=True, context=ctx).data
             )
+            return combined[:15]
 
         data = _get_or_set_cached_payload(
             request,

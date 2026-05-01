@@ -10,6 +10,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from notification.service import FCMService, NotificationService
 from notification.views import (
+    ClientNotificationListView,
     FCMTokenUpdateView,
     PartnerNotificationListView,
     PartnerNotificationMarkAsReadView,
@@ -175,6 +176,34 @@ class NotificationViewsTests(SimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["detail"], "FCM token updated successfully")
         mock_register_device.assert_called_once()
+
+    @patch("notification.views.count_client_notifications", return_value={"total": 4, "unread_count": 1})
+    @patch("notification.views.list_client_notifications")
+    def test_client_notification_list_returns_counts(
+        self,
+        mock_list_notifications,
+        _mock_count_notifications,
+    ):
+        mock_list_notifications.return_value = [
+            {
+                "guid": "11111111-1111-1111-1111-111111111111",
+                "title": "A",
+                "push_message": "Body",
+                "notification_type": "system",
+                "status": "pending",
+                "created_at": "2026-01-01T10:00:00",
+            }
+        ]
+        request = self.factory.get("/api/notification/client/?page=1&limit=10")
+        user = SimpleNamespace(id=103, role="client", is_active=True)
+        force_authenticate(request, user=user, token="token")
+
+        response = ClientNotificationListView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["total"], 4)
+        self.assertEqual(response.data["unread_count"], 1)
+        self.assertEqual(len(response.data["notifications"]), 1)
 
     @patch("notification.views.count_partner_notifications", return_value={"total": 3, "unread_count": 2})
     @patch("notification.views.list_partner_notifications")

@@ -16,6 +16,25 @@ from .apartment_repository import COTTAGE_TYPE_GUID, is_prefecture_linked_to_dis
 MAX_PRICE_ABS = Decimal("9999999999.99")
 
 
+def _preferred_language(request: Any) -> str:
+    if request is None:
+        return "uz"
+    raw = str(request.headers.get("Accept-Language") or "").strip().lower()
+    if raw.startswith("ru"):
+        return "ru"
+    if raw.startswith("en"):
+        return "en"
+    return "uz"
+
+
+def _cottage_type_title(language: str) -> str:
+    if language == "ru":
+        return "Дача"
+    if language == "en":
+        return "Cottage"
+    return "Dacha"
+
+
 def _build_media_url(request, media_path: Any) -> list[str]:
     if not media_path:
         return []
@@ -289,10 +308,11 @@ class CottageListSerializer(serializers.Serializer):
         row["rooms"] = _parse_int_maybe(row.get("rooms"))
         row["beds"] = _parse_int_maybe(row.get("beds"))
         row["bathrooms"] = _parse_int_maybe(row.get("bathrooms"))
+        lang = _preferred_language(request)
         row["property_type_id"] = str(COTTAGE_TYPE_GUID)
         row["property_type"] = {
             "guid": str(COTTAGE_TYPE_GUID),
-            "title": "Cottage",
+            "title": _cottage_type_title(lang),
         }
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites

@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    ClientNotificationListView,
     FCMTokenUpdateView,
     PartnerFCMTokenUpdateView,
     PartnerNotificationListView,
@@ -14,6 +15,11 @@ urlpatterns = [
         "partner/device/",
         PartnerFCMTokenUpdateView.as_view(),
         name="update-partner-fcm-token",
+    ),
+    path(
+        "client/",
+        ClientNotificationListView.as_view(),
+        name="client-notifications",
     ),
     path(
         "partner/",
