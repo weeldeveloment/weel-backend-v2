@@ -1,0 +1,49 @@
+{
+  "title": "Qizil Suv",
+  "currency": "UZS",
+  "weekend_only_sunday_inclusive": false,
+  "price": [
+    {
+      "month_from": "2026-05-01",
+      "month_to": "2026-05-31",
+      "price_per_person": "100000",
+      "price_on_working_days": "3000000",
+      "price_on_weekends": "4000000"
+    },
+    {
+      "month_from": "2026-06-01",
+      "month_to": "2026-06-30",
+      "price_per_person": "100000",
+      "price_on_working_days": "3000000",
+      "price_on_weekends": "4000000"
+    }
+  ],
+  "property_location": {
+    "latitude": "41.2995",
+    "longitude": "69.2401",
+    "country": "Uzbekistan",
+    "city": "",
+    "region_id": "1",
+    "district_id": "1",
+    "prefecture_id": ""
+  },
+  "property_detail": {
+    "description_uz": "…",
+    "description_ru": "…",
+    "description_en": "",
+    "check_in": "19:00:00",
+    "check_out": "17:00:00",
+    "is_quiet_hours": true,
+    "is_allowed_alcohol": true,
+    "is_allowed_corporate": true,
+    "is_allowed_pets": false
+  },
+  "property_room": {
+    "guests": 20,
+    "rooms": 3,
+    "beds": 8,
+    "bathrooms": 4
+  },
+  "property_services": [],
+  "img": []
+}
