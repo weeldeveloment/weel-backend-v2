@@ -1,14 +1,27 @@
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
 from django.utils import timezone
 
+from shared.raw.compat import get_table_name, is_postgresql
 from shared.raw.db import execute, fetch_all, fetch_one
-from shared.raw.compat import get_table_name
 
 NOTIFICATION_TABLE = get_table_name("notification")
+
+
+def _payload_for_db(payload: dict[str, Any] | None) -> Any:
+    blob: dict[str, Any] = dict(payload or {})
+    if is_postgresql():
+        try:
+            from psycopg2.extras import Json
+
+            return Json(blob)
+        except ImportError:
+            pass
+    return json.dumps(blob, ensure_ascii=False)
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -29,6 +42,7 @@ def create_notification(
     notification_type: str,
     status: str = "pending",
     is_for_every_one: bool = False,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     now = timezone.now()
     return fetch_one(
@@ -43,8 +57,9 @@ def create_notification(
             status,
             is_for_every_one,
             recipient_user_id,
-            recipient_role
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            recipient_role,
+            payload
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         __RETURNING_MARKER__
         """,
         [
@@ -58,6 +73,7 @@ def create_notification(
             is_for_every_one,
             recipient_user_id,
             recipient_role,
+            _payload_for_db(payload),
         ],
     )
 
@@ -152,4 +168,70 @@ def mark_partner_notifications_as_read(partner_user_id: int, notification_guids:
           AND COALESCE(status, '') <> 'read'
         """,
         [now, partner_user_id],
+    )
+
+
+def mark_client_notifications_as_read(client_user_id: int, notification_guids: list[str] | None = None) -> int:
+    now = timezone.now()
+    if notification_guids:
+        return execute(
+            f"""
+            UPDATE {NOTIFICATION_TABLE}
+            SET status = 'read',
+                updated_at = %s
+            WHERE recipient_role = 'client'
+              AND recipient_user_id = %s
+              AND guid = ANY(%s::uuid[])
+              AND COALESCE(status, '') <> 'read'
+            """,
+            [now, client_user_id, notification_guids],
+        )
+
+    return execute(
+        f"""
+        UPDATE {NOTIFICATION_TABLE}
+        SET status = 'read',
+            updated_at = %s
+        WHERE recipient_role = 'client'
+          AND recipient_user_id = %s
+          AND COALESCE(status, '') <> 'read'
+        """,
+        [now, client_user_id],
+    )
+
+
+def mark_message_notifications_for_conversation(
+    *,
+    recipient_user_id: int,
+    recipient_role: str,
+    conversation_id: int,
+) -> int:
+    """Mark push notifications tied to a chat conversation as read (messages section)."""
+    now = timezone.now()
+    if is_postgresql():
+        return execute(
+            f"""
+            UPDATE {NOTIFICATION_TABLE}
+            SET status = 'read',
+                updated_at = %s
+            WHERE recipient_user_id = %s
+              AND recipient_role = %s
+              AND notification_type = 'message'
+              AND COALESCE(status, '') <> 'read'
+              AND (payload->>'conversation_id') = %s
+            """,
+            [now, recipient_user_id, recipient_role, str(int(conversation_id))],
+        )
+    return execute(
+        f"""
+        UPDATE {NOTIFICATION_TABLE}
+        SET status = 'read',
+            updated_at = %s
+        WHERE recipient_user_id = %s
+          AND recipient_role = %s
+          AND notification_type = 'message'
+          AND COALESCE(status, '') <> 'read'
+          AND CAST(json_extract(payload, '$.conversation_id') AS INTEGER) = %s
+        """,
+        [now, recipient_user_id, recipient_role, int(conversation_id)],
     )

@@ -10,6 +10,7 @@ from rest_framework import serializers
 from shared.raw.compat import get_table_name
 from shared.raw.db import fetch_one
 
+from .guest_rules import booking_max_guests
 from .mixins import DateRangeValidationMixin
 
 
@@ -139,9 +140,14 @@ class RawClientBookingCreateSerializer(
         property_row = self.context["property_row"]
 
         guests = attrs["adults"] + attrs.get("children", 0)
-        if guests <= 0 or guests > 15:
+        max_guests = booking_max_guests()
+        if guests <= 0 or guests > max_guests:
             raise serializers.ValidationError(
-                _("The total number of adults and children shouldn't greater than 15")
+                _(
+                    "The total number of adults and children must be between 1 and %(max)s. "
+                    "If the guest count exceeds what the listing allows, the host may decline the request."
+                )
+                % {"max": max_guests}
             )
 
         nights = (check_out - check_in).days
@@ -319,6 +325,7 @@ class RawPartnerBookingListSerializer(serializers.Serializer):
     adults = serializers.IntegerField(read_only=True)
     children = serializers.IntegerField(read_only=True)
     babies = serializers.IntegerField(read_only=True)
+    guests_over_listing_standard = serializers.SerializerMethodField()
     booking_price = serializers.SerializerMethodField("get_booking_price")
     booking_number = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
@@ -326,6 +333,13 @@ class RawPartnerBookingListSerializer(serializers.Serializer):
     confirmed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     cancelled_at = serializers.DateTimeField(read_only=True, allow_null=True)
     completed_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+    def get_guests_over_listing_standard(self, obj):
+        booked = int(obj.get("adults") or 0) + int(obj.get("children") or 0)
+        listing = int(obj.get("property_guests") or 0)
+        if listing <= 0:
+            return False
+        return booked > listing
 
     def get_booking_price(self, obj):
         price_payload = {

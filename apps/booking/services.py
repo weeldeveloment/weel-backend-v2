@@ -20,6 +20,7 @@ from payment.services import PlumAPIError, PlumAPIService
 from property.apartment_repository import parse_property_kind
 from users.raw_repository import get_user_by_id
 
+from .guest_rules import extra_guest_fee_total, listing_included_guests
 from .helpers import client_can_cancel, get_cancellation_error_message
 from .raw_booking_repository import (
     get_booking_by_guid,
@@ -148,6 +149,15 @@ def _resolve_property_row(property_value: Any) -> dict[str, Any]:
             if isinstance(property_value, dict)
             else getattr(property_value, "weekend_only_sunday_inclusive", False)
         ),
+        "guests": (
+            property_value.get("guests")
+            if isinstance(property_value, dict)
+            else (
+                getattr(getattr(property_value, "property_room", None), "guests", None)
+                if getattr(property_value, "property_room", None) is not None
+                else getattr(property_value, "guests", None)
+            )
+        ),
     }
 
 
@@ -222,21 +232,6 @@ class BookingPriceService:
             yield current
             current += timedelta(days=1)
 
-    @staticmethod
-    def _included_guests(property_value: Any) -> int:
-        if isinstance(property_value, dict):
-            try:
-                return int(property_value.get("guests") or 0)
-            except (TypeError, ValueError):
-                return 0
-        room = getattr(property_value, "property_room", None)
-        if room is None:
-            return 0
-        try:
-            return int(getattr(room, "guests", 0) or 0)
-        except (TypeError, ValueError):
-            return 0
-
     def calculate(
         self,
         adults: int,
@@ -247,12 +242,11 @@ class BookingPriceService:
     ):
         property_row = _resolve_property_row(property)
         guests = adults + children
-        included_guests = self._included_guests(property)
+        included_guests = listing_included_guests(property_row)
         extra_persons = max(guests - included_guests, 0)
         property_kind = property_row.get("property_kind")
 
         base_total_price = Decimal("0")
-        extra_total_price = Decimal("0")
 
         if property_kind == "apartment":
             price = _to_decimal(property_row.get("price"))
@@ -266,14 +260,13 @@ class BookingPriceService:
                 else:
                     base_day = _to_decimal(property_row.get("price_on_working_days"))
                 base_total_price += base_day
-            extra_total_price = _to_decimal(property_row.get("price_per_person")) * extra_persons
 
-        raw_subtotal = base_total_price + extra_total_price
+        extra_total_uzs = extra_guest_fee_total(guests, property_row)
         currency = str(property_row.get("currency") or "UZS").upper()
         if currency == "USD":
-            subtotal = to_uzs(raw_subtotal)
+            subtotal = to_uzs(base_total_price) + extra_total_uzs
         elif currency == "UZS":
-            subtotal = raw_subtotal
+            subtotal = base_total_price + extra_total_uzs
         else:
             raise ValidationError(_("Unsupported currency"))
 

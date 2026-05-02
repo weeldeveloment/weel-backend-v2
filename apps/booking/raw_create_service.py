@@ -21,6 +21,7 @@ from payment.services import PlumAPIError, PlumAPIService
 from shared.raw.entities import RawUser
 from users.tasks import send_partner_telegram_msg
 
+from .guest_rules import extra_guest_fee_total
 from .raw_booking_repository import (
     create_booking_row,
 )
@@ -143,10 +144,11 @@ class RawBookingCreateService:
                 base_total_price += self._as_decimal(base_day_value)
 
         currency = str(property_row.get("currency") or "UZS").upper()
+        extra_guests_uzs = extra_guest_fee_total(guests, property_row)
         if currency == "USD":
-            subtotal = to_uzs(base_total_price)
+            subtotal = to_uzs(base_total_price) + extra_guests_uzs
         elif currency == "UZS":
-            subtotal = base_total_price
+            subtotal = base_total_price + extra_guests_uzs
         else:
             raise ValidationError(_("Unsupported currency"))
 

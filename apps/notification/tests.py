@@ -4,13 +4,18 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
+from django.urls import resolve
 
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from notification.raw_repository import mark_message_notifications_for_conversation
 from notification.service import FCMService, NotificationService
+from notification.serializers import PartnerNotificationSerializer
 from notification.views import (
     ClientNotificationListView,
+    ClientNotificationMarkAllAsReadView,
+    ClientNotificationMarkAsReadView,
     FCMTokenUpdateView,
     PartnerNotificationListView,
     PartnerNotificationMarkAsReadView,
@@ -67,25 +72,20 @@ class FCMServiceTests(SimpleTestCase):
         mock_deactivate.assert_called_once_with(["bad-token"])
 
     @patch("notification.service.execute")
-    @patch("notification.service.table_exists")
-    def test_deactivate_invalid_tokens_updates_existing_tables(self, mock_table_exists, mock_execute):
-        mock_table_exists.side_effect = lambda table_name: table_name in {"client_devices", "partner_devices"}
-
+    def test_deactivate_invalid_tokens_updates_users_table(self, mock_execute):
         FCMService._deactivate_invalid_tokens(["t1", "t2"])
 
-        self.assertEqual(mock_execute.call_count, 2)
+        self.assertEqual(mock_execute.call_count, 1)
 
 
 class NotificationServiceTests(SimpleTestCase):
     @patch("notification.service.execute")
     @patch("notification.service.FCMService.send_to_tokens")
     @patch("notification.service.fetch_all")
-    @patch("notification.service.table_exists", return_value=True)
     @patch("notification.service.create_notification")
     def test_send_to_client_marks_notification_sent_on_success(
         self,
         mock_create_notification,
-        _mock_table_exists,
         mock_fetch_all,
         mock_send_to_tokens,
         mock_execute,
@@ -105,16 +105,19 @@ class NotificationServiceTests(SimpleTestCase):
 
         self.assertEqual(created["id"], 77)
         mock_execute.assert_called_once()
+        mock_create_notification.assert_called_once()
+        self.assertEqual(
+            mock_create_notification.call_args.kwargs.get("payload"),
+            {"booking_id": 99},
+        )
 
     @patch("notification.service.execute")
     @patch("notification.service.FCMService.send_to_tokens", return_value=None)
     @patch("notification.service.fetch_all", return_value=[])
-    @patch("notification.service.table_exists", return_value=True)
     @patch("notification.service.create_notification", return_value={"id": 88})
     def test_send_to_client_keeps_pending_if_no_successful_delivery(
         self,
         _mock_create_notification,
-        _mock_table_exists,
         _mock_fetch_all,
         _mock_send_to_tokens,
         mock_execute,
@@ -128,21 +131,22 @@ class NotificationServiceTests(SimpleTestCase):
         )
         mock_execute.assert_not_called()
 
+    @patch("notification.service.execute")
     @patch("notification.service.FCMService.send_to_tokens")
     @patch("notification.service.fetch_all", return_value=[{"fcm_token": "pt-1"}])
-    @patch("notification.service.table_exists", return_value=True)
     @patch("notification.service.create_notification")
     def test_send_to_partner_saves_and_sends(
         self,
         mock_create_notification,
-        _mock_table_exists,
-        _mock_fetch_all,
+        mock_fetch_all,
         mock_send_to_tokens,
+        _mock_execute,
     ):
+        mock_create_notification.return_value = {"id": 1}
         mock_send_to_tokens.return_value = SimpleNamespace(success_count=1, failure_count=0)
         partner = SimpleNamespace(id=12)
 
-        response = NotificationService.send_to_partner(
+        result = NotificationService.send_to_partner(
             partner=partner,
             title="Admin message",
             message="Hello",
@@ -150,12 +154,29 @@ class NotificationServiceTests(SimpleTestCase):
             data={"conversation_id": 5},
         )
 
-        self.assertEqual(response.success_count, 1)
+        self.assertEqual(result.get("id"), 1)
         mock_create_notification.assert_called_once()
+        self.assertEqual(
+            mock_create_notification.call_args.kwargs.get("payload"),
+            {"conversation_id": 5},
+        )
 
     def test_normalize_data_converts_values_to_strings_and_skips_none(self):
         payload = NotificationService._normalize_data({"a": 1, "b": None, 3: True})
         self.assertEqual(payload, {"a": "1", "3": "True"})
+
+    def test_partner_notification_serializer_exposes_payload_as_data(self):
+        row = {
+            "guid": "11111111-1111-1111-1111-111111111111",
+            "title": "Hi",
+            "push_message": "Body",
+            "notification_type": "message",
+            "status": "pending",
+            "created_at": "2026-01-01T10:00:00",
+            "payload": {"conversation_id": 3},
+        }
+        data = PartnerNotificationSerializer(row).data
+        self.assertEqual(data["data"]["conversation_id"], 3)
 
 
 class NotificationViewsTests(SimpleTestCase):
@@ -233,6 +254,33 @@ class NotificationViewsTests(SimpleTestCase):
         self.assertEqual(response.data["unread_count"], 2)
         self.assertEqual(len(response.data["notifications"]), 1)
 
+    @patch("notification.views.mark_client_notifications_as_read", return_value=2)
+    def test_client_mark_as_read_returns_marked_count(self, mock_mark_as_read):
+        request = self.factory.post(
+            "/api/notification/client/read/",
+            {"notification_ids": ["11111111-1111-1111-1111-111111111111"]},
+            format="json",
+        )
+        user = SimpleNamespace(id=104, role="client", is_active=True)
+        force_authenticate(request, user=user, token="token")
+
+        response = ClientNotificationMarkAsReadView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["marked_count"], 2)
+        mock_mark_as_read.assert_called_once()
+
+    @patch("notification.views.mark_client_notifications_as_read", return_value=9)
+    def test_client_mark_all_as_read_returns_marked_count(self, mock_mark_as_read):
+        request = self.factory.post("/api/notification/client/read-all/")
+        user = SimpleNamespace(id=105, role="client", is_active=True)
+        force_authenticate(request, user=user, token="token")
+
+        response = ClientNotificationMarkAllAsReadView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["marked_count"], 9)
+
     @patch("notification.views.mark_partner_notifications_as_read", return_value=4)
     def test_partner_mark_as_read_returns_marked_count(self, mock_mark_as_read):
         request = self.factory.post(
@@ -248,4 +296,40 @@ class NotificationViewsTests(SimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["marked_count"], 4)
         mock_mark_as_read.assert_called_once()
+
+
+class NotificationUrlsTests(SimpleTestCase):
+    def test_client_notification_read_urls_resolve(self):
+        self.assertEqual(
+            resolve("/api/notification/client/read/").func.view_class.__name__,
+            "ClientNotificationMarkAsReadView",
+        )
+        self.assertEqual(
+            resolve("/api/notification/client/read-all/").func.view_class.__name__,
+            "ClientNotificationMarkAllAsReadView",
+        )
+
+
+class NotificationRawRepositoryTests(SimpleTestCase):
+    @patch("notification.raw_repository.execute", return_value=2)
+    @patch("notification.raw_repository.is_postgresql", return_value=True)
+    def test_mark_message_notifications_uses_postgres_payload_filter(self, _mock_pg, mock_execute):
+        count = mark_message_notifications_for_conversation(
+            recipient_user_id=5,
+            recipient_role="partner",
+            conversation_id=42,
+        )
+        self.assertEqual(count, 2)
+        self.assertIn("payload->>'conversation_id'", mock_execute.call_args[0][0])
+
+    @patch("notification.raw_repository.execute", return_value=1)
+    @patch("notification.raw_repository.is_postgresql", return_value=False)
+    def test_mark_message_notifications_uses_sqlite_json_extract(self, _mock_pg, mock_execute):
+        count = mark_message_notifications_for_conversation(
+            recipient_user_id=5,
+            recipient_role="client",
+            conversation_id=9,
+        )
+        self.assertEqual(count, 1)
+        self.assertIn("json_extract", mock_execute.call_args[0][0])
 

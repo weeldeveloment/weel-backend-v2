@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from rest_framework import serializers
 
 
@@ -31,6 +33,16 @@ class PartnerNotificationSerializer(serializers.Serializer):
         return obj.get("push_message")
 
     def get_data(self, obj):
+        raw = obj.get("payload")
+        if raw is None:
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, (bytes, str)):
+            try:
+                return json.loads(raw)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return {}
         return {}
 
     def get_is_read(self, obj):

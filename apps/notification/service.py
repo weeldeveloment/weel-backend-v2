@@ -154,6 +154,7 @@ class NotificationService:
             notification_type=notification_type,
             status="pending",
             is_for_every_one=False,
+            payload=dict(data) if data else None,
         )
 
         tokens: list[str] = []
@@ -233,6 +234,7 @@ class NotificationService:
             notification_type=notification_type,
             status="pending",
             is_for_every_one=False,
+            payload=dict(data) if data else None,
         )
         logger.info(
             "Partner notification saved to normalized table. partner=%s title=%s",

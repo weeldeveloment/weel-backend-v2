@@ -22,6 +22,7 @@ from .raw_repository import (
     count_partner_notifications,
     list_client_notifications,
     list_partner_notifications,
+    mark_client_notifications_as_read,
     mark_partner_notifications_as_read,
 )
 
@@ -356,3 +357,87 @@ class PartnerNotificationMarkAllAsReadView(APIView):
             "detail": "All notifications marked as read",
             "marked_count": count
         })
+
+
+class ClientNotificationMarkAsReadView(APIView):
+    """Mark client notifications as read."""
+
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [IsClient]
+
+    @swagger_auto_schema(
+        tags=["Notification"],
+        operation_summary="Mark client notifications as read",
+        operation_description="Mark specific notifications or all as read",
+        request_body=MarkAsReadSerializer,
+        responses={
+            status.HTTP_200_OK: openapi.Response(
+                description="Notifications marked as read",
+                examples={
+                    "application/json": {
+                        "detail": "Notifications marked as read",
+                        "marked_count": 5,
+                    }
+                },
+            ),
+            status.HTTP_400_BAD_REQUEST: "Validation error",
+            status.HTTP_401_UNAUTHORIZED: "Unauthorized",
+        },
+    )
+    def post(self, request):
+        client = request.user
+        serializer = MarkAsReadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        notification_ids = serializer.validated_data.get("notification_ids", [])
+
+        count = mark_client_notifications_as_read(
+            client_user_id=client.id,
+            notification_guids=notification_ids or None,
+        )
+
+        return Response(
+            {
+                "detail": "Notifications marked as read",
+                "marked_count": count,
+            }
+        )
+
+
+class ClientNotificationMarkAllAsReadView(APIView):
+    """Mark all client notifications as read."""
+
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [IsClient]
+
+    @swagger_auto_schema(
+        tags=["Notification"],
+        operation_summary="Mark all client notifications as read",
+        operation_description="Mark all client notifications as read",
+        responses={
+            status.HTTP_200_OK: openapi.Response(
+                description="All notifications marked as read",
+                examples={
+                    "application/json": {
+                        "detail": "All notifications marked as read",
+                        "marked_count": 5,
+                    }
+                },
+            ),
+            status.HTTP_401_UNAUTHORIZED: "Unauthorized",
+        },
+    )
+    def post(self, request):
+        client = request.user
+
+        count = mark_client_notifications_as_read(
+            client_user_id=client.id,
+            notification_guids=None,
+        )
+
+        return Response(
+            {
+                "detail": "All notifications marked as read",
+                "marked_count": count,
+            }
+        )
