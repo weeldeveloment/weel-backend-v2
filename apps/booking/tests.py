@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from django.urls import resolve
 from django.utils import timezone
 
+from booking.guest_rules import (
+    extra_guest_count,
+    extra_guest_fee_total,
+    listing_included_guests,
+)
 from booking.helpers import (
     _get_cancellation_window,
     client_can_cancel,
@@ -82,7 +88,7 @@ class BookingSerializersTests(SimpleTestCase):
             context={"property_row": {}},
         )
         self.assertFalse(serializer.is_valid())
-        self.assertIn("shouldn't greater than 15", str(serializer.errors))
+        self.assertIn("between 1 and", str(serializer.errors))
 
     @patch("booking.raw_repository.fetch_calendar_dates_by_status", return_value=[])
     def test_client_booking_create_serializer_requires_sunday_when_weekend_only_flag_enabled(self, _mock_calendar):
@@ -269,6 +275,10 @@ class BookingSerializersTests(SimpleTestCase):
         data = RawPartnerBookingListSerializer(row).data
         self.assertEqual(data["booking_price"]["service_fee_percentage"], 20)
         self.assertEqual(data["client"]["first_name"], "Ali")
+        self.assertFalse(data.get("guests_over_listing_standard"))
+
+        row_over = {**row, "property_guests": 2}
+        self.assertTrue(RawPartnerBookingListSerializer(row_over).data["guests_over_listing_standard"])
 
 
 class BookingUrlsTests(SimpleTestCase):
@@ -279,4 +289,27 @@ class BookingUrlsTests(SimpleTestCase):
     def test_partner_booking_list_url_resolves(self):
         match = resolve("/api/booking/partner/")
         self.assertEqual(match.func.view_class.__name__, "PartnerBookingListView")
+
+
+class GuestRulesTests(SimpleTestCase):
+    @override_settings(BOOKING_MAX_GUESTS=6, BOOKING_EXTRA_GUEST_FEE_UZS="100000")
+    def test_listing_included_defaults_to_max_when_guests_missing(self):
+        self.assertEqual(listing_included_guests({}), 6)
+
+    @override_settings(BOOKING_MAX_GUESTS=6, BOOKING_EXTRA_GUEST_FEE_UZS="100000")
+    def test_listing_included_caps_property_guests(self):
+        self.assertEqual(listing_included_guests({"guests": 4}), 4)
+        self.assertEqual(listing_included_guests({"guests": 10}), 6)
+
+    @override_settings(BOOKING_MAX_GUESTS=6, BOOKING_EXTRA_GUEST_FEE_UZS="100000")
+    def test_extra_fee_when_above_listing_standard(self):
+        row = {"guests": 2}
+        self.assertEqual(extra_guest_count(4, row), 2)
+        self.assertEqual(extra_guest_fee_total(4, row), Decimal("200000"))
+
+    @override_settings(BOOKING_MAX_GUESTS=6, BOOKING_EXTRA_GUEST_FEE_UZS="100000")
+    def test_no_extra_when_within_listing_standard(self):
+        row = {"guests": 6}
+        self.assertEqual(extra_guest_count(4, row), 0)
+        self.assertEqual(extra_guest_fee_total(4, row), Decimal("0"))
 

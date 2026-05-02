@@ -596,6 +596,10 @@ CURRENT_CURRENCY_EXCHANGE_RATE = os.getenv(
 # Service fee (percentage)
 SERVICE_FEE = (os.getenv("SERVICE_FEE") or "20").strip() or "20"
 
+# Booking: max adults+children per property; each guest above listing standard pays extra (UZS)
+BOOKING_MAX_GUESTS = int((os.getenv("BOOKING_MAX_GUESTS") or "6").strip() or "6")
+BOOKING_EXTRA_GUEST_FEE_UZS = (os.getenv("BOOKING_EXTRA_GUEST_FEE_UZS") or "100000").strip() or "100000"
+
 # Telegram Bot
 TELEGRAM_BOT_TOKEN_APP = os.getenv("TELEGRAM_BOT_TOKEN_APP")
 BOT_TOKEN = TELEGRAM_BOT_TOKEN_APP

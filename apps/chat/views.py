@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 
+from notification.raw_repository import mark_message_notifications_for_conversation
 from notification.service import NotificationService
 from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
 
@@ -180,6 +181,11 @@ class ChatViewSet(viewsets.GenericViewSet):
             receiver_user_id=user.id,
             receiver_role=user.role,
         )
+        mark_message_notifications_for_conversation(
+            recipient_user_id=user.id,
+            recipient_role=user.role,
+            conversation_id=conversation.id,
+        )
 
         serializer = ChatMessageSerializer(messages, many=True)
         return Response(serializer.data)
@@ -347,6 +353,17 @@ class ChatViewSet(viewsets.GenericViewSet):
             receiver_user_id=user.id,
             receiver_role=user.role,
         )
+
+        raw_conversation_id = request.data.get("conversation_id")
+        if raw_conversation_id is not None:
+            try:
+                mark_message_notifications_for_conversation(
+                    recipient_user_id=user.id,
+                    recipient_role=user.role,
+                    conversation_id=int(raw_conversation_id),
+                )
+            except (TypeError, ValueError):
+                pass
 
         counterpart_id = request.data.get("partner_id") or request.data.get("counterpart_id")
         counterpart_type = request.data.get("partner_type") or request.data.get("counterpart_type")

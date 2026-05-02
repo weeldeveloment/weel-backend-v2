@@ -26,6 +26,7 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
             a.longitude,
             a.city,
             a.country,
+            a.guests,
             u.username AS partner_username,
             u.first_name AS partner_first_name,
             u.last_name AS partner_last_name,
@@ -56,6 +57,7 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
             c.longitude,
             c.city,
             c.country,
+            c.guests,
             u.username AS partner_username,
             u.first_name AS partner_first_name,
             u.last_name AS partner_last_name,
@@ -104,6 +106,7 @@ BOOKING_BASE_SELECT = f"""
         COALESCE(a.longitude, c.longitude) AS property_longitude,
         COALESCE(a.city, c.city) AS property_city,
         COALESCE(a.country, c.country) AS property_country,
+        COALESCE(a.guests, c.guests) AS property_guests,
         CASE
             WHEN b.property_apartment_id IS NOT NULL THEN 'Apartment'
             ELSE 'Cottages'
