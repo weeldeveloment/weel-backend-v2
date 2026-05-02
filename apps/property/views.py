@@ -1327,7 +1327,7 @@ class CottagePropertyListCreateView(APIView):
     @swagger_auto_schema(
         operation_id="createCottage",
         operation_summary="Create a cottage",
-        operation_description="Partner-only. Creates a new cottage listing. The property is created with verification_status=pending.",
+        operation_description="Partner-only. Creates a new cottage listing. The property is created with verification_status=waiting.",
         tags=["Property / Partner"],
         request_body=CottageCreateSerializer,
         responses={

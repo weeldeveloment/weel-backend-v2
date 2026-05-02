@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from django.utils import timezone
 
+from property.models import VerificationStatus
 from shared.raw.compat import get_table_name, is_postgresql
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 
@@ -316,7 +317,7 @@ def create_cottage(
         ) VALUES (
             %s, %s, %s,
             %s, %s,
-            FALSE, 'pending', FALSE, FALSE,
+            FALSE, %s, FALSE, FALSE,
             %s, %s,
             %s, %s, %s,
             %s, %s, %s,
@@ -332,6 +333,7 @@ def create_cottage(
         [
             uuid4(), now, now,
             values["title"], values["title_sort"],
+            VerificationStatus.WAITING.value,
             bool(values.get("weekend_only_sunday_inclusive", False)),
             int(values.get("comment_count", 0)),
             values.get("price_per_person"), values.get("price_on_working_days"),
@@ -455,7 +457,7 @@ def update_cottage(
     should_send_to_moderation = bool(changed_non_price_fields)
     if should_send_to_moderation:
         updates["is_verified"] = False
-        updates["verification_status"] = "pending"
+        updates["verification_status"] = VerificationStatus.WAITING.value
 
     assignments_parts: list[str] = []
     for col in updates:
@@ -586,7 +588,7 @@ def set_cottage_primary_image(
     image_payload = [image_path] if image_path else []
     row = fetch_one(
         f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [image_payload, timezone.now(), False, "pending", cottage_id, partner_user_id],
+        [image_payload, timezone.now(), False, VerificationStatus.WAITING.value, cottage_id, partner_user_id],
     )
     if not row:
         return None
