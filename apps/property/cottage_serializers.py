@@ -484,7 +484,7 @@ class CottageCreateSerializer(serializers.Serializer):
     title = serializers.CharField(required=False, allow_blank=True)
     currency = serializers.ChoiceField(required=False, choices=["USD", "UZS"])
     weekend_only_sunday_inclusive = serializers.BooleanField(required=False, default=False)
-    price = serializers.DictField(required=True, allow_empty=True)
+    price = serializers.ListField(required=True, allow_empty=True)
     property_location =PropertyLocation(required=True)
     property_detail = serializers.DictField(required=True)
     property_services = serializers.ListField(required=True, allow_empty=True)
