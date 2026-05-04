@@ -611,87 +611,157 @@ class ApartmentCreateSerializer(serializers.Serializer):
         return attrs
 
 
-class ApartmentUpdateSerializer(ApartmentCreateSerializer):
-    apartment_number = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
-    home_number = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
-    entrance_number = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
-    floor_number = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
-    pass_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+from decimal import Decimal
+
+from rest_framework import serializers
 
 
-class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
-    """Admin-only partial updater that permits mutating every apartment field.
+class ApartmentUpdateSerializer(serializers.Serializer):
+    # ===== Base fields =====
+    title = serializers.CharField(required=False, allow_blank=False)
 
-    Extends the partner update flow with verification/archival flags and
-    owner reassignment that only administrators are allowed to touch.
-    """
+    price = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        min_value=Decimal("0"),
+        error_messages={
+            "min_value": "Цена не может быть меньше 0.",
+            "invalid": "Введите корректную цену.",
+        },
+    )
 
+    currency = serializers.ChoiceField(
+        choices=["USD", "UZS"],
+        required=False,
+        error_messages={"invalid_choice": "Выберите корректную валюту."},
+    )
+
+    latitude = serializers.DecimalField(
+        max_digits=17, decimal_places=14, required=False, allow_null=True
+    )
+    longitude = serializers.DecimalField(
+        max_digits=17, decimal_places=14, required=False, allow_null=True
+    )
+
+    city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    region_id = serializers.IntegerField(required=False, allow_null=True)
+    district_id = serializers.IntegerField(required=False, allow_null=True)
+    prefecture_id = serializers.UUIDField(required=False, allow_null=True)
+
+    services = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        allow_empty=True,
+    )
+
+    img = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+    )
+
+    description_ru = serializers.CharField(required=False, allow_blank=False)
+    description_uz = serializers.CharField(required=False, allow_blank=False)
+    description_en = serializers.CharField(required=False, allow_blank=False)
+
+    check_in = serializers.TimeField(required=False)
+    check_out = serializers.TimeField(required=False)
+
+    is_allowed_alcohol = serializers.BooleanField(required=False)
+    is_allowed_corporate = serializers.BooleanField(required=False)
+    is_allowed_pets = serializers.BooleanField(required=False)
+    is_quiet_hours = serializers.BooleanField(required=False)
+
+    apartment_number = serializers.CharField(required=False, allow_blank=True)
+    home_number = serializers.CharField(required=False, allow_blank=True)
+    entrance_number = serializers.CharField(required=False, allow_blank=True)
+    floor_number = serializers.CharField(required=False, allow_blank=True)
+    pass_code = serializers.CharField(required=False, allow_blank=True)
+
+    guests = serializers.IntegerField(required=False)
+    rooms = serializers.IntegerField(required=False)
+    beds = serializers.IntegerField(required=False)
+    bathrooms = serializers.IntegerField(required=False)
+
+    # ===== Admin-only fields =====
     is_verified = serializers.BooleanField(required=False)
     verified_at = serializers.DateTimeField(required=False, allow_null=True)
-    verification_status = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
+    verification_status = serializers.CharField(required=False, allow_blank=True)
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
-    partner_user = ApartmentPartnerUserUpdateSerializer(required=False, allow_null=True)
+
+    partner_user_id = serializers.IntegerField(required=False)
     verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
-    comment_count = serializers.IntegerField(required=False, min_value=0)
+
+    comment_count = serializers.IntegerField(
+        required=False,
+        min_value=0,
+        error_messages={"min_value": "Количество комментариев не может быть меньше 0."},
+    )
+
     legacy_property_id = serializers.IntegerField(required=False, allow_null=True)
 
-    _ADMIN_ONLY_FIELDS = (
+    # ===== Internal =====
+    ADMIN_ONLY_FIELDS = {
         "is_verified",
         "verified_at",
         "verification_status",
         "is_archived",
         "is_recommended",
-        "partner_user",
+        "partner_user_id",
         "verified_by_user_id",
         "comment_count",
         "legacy_property_id",
-    )
+    }
 
-    def get_fields(self):
-        fields = super().get_fields()
-        # Admin update endpoint should no longer accept nested location payloads.
-        fields.pop("property_location", None)
-        # Admin update endpoint should no longer accept nested detail payloads.
-        fields.pop("property_detail", None)
-        return fields
+    def validate_title(self, value):
+        return value.strip()
+
+    def validate_verification_status(self, value):
+        if value in (None, ""):
+            return None
+        return value.strip().lower()
 
     def validate(self, attrs):
-        admin_overrides = {
-            key: attrs.get(key) for key in self._ADMIN_ONLY_FIELDS if key in attrs
-        }
-        attrs = super().validate(attrs)
-        normalized = attrs.get("normalized_values") or {}
-        for key, value in admin_overrides.items():
-            if key == "verification_status":
-                if value in (None, ""):
-                    continue
-                normalized[key] = str(value).strip().lower()
-            elif key == "partner_user":
-                if value in (None, "", "null", "None", "undefined"):
-                    normalized["partner_user_id"] = None
-                elif isinstance(value, dict):
-                    partner_id = value.get("id")
-                    if partner_id in (None, "", "null", "None", "undefined"):
-                        raise serializers.ValidationError(
-                            {"partner_user": {"id": _("This field is required.")}}
-                        )
-                    normalized["partner_user_id"] = int(partner_id)
-                else:
+        is_admin = self.context.get("is_admin", False)
+
+        # Block admin-only fields for non-admins
+        if not is_admin:
+            forbidden = self.ADMIN_ONLY_FIELDS.intersection(attrs.keys())
+            if forbidden:
+                raise serializers.ValidationError(
+                    {
+                        field: "Недостаточно прав для изменения этого поля."
+                        for field in forbidden
+                    }
+                )
+
+        # Location + prefecture logic
+        district_id = attrs.get("district_id")
+        prefecture_id = attrs.get("prefecture_id")
+
+        if not is_admin:
+            if district_id in {75, 82}:
+                if not prefecture_id:
                     raise serializers.ValidationError(
-                        {"partner_user": _("Expected an object payload.")}
+                        {"prefecture_id": "Укажите префектуру для выбранного района."}
                     )
-            else:
-                normalized[key] = value
-        attrs["normalized_values"] = normalized
+
+                if not is_prefecture_linked_to_district(
+                    district_id=district_id, prefecture_guid=prefecture_id
+                ):
+                    raise serializers.ValidationError(
+                        {
+                            "prefecture_id": "Выбранная префектура не соответствует району."
+                        }
+                    )
+
+            elif prefecture_id:
+                raise serializers.ValidationError(
+                    {"prefecture_id": "Префектура недоступна для выбранного района."}
+                )
+
         return attrs
