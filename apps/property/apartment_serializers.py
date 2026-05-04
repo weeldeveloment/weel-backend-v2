@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from decimal import InvalidOperation
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
 from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
+from payment.exchange_rate import to_uzs
 from rest_framework import serializers
 
-from payment.exchange_rate import to_uzs
 from .apartment_repository import (
     APARTMENT_TYPE_GUID,
     is_prefecture_linked_to_district,
@@ -206,7 +205,9 @@ def _normalize_uuid_list(values: Any) -> list[UUID]:
         try:
             normalized.append(UUID(str(value)))
         except (ValueError, TypeError, AttributeError):
-            raise serializers.ValidationError(_("Services must contain valid UUID values."))
+            raise serializers.ValidationError(
+                _("Services must contain valid UUID values.")
+            )
     return normalized
 
 
@@ -229,10 +230,18 @@ class ApartmentListSerializer(serializers.Serializer):
     rooms = serializers.IntegerField(allow_null=True)
     beds = serializers.IntegerField(allow_null=True)
     bathrooms = serializers.IntegerField(allow_null=True)
-    apartment_number = serializers.CharField(allow_blank=True, allow_null=True, required=False)
-    home_number = serializers.CharField(allow_blank=True, allow_null=True, required=False)
-    entrance_number = serializers.CharField(allow_blank=True, allow_null=True, required=False)
-    floor_number = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    apartment_number = serializers.CharField(
+        allow_blank=True, allow_null=True, required=False
+    )
+    home_number = serializers.CharField(
+        allow_blank=True, allow_null=True, required=False
+    )
+    entrance_number = serializers.CharField(
+        allow_blank=True, allow_null=True, required=False
+    )
+    floor_number = serializers.CharField(
+        allow_blank=True, allow_null=True, required=False
+    )
     pass_code = serializers.CharField(allow_blank=True, allow_null=True, required=False)
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
@@ -287,9 +296,13 @@ class ApartmentPartnerUserSerializer(serializers.Serializer):
 class ApartmentPartnerUserUpdateSerializer(serializers.Serializer):
     id = serializers.IntegerField(required=False, allow_null=True)
     role = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    first_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    first_name = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     last_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    phone_number = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     email = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     username = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     avatar = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -366,9 +379,7 @@ class ApartmentDetailSerializer(serializers.Serializer):
         # Keep Uzbek as the default/fallback description value.
         if not row.get("description_uz"):
             row["description_uz"] = (
-                row.get("description_en")
-                or row.get("description_ru")
-                or ""
+                row.get("description_en") or row.get("description_ru") or ""
             )
         row["comment_count"] = int(row.get("comment_count") or 0)
         favorites = _favorite_guid_set(self.context)
@@ -383,168 +394,236 @@ class ApartmentDetailSerializer(serializers.Serializer):
 
 
 class ApartmentCreateSerializer(serializers.Serializer):
-    title = serializers.CharField(required=False, allow_blank=True)
-    price = serializers.DecimalField(max_digits=18, decimal_places=2, required=False)
-    currency = serializers.ChoiceField(required=False, choices=["USD", "UZS"])
-    property_location = serializers.DictField(required=False)
-    property_detail = serializers.DictField(required=False)
-    latitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
-    longitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
+    title = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        error_messages={
+            "required": "Укажите название.",
+            "blank": "Название не может быть пустым.",
+        },
+    )
+
+    price = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        required=False,
+        min_value=Decimal("0"),
+        error_messages={
+            "invalid": "Введите корректную цену.",
+            "min_value": "Цена не может быть меньше 0.",
+        },
+    )
+
+    currency = serializers.ChoiceField(
+        choices=["USD", "UZS"],
+        required=False,
+        default="UZS",
+        error_messages={
+            "invalid_choice": "Выберите корректную валюту.",
+        },
+    )
+
+    latitude = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=8,
+        required=False,
+        allow_null=True,
+        error_messages={"invalid": "Некорректная широта."},
+    )
+    longitude = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=8,
+        required=False,
+        allow_null=True,
+        error_messages={"invalid": "Некорректная долгота."},
+    )
+
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    services = serializers.ListField(required=False, allow_empty=True)
-    region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    prefecture_id = serializers.UUIDField(required=False, allow_null=True)
-    guests = serializers.IntegerField(required=False, allow_null=True)
-    rooms = serializers.IntegerField(required=False, allow_null=True)
-    beds = serializers.IntegerField(required=False, allow_null=True)
-    bathrooms = serializers.IntegerField(required=False, allow_null=True)
-    img = serializers.JSONField(required=False)
-    apartment_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
-    home_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
-    entrance_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
-    floor_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
-    pass_code = serializers.CharField(required=True, allow_blank=False, allow_null=False)
+
+    region_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        error_messages={"invalid": "Некорректный регион."},
+    )
+    district_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        error_messages={"invalid": "Некорректный район."},
+    )
+    prefecture_id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        error_messages={"invalid": "Некорректная префектура."},
+    )
+
+    services = serializers.ListField(
+        child=serializers.UUIDField(
+            error_messages={"invalid": "Некорректный формат услуги."}
+        ),
+        required=False,
+        allow_empty=True,
+    )
+
+    apartment_number = serializers.IntegerField(
+        required=True,
+        error_messages={"required": "Укажите номер квартиры."},
+    )
+    home_number = serializers.IntegerField(
+        required=True,
+        error_messages={"required": "Укажите номер дома."},
+    )
+    entrance_number = serializers.IntegerField(
+        required=True,
+        error_messages={"required": "Укажите подъезд."},
+    )
+    floor_number = serializers.IntegerField(
+        required=True,
+        error_messages={"required": "Укажите этаж."},
+    )
+    pass_code = serializers.IntegerField(
+        required=True,
+        error_messages={"required": "Укажите код доступа."},
+    )
+
+    description_ru = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        error_messages={
+            "required": "Добавьте описание на русском языке.",
+            "blank": "Описание на русском языке не может быть пустым.",
+        },
+    )
+    description_uz = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        error_messages={
+            "required": "Добавьте описание на узбекском языке.",
+            "blank": "Описание на узбекском языке не может быть пустым.",
+        },
+    )
+    description_en = serializers.CharField(
+        required=False,
+        allow_blank=False,
+        error_messages={
+            "blank": "Описание на английском языке не может быть пустым.",
+        },
+    )
+
+    check_in = serializers.TimeField(
+        format="%H:%M:%S",
+        required=True,
+        error_messages={
+            "required": "Укажите время заезда.",
+            "invalid": "Неверный формат времени (чч:мм:сс).",
+        },
+    )
+    check_out = serializers.TimeField(
+        format="%H:%M:%S",
+        required=True,
+        error_messages={
+            "required": "Укажите время выезда.",
+            "invalid": "Неверный формат времени (чч:мм:сс).",
+        },
+    )
+
+    is_allowed_alcohol = serializers.BooleanField(required=True)
+    is_allowed_corporate = serializers.BooleanField(required=True)
+    is_allowed_pets = serializers.BooleanField(required=True)
+    is_quiet_hours = serializers.BooleanField(required=True)
+
+    guests = serializers.IntegerField(
+        required=True,
+        error_messages={"required": "Укажите количество гостей."},
+    )
+    rooms = serializers.IntegerField(
+        required=True,
+        error_messages={"required": "Укажите количество комнат."},
+    )
+    beds = serializers.IntegerField(
+        required=True,
+        error_messages={"required": "Укажите количество кроватей."},
+    )
+    bathrooms = serializers.IntegerField(
+        required=True,
+        error_messages={"required": "Укажите количество ванных комнат."},
+    )
+
+    def validate_title(self, value):
+        return value.strip()
 
     def validate(self, attrs):
-        is_update = bool(self.context.get("is_update"))
-        is_admin = bool(self.context.get("is_admin"))
+        is_update = self.context.get("is_update", False)
+        is_admin = self.context.get("is_admin", False)
 
-        title = (attrs.get("title") or "").strip()
-        if not is_update and not title:
-            raise serializers.ValidationError({"title": _("This field is required.")})
+        # default price
+        if not is_update and attrs.get("price") is None:
+            attrs["price"] = Decimal("0")
 
-        price = _to_decimal(attrs.get("price"))
-        if not is_update and price is None:
-            price = Decimal("0")
-        if price is not None and price < 0:
-            raise serializers.ValidationError(_("Price must be non-negative"))
-
-        normalized: dict[str, Any] = {}
-        if title:
-            normalized["title"] = title
-            normalized["title_sort"] = title.lower()
-        if "currency" in attrs:
-            normalized["currency"] = attrs.get("currency") or "UZS"
-        elif not is_update:
-            normalized["currency"] = "UZS"
-        if "img" in attrs:
-            image_value = attrs.get("img")
-            if isinstance(image_value, list):
-                normalized["img"] = [str(v) for v in image_value if v]
-            elif image_value:
-                normalized["img"] = [str(image_value)]
-            else:
-                normalized["img"] = []
-        if price is not None:
-            normalized["price"] = price
-        for key in (
-            "latitude",
-            "longitude",
-            "country",
-            "city",
-            "apartment_number",
-            "home_number",
-            "entrance_number",
-            "floor_number",
-            "pass_code",
-            "check_in",
-            "check_out",
-            "is_allowed_alcohol",
-            "is_allowed_corporate",
-            "is_allowed_pets",
-            "is_quiet_hours",
-        ):
-            if key in attrs:
-                normalized[key] = attrs.get(key)
-        for key in ("guests", "rooms", "beds", "bathrooms"):
-            if key in attrs:
-                normalized[key] = _parse_int_maybe(attrs.get(key))
-        if "services" in attrs:
-            normalized["services"] = _normalize_uuid_list(attrs.get("services"))
-        if "property_services" in attrs:
-            normalized["services"] = _normalize_uuid_list(attrs.get("property_services"))
-        detail_payload = attrs.get("property_detail") or {}
-        if detail_payload:
-            for key, value in detail_payload.items():
-                if key in {"check_in", "check_out"}:
-                    try:
-                        normalized[key] = value
-                    except Exception:
-                        pass
-                elif key.startswith("is_"):
-                    normalized[key] = bool(value)
-                elif key in {"description_en", "description_ru", "description_uz", "apartment_number", "home_number", "entrance_number", "floor_number", "pass_code"}:
-                    normalized[key] = value
-        location_payload = attrs.get("property_location") or {}
-        if location_payload:
-            for key in ("latitude", "longitude", "country", "city", "region_id", "district_id", "prefecture_id"):
-                if key not in location_payload:
-                    continue
-                value = location_payload.get(key)
-                if key in {"latitude", "longitude"}:
-                    normalized[key] = _parse_decimal_maybe(value, allow_invalid=is_update)
-                elif key in {"region_id", "district_id"}:
-                    if key == "region_id":
-                        normalized[key] = _parse_region_id_maybe(value)
-                    else:
-                        normalized[key] = _parse_district_id_maybe(value)
-                else:
-                    normalized[key] = None if value in ("", "null", "None", "undefined") else value
-        if "region_id" in attrs or "region_id" in location_payload:
-            normalized["region_id"] = _parse_region_id_maybe(
-                attrs.get("region_id") if attrs.get("region_id") is not None else location_payload.get("region_id")
-            )
-        if "district_id" in attrs or "district_id" in location_payload:
-            normalized["district_id"] = _parse_district_id_maybe(
-                attrs.get("district_id") if attrs.get("district_id") is not None else location_payload.get("district_id")
-            )
-        if "prefecture_id" in attrs or "prefecture_id" in location_payload:
-            pref_val = attrs.get("prefecture_id") if attrs.get("prefecture_id") is not None else location_payload.get("prefecture_id")
-            normalized["prefecture_id"] = str(pref_val) if pref_val not in (None, "", "null", "None", "undefined") else None
+        district_id = attrs.get("district_id")
+        prefecture_id = attrs.get("prefecture_id")
 
         if not is_admin:
+            # 👇 user-friendly prefecture logic
+            if district_id in {75, 82}:
+                if not prefecture_id:
+                    raise serializers.ValidationError(
+                        {"prefecture_id": "Укажите префектуру для выбранного района."}
+                    )
+
+                if not is_prefecture_linked_to_district(
+                    district_id=district_id, prefecture_guid=prefecture_id
+                ):
+                    raise serializers.ValidationError(
+                        {
+                            "prefecture_id": "Выбранная префектура не соответствует району."
+                        }
+                    )
+
+            elif prefecture_id:
+                raise serializers.ValidationError(
+                    {"prefecture_id": "Префектура недоступна для выбранного района."}
+                )
+
+            # 👇 update rules
             if is_update:
                 touches_location = any(
-                    key in attrs
-                    for key in (
+                    k in attrs
+                    for k in (
                         "region_id",
                         "district_id",
-                        "prefecture_id",
                         "latitude",
                         "longitude",
                         "city",
                         "country",
-                        "property_location",
                     )
                 )
                 if touches_location:
-                    if normalized.get("region_id") is None:
-                        raise serializers.ValidationError({"region_id": _("This field is required.")})
-                    if normalized.get("district_id") is None:
-                        raise serializers.ValidationError({"district_id": _("This field is required.")})
+                    if attrs.get("region_id") is None:
+                        raise serializers.ValidationError(
+                            {"region_id": "Укажите регион."}
+                        )
+                    if attrs.get("district_id") is None:
+                        raise serializers.ValidationError(
+                            {"district_id": "Укажите район."}
+                        )
 
-        district_id = normalized.get("district_id")
-        prefecture_id = normalized.get("prefecture_id")
-        if not is_admin:
-            if district_id in {75, 82}:
-                if not prefecture_id:
-                    raise serializers.ValidationError({"prefecture_id": _("This field is required for selected district.")})
-                if not is_prefecture_linked_to_district(district_id=district_id, prefecture_guid=prefecture_id):
-                    raise serializers.ValidationError({"prefecture_id": _("Invalid prefecture for selected district.")})
-            elif prefecture_id:
-                raise serializers.ValidationError({"prefecture_id": _("Prefecture can be set only for district 75 or 82.")})
-
-        attrs["normalized_values"] = normalized
         return attrs
 
 
 class ApartmentUpdateSerializer(ApartmentCreateSerializer):
-    apartment_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    home_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    entrance_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    floor_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    apartment_number = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    home_number = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    entrance_number = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    floor_number = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     pass_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
@@ -557,7 +636,9 @@ class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
 
     is_verified = serializers.BooleanField(required=False)
     verified_at = serializers.DateTimeField(required=False, allow_null=True)
-    verification_status = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    verification_status = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
     partner_user = ApartmentPartnerUserUpdateSerializer(required=False, allow_null=True)
@@ -602,10 +683,14 @@ class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
                 elif isinstance(value, dict):
                     partner_id = value.get("id")
                     if partner_id in (None, "", "null", "None", "undefined"):
-                        raise serializers.ValidationError({"partner_user": {"id": _("This field is required.")}})
+                        raise serializers.ValidationError(
+                            {"partner_user": {"id": _("This field is required.")}}
+                        )
                     normalized["partner_user_id"] = int(partner_id)
                 else:
-                    raise serializers.ValidationError({"partner_user": _("Expected an object payload.")})
+                    raise serializers.ValidationError(
+                        {"partner_user": _("Expected an object payload.")}
+                    )
             else:
                 normalized[key] = value
         attrs["normalized_values"] = normalized
