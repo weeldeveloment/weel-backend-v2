@@ -269,6 +269,96 @@ COTTAGE_PRICE_ITEM_SCHEMA = openapi.Schema(
     },
 )
 
+_COTTAGE_PARTNER_FLAT_REQUEST_PROPERTIES: dict[str, openapi.Schema] = {
+    "title": openapi.Schema(type=openapi.TYPE_STRING),
+    "currency": openapi.Schema(
+        type=openapi.TYPE_STRING,
+        enum=["USD", "UZS"],
+        default="UZS",
+    ),
+    "weekend_only_sunday_inclusive": openapi.Schema(
+        type=openapi.TYPE_BOOLEAN,
+        default=False,
+    ),
+    "price_per_person": openapi.Schema(
+        type=openapi.TYPE_NUMBER,
+        format="double",
+        nullable=True,
+        description="Per-person price (both months unless you vary via legacy `price` list only).",
+    ),
+    "price_on_working_days": openapi.Schema(
+        type=openapi.TYPE_NUMBER,
+        format="double",
+        nullable=True,
+        description="Working-day rate.",
+    ),
+    "price_on_weekends": openapi.Schema(
+        type=openapi.TYPE_NUMBER,
+        format="double",
+        nullable=True,
+        description="Weekend rate.",
+    ),
+    "month_from": openapi.Schema(
+        type=openapi.TYPE_STRING,
+        format="date",
+        nullable=True,
+        description="First pricing month: interval start (YYYY-MM-DD). Use with month_to, next_month_from, next_month_to.",
+    ),
+    "month_to": openapi.Schema(
+        type=openapi.TYPE_STRING,
+        format="date",
+        nullable=True,
+        description="First pricing month: interval end (YYYY-MM-DD). Should be the last day of that month.",
+    ),
+    "next_month_from": openapi.Schema(
+        type=openapi.TYPE_STRING,
+        format="date",
+        nullable=True,
+        description="Second pricing month: interval start.",
+    ),
+    "next_month_to": openapi.Schema(
+        type=openapi.TYPE_STRING,
+        format="date",
+        nullable=True,
+        description="Second pricing month: interval end.",
+    ),
+    "latitude": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    "longitude": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    "country": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    "city": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    "region_id": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    "district_id": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    "prefecture_id": openapi.Schema(
+        type=openapi.TYPE_STRING,
+        format="uuid",
+        nullable=True,
+    ),
+    "description_en": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    "description_ru": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    "description_uz": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    "check_in": openapi.Schema(type=openapi.TYPE_STRING, format="time", nullable=True),
+    "check_out": openapi.Schema(type=openapi.TYPE_STRING, format="time", nullable=True),
+    "is_allowed_alcohol": openapi.Schema(type=openapi.TYPE_BOOLEAN, default=False),
+    "is_allowed_corporate": openapi.Schema(type=openapi.TYPE_BOOLEAN, default=False),
+    "is_allowed_pets": openapi.Schema(type=openapi.TYPE_BOOLEAN, default=False),
+    "is_quiet_hours": openapi.Schema(type=openapi.TYPE_BOOLEAN, default=False),
+    "services": openapi.Schema(
+        type=openapi.TYPE_ARRAY,
+        items=openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+        description="Service UUIDs (same as legacy `property_services`).",
+    ),
+    "guests": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+    "rooms": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+    "beds": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+    "bathrooms": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
+    "img": openapi.Schema(
+        type=openapi.TYPE_ARRAY,
+        items=openapi.Schema(type=openapi.TYPE_STRING),
+        nullable=True,
+        description="Image paths or URLs; a single string is also accepted by the API.",
+    ),
+}
+
 COTTAGE_PARTNER_CREATE_REQUEST_SCHEMA = openapi.Schema(
     type=openapi.TYPE_OBJECT,
     description=(
@@ -278,95 +368,18 @@ COTTAGE_PARTNER_CREATE_REQUEST_SCHEMA = openapi.Schema(
         "Do not use a nested `price` array (legacy; still accepted by the API if month fields are not used)."
     ),
     required=["title"],
-    properties={
-        "title": openapi.Schema(type=openapi.TYPE_STRING),
-        "currency": openapi.Schema(
-            type=openapi.TYPE_STRING,
-            enum=["USD", "UZS"],
-            default="UZS",
-        ),
-        "weekend_only_sunday_inclusive": openapi.Schema(
-            type=openapi.TYPE_BOOLEAN,
-            default=False,
-        ),
-        "price_per_person": openapi.Schema(
-            type=openapi.TYPE_NUMBER,
-            format="double",
-            nullable=True,
-            description="Per-person price (both months unless you vary via legacy `price` list only).",
-        ),
-        "price_on_working_days": openapi.Schema(
-            type=openapi.TYPE_NUMBER,
-            format="double",
-            nullable=True,
-            description="Working-day rate.",
-        ),
-        "price_on_weekends": openapi.Schema(
-            type=openapi.TYPE_NUMBER,
-            format="double",
-            nullable=True,
-            description="Weekend rate.",
-        ),
-        "month_from": openapi.Schema(
-            type=openapi.TYPE_STRING,
-            format="date",
-            nullable=True,
-            description="First pricing month: interval start (YYYY-MM-DD). Use with month_to, next_month_from, next_month_to.",
-        ),
-        "month_to": openapi.Schema(
-            type=openapi.TYPE_STRING,
-            format="date",
-            nullable=True,
-            description="First pricing month: interval end (YYYY-MM-DD). Should be the last day of that month.",
-        ),
-        "next_month_from": openapi.Schema(
-            type=openapi.TYPE_STRING,
-            format="date",
-            nullable=True,
-            description="Second pricing month: interval start.",
-        ),
-        "next_month_to": openapi.Schema(
-            type=openapi.TYPE_STRING,
-            format="date",
-            nullable=True,
-            description="Second pricing month: interval end.",
-        ),
-        "latitude": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "longitude": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "country": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "city": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "region_id": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "district_id": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "prefecture_id": openapi.Schema(
-            type=openapi.TYPE_STRING,
-            format="uuid",
-            nullable=True,
-        ),
-        "description_en": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "description_ru": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "description_uz": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "check_in": openapi.Schema(type=openapi.TYPE_STRING, format="time", nullable=True),
-        "check_out": openapi.Schema(type=openapi.TYPE_STRING, format="time", nullable=True),
-        "is_allowed_alcohol": openapi.Schema(type=openapi.TYPE_BOOLEAN, default=False),
-        "is_allowed_corporate": openapi.Schema(type=openapi.TYPE_BOOLEAN, default=False),
-        "is_allowed_pets": openapi.Schema(type=openapi.TYPE_BOOLEAN, default=False),
-        "is_quiet_hours": openapi.Schema(type=openapi.TYPE_BOOLEAN, default=False),
-        "services": openapi.Schema(
-            type=openapi.TYPE_ARRAY,
-            items=openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
-            description="Service UUIDs (same as legacy `property_services`).",
-        ),
-        "guests": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
-        "rooms": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
-        "beds": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
-        "bathrooms": openapi.Schema(type=openapi.TYPE_INTEGER, nullable=True),
-        "img": openapi.Schema(
-            type=openapi.TYPE_ARRAY,
-            items=openapi.Schema(type=openapi.TYPE_STRING),
-            nullable=True,
-            description="Image paths or URLs; a single string is also accepted by the API.",
-        ),
-    },
+    properties=_COTTAGE_PARTNER_FLAT_REQUEST_PROPERTIES,
+)
+
+COTTAGE_PARTNER_PATCH_REQUEST_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    description=(
+        "Partner cottage partial update (PATCH). Same flat fields as POST /api/property/cottages/; "
+        "all optional — send only what changes. Pricing: use `price_*` with optional "
+        "`month_from` / `month_to` / `next_month_from` / `next_month_to` (all four together), "
+        "or legacy `price` list (not documented here). Changing non-price fields may reset verification."
+    ),
+    properties=_COTTAGE_PARTNER_FLAT_REQUEST_PROPERTIES,
 )
 
 PROPERTY_DETAIL_RESPONSE_SCHEMA = openapi.Schema(
@@ -1696,9 +1709,9 @@ class PropertyRetrieveUpdateDestroyView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
-        operation_id="partialUpdateProperty",
-        operation_summary="Partially update a property",
-        operation_description="Partner-only partial update for an apartment or cottage. Mutating fields resets verification status to pending.",
+        operation_id="partialUpdateApartment",
+        operation_summary="Partially update an apartment",
+        operation_description="Partner-only partial update for an apartment. Mutating fields resets verification status to pending.",
         tags=["Property / Partner"],
         request_body=ApartmentUpdateSerializer,
         responses={
@@ -1781,6 +1794,37 @@ class PropertyRetrieveUpdateDestroyView(APIView):
         if not deleted:
             raise NotFound(_("Property not found"))
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CottagePropertyRetrieveUpdateDestroyView(PropertyRetrieveUpdateDestroyView):
+    """Same as `PropertyRetrieveUpdateDestroyView` but Swagger documents cottage PATCH body (flat, like create)."""
+
+    @swagger_auto_schema(
+        operation_id="partialUpdateCottage",
+        operation_summary="Partially update a cottage",
+        operation_description=(
+            "Partner-only partial update for a cottage. Request body matches POST /api/property/cottages/ "
+            "(flat `price_*`, month range fields, location, descriptions, services, rooms); all fields optional."
+        ),
+        tags=["Property / Partner"],
+        request_body=COTTAGE_PARTNER_PATCH_REQUEST_SCHEMA,
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                },
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def patch(self, request, property_id, *args, **kwargs):
+        return super().patch(request, property_id, *args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
