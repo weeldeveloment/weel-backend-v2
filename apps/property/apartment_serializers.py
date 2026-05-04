@@ -688,7 +688,8 @@ class ApartmentUpdateSerializer(serializers.Serializer):
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
 
-    partner_user_id = serializers.IntegerField(required=False)
+    partner_user = ApartmentPartnerUserUpdateSerializer(required=False, allow_null=True)
+
     verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
 
     comment_count = serializers.IntegerField(
@@ -699,14 +700,13 @@ class ApartmentUpdateSerializer(serializers.Serializer):
 
     legacy_property_id = serializers.IntegerField(required=False, allow_null=True)
 
-    # ===== Internal =====
     ADMIN_ONLY_FIELDS = {
         "is_verified",
         "verified_at",
         "verification_status",
         "is_archived",
         "is_recommended",
-        "partner_user_id",
+        "partner_user",
         "verified_by_user_id",
         "comment_count",
         "legacy_property_id",
@@ -720,10 +720,22 @@ class ApartmentUpdateSerializer(serializers.Serializer):
             return None
         return value.strip().lower()
 
+    def validate_partner_user(self, value):
+        if value in (None, "", "null", "None"):
+            return None
+
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Ожидается объект пользователя.")
+
+        if "id" not in value or value["id"] in (None, "", "null"):
+            raise serializers.ValidationError({"id": "Укажите ID пользователя."})
+
+        return value
+
     def validate(self, attrs):
         is_admin = self.context.get("is_admin", False)
 
-        # Block admin-only fields for non-admins
+        # block admin-only fields
         if not is_admin:
             forbidden = self.ADMIN_ONLY_FIELDS.intersection(attrs.keys())
             if forbidden:
@@ -734,7 +746,7 @@ class ApartmentUpdateSerializer(serializers.Serializer):
                     }
                 )
 
-        # Location + prefecture logic
+        # location rules
         district_id = attrs.get("district_id")
         prefecture_id = attrs.get("prefecture_id")
 
@@ -760,3 +772,26 @@ class ApartmentUpdateSerializer(serializers.Serializer):
                 )
 
         return attrs
+
+    def update(self, instance, validated_data):
+        partner_payload = validated_data.pop("partner_user", None)
+
+        # update apartment fields
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+
+        # derived field
+        if "title" in validated_data:
+            instance.title_sort = instance.title.lower()
+
+        # handle partner_user update
+        if partner_payload is not None:
+            partner_id = partner_payload.get("id")
+            if partner_id:
+                instance.partner_user_id = int(partner_id)
+
+            # optional: update user fields here if needed
+            # (depends on your service layer / repository)
+
+        instance.save()
+        return instance
