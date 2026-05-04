@@ -117,16 +117,26 @@ _DEFAULT_PUBLIC_LIST_LIMIT = 50
 _DEFAULT_PARTNER_LIST_LIMIT = 100
 
 
-class CottagePagination(PageNumberPagination):
+class _OptionalLimitPagePagination(PageNumberPagination):
+    """If neither `limit` nor `page` is sent, skip pagination and return the full list."""
+
     page_size = 20
-    page_size_query_param = 'limit'
+    page_size_query_param = "limit"
     max_page_size = 100
 
+    def paginate_queryset(self, queryset, request, view=None):
+        qp = request.query_params
+        if self.page_query_param not in qp and self.page_size_query_param not in qp:
+            return None
+        return super().paginate_queryset(queryset, request, view)
 
-class ApartmentPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = 'limit'
-    max_page_size = 100
+
+class CottagePagination(_OptionalLimitPagePagination):
+    pass
+
+
+class ApartmentPagination(_OptionalLimitPagePagination):
+    pass
 
 
 PROPERTY_LIST_QUERY_PARAMS = [
@@ -1217,7 +1227,7 @@ class ApartmentPropertyListCreateView(APIView):
     @swagger_auto_schema(
         operation_id="listApartments",
         operation_summary="List apartments",
-        operation_description="Returns a paginated list of verified public apartments. Supports search, filtering, sorting, and pagination.",
+        operation_description="Returns verified public apartments. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated (default page size 20, max `limit` 100). Supports search, filtering, and sorting.",
         tags=["Property / Public"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
         responses={
@@ -1296,7 +1306,7 @@ class CottagePropertyListCreateView(APIView):
     @swagger_auto_schema(
         operation_id="listCottages",
         operation_summary="List cottages",
-        operation_description="Returns a paginated list of verified public cottages. Supports search, filtering, sorting, and pagination.",
+        operation_description="Returns verified public cottages. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated (default page size 20, max `limit` 100). Supports search, filtering, and sorting.",
         tags=["Property / Public"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
         responses={
