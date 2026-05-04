@@ -231,27 +231,37 @@ class UtilTests(SimpleTestCase):
         self.assertIsNone(_parse_int_maybe("abc"))
         self.assertIsNone(_parse_int_maybe(None))
 
-    def test_apartment_create_serializer_normalizes_blank_property_location_coordinates(self):
+    def test_apartment_create_serializer_prepares_blank_coordinates(self):
         serializer = ApartmentCreateSerializer(
             data={
                 "title": "Test apartment",
-                "property_location": {
-                    "latitude": "",
-                    "longitude": "",
-                    "country": "Uzbekistan",
-                    "city": "Tashkent",
-                },
+                "latitude": "",
+                "longitude": "",
+                "country": "Uzbekistan",
+                "city": "Tashkent",
                 "apartment_number": "12",
                 "home_number": "10",
                 "entrance_number": "2",
                 "floor_number": "3",
                 "pass_code": "0000",
+                "description_ru": "Test",
+                "description_uz": "Test",
+                "check_in": "14:00:00",
+                "check_out": "12:00:00",
+                "is_allowed_alcohol": False,
+                "is_allowed_corporate": False,
+                "is_allowed_pets": False,
+                "is_quiet_hours": True,
+                "guests": 2,
+                "rooms": 1,
+                "beds": 1,
+                "bathrooms": 1,
             },
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
-        normalized = serializer.validated_data["normalized_values"]
-        self.assertIsNone(normalized["latitude"])
-        self.assertIsNone(normalized["longitude"])
+        values = serializer.validated_data["values"]
+        self.assertIsNone(values.get("latitude"))
+        self.assertIsNone(values.get("longitude"))
 
     def test_cottage_create_serializer_normalizes_blank_property_location_coordinates(self):
         serializer = CottageCreateSerializer(
@@ -270,63 +280,63 @@ class UtilTests(SimpleTestCase):
         self.assertIsNone(normalized["latitude"])
         self.assertIsNone(normalized["longitude"])
 
-    def test_apartment_update_serializer_accepts_property_services(self):
+    def test_apartment_create_serializer_accepts_services(self):
         serializer = ApartmentCreateSerializer(
             data={
                 "title": "Test apartment",
-                "property_services": ["guid1", "guid2"],
-                "property_location": {
-                    "latitude": "41.3",
-                    "longitude": "69.2",
-                    "country": "Uzbekistan",
-                    "city": "Tashkent",
-                },
+                "services": ["guid1", "guid2"],
                 "apartment_number": "12",
                 "home_number": "10",
                 "entrance_number": "2",
                 "floor_number": "3",
                 "pass_code": "0000",
+                "description_ru": "Test",
+                "description_uz": "Test",
+                "check_in": "14:00:00",
+                "check_out": "12:00:00",
+                "is_allowed_alcohol": False,
+                "is_allowed_corporate": False,
+                "is_allowed_pets": False,
+                "is_quiet_hours": True,
+                "guests": 2,
+                "rooms": 1,
+                "beds": 1,
+                "bathrooms": 1,
             },
-            context={"is_update": True},
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
-        normalized = serializer.validated_data["normalized_values"]
-        self.assertEqual(normalized["services"], ["guid1", "guid2"])
+        values = serializer.validated_data["values"]
+        self.assertEqual(values["services"], ["guid1", "guid2"])
 
-    def test_apartment_update_serializer_accepts_property_detail(self):
+    def test_apartment_create_serializer_accepts_detail_fields(self):
         serializer = ApartmentCreateSerializer(
             data={
                 "title": "Test apartment",
-                "property_detail": {
-                    "description_ru": "Русское описание",
-                    "description_uz": "O'zbek tavsifi",
-                    "description_en": "English description",
-                    "check_in": "19:00:00",
-                    "check_out": "17:00:00",
-                    "is_allowed_alcohol": True,
-                    "is_allowed_corporate": False,
-                    "is_allowed_pets": True,
-                    "is_quiet_hours": False,
-                },
-                "property_location": {
-                    "latitude": "41.3",
-                    "longitude": "69.2",
-                    "country": "Uzbekistan",
-                    "city": "Tashkent",
-                },
+                "description_ru": "Русское описание",
+                "description_uz": "O'zbek tavsifi",
+                "description_en": "English description",
+                "check_in": "19:00:00",
+                "check_out": "17:00:00",
+                "is_allowed_alcohol": True,
+                "is_allowed_corporate": False,
+                "is_allowed_pets": True,
+                "is_quiet_hours": False,
                 "apartment_number": "12",
                 "home_number": "10",
                 "entrance_number": "2",
                 "floor_number": "3",
                 "pass_code": "0000",
+                "guests": 2,
+                "rooms": 1,
+                "beds": 1,
+                "bathrooms": 1,
             },
-            context={"is_update": True},
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
-        normalized = serializer.validated_data["normalized_values"]
-        self.assertEqual(normalized.get("description_ru"), "Русское описание")
-        self.assertEqual(normalized.get("is_allowed_alcohol"), True)
-        self.assertEqual(normalized.get("is_allowed_pets"), True)
+        values = serializer.validated_data["values"]
+        self.assertEqual(values.get("description_ru"), "Русское описание")
+        self.assertEqual(values.get("is_allowed_alcohol"), True)
+        self.assertEqual(values.get("is_allowed_pets"), True)
 
     def test_cottage_update_serializer_processes_property_services(self):
         serializer = CottageCreateSerializer(

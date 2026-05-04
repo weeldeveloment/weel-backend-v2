@@ -1531,7 +1531,7 @@ class ApartmentPropertyListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         created = create_apartment(
             partner_user_id=int(request.user.id),
-            values=serializer.validated_data["normalized_values"],
+            values=serializer.validated_data["values"],
         )
         if not created:
             raise ValidationError(_("Apartment could not be created"))
@@ -1700,7 +1700,7 @@ class PropertyListCreateView(APIView):
             serializer.is_valid(raise_exception=True)
             created = create_apartment(
                 partner_user_id=int(request.user.id),
-                values=serializer.validated_data["normalized_values"],
+                values=serializer.validated_data["values"],
             )
         if not created:
             raise ValidationError(_("Property could not be created"))
@@ -3138,18 +3138,18 @@ class AdminApartmentPatchView(APIView):
             context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
-        normalized = serializer.validated_data.get("normalized_values") or {}
+        prepared = serializer.validated_data.get("values") or {}
 
         logger.info(
-            "admin_apartment_patch apartment_guid=%s admin_user_id=%s normalized_keys=%s",
+            "admin_apartment_patch apartment_guid=%s admin_user_id=%s prepared_keys=%s",
             apartment_id,
             getattr(request.user, "id", None),
-            sorted(normalized.keys()),
+            sorted(prepared.keys()),
         )
 
         updated = admin_update_apartment(
             apartment_guid=str(apartment_id),
-            values=normalized,
+            values=prepared,
             admin_user_id=getattr(request.user, "id", None),
         )
         if not updated:

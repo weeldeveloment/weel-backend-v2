@@ -479,7 +479,7 @@ def create_apartment(
         """,
         [
             uuid4(), now, now,
-            values["title"], values["title_sort"],
+            values.get("title"), values.get("title_sort"),
             int(values.get("comment_count", 0)),
             values.get("price"), values.get("currency"), values.get("img"),
             partner_user_id,

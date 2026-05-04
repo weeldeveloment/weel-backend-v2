@@ -166,7 +166,10 @@ def exception_errors_format_handler(exc, context):
 
     # If an unexpected error occurs (server error, etc.)
     if response is None:
-        return response
+        return Response(
+            {"errors": [{"detail": "Internal server error.", "status_code": 500}]},
+            status=500,
+        )
     try:
         code = exc.get_codes()
         if isinstance(code, dict):

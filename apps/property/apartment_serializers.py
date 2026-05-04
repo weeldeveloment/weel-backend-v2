@@ -426,6 +426,12 @@ class ApartmentCreateSerializer(serializers.Serializer):
         allow_empty=True,
     )
 
+    img = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+    )
+
     apartment_number = serializers.IntegerField(
         required=True,
         error_messages={"required": "Укажите номер квартиры."},
@@ -514,31 +520,108 @@ class ApartmentCreateSerializer(serializers.Serializer):
         return value.strip()
 
     def validate(self, attrs):
-        if attrs.get("price") is None:
-            attrs["price"] = Decimal("0")
+        prepared: dict[str, Any] = {}
 
-        district_id = attrs.get("district_id")
-        prefecture_id = attrs.get("prefecture_id")
+        title = str(attrs.get("title") or "").strip()
+        if not title:
+            raise serializers.ValidationError(
+                {"title": "Укажите название."}
+            )
+        prepared["title"] = title
+        prepared["title_sort"] = title.lower()
 
+        price = attrs.get("price")
+        if price is None:
+            prepared["price"] = Decimal("0")
+        else:
+            prepared["price"] = price
+
+        prepared["currency"] = str(attrs.get("currency") or "UZS")
+
+        img_value = attrs.get("img")
+        if isinstance(img_value, list):
+            prepared["img"] = [str(v) for v in img_value if v]
+        elif img_value:
+            prepared["img"] = [str(img_value)]
+        else:
+            prepared["img"] = []
+
+        prepared["comment_count"] = 0
+
+        for key in ("latitude", "longitude", "country", "city"):
+            if key in attrs:
+                prepared[key] = attrs.get(key)
+
+        if "region_id" in attrs:
+            prepared["region_id"] = _parse_int_maybe(attrs.get("region_id"))
+        if "district_id" in attrs:
+            prepared["district_id"] = _parse_int_maybe(attrs.get("district_id"))
+        if "prefecture_id" in attrs:
+            prefecture_id = attrs.get("prefecture_id")
+            prepared["prefecture_id"] = (
+                str(prefecture_id)
+                if prefecture_id not in (None, "", "null", "None", "undefined")
+                else None
+            )
+
+        for key in ("description_en", "description_ru", "description_uz"):
+            if key in attrs:
+                prepared[key] = attrs.get(key)
+
+        for key in ("check_in", "check_out"):
+            if key in attrs:
+                prepared[key] = attrs.get(key)
+
+        for key in (
+            "is_allowed_alcohol",
+            "is_allowed_corporate",
+            "is_allowed_pets",
+            "is_quiet_hours",
+        ):
+            if key in attrs:
+                prepared[key] = bool(attrs.get(key))
+
+        for key in (
+            "apartment_number",
+            "home_number",
+            "entrance_number",
+            "floor_number",
+            "pass_code",
+        ):
+            if key in attrs:
+                prepared[key] = attrs.get(key)
+
+        for key in ("guests", "rooms", "beds", "bathrooms"):
+            if key in attrs:
+                prepared[key] = _parse_int_maybe(attrs.get(key))
+
+        services = attrs.get("services")
+        if services is not None:
+            prepared["services"] = [str(s) for s in services if s is not None]
+        else:
+            prepared["services"] = []
+
+        district_id = prepared.get("district_id")
+        prefecture_id = prepared.get("prefecture_id")
         if district_id in {75, 82}:
             if not prefecture_id:
                 raise serializers.ValidationError(
                     {"prefecture_id": "Укажите префектуру для выбранного района."}
                 )
-
             if not is_prefecture_linked_to_district(
                 district_id=district_id, prefecture_guid=prefecture_id
             ):
                 raise serializers.ValidationError(
-                    {"prefecture_id": "Выбранная префектура не соответствует району."}
+                    {
+                        "prefecture_id": "Выбранная префектура не соответствует району."
+                    }
                 )
-
         elif prefecture_id:
             raise serializers.ValidationError(
                 {"prefecture_id": "Префектура недоступна для выбранного района."}
             )
 
-        attrs["normalized_values"] = attrs
+        attrs["values"] = prepared
         return attrs
 
 
@@ -673,7 +756,6 @@ class ApartmentUpdateSerializer(serializers.Serializer):
     def validate(self, attrs):
         is_admin = self._request_is_admin()
 
-        # block admin-only fields
         if not is_admin:
             forbidden = self.ADMIN_ONLY_FIELDS.intersection(attrs.keys())
             if forbidden:
@@ -684,17 +766,118 @@ class ApartmentUpdateSerializer(serializers.Serializer):
                     }
                 )
 
-        # location rules
-        district_id = attrs.get("district_id")
-        prefecture_id = attrs.get("prefecture_id")
+        prepared: dict[str, Any] = {}
 
+        if "title" in attrs:
+            title = str(attrs.get("title") or "").strip()
+            if title:
+                prepared["title"] = title
+                prepared["title_sort"] = title.lower()
+
+        if "price" in attrs:
+            prepared["price"] = attrs.get("price")
+
+        if "currency" in attrs:
+            prepared["currency"] = str(attrs.get("currency") or "UZS")
+
+        if "img" in attrs:
+            img_value = attrs.get("img")
+            if isinstance(img_value, list):
+                prepared["img"] = [str(v) for v in img_value if v]
+            elif img_value:
+                prepared["img"] = [str(img_value)]
+            else:
+                prepared["img"] = []
+
+        if "comment_count" in attrs:
+            prepared["comment_count"] = _parse_int_maybe(attrs.get("comment_count"))
+
+        for key in ("latitude", "longitude", "country", "city"):
+            if key in attrs:
+                prepared[key] = attrs.get(key)
+
+        if "region_id" in attrs:
+            prepared["region_id"] = _parse_int_maybe(attrs.get("region_id"))
+        if "district_id" in attrs:
+            prepared["district_id"] = _parse_int_maybe(attrs.get("district_id"))
+        if "prefecture_id" in attrs:
+            prefecture_id = attrs.get("prefecture_id")
+            prepared["prefecture_id"] = (
+                str(prefecture_id)
+                if prefecture_id not in (None, "", "null", "None", "undefined")
+                else None
+            )
+
+        for key in ("description_en", "description_ru", "description_uz"):
+            if key in attrs:
+                prepared[key] = attrs.get(key)
+
+        for key in ("check_in", "check_out"):
+            if key in attrs:
+                prepared[key] = attrs.get(key)
+
+        for key in (
+            "is_allowed_alcohol",
+            "is_allowed_corporate",
+            "is_allowed_pets",
+            "is_quiet_hours",
+        ):
+            if key in attrs:
+                prepared[key] = bool(attrs.get(key))
+
+        for key in (
+            "apartment_number",
+            "home_number",
+            "entrance_number",
+            "floor_number",
+            "pass_code",
+        ):
+            if key in attrs:
+                prepared[key] = attrs.get(key)
+
+        for key in ("guests", "rooms", "beds", "bathrooms"):
+            if key in attrs:
+                prepared[key] = _parse_int_maybe(attrs.get(key))
+
+        if "services" in attrs:
+            services = attrs.get("services")
+            prepared["services"] = (
+                [str(s) for s in services if s is not None] if services else []
+            )
+
+        if is_admin:
+            for key in self.ADMIN_ONLY_FIELDS:
+                if key in attrs:
+                    if key == "verification_status":
+                        value = attrs.get(key)
+                        if value not in (None, ""):
+                            prepared[key] = str(value).strip().lower()
+                    elif key == "partner_user":
+                        value = attrs.get(key)
+                        if value in (None, "", "null", "None", "undefined"):
+                            prepared["partner_user_id"] = None
+                        elif isinstance(value, dict):
+                            partner_id = value.get("id")
+                            if partner_id in (None, "", "null", "None", "undefined"):
+                                raise serializers.ValidationError(
+                                    {"partner_user": {"id": "Укажите ID пользователя."}}
+                                )
+                            prepared["partner_user_id"] = int(partner_id)
+                        else:
+                            raise serializers.ValidationError(
+                                {"partner_user": "Ожидается объект пользователя."}
+                            )
+                    else:
+                        prepared[key] = attrs.get(key)
+
+        district_id = prepared.get("district_id")
+        prefecture_id = prepared.get("prefecture_id")
         if not is_admin:
             if district_id in {75, 82}:
                 if not prefecture_id:
                     raise serializers.ValidationError(
                         {"prefecture_id": "Укажите префектуру для выбранного района."}
                     )
-
                 if not is_prefecture_linked_to_district(
                     district_id=district_id, prefecture_guid=prefecture_id
                 ):
@@ -703,13 +886,12 @@ class ApartmentUpdateSerializer(serializers.Serializer):
                             "prefecture_id": "Выбранная префектура не соответствует району."
                         }
                     )
-
             elif prefecture_id:
                 raise serializers.ValidationError(
                     {"prefecture_id": "Префектура недоступна для выбранного района."}
                 )
 
-        attrs["normalized_values"] = attrs
+        attrs["values"] = prepared
         return attrs
 
     def update(self, instance, validated_data):
