@@ -68,11 +68,6 @@ urlpatterns = [
     ),
     path("properties/", PropertyListCreateView.as_view(), name="property-list-create"),
     path(
-        "apartment/",
-        ApartmentPropertyListCreateView.as_view(),
-        name="apartment-property-list-create-legacy",
-    ),
-    path(
         "apartments/",
         ApartmentPropertyListCreateView.as_view(),
         name="apartment-property-list-create",
