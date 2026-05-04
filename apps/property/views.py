@@ -7,93 +7,86 @@ from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urlencode, urlparse
 from uuid import uuid4
 
+from admin_auth.authentication import AdminJWTAuthentication
+from admin_auth.permissions import IsAdminUser
+from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
-from django.conf import settings
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-
-from rest_framework import parsers, status
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework import parsers, serializers, status
+from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.pagination import PageNumberPagination
-
-from shared.raw.db import fetch_all
-from shared.raw.compat import get_table_name
-
-from admin_auth.authentication import AdminJWTAuthentication
-from admin_auth.permissions import IsAdminUser
 from shared.permissions import IsClient, IsPartner, IsPartnerOrAdmin
+from shared.raw.compat import get_table_name
+from shared.raw.db import fetch_all
 from users.authentication import (
     ClientJWTAuthentication,
     OptionalClientOrPartnerJWTAuthentication,
     PartnerJWTAuthentication,
 )
-from users.raw_repository import get_user_by_id, fetch_users_by_ids
+from users.raw_repository import fetch_users_by_ids, get_user_by_id
 
 from .apartment_repository import (
     APARTMENT_TYPE_GUID,
     COTTAGE_TYPE_GUID,
     PROPERTY_KIND_APARTMENT,
     PROPERTY_KIND_COTTAGE,
-    parse_property_kind,
-    list_property_types,
-    list_property_services,
-    list_regions,
-    list_districts,
-    list_prefectures,
-    list_reviews,
-    has_eligible_booking_for_review,
-    create_review,
-    prepare_property_rows,
-    resolve_region_id_by_guid,
-)
-from .serializers import PropertyServiceListSerializer, RegionListSerializer, DistrictListSerializer, PrefectureListSerializer
-from .apartment_repository import (
-    list_apartments,
-    get_apartment_for_public,
-    get_apartment_for_partner,
-    create_apartment,
-    update_apartment,
-    delete_apartment,
-    set_apartment_primary_image,
-    effective_apartment_price,
     admin_get_apartment,
     admin_update_apartment,
-)
-from .cottage_repository import (
-    list_cottages,
-    get_cottage_for_public,
-    get_cottage_for_partner,
-    create_cottage,
-    update_cottage,
-    delete_cottage,
-    set_cottage_primary_image,
-    effective_cottage_price,
-    admin_get_cottage,
-    admin_update_cottage,
+    create_apartment,
+    create_review,
+    delete_apartment,
+    effective_apartment_price,
+    get_apartment_for_partner,
+    get_apartment_for_public,
+    has_eligible_booking_for_review,
+    list_apartments,
+    list_districts,
+    list_prefectures,
+    list_property_services,
+    list_property_types,
+    list_regions,
+    list_reviews,
+    parse_property_kind,
+    prepare_property_rows,
+    resolve_region_id_by_guid,
+    set_apartment_primary_image,
+    update_apartment,
 )
 from .apartment_serializers import (
+    ApartmentAdminListSerializer,
+    ApartmentCreateSerializer,
+    ApartmentDetailSerializer,
     ApartmentListSerializer,
     ApartmentPartnerListSerializer,
-    ApartmentAdminListSerializer,
-    ApartmentDetailSerializer,
-    ApartmentCreateSerializer,
     ApartmentUpdateSerializer,
-    ApartmentAdminUpdateSerializer,
+)
+from .cottage_repository import (
+    admin_get_cottage,
+    admin_update_cottage,
+    create_cottage,
+    delete_cottage,
+    effective_cottage_price,
+    get_cottage_for_partner,
+    get_cottage_for_public,
+    list_cottages,
+    set_cottage_primary_image,
+    update_cottage,
 )
 from .cottage_serializers import (
+    CottageAdminListSerializer,
+    CottageAdminUpdateSerializer,
+    CottageCreateSerializer,
+    CottageDetailSerializer,
     CottageListSerializer,
     CottagePartnerListSerializer,
-    CottageAdminListSerializer,
-    CottageDetailSerializer,
-    CottageCreateSerializer,
     CottageUpdateSerializer,
-    CottageAdminUpdateSerializer,
 )
 from .serializers import (
     DistrictListSerializer,
@@ -105,7 +98,6 @@ from .serializers import (
     RegionListSerializer,
     RegionsResponseSerializer,
 )
-from rest_framework import serializers
 
 logger = logging.getLogger(__name__)
 
@@ -147,15 +139,27 @@ PROPERTY_LIST_QUERY_PARAMS = [
     openapi.Parameter("min_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
     openapi.Parameter("max_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
     openapi.Parameter("currency", openapi.IN_QUERY, type=openapi.TYPE_STRING),
-    openapi.Parameter("sort", openapi.IN_QUERY, type=openapi.TYPE_STRING, enum=[
-        "price_high", "price_low",
-        "rating_high", "rating_low",
-        "reviews_high", "reviews_low",
-        "title_asc", "title_desc",
-        "corporate_yes", "corporate_no",
-    ]),
+    openapi.Parameter(
+        "sort",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        enum=[
+            "price_high",
+            "price_low",
+            "rating_high",
+            "rating_low",
+            "reviews_high",
+            "reviews_low",
+            "title_asc",
+            "title_desc",
+            "corporate_yes",
+            "corporate_no",
+        ],
+    ),
     openapi.Parameter("ordering", openapi.IN_QUERY, type=openapi.TYPE_STRING),
-    openapi.Parameter("from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
+    openapi.Parameter(
+        "from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"
+    ),
     openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
     openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
 ]
@@ -166,8 +170,18 @@ LOCATION_QUERY_PARAMS = [
 ]
 
 RECOMMENDATIONS_QUERY_PARAMS = PROPERTY_LIST_QUERY_PARAMS + [
-    openapi.Parameter("kind", openapi.IN_QUERY, type=openapi.TYPE_STRING, enum=["property", "apartment", "cottage"]),
-    openapi.Parameter("type", openapi.IN_QUERY, type=openapi.TYPE_STRING, enum=["featured", "best-by-reviews", "most-booked"]),
+    openapi.Parameter(
+        "kind",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        enum=["property", "apartment", "cottage"],
+    ),
+    openapi.Parameter(
+        "type",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        enum=["featured", "best-by-reviews", "most-booked"],
+    ),
 ]
 
 PROPERTY_FILTER_BY_LINK_SCHEMA = openapi.Schema(
@@ -387,7 +401,9 @@ PROPERTY_DETAIL_RESPONSE_SCHEMA = openapi.Schema(
     properties={
         "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
         "title": openapi.Schema(type=openapi.TYPE_STRING),
-        "img": openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_STRING)),
+        "img": openapi.Schema(
+            type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_STRING)
+        ),
         "created_at": openapi.Schema(type=openapi.TYPE_STRING, format="date-time"),
         "currency": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
         "price": openapi.Schema(
@@ -420,7 +436,9 @@ PROPERTY_DETAIL_RESPONSE_SCHEMA = openapi.Schema(
             nullable=True,
             description="Cottage monthly price breakdown. Empty/null for apartments.",
         ),
-        "weekend_only_sunday_inclusive": openapi.Schema(type=openapi.TYPE_BOOLEAN, nullable=True),
+        "weekend_only_sunday_inclusive": openapi.Schema(
+            type=openapi.TYPE_BOOLEAN, nullable=True
+        ),
         "description": openapi.Schema(
             type=openapi.TYPE_STRING,
             nullable=True,
@@ -442,7 +460,9 @@ PROPERTY_DETAIL_RESPONSE_SCHEMA = openapi.Schema(
             description="Uzbek description for apartments (falls back to en/ru if empty).",
         ),
         "comment_count": openapi.Schema(type=openapi.TYPE_INTEGER),
-        "average_rating": openapi.Schema(type=openapi.TYPE_NUMBER, format="float", nullable=True),
+        "average_rating": openapi.Schema(
+            type=openapi.TYPE_NUMBER, format="float", nullable=True
+        ),
         "is_favorite": openapi.Schema(type=openapi.TYPE_BOOLEAN),
         "services": openapi.Schema(
             type=openapi.TYPE_ARRAY,
@@ -469,8 +489,12 @@ PROPERTY_DETAIL_RESPONSE_SCHEMA = openapi.Schema(
         "entrance_number": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
         "floor_number": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
         "pass_code": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-        "check_in": openapi.Schema(type=openapi.TYPE_STRING, format="time", nullable=True),
-        "check_out": openapi.Schema(type=openapi.TYPE_STRING, format="time", nullable=True),
+        "check_in": openapi.Schema(
+            type=openapi.TYPE_STRING, format="time", nullable=True
+        ),
+        "check_out": openapi.Schema(
+            type=openapi.TYPE_STRING, format="time", nullable=True
+        ),
         "is_allowed_alcohol": openapi.Schema(type=openapi.TYPE_BOOLEAN),
         "is_allowed_corporate": openapi.Schema(type=openapi.TYPE_BOOLEAN),
         "is_allowed_pets": openapi.Schema(type=openapi.TYPE_BOOLEAN),
@@ -700,7 +724,9 @@ def _fetch_prefectures(language: str, district_id: int | None = None) -> list[di
         normalized.append(
             {
                 "guid": row["id"],
-                "title": _select_title({"name": row.get("name"), "ru_name": row.get("ru_name")}, language),
+                "title": _select_title(
+                    {"name": row.get("name"), "ru_name": row.get("ru_name")}, language
+                ),
                 "district_id": row.get("district_id"),
             }
         )
@@ -748,7 +774,7 @@ def _build_location_tree(language: str) -> list[dict]:
 
 
 def _resolve_reference_date(value) -> date:
-    raw = (str(value).strip() if value is not None else "")
+    raw = str(value).strip() if value is not None else ""
     if not raw:
         return date.today()
     try:
@@ -815,19 +841,34 @@ def _get_or_set_cached_payload(request, cache_key: str, timeout: int, loader):
 
 
 _BLOCKED_IMAGE_EXTENSIONS = {"heic", "heif"}
-_BLOCKED_IMAGE_CONTENT_TYPES = {"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"}
+_BLOCKED_IMAGE_CONTENT_TYPES = {
+    "image/heic",
+    "image/heif",
+    "image/heic-sequence",
+    "image/heif-sequence",
+}
 
 
 def _validate_image_upload(uploaded):
     if uploaded is None:
         raise ValidationError({"image": [_("This field is required.")]})
     max_size = getattr(settings, "MAX_IMAGE_SIZE", 20 * 1024 * 1024)
-    allowed_ext = {ext.lower() for ext in getattr(settings, "ALLOWED_PHOTO_EXTENSION", [])} - _BLOCKED_IMAGE_EXTENSIONS
+    allowed_ext = {
+        ext.lower() for ext in getattr(settings, "ALLOWED_PHOTO_EXTENSION", [])
+    } - _BLOCKED_IMAGE_EXTENSIONS
     name = (uploaded.name or "").lower()
     ext = name.rsplit(".", 1)[-1] if "." in name else ""
     content_type = (uploaded.content_type or "").lower()
     if ext in _BLOCKED_IMAGE_EXTENSIONS or content_type in _BLOCKED_IMAGE_CONTENT_TYPES:
-        raise ValidationError({"image": [_("HEIC/HEIF images are not supported. Please upload JPG, JPEG or PNG.")]})
+        raise ValidationError(
+            {
+                "image": [
+                    _(
+                        "HEIC/HEIF images are not supported. Please upload JPG, JPEG or PNG."
+                    )
+                ]
+            }
+        )
     if allowed_ext and ext not in allowed_ext:
         raise ValidationError({"image": [_("Unsupported file extension.")]})
     if content_type and not content_type.startswith("image/"):
@@ -852,7 +893,9 @@ def _extract_list_params(source):
 
     return {
         "search": _source_get(source, "search"),
-        "region_id": _parse_int(_source_get(source, "region_id") or _source_get(source, "location_id")),
+        "region_id": _parse_int(
+            _source_get(source, "region_id") or _source_get(source, "location_id")
+        ),
         "district_id": _parse_int(_source_get(source, "district_id")),
         "corporate": corporate_filter,
         "min_price": _parse_decimal(_source_get(source, "min_price")),
@@ -861,7 +904,9 @@ def _extract_list_params(source):
     }
 
 
-def _extract_prepare_params(source, *, default_ordering="-created_at", default_limit=None):
+def _extract_prepare_params(
+    source, *, default_ordering="-created_at", default_limit=None
+):
     limit = _parse_int(_source_get(source, "limit"))
     if limit is None:
         limit = default_limit
@@ -896,7 +941,9 @@ def _list_apartment_rows(
         recommended_only=recommended_only,
         **lp,
     )
-    pp = _extract_prepare_params(source, default_ordering=default_ordering, default_limit=default_limit)
+    pp = _extract_prepare_params(
+        source, default_ordering=default_ordering, default_limit=default_limit
+    )
     return prepare_property_rows(rows, **pp)
 
 
@@ -918,7 +965,9 @@ def _list_cottage_rows(
         recommended_only=recommended_only,
         **lp,
     )
-    pp = _extract_prepare_params(source, default_ordering=default_ordering, default_limit=default_limit)
+    pp = _extract_prepare_params(
+        source, default_ordering=default_ordering, default_limit=default_limit
+    )
     return prepare_property_rows(rows, **pp)
 
 
@@ -951,7 +1000,11 @@ def _attach_partner_users(rows: list[dict]) -> list[dict]:
         payload = dict(row)
         raw_partner_id = row.get("partner_user_id")
         partner_id = _parse_int(raw_partner_id)
-        payload["partner_user"] = _serialize_partner_user(users_by_id.get(partner_id)) if partner_id is not None else None
+        payload["partner_user"] = (
+            _serialize_partner_user(users_by_id.get(partner_id))
+            if partner_id is not None
+            else None
+        )
         enriched.append(payload)
     return enriched
 
@@ -959,6 +1012,7 @@ def _attach_partner_users(rows: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Static / simple views
 # ---------------------------------------------------------------------------
+
 
 class PropertyTypeListView(APIView):
     permission_classes = [AllowAny]
@@ -991,7 +1045,9 @@ class PropertyTypeListView(APIView):
             # Keep cottage first regardless of source ordering.
             rows = sorted(
                 rows,
-                key=lambda row: 0 if str(row.get("guid")) == str(COTTAGE_TYPE_GUID) else 1,
+                key=lambda row: (
+                    0 if str(row.get("guid")) == str(COTTAGE_TYPE_GUID) else 1
+                ),
             )
             for row in rows:
                 row["icon_url"] = _build_media_url(request, row.get("icon_url"))
@@ -1123,7 +1179,9 @@ class DistrictListView(APIView):
                             "guid": row.get("region_guid"),
                             "title": row.get("region_title"),
                             "img": _build_media_url(request, row.get("region_img")),
-                        } if row.get("region_guid") else None,
+                        }
+                        if row.get("region_guid")
+                        else None,
                     }
                 )
             serializer = DistrictListSerializer(data, many=True)
@@ -1171,8 +1229,12 @@ class PrefectureListView(APIView):
     def get(self, request, *args, **kwargs):
         def _load():
             district_id = _parse_int(request.query_params.get("district_id"))
-            district_guid = (request.query_params.get("district_guid") or "").strip() or None
-            rows = list_prefectures(district_id=district_id, district_guid=district_guid)
+            district_guid = (
+                request.query_params.get("district_guid") or ""
+            ).strip() or None
+            rows = list_prefectures(
+                district_id=district_id, district_guid=district_guid
+            )
             data = []
             for row in rows:
                 data.append(
@@ -1248,7 +1310,9 @@ class CategoryListView(APIView):
         operation_description="Returns an empty list. Categories are not yet implemented.",
         tags=["Property / Meta"],
         responses={
-            200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+            200: openapi.Schema(
+                type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)
+            ),
         },
     )
     def get(self, request, *args, **kwargs):
@@ -1264,7 +1328,9 @@ class CategoryLatestPropertyListView(APIView):
         operation_description="Returns an empty list. Category-based latest properties are not yet implemented.",
         tags=["Property / Meta"],
         responses={
-            200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+            200: openapi.Schema(
+                type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)
+            ),
         },
     )
     def get(self, request, *args, **kwargs):
@@ -1280,7 +1346,9 @@ class CategoryPropertyRecommendationView(APIView):
         operation_description="Returns an empty list. Category-based recommendations are not yet implemented.",
         tags=["Property / Meta"],
         responses={
-            200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+            200: openapi.Schema(
+                type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)
+            ),
         },
     )
     def get(self, request, *args, **kwargs):
@@ -1290,6 +1358,7 @@ class CategoryPropertyRecommendationView(APIView):
 # ---------------------------------------------------------------------------
 # Recommendations (unified, returns both kinds)
 # ---------------------------------------------------------------------------
+
 
 class UnifiedRecommendationsListView(APIView):
     authentication_classes = [OptionalClientOrPartnerJWTAuthentication]
@@ -1308,14 +1377,24 @@ class UnifiedRecommendationsListView(APIView):
     )
     def get(self, request, *args, **kwargs):
         def _load():
-            property_type = str(request.query_params.get("kind") or "property").strip().lower()
-            if property_type not in {"property", "apartment", "cottage", "apartments", "cottages"}:
+            property_type = (
+                str(request.query_params.get("kind") or "property").strip().lower()
+            )
+            if property_type not in {
+                "property",
+                "apartment",
+                "cottage",
+                "apartments",
+                "cottages",
+            }:
                 return []
             source_params = request.query_params.copy()
             source_params.pop("kind", None)
             source_params.pop("type", None)
 
-            rec_type = str(request.query_params.get("type") or "featured").strip().lower()
+            rec_type = (
+                str(request.query_params.get("type") or "featured").strip().lower()
+            )
             if rec_type == "best-by-reviews":
                 ordering = "-average_rating"
             elif rec_type == "most-booked":
@@ -1323,21 +1402,48 @@ class UnifiedRecommendationsListView(APIView):
             else:
                 ordering = "-created_at"
 
-            ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
+            ctx = {
+                "request": request,
+                "favorite_guids": _favorite_guids_from_request(request),
+            }
 
             if property_type in {"apartment", "apartments"}:
-                rows = _list_apartment_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
+                rows = _list_apartment_rows(
+                    source_params,
+                    public_only=True,
+                    recommended_only=False,
+                    default_ordering=ordering,
+                    default_limit=15,
+                )
                 return ApartmentListSerializer(rows, many=True, context=ctx).data
 
             if property_type in {"cottage", "cottages"}:
-                rows = _list_cottage_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
+                rows = _list_cottage_rows(
+                    source_params,
+                    public_only=True,
+                    recommended_only=False,
+                    default_ordering=ordering,
+                    default_limit=15,
+                )
                 return CottageListSerializer(rows, many=True, context=ctx).data
 
-            apt_rows = _list_apartment_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
-            cot_rows = _list_cottage_rows(source_params, public_only=True, recommended_only=False, default_ordering=ordering, default_limit=15)
+            apt_rows = _list_apartment_rows(
+                source_params,
+                public_only=True,
+                recommended_only=False,
+                default_ordering=ordering,
+                default_limit=15,
+            )
+            cot_rows = _list_cottage_rows(
+                source_params,
+                public_only=True,
+                recommended_only=False,
+                default_ordering=ordering,
+                default_limit=15,
+            )
             combined = (
-                ApartmentListSerializer(apt_rows, many=True, context=ctx).data
-                + CottageListSerializer(cot_rows, many=True, context=ctx).data
+                ApartmentListSerializer(apt_rows, many=True, context=ctx).data,
+                CottageListSerializer(cot_rows, many=True, context=ctx).data,
             )
             return combined[:15]
 
@@ -1353,6 +1459,7 @@ class UnifiedRecommendationsListView(APIView):
 # ---------------------------------------------------------------------------
 # Apartment views
 # ---------------------------------------------------------------------------
+
 
 class ApartmentPropertyListCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
@@ -1376,21 +1483,24 @@ class ApartmentPropertyListCreateView(APIView):
     )
     def get(self, request, *args, **kwargs):
         query_params = request.query_params.copy()
-        query_params.pop('limit', None)
-        
+        query_params.pop("limit", None)
+
         rows = _list_apartment_rows(
             query_params,
             public_only=True,
             default_limit=None,
         )
-        ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+
         paginator = self.pagination_class()
         paginated_data = paginator.paginate_queryset(rows, request)
         if paginated_data is not None:
             serializer = ApartmentListSerializer(paginated_data, many=True, context=ctx)
             return paginator.get_paginated_response(serializer.data)
-        
+
         serializer = ApartmentListSerializer(rows, many=True, context=ctx)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -1405,7 +1515,9 @@ class ApartmentPropertyListCreateView(APIView):
                 type=openapi.TYPE_OBJECT,
                 properties={
                     "detail": openapi.Schema(type=openapi.TYPE_STRING),
-                    "property_id": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                    "property_id": openapi.Schema(
+                        type=openapi.TYPE_STRING, format="uuid"
+                    ),
                     "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
                 },
             ),
@@ -1415,7 +1527,7 @@ class ApartmentPropertyListCreateView(APIView):
         },
     )
     def post(self, request, *args, **kwargs):
-        serializer = ApartmentCreateSerializer(data=request.data)
+        serializer = ApartmentCreateSerializer(data=request.data, is_partner=True)
         serializer.is_valid(raise_exception=True)
         created = create_apartment(
             partner_user_id=int(request.user.id),
@@ -1424,7 +1536,13 @@ class ApartmentPropertyListCreateView(APIView):
         if not created:
             raise ValidationError(_("Apartment could not be created"))
         return Response(
-            {"detail": _("Property has been created successfully, please wait while we verify it"), "property_id": str(created["guid"]), "status_code": 201},
+            {
+                "detail": _(
+                    "Property has been created successfully, please wait while we verify it"
+                ),
+                "property_id": str(created["guid"]),
+                "status_code": 201,
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -1432,6 +1550,7 @@ class ApartmentPropertyListCreateView(APIView):
 # ---------------------------------------------------------------------------
 # Cottage views
 # ---------------------------------------------------------------------------
+
 
 class CottagePropertyListCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
@@ -1455,21 +1574,24 @@ class CottagePropertyListCreateView(APIView):
     )
     def get(self, request, *args, **kwargs):
         query_params = request.query_params.copy()
-        query_params.pop('limit', None)
-        
+        query_params.pop("limit", None)
+
         rows = _list_cottage_rows(
             query_params,
             public_only=True,
             default_limit=None,
         )
-        ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+
         paginator = self.pagination_class()
         paginated_data = paginator.paginate_queryset(rows, request)
         if paginated_data is not None:
             serializer = CottageListSerializer(paginated_data, many=True, context=ctx)
             return paginator.get_paginated_response(serializer.data)
-        
+
         serializer = CottageListSerializer(rows, many=True, context=ctx)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -1484,7 +1606,9 @@ class CottagePropertyListCreateView(APIView):
                 type=openapi.TYPE_OBJECT,
                 properties={
                     "detail": openapi.Schema(type=openapi.TYPE_STRING),
-                    "property_id": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                    "property_id": openapi.Schema(
+                        type=openapi.TYPE_STRING, format="uuid"
+                    ),
                     "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
                 },
             ),
@@ -1503,7 +1627,13 @@ class CottagePropertyListCreateView(APIView):
         if not created:
             raise ValidationError(_("Cottage could not be created"))
         return Response(
-            {"detail": _("Property has been created successfully, please wait while we verify it"), "property_id": str(created["guid"]), "status_code": 201},
+            {
+                "detail": _(
+                    "Property has been created successfully, please wait while we verify it"
+                ),
+                "property_id": str(created["guid"]),
+                "status_code": 201,
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -1511,6 +1641,7 @@ class CottagePropertyListCreateView(APIView):
 # ---------------------------------------------------------------------------
 # Kept for URL compat: generic PropertyListCreateView delegates to kind-specific
 # ---------------------------------------------------------------------------
+
 
 class PropertyListCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
@@ -1531,7 +1662,10 @@ class PropertyListCreateView(APIView):
         responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
     )
     def get(self, request, *args, **kwargs):
-        ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
         requested_kind = self.forced_property_type or parse_property_kind(
             request.query_params.get("property_type")
         )
@@ -1553,15 +1687,31 @@ class PropertyListCreateView(APIView):
         if self.forced_property_type == PROPERTY_KIND_COTTAGE:
             serializer = CottageCreateSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
-            created = create_cottage(partner_user_id=int(request.user.id), values=serializer.validated_data["normalized_values"])
+            created = create_cottage(
+                partner_user_id=int(request.user.id),
+                values=serializer.validated_data["normalized_values"],
+            )
         else:
-            serializer = ApartmentCreateSerializer(data=request.data)
+            serializer = ApartmentCreateSerializer(
+                data=request.data,
+                partial=True,
+                context={"is_partner": True, "request": request},
+            )
             serializer.is_valid(raise_exception=True)
-            created = create_apartment(partner_user_id=int(request.user.id), values=serializer.validated_data["normalized_values"])
+            created = create_apartment(
+                partner_user_id=int(request.user.id),
+                values=serializer.validated_data["normalized_values"],
+            )
         if not created:
             raise ValidationError(_("Property could not be created"))
         return Response(
-            {"detail": _("Property has been created successfully, please wait while we verify it"), "property_id": str(created["guid"]), "status_code": 201},
+            {
+                "detail": _(
+                    "Property has been created successfully, please wait while we verify it"
+                ),
+                "property_id": str(created["guid"]),
+                "status_code": 201,
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -1579,7 +1729,9 @@ class PropertyFilterByLinkView(APIView):
             200: openapi.Schema(
                 type=openapi.TYPE_OBJECT,
                 properties={
-                    "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid", nullable=True),
+                    "guid": openapi.Schema(
+                        type=openapi.TYPE_STRING, format="uuid", nullable=True
+                    ),
                 },
             ),
             400: _ERROR_VALIDATION_SCHEMA,
@@ -1589,11 +1741,21 @@ class PropertyFilterByLinkView(APIView):
         payload = request.data or {}
         url = str(payload.get("url") or payload.get("link") or "").strip()
         if not url:
-            return Response({"url": [_("This field is required.")]}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"url": [_("This field is required.")]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         parsed = parse_qs(urlparse(url).query)
-        ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        apt_rows = _list_apartment_rows(parsed, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT)
-        cot_rows = _list_cottage_rows(parsed, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT)
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        apt_rows = _list_apartment_rows(
+            parsed, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT
+        )
+        cot_rows = _list_cottage_rows(
+            parsed, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT
+        )
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
             + CottageListSerializer(cot_rows, many=True, context=ctx).data
@@ -1621,9 +1783,16 @@ class RegionPropertyListView(APIView):
             return Response([], status=status.HTTP_200_OK)
         mutable = request.query_params.copy()
         mutable["region_id"] = str(region_id)
-        ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
-        apt_rows = _list_apartment_rows(mutable, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT)
-        cot_rows = _list_cottage_rows(mutable, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT)
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        apt_rows = _list_apartment_rows(
+            mutable, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT
+        )
+        cot_rows = _list_cottage_rows(
+            mutable, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT
+        )
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
             + CottageListSerializer(cot_rows, many=True, context=ctx).data
@@ -1634,6 +1803,7 @@ class RegionPropertyListView(APIView):
 # ---------------------------------------------------------------------------
 # Retrieve / Update / Delete  (kind-aware, looks up in both tables)
 # ---------------------------------------------------------------------------
+
 
 def _get_property_for_public(guid: str):
     row = get_apartment_for_public(guid)
@@ -1700,7 +1870,10 @@ class PropertyRetrieveUpdateDestroyView(APIView):
     )
     def get(self, request, property_id, *args, **kwargs):
         row = self._read_property_or_404(str(property_id))
-        ctx = {"request": request, "favorite_guids": _favorite_guids_from_request(request)}
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
         property_type = str(row.get("property_kind") or "")
         if property_type == PROPERTY_KIND_COTTAGE:
             serializer = CottageDetailSerializer(row, context=ctx)
@@ -1708,69 +1881,88 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             serializer = ApartmentDetailSerializer(row, context=ctx)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    @swagger_auto_schema(
-        operation_id="partialUpdateApartment",
-        operation_summary="Partially update an apartment",
-        operation_description="Partner-only partial update for an apartment. Mutating fields resets verification status to pending.",
-        tags=["Property / Partner"],
-        request_body=ApartmentUpdateSerializer,
-        responses={
-            200: openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
-                    "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
-                    "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-                },
-            ),
-            400: _ERROR_VALIDATION_SCHEMA,
-            401: _ERROR_DETAIL_SCHEMA,
-            403: _ERROR_DETAIL_SCHEMA,
-            404: _ERROR_DETAIL_SCHEMA,
-        },
-    )
-    def patch(self, request, property_id, *args, **kwargs):
-        return self._update(request, property_id, partial=True)
+    # @swagger_auto_schema(
+    #     operation_id="fullUpdateApartment",
+    #     operation_summary="Full update a property",
+    #     operation_description="Partner-only update for an apartment. Mutating fields resets verification status to pending.",
+    #     tags=["Property / Partner"],
+    #     request_body=ApartmentUpdateSerializer,
+    #     responses={
+    #         200: openapi.Schema(
+    #             type=openapi.TYPE_OBJECT,
+    #             properties={
+    #                 "detail": openapi.Schema(type=openapi.TYPE_STRING),
+    #                 "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
+    #                 "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+    #             },
+    #         ),
+    #         400: _ERROR_VALIDATION_SCHEMA,
+    #         401: _ERROR_DETAIL_SCHEMA,
+    #         403: _ERROR_DETAIL_SCHEMA,
+    #         404: _ERROR_DETAIL_SCHEMA,
+    #     },
+    # )
+    # def patch(self, request, property_id, *args, **kwargs):
+    #     return self._update(request, property_id)
 
-    def _update(self, request, property_id, *, partial: bool):
-        current = self._partner_property_or_404(str(property_id))
-        property_type = str(current["property_kind"])
-        logger.info(
-            "property_update_request property_id=%s property_type=%s partner_user_id=%s payload_keys=%s",
-            property_id,
-            property_type,
-            getattr(request.user, "id", None),
-            sorted((request.data or {}).keys()) if hasattr(request.data, "keys") else [],
-        )
-        if property_type == PROPERTY_KIND_COTTAGE:
-            serializer = CottageUpdateSerializer(data=request.data, partial=partial, context={"is_update": True})
-            serializer.is_valid(raise_exception=True)
-            logger.info(
-                "property_update_normalized property_id=%s property_type=cottage normalized_keys=%s",
-                property_id,
-                sorted(serializer.validated_data.get("normalized_values", {}).keys()),
-            )
-            updated = update_cottage(cottage_id=int(current["id"]), partner_user_id=int(request.user.id), values=serializer.validated_data["normalized_values"])
-        else:
-            serializer = ApartmentUpdateSerializer(data=request.data, partial=partial, context={"is_update": True})
-            serializer.is_valid(raise_exception=True)
-            normalized = serializer.validated_data.get("normalized_values", {})
-            logger.info(
-                "property_update_normalized property_id=%s property_type=apartment normalized_keys=%s services_count=%s desc_ru_len=%s desc_uz_len=%s",
-                property_id,
-                sorted(normalized.keys()),
-                len(normalized.get("services") or []),
-                len(str(normalized.get("description_ru") or "")),
-                len(str(normalized.get("description_uz") or "")),
-            )
-            updated = update_apartment(apartment_id=int(current["id"]), partner_user_id=int(request.user.id), values=serializer.validated_data["normalized_values"])
-        if not updated:
-            raise NotFound(_("Property not found"))
-        is_verified = bool(updated.get("is_verified"))
-        payload = {"detail": "Your changes have been saved successfully", "status_code": 200}
-        if not is_verified:
-            payload["warning"] = "Property has been sent for re-verification, please wait while we verify it"
-        return Response(payload, status=status.HTTP_200_OK)
+    # def _update(self, request, property_id, *, partial: bool):
+    #     current = self._partner_property_or_404(str(property_id))
+    #     property_type = str(current["property_kind"])
+    #     logger.info(
+    #         "property_update_request property_id=%s property_type=%s partner_user_id=%s payload_keys=%s",
+    #         property_id,
+    #         property_type,
+    #         getattr(request.user, "id", None),
+    #         sorted((request.data or {}).keys())
+    #         if hasattr(request.data, "keys")
+    #         else [],
+    #     )
+    #     if property_type == PROPERTY_KIND_COTTAGE:
+    #         serializer = CottageUpdateSerializer(
+    #             data=request.data, partial=partial, context={"is_update": True}
+    #         )
+    #         serializer.is_valid(raise_exception=True)
+    #         logger.info(
+    #             "property_update_normalized property_id=%s property_type=cottage normalized_keys=%s",
+    #             property_id,
+    #             sorted(serializer.validated_data.get("normalized_values", {}).keys()),
+    #         )
+    #         updated = update_cottage(
+    #             cottage_id=int(current["id"]),
+    #             partner_user_id=int(request.user.id),
+    #             values=serializer.validated_data["normalized_values"],
+    #         )
+    #     else:
+    #         serializer = ApartmentUpdateSerializer(
+    #             data=request.data, partial=partial, context={"request": request}
+    #         )
+    #         serializer.is_valid(raise_exception=True)
+    #         normalized = serializer.validated_data.get("normalized_values", {})
+    #         logger.info(
+    #             "property_update_normalized property_id=%s property_type=apartment normalized_keys=%s services_count=%s desc_ru_len=%s desc_uz_len=%s",
+    #             property_id,
+    #             sorted(normalized.keys()),
+    #             len(normalized.get("services") or []),
+    #             len(str(normalized.get("description_ru") or "")),
+    #             len(str(normalized.get("description_uz") or "")),
+    #         )
+    #         updated = update_apartment(
+    #             apartment_id=int(current["id"]),
+    #             partner_user_id=int(request.user.id),
+    #             values=serializer.validated_data["normalized_values"],
+    #         )
+    #     if not updated:
+    #         raise NotFound(_("Property not found"))
+    #     is_verified = bool(updated.get("is_verified"))
+    #     payload = {
+    #         "detail": "Your changes have been saved successfully",
+    #         "status_code": 200,
+    #     }
+    #     if not is_verified:
+    #         payload["warning"] = (
+    #             "Property has been sent for re-verification, please wait while we verify it"
+    #         )
+    #     return Response(payload, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         operation_id="deleteProperty",
@@ -1788,9 +1980,13 @@ class PropertyRetrieveUpdateDestroyView(APIView):
         current = self._partner_property_or_404(str(property_id))
         property_type = str(current["property_kind"])
         if property_type == PROPERTY_KIND_COTTAGE:
-            deleted = delete_cottage(cottage_id=int(current["id"]), partner_user_id=int(request.user.id))
+            deleted = delete_cottage(
+                cottage_id=int(current["id"]), partner_user_id=int(request.user.id)
+            )
         else:
-            deleted = delete_apartment(apartment_id=int(current["id"]), partner_user_id=int(request.user.id))
+            deleted = delete_apartment(
+                apartment_id=int(current["id"]), partner_user_id=int(request.user.id)
+            )
         if not deleted:
             raise NotFound(_("Property not found"))
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -1830,6 +2026,7 @@ class CottagePropertyRetrieveUpdateDestroyView(PropertyRetrieveUpdateDestroyView
 # ---------------------------------------------------------------------------
 # Image views
 # ---------------------------------------------------------------------------
+
 
 class PropertyImageCreateView(APIView):
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
@@ -1900,22 +2097,42 @@ class PropertyImageCreateView(APIView):
             _validate_image_upload(file)
 
         uploaded = uploaded_files[0]
-        saved_path = default_storage.save(f"property/images/{uuid4()}_{uploaded.name}", uploaded)
+        saved_path = default_storage.save(
+            f"property/images/{uuid4()}_{uploaded.name}", uploaded
+        )
 
         property_type = str(property_row["property_kind"])
         if property_type == PROPERTY_KIND_COTTAGE:
-            updated = set_cottage_primary_image(cottage_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=saved_path)
+            updated = set_cottage_primary_image(
+                cottage_id=int(property_row["id"]),
+                partner_user_id=int(request.user.id),
+                image_path=saved_path,
+            )
         else:
-            updated = set_apartment_primary_image(apartment_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=saved_path)
+            updated = set_apartment_primary_image(
+                apartment_id=int(property_row["id"]),
+                partner_user_id=int(request.user.id),
+                image_path=saved_path,
+            )
 
         if not updated:
             raise NotFound(_("Property not found"))
 
         if not bool(updated.get("is_verified")):
-            return Response({"detail": "Your image(s) are pending approval", "status": "pending"}, status=status.HTTP_200_OK)
+            return Response(
+                {"detail": "Your image(s) are pending approval", "status": "pending"},
+                status=status.HTTP_200_OK,
+            )
 
         return Response(
-            [{"guid": uuid4(), "order": 1, "is_pending": False, "image_url": _build_media_url(request, updated.get("img"))}],
+            [
+                {
+                    "guid": uuid4(),
+                    "order": 1,
+                    "is_pending": False,
+                    "image_url": _build_media_url(request, updated.get("img")),
+                }
+            ],
             status=status.HTTP_201_CREATED,
         )
 
@@ -1980,18 +2197,34 @@ class PropertyImageUpdateDeleteView(APIView):
         image_path = property_row.get("img")
         if uploaded is not None:
             _validate_image_upload(uploaded)
-            image_path = default_storage.save(f"property/images/{uuid4()}_{uploaded.name}", uploaded)
+            image_path = default_storage.save(
+                f"property/images/{uuid4()}_{uploaded.name}", uploaded
+            )
             property_type = str(property_row["property_kind"])
             if property_type == PROPERTY_KIND_COTTAGE:
-                updated = set_cottage_primary_image(cottage_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=image_path)
+                updated = set_cottage_primary_image(
+                    cottage_id=int(property_row["id"]),
+                    partner_user_id=int(request.user.id),
+                    image_path=image_path,
+                )
             else:
-                updated = set_apartment_primary_image(apartment_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=image_path)
+                updated = set_apartment_primary_image(
+                    apartment_id=int(property_row["id"]),
+                    partner_user_id=int(request.user.id),
+                    image_path=image_path,
+                )
             if not updated:
                 raise NotFound(_("Property not found"))
         elif not image_path:
             raise NotFound(_("Property image not found"))
 
-        return Response({"detail": _("Your image has been updated and is pending approval"), "status": "pending"}, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "detail": _("Your image has been updated and is pending approval"),
+                "status": "pending",
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @swagger_auto_schema(
         operation_id="deletePropertyImage",
@@ -2031,9 +2264,17 @@ class PropertyImageUpdateDeleteView(APIView):
 
         property_type = str(property_row["property_kind"])
         if property_type == PROPERTY_KIND_COTTAGE:
-            updated = set_cottage_primary_image(cottage_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=None)
+            updated = set_cottage_primary_image(
+                cottage_id=int(property_row["id"]),
+                partner_user_id=int(request.user.id),
+                image_path=None,
+            )
         else:
-            updated = set_apartment_primary_image(apartment_id=int(property_row["id"]), partner_user_id=int(request.user.id), image_path=None)
+            updated = set_apartment_primary_image(
+                apartment_id=int(property_row["id"]),
+                partner_user_id=int(request.user.id),
+                image_path=None,
+            )
         if not updated:
             raise NotFound(_("Property not found"))
         try:
@@ -2046,6 +2287,7 @@ class PropertyImageUpdateDeleteView(APIView):
 # ---------------------------------------------------------------------------
 # Reviews  (shared — reviews reference both kinds)
 # ---------------------------------------------------------------------------
+
 
 class PropertyReviewListCreateView(APIView):
     authentication_classes = [ClientJWTAuthentication]
@@ -2082,8 +2324,14 @@ class PropertyReviewListCreateView(APIView):
     )
     def get(self, request, property_id, *args, **kwargs):
         property_row = self._get_property_or_404(str(property_id))
-        rows = list_reviews(property_kind=str(property_row["property_kind"]), property_id=int(property_row["id"]), include_hidden=False)
-        return Response(RawPropertyReviewSerializer(rows, many=True).data, status=status.HTTP_200_OK)
+        rows = list_reviews(
+            property_kind=str(property_row["property_kind"]),
+            property_id=int(property_row["id"]),
+            include_hidden=False,
+        )
+        return Response(
+            RawPropertyReviewSerializer(rows, many=True).data, status=status.HTTP_200_OK
+        )
 
     @swagger_auto_schema(
         operation_id="createPropertyReview",
@@ -2113,9 +2361,15 @@ class PropertyReviewListCreateView(APIView):
         serializer = RawPropertyReviewCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        can_review = has_eligible_booking_for_review(client_user_id=int(request.user.id), property_kind=str(property_row["property_kind"]), property_id=int(property_row["id"]))
+        can_review = has_eligible_booking_for_review(
+            client_user_id=int(request.user.id),
+            property_kind=str(property_row["property_kind"]),
+            property_id=int(property_row["id"]),
+        )
         if not can_review:
-            raise ValidationError(_("You can leave a review only for accepted or completed bookings"))
+            raise ValidationError(
+                _("You can leave a review only for accepted or completed bookings")
+            )
 
         created = create_review(
             client_user_id=int(request.user.id),
@@ -2126,7 +2380,9 @@ class PropertyReviewListCreateView(APIView):
         )
         if not created:
             raise ValidationError(_("Review could not be created"))
-        return Response(RawPropertyReviewSerializer(created).data, status=status.HTTP_201_CREATED)
+        return Response(
+            RawPropertyReviewSerializer(created).data, status=status.HTTP_201_CREATED
+        )
 
 
 class PartnerPropertyReviewListView(APIView):
@@ -2158,8 +2414,14 @@ class PartnerPropertyReviewListView(APIView):
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
             raise NotFound(_("Property not found"))
-        rows = list_reviews(property_kind=str(property_row["property_kind"]), property_id=int(property_row["id"]), include_hidden=True)
-        return Response(RawPropertyReviewSerializer(rows, many=True).data, status=status.HTTP_200_OK)
+        rows = list_reviews(
+            property_kind=str(property_row["property_kind"]),
+            property_id=int(property_row["id"]),
+            include_hidden=True,
+        )
+        return Response(
+            RawPropertyReviewSerializer(rows, many=True).data, status=status.HTTP_200_OK
+        )
 
 
 ANALYTICS_RANGE_DAYS = {
@@ -2201,7 +2463,9 @@ def _format_amount(amount: Decimal) -> str:
     return str(Decimal(amount).quantize(Decimal("0.01")))
 
 
-def _build_analytics_series(start_date: date, end_date: date, values_by_date: dict[str, float | int]) -> list[dict[str, float | int | str]]:
+def _build_analytics_series(
+    start_date: date, end_date: date, values_by_date: dict[str, float | int]
+) -> list[dict[str, float | int | str]]:
     series: list[dict[str, float | int | str]] = []
     current = start_date
     while current <= end_date:
@@ -2211,7 +2475,9 @@ def _build_analytics_series(start_date: date, end_date: date, values_by_date: di
     return series
 
 
-def _summarize_bookings(rows: list[dict], start_date: date, end_date: date) -> dict[str, object]:
+def _summarize_bookings(
+    rows: list[dict], start_date: date, end_date: date
+) -> dict[str, object]:
     booked_count = 0
     cancelled_count = 0
     no_show_count = 0
@@ -2228,13 +2494,18 @@ def _summarize_bookings(rows: list[dict], start_date: date, end_date: date) -> d
         confirmed_at = row.get("confirmed_at") or row.get("completed_at")
         if confirmed_at:
             confirmed_date = _as_date(confirmed_at)
-            if start_date <= confirmed_date <= end_date and str(row.get("status") or "").lower() in {"confirmed", "completed"}:
+            if start_date <= confirmed_date <= end_date and str(
+                row.get("status") or ""
+            ).lower() in {"confirmed", "completed"}:
                 booked_count += 1
 
         cancelled_at = row.get("cancelled_at")
         if cancelled_at:
             cancelled_date = _as_date(cancelled_at)
-            if start_date <= cancelled_date <= end_date and str(row.get("status") or "").lower() == "cancelled":
+            if (
+                start_date <= cancelled_date <= end_date
+                and str(row.get("status") or "").lower() == "cancelled"
+            ):
                 cancelled_count += 1
                 reason = str(row.get("cancellation_reason") or "").strip().lower()
                 if reason == "user_no_show":
@@ -2251,7 +2522,9 @@ def _summarize_bookings(rows: list[dict], start_date: date, end_date: date) -> d
     }
 
 
-def _summarize_income(rows: list[dict], start_date: date, end_date: date) -> dict[str, object]:
+def _summarize_income(
+    rows: list[dict], start_date: date, end_date: date
+) -> dict[str, object]:
     total = Decimal("0")
     bars: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
     count = 0
@@ -2304,21 +2577,33 @@ class PartnerPropertyAnalyticsView(APIView):
                     "property": openapi.Schema(
                         type=openapi.TYPE_OBJECT,
                         properties={
-                            "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                            "guid": openapi.Schema(
+                                type=openapi.TYPE_STRING, format="uuid"
+                            ),
                             "title": openapi.Schema(type=openapi.TYPE_STRING),
-                            "image_url": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-                            "city": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                            "image_url": openapi.Schema(
+                                type=openapi.TYPE_STRING, nullable=True
+                            ),
+                            "city": openapi.Schema(
+                                type=openapi.TYPE_STRING, nullable=True
+                            ),
                         },
                     ),
                     "range": openapi.Schema(type=openapi.TYPE_STRING),
                     "bookings_overview": openapi.Schema(type=openapi.TYPE_OBJECT),
-                    "bookings_activity": openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+                    "bookings_activity": openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                    ),
                     "income_overview": openapi.Schema(
                         type=openapi.TYPE_OBJECT,
                         properties={
                             "balance_amount": openapi.Schema(type=openapi.TYPE_STRING),
                             "currency": openapi.Schema(type=openapi.TYPE_STRING),
-                            "bars": openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
+                            "bars": openapi.Schema(
+                                type=openapi.TYPE_ARRAY,
+                                items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                            ),
                         },
                     ),
                 },
@@ -2347,7 +2632,9 @@ class PartnerPropertyAnalyticsView(APIView):
         if range_name not in ANALYTICS_RANGE_DAYS:
             raise ValidationError({"range": _("Invalid range")})
 
-        start_date, end_date, previous_start_date, previous_end_date = _analytics_range_bounds(range_name)
+        start_date, end_date, previous_start_date, previous_end_date = (
+            _analytics_range_bounds(range_name)
+        )
         property_column = _analytics_property_id_column(property_kind)
         property_table = get_table_name("booking")
         transaction_table = get_table_name("transaction_history")
@@ -2376,27 +2663,38 @@ class PartnerPropertyAnalyticsView(APIView):
         )
 
         current_bookings = _summarize_bookings(booking_rows, start_date, end_date)
-        previous_bookings = _summarize_bookings(booking_rows, previous_start_date, previous_end_date)
+        previous_bookings = _summarize_bookings(
+            booking_rows, previous_start_date, previous_end_date
+        )
         current_income = _summarize_income(income_rows, start_date, end_date)
 
         booked_count = int(current_bookings["booked_count"])
         cancelled_count = int(current_bookings["cancelled_count"])
         no_show_count = int(current_bookings["no_show_count"])
-        cancelled_after_booking_count = int(current_bookings["cancelled_after_booking_count"])
+        cancelled_after_booking_count = int(
+            current_bookings["cancelled_after_booking_count"]
+        )
 
         previous_booked_count = int(previous_bookings["booked_count"])
         previous_cancelled_count = int(previous_bookings["cancelled_count"])
         previous_no_show_count = int(previous_bookings["no_show_count"])
-        previous_cancelled_after_booking_count = int(previous_bookings["cancelled_after_booking_count"])
+        previous_cancelled_after_booking_count = int(
+            previous_bookings["cancelled_after_booking_count"]
+        )
 
         booked_change_percent = _change_percent(booked_count, previous_booked_count)
-        cancelled_change_percent = _change_percent(cancelled_count, previous_cancelled_count)
+        cancelled_change_percent = _change_percent(
+            cancelled_count, previous_cancelled_count
+        )
         no_show_change_percent = _change_percent(no_show_count, previous_no_show_count)
         cancelled_after_booking_change_percent = _change_percent(
             cancelled_after_booking_count,
             previous_cancelled_after_booking_count,
         )
-        comparison_percent = _change_percent(booked_count + cancelled_count, previous_booked_count + previous_cancelled_count)
+        comparison_percent = _change_percent(
+            booked_count + cancelled_count,
+            previous_booked_count + previous_cancelled_count,
+        )
 
         income_total = Decimal(current_income["total"])
         charged_count = int(current_income["count"])
@@ -2443,11 +2741,20 @@ class PartnerPropertyAnalyticsView(APIView):
                     "cancelled_after_booking_change_percent": cancelled_after_booking_change_percent,
                     "distribution": distribution,
                 },
-                "bookings_activity": _build_analytics_series(start_date, end_date, dict(current_bookings["activity"])),
+                "bookings_activity": _build_analytics_series(
+                    start_date, end_date, dict(current_bookings["activity"])
+                ),
                 "income_overview": {
                     "balance_amount": _format_amount(income_total),
                     "currency": str(full_property.get("currency") or "UZS"),
-                    "bars": _build_analytics_series(start_date, end_date, {key: float(value) for key, value in dict(current_income["bars"]).items()}),
+                    "bars": _build_analytics_series(
+                        start_date,
+                        end_date,
+                        {
+                            key: float(value)
+                            for key, value in dict(current_income["bars"]).items()
+                        },
+                    ),
                 },
             },
             status=status.HTTP_200_OK,
@@ -2458,6 +2765,7 @@ class PartnerPropertyAnalyticsView(APIView):
 # Partner property list
 # ---------------------------------------------------------------------------
 
+
 class PartnerPropertyListView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     permission_classes = [IsPartner]
@@ -2467,7 +2775,8 @@ class PartnerPropertyListView(APIView):
         operation_summary="List partner properties",
         operation_description="Partner-only. Returns the authenticated partner's own apartments and cottages, including unverified and archived. Supports the same filters as public list.",
         tags=["Property / Partner"],
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS
+        + [
             openapi.Parameter(
                 "property_type",
                 openapi.IN_QUERY,
@@ -2495,7 +2804,9 @@ class PartnerPropertyListView(APIView):
                 partner_user_id=partner_id,
                 default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
             )
-            return Response(ApartmentPartnerListSerializer(rows, many=True, context=ctx).data)
+            return Response(
+                ApartmentPartnerListSerializer(rows, many=True, context=ctx).data
+            )
         if property_type == PROPERTY_KIND_COTTAGE:
             rows = _list_cottage_rows(
                 request.query_params,
@@ -2503,7 +2814,9 @@ class PartnerPropertyListView(APIView):
                 partner_user_id=partner_id,
                 default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
             )
-            return Response(CottagePartnerListSerializer(rows, many=True, context=ctx).data)
+            return Response(
+                CottagePartnerListSerializer(rows, many=True, context=ctx).data
+            )
 
         apt_rows = _list_apartment_rows(
             request.query_params,
@@ -2533,7 +2846,8 @@ class PartnerAllPropertyListView(APIView):
         operation_summary="List all properties for a partner",
         operation_description="Admin or Partner. Returns every property owned by a partner (or the authenticated partner). Admins can pass partner_id to query another partner's listings.",
         tags=["Property / Partner"],
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS
+        + [
             openapi.Parameter(
                 "partner_id",
                 openapi.IN_QUERY,
@@ -2555,7 +2869,11 @@ class PartnerAllPropertyListView(APIView):
             raw = request.query_params.get("partner_id")
             if raw is None or str(raw).strip() == "":
                 raise ValidationError(
-                    {"partner_id": _("This field is required when using an admin token.")}
+                    {
+                        "partner_id": _(
+                            "This field is required when using an admin token."
+                        )
+                    }
                 )
             try:
                 partner_id = int(str(raw).strip())
@@ -2621,13 +2939,25 @@ class AdminAllPropertiesListView(APIView):
             default_limit=None,
         )
         if requested_kind == PROPERTY_KIND_APARTMENT:
-            rows = _attach_partner_users(_list_apartment_rows(request.query_params, **list_kwargs))
-            return Response(ApartmentAdminListSerializer(rows, many=True, context=ctx).data)
+            rows = _attach_partner_users(
+                _list_apartment_rows(request.query_params, **list_kwargs)
+            )
+            return Response(
+                ApartmentAdminListSerializer(rows, many=True, context=ctx).data
+            )
         if requested_kind == PROPERTY_KIND_COTTAGE:
-            rows = _attach_partner_users(_list_cottage_rows(request.query_params, **list_kwargs))
-            return Response(CottageAdminListSerializer(rows, many=True, context=ctx).data)
-        apt_rows = _attach_partner_users(_list_apartment_rows(request.query_params, **list_kwargs))
-        cot_rows = _attach_partner_users(_list_cottage_rows(request.query_params, **list_kwargs))
+            rows = _attach_partner_users(
+                _list_cottage_rows(request.query_params, **list_kwargs)
+            )
+            return Response(
+                CottageAdminListSerializer(rows, many=True, context=ctx).data
+            )
+        apt_rows = _attach_partner_users(
+            _list_apartment_rows(request.query_params, **list_kwargs)
+        )
+        cot_rows = _attach_partner_users(
+            _list_cottage_rows(request.query_params, **list_kwargs)
+        )
         data = (
             ApartmentAdminListSerializer(apt_rows, many=True, context=ctx).data
             + CottageAdminListSerializer(cot_rows, many=True, context=ctx).data
@@ -2654,7 +2984,9 @@ class AdminRegionListView(APIView):
             payload = dict(row)
             payload["img"] = _build_media_url(request, payload.get("img"))
             data.append(payload)
-        return Response(RegionListSerializer(data, many=True).data, status=status.HTTP_200_OK)
+        return Response(
+            RegionListSerializer(data, many=True).data, status=status.HTTP_200_OK
+        )
 
 
 class AdminDistrictListView(APIView):
@@ -2694,10 +3026,14 @@ class AdminDistrictListView(APIView):
                         "guid": row.get("region_guid"),
                         "title": row.get("region_title"),
                         "img": _build_media_url(request, row.get("region_img")),
-                    } if row.get("region_guid") else None,
+                    }
+                    if row.get("region_guid")
+                    else None,
                 }
             )
-        return Response(DistrictListSerializer(data, many=True).data, status=status.HTTP_200_OK)
+        return Response(
+            DistrictListSerializer(data, many=True).data, status=status.HTTP_200_OK
+        )
 
 
 class AdminPrefectureListView(APIView):
@@ -2730,7 +3066,9 @@ class AdminPrefectureListView(APIView):
     )
     def get(self, request, *args, **kwargs):
         district_id = _parse_int(request.query_params.get("district_id"))
-        district_guid = (request.query_params.get("district_guid") or "").strip() or None
+        district_guid = (
+            request.query_params.get("district_guid") or ""
+        ).strip() or None
         rows = list_prefectures(district_id=district_id, district_guid=district_guid)
         data = []
         for row in rows:
@@ -2746,7 +3084,9 @@ class AdminPrefectureListView(APIView):
                     else None,
                 }
             )
-        return Response(PrefectureListSerializer(data, many=True).data, status=status.HTTP_200_OK)
+        return Response(
+            PrefectureListSerializer(data, many=True).data, status=status.HTTP_200_OK
+        )
 
 
 class AdminApartmentPatchView(APIView):
@@ -2767,19 +3107,24 @@ class AdminApartmentPatchView(APIView):
             raise NotFound(_("Apartment not found"))
         partner_id = _parse_int(row.get("partner_user_id"))
         row = dict(row)
-        row["partner_user"] = _serialize_partner_user(get_user_by_id(partner_id)) if partner_id is not None else None
+        row["partner_user"] = (
+            _serialize_partner_user(get_user_by_id(partner_id))
+            if partner_id is not None
+            else None
+        )
         ctx = {"request": request}
-        return Response(ApartmentAdminListSerializer(row, context=ctx).data, status=status.HTTP_200_OK)
+        return Response(
+            ApartmentAdminListSerializer(row, context=ctx).data,
+            status=status.HTTP_200_OK,
+        )
 
     @swagger_auto_schema(
         tags=["Admin / Property"],
         operation_summary="Patch apartment (admin)",
         operation_description=(
-            "Admin-only partial update for every writable field on the apartment table, "
-            "including verification/archival/recommendation flags and owner reassignment. "
-            "Unlike the partner endpoint, this does NOT auto-reset verification on save."
+            "Admin-only full update for every writable field on the apartment table, "
         ),
-        request_body=ApartmentAdminUpdateSerializer,
+        request_body=ApartmentUpdateSerializer,
         responses={200: ApartmentAdminListSerializer},
     )
     def patch(self, request, apartment_id, *args, **kwargs):
@@ -2787,7 +3132,7 @@ class AdminApartmentPatchView(APIView):
         if not current:
             raise NotFound(_("Apartment not found"))
 
-        serializer = ApartmentAdminUpdateSerializer(
+        serializer = ApartmentUpdateSerializer(
             data=request.data,
             partial=True,
             context={"is_update": True, "is_admin": True, "request": request},
@@ -2811,9 +3156,16 @@ class AdminApartmentPatchView(APIView):
             raise NotFound(_("Apartment not found"))
         partner_id = _parse_int(updated.get("partner_user_id"))
         updated = dict(updated)
-        updated["partner_user"] = _serialize_partner_user(get_user_by_id(partner_id)) if partner_id is not None else None
+        updated["partner_user"] = (
+            _serialize_partner_user(get_user_by_id(partner_id))
+            if partner_id is not None
+            else None
+        )
         ctx = {"request": request}
-        return Response(ApartmentAdminListSerializer(updated, context=ctx).data, status=status.HTTP_200_OK)
+        return Response(
+            ApartmentAdminListSerializer(updated, context=ctx).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class AdminCottagePatchView(APIView):
@@ -2834,9 +3186,15 @@ class AdminCottagePatchView(APIView):
             raise NotFound(_("Cottage not found"))
         partner_id = _parse_int(row.get("partner_user_id"))
         row = dict(row)
-        row["partner_user"] = _serialize_partner_user(get_user_by_id(partner_id)) if partner_id is not None else None
+        row["partner_user"] = (
+            _serialize_partner_user(get_user_by_id(partner_id))
+            if partner_id is not None
+            else None
+        )
         ctx = {"request": request}
-        return Response(CottageAdminListSerializer(row, context=ctx).data, status=status.HTTP_200_OK)
+        return Response(
+            CottageAdminListSerializer(row, context=ctx).data, status=status.HTTP_200_OK
+        )
 
     @swagger_auto_schema(
         tags=["Admin / Property"],
@@ -2878,9 +3236,16 @@ class AdminCottagePatchView(APIView):
             raise NotFound(_("Cottage not found"))
         partner_id = _parse_int(updated.get("partner_user_id"))
         updated = dict(updated)
-        updated["partner_user"] = _serialize_partner_user(get_user_by_id(partner_id)) if partner_id is not None else None
+        updated["partner_user"] = (
+            _serialize_partner_user(get_user_by_id(partner_id))
+            if partner_id is not None
+            else None
+        )
         ctx = {"request": request}
-        return Response(CottageAdminListSerializer(updated, context=ctx).data, status=status.HTTP_200_OK)
+        return Response(
+            CottageAdminListSerializer(updated, context=ctx).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class ApartmentPartnerPropertyListView(APIView):
@@ -2907,7 +3272,10 @@ class ApartmentPartnerPropertyListView(APIView):
             partner_user_id=int(request.user.id),
             default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
         )
-        return Response(ApartmentPartnerListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
+        return Response(
+            ApartmentPartnerListSerializer(rows, many=True, context=ctx).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class CottagePartnerPropertyListView(APIView):
@@ -2934,12 +3302,16 @@ class CottagePartnerPropertyListView(APIView):
             partner_user_id=int(request.user.id),
             default_limit=_DEFAULT_PARTNER_LIST_LIMIT,
         )
-        return Response(CottagePartnerListSerializer(rows, many=True, context=ctx).data, status=status.HTTP_200_OK)
+        return Response(
+            CottagePartnerListSerializer(rows, many=True, context=ctx).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 # ---------------------------------------------------------------------------
 # Favorites
 # ---------------------------------------------------------------------------
+
 
 class SavedPropertyListView(APIView):
     authentication_classes = [ClientJWTAuthentication]
@@ -2962,8 +3334,16 @@ class SavedPropertyListView(APIView):
         if not favorite_guids:
             return Response([], status=status.HTTP_200_OK)
         ctx = {"request": request, "favorite_guids": favorite_guids}
-        apt_rows = [r for r in _list_apartment_rows(request.query_params, public_only=True) if str(r.get("guid")) in favorite_guids]
-        cot_rows = [r for r in _list_cottage_rows(request.query_params, public_only=True) if str(r.get("guid")) in favorite_guids]
+        apt_rows = [
+            r
+            for r in _list_apartment_rows(request.query_params, public_only=True)
+            if str(r.get("guid")) in favorite_guids
+        ]
+        cot_rows = [
+            r
+            for r in _list_cottage_rows(request.query_params, public_only=True)
+            if str(r.get("guid")) in favorite_guids
+        ]
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
             + CottageListSerializer(cot_rows, many=True, context=ctx).data
@@ -3018,10 +3398,16 @@ class PropertyFavoriteToggleView(APIView):
         if guid in favorite_guids:
             favorite_guids.remove(guid)
             _store_favorite_guids(int(request.user.id), favorite_guids)
-            return Response({"detail": _("Removed from favorites"), "is_favorite": False}, status=status.HTTP_200_OK)
+            return Response(
+                {"detail": _("Removed from favorites"), "is_favorite": False},
+                status=status.HTTP_200_OK,
+            )
         favorite_guids.add(guid)
         _store_favorite_guids(int(request.user.id), favorite_guids)
-        return Response({"detail": _("Added to favorites"), "is_favorite": True}, status=status.HTTP_201_CREATED)
+        return Response(
+            {"detail": _("Added to favorites"), "is_favorite": True},
+            status=status.HTTP_201_CREATED,
+        )
 
     @swagger_auto_schema(
         operation_id="removePropertyFavorite",
@@ -3057,4 +3443,7 @@ class PropertyFavoriteToggleView(APIView):
         favorite_guids = _load_favorite_guids(int(request.user.id))
         favorite_guids.discard(str(row["guid"]))
         _store_favorite_guids(int(request.user.id), favorite_guids)
-        return Response({"detail": _("Removed from favorites"), "is_favorite": False}, status=status.HTTP_200_OK)
+        return Response(
+            {"detail": _("Removed from favorites"), "is_favorite": False},
+            status=status.HTTP_200_OK,
+        )
