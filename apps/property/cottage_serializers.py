@@ -880,9 +880,11 @@ class CottageAdminUpdateSerializer(CottageUpdateSerializer):
 
     def get_fields(self):
         fields = super().get_fields()
-        # Admin update endpoint should not accept nested location/detail payloads.
+        # Admin update endpoint should not accept nested location/detail/room/price payloads.
         fields.pop("property_location", None)
         fields.pop("property_detail", None)
+        fields.pop("property_room", None)
+        fields.pop("price", None)
         # Admin update endpoint uses `services` only.
         fields.pop("property_services", None)
         return fields
