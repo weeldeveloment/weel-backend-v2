@@ -11,6 +11,7 @@ from .views import (
     PropertyReviewListCreateView,
     PropertyImageUpdateDeleteView,
     PropertyRetrieveUpdateDestroyView,
+    CottagePropertyRetrieveUpdateDestroyView,
     PartnerPropertyReviewListView,
     PartnerPropertyListView,
     PartnerPropertyAnalyticsView,
@@ -68,11 +69,6 @@ urlpatterns = [
     ),
     path("properties/", PropertyListCreateView.as_view(), name="property-list-create"),
     path(
-        "apartment/",
-        ApartmentPropertyListCreateView.as_view(),
-        name="apartment-property-list-create-legacy",
-    ),
-    path(
         "apartments/",
         ApartmentPropertyListCreateView.as_view(),
         name="apartment-property-list-create",
@@ -109,7 +105,7 @@ urlpatterns = [
     ),
     path(
         "cottages/<uuid:property_id>/",
-        PropertyRetrieveUpdateDestroyView.as_view(),
+        CottagePropertyRetrieveUpdateDestroyView.as_view(),
         name="cottage-property-retrieve-update-destroy",
     ),
     path(
