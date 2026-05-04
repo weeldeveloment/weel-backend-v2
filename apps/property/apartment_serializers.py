@@ -514,34 +514,32 @@ class ApartmentCreateSerializer(serializers.Serializer):
         return value.strip()
 
     def validate(self, attrs):
-        is_partner = self.context.get("is_partner", False)
+        if attrs.get("price") is None:
+            attrs["price"] = Decimal("0")
 
-        if is_partner
-            if attrs.get("price") is None:
-                attrs["price"] = Decimal("0")
+        district_id = attrs.get("district_id")
+        prefecture_id = attrs.get("prefecture_id")
 
-            district_id = attrs.get("district_id")
-            prefecture_id = attrs.get("prefecture_id")
-
-            if district_id in {75, 82}:
-                if not prefecture_id:
-                    raise serializers.ValidationError(
-                        {"prefecture_id": "Укажите префектуру для выбранного района."}
-                    )
-
-                if not is_prefecture_linked_to_district(
-                    district_id=district_id, prefecture_guid=prefecture_id
-                ):
-                    raise serializers.ValidationError(
-                        {"prefecture_id": "Выбранная префектура не соответствует району."}
-                    )
-
-            elif prefecture_id:
+        if district_id in {75, 82}:
+            if not prefecture_id:
                 raise serializers.ValidationError(
-                    {"prefecture_id": "Префектура недоступна для выбранного района."}
+                    {"prefecture_id": "Укажите префектуру для выбранного района."}
                 )
 
-            return attrs
+            if not is_prefecture_linked_to_district(
+                district_id=district_id, prefecture_guid=prefecture_id
+            ):
+                raise serializers.ValidationError(
+                    {"prefecture_id": "Выбранная префектура не соответствует району."}
+                )
+
+        elif prefecture_id:
+            raise serializers.ValidationError(
+                {"prefecture_id": "Префектура недоступна для выбранного района."}
+            )
+
+        attrs["normalized_values"] = attrs
+        return attrs
 
 
 class ApartmentUpdateSerializer(serializers.Serializer):
@@ -665,9 +663,15 @@ class ApartmentUpdateSerializer(serializers.Serializer):
 
         return value
 
+    def _request_is_admin(self) -> bool:
+        request = (self.context or {}).get("request")
+        if request is None:
+            return False
+        user = getattr(request, "user", None)
+        return getattr(user, "role", None) == "admin"
+
     def validate(self, attrs):
-        is_admin = self.context.get("is_admin", False)
-        is_partner = self.context.get('is_partner', False)
+        is_admin = self._request_is_admin()
 
         # block admin-only fields
         if not is_admin:
@@ -705,6 +709,7 @@ class ApartmentUpdateSerializer(serializers.Serializer):
                     {"prefecture_id": "Префектура недоступна для выбранного района."}
                 )
 
+        attrs["normalized_values"] = attrs
         return attrs
 
     def update(self, instance, validated_data):

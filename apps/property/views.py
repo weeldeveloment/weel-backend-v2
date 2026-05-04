@@ -1527,7 +1527,7 @@ class ApartmentPropertyListCreateView(APIView):
         },
     )
     def post(self, request, *args, **kwargs):
-        serializer = ApartmentCreateSerializer(data=request.data, is_partner=True)
+        serializer = ApartmentCreateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         created = create_apartment(
             partner_user_id=int(request.user.id),
@@ -1695,7 +1695,7 @@ class PropertyListCreateView(APIView):
             serializer = ApartmentCreateSerializer(
                 data=request.data,
                 partial=True,
-                context={"is_partner": True, "request": request},
+                context={"request": request},
             )
             serializer.is_valid(raise_exception=True)
             created = create_apartment(
@@ -3135,7 +3135,7 @@ class AdminApartmentPatchView(APIView):
         serializer = ApartmentUpdateSerializer(
             data=request.data,
             partial=True,
-            context={"is_update": True, "is_admin": True, "request": request},
+            context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
         normalized = serializer.validated_data.get("normalized_values") or {}
