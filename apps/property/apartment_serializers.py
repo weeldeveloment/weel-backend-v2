@@ -168,49 +168,6 @@ def _parse_int_maybe(value: Any) -> int | None:
         return None
 
 
-def _parse_region_id_maybe(value: Any) -> int | None:
-    parsed = _parse_int_maybe(value)
-    if parsed is not None:
-        return parsed
-    return resolve_region_id_by_guid(str(value or "").strip())
-
-
-def _parse_district_id_maybe(value: Any) -> int | None:
-    parsed = _parse_int_maybe(value)
-    if parsed is not None:
-        return parsed
-    return resolve_district_id_by_guid(str(value or "").strip())
-
-
-def _parse_decimal_maybe(value: Any, allow_invalid: bool = False) -> Decimal | None:
-    if value in (None, "", "null", "None", "undefined"):
-        return None
-    amount = _to_decimal(value)
-    if amount is None:
-        if allow_invalid:
-            return None
-        raise serializers.ValidationError(_("Invalid numeric value."))
-    return amount
-
-
-def _normalize_uuid_list(values: Any) -> list[UUID]:
-    if values in (None, "", "null", "None", "undefined"):
-        return []
-    if not isinstance(values, list):
-        raise serializers.ValidationError(_("Expected a list of UUID values."))
-    normalized: list[UUID] = []
-    for value in values:
-        if value in (None, "", "null", "None", "undefined"):
-            continue
-        try:
-            normalized.append(UUID(str(value)))
-        except (ValueError, TypeError, AttributeError):
-            raise serializers.ValidationError(
-                _("Services must contain valid UUID values.")
-            )
-    return normalized
-
-
 class ApartmentListSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
@@ -394,6 +351,10 @@ class ApartmentDetailSerializer(serializers.Serializer):
 
 
 class ApartmentCreateSerializer(serializers.Serializer):
+    """
+    It is only for partner usage for post requests don't use this serializer function for admin usage.
+    """
+
     title = serializers.CharField(
         required=True,
         allow_blank=False,
@@ -553,18 +514,15 @@ class ApartmentCreateSerializer(serializers.Serializer):
         return value.strip()
 
     def validate(self, attrs):
-        is_update = self.context.get("is_update", False)
-        is_admin = self.context.get("is_admin", False)
+        is_partner = self.context.get("is_partner", False)
 
-        # default price
-        if not is_update and attrs.get("price") is None:
-            attrs["price"] = Decimal("0")
+        if is_partner
+            if attrs.get("price") is None:
+                attrs["price"] = Decimal("0")
 
-        district_id = attrs.get("district_id")
-        prefecture_id = attrs.get("prefecture_id")
+            district_id = attrs.get("district_id")
+            prefecture_id = attrs.get("prefecture_id")
 
-        if not is_admin:
-            # 👇 user-friendly prefecture logic
             if district_id in {75, 82}:
                 if not prefecture_id:
                     raise serializers.ValidationError(
@@ -575,9 +533,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
                     district_id=district_id, prefecture_guid=prefecture_id
                 ):
                     raise serializers.ValidationError(
-                        {
-                            "prefecture_id": "Выбранная префектура не соответствует району."
-                        }
+                        {"prefecture_id": "Выбранная префектура не соответствует району."}
                     )
 
             elif prefecture_id:
@@ -585,30 +541,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
                     {"prefecture_id": "Префектура недоступна для выбранного района."}
                 )
 
-            # 👇 update rules
-            if is_update:
-                touches_location = any(
-                    k in attrs
-                    for k in (
-                        "region_id",
-                        "district_id",
-                        "latitude",
-                        "longitude",
-                        "city",
-                        "country",
-                    )
-                )
-                if touches_location:
-                    if attrs.get("region_id") is None:
-                        raise serializers.ValidationError(
-                            {"region_id": "Укажите регион."}
-                        )
-                    if attrs.get("district_id") is None:
-                        raise serializers.ValidationError(
-                            {"district_id": "Укажите район."}
-                        )
-
-        return attrs
+            return attrs
 
 
 class ApartmentUpdateSerializer(serializers.Serializer):
@@ -734,6 +667,7 @@ class ApartmentUpdateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         is_admin = self.context.get("is_admin", False)
+        is_partner = self.context.get('is_partner', False)
 
         # block admin-only fields
         if not is_admin:
