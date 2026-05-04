@@ -611,11 +611,6 @@ class ApartmentCreateSerializer(serializers.Serializer):
         return attrs
 
 
-from decimal import Decimal
-
-from rest_framework import serializers
-
-
 class ApartmentUpdateSerializer(serializers.Serializer):
     # ===== Base fields =====
     title = serializers.CharField(required=False, allow_blank=False)
