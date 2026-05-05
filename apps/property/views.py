@@ -1883,88 +1883,85 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             serializer = ApartmentDetailSerializer(row, context=ctx)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # @swagger_auto_schema(
-    #     operation_id="fullUpdateApartment",
-    #     operation_summary="Full update a property",
-    #     operation_description="Partner-only update for an apartment. Mutating fields resets verification status to pending.",
-    #     tags=["Property / Partner"],
-    #     request_body=ApartmentUpdateSerializer,
-    #     responses={
-    #         200: openapi.Schema(
-    #             type=openapi.TYPE_OBJECT,
-    #             properties={
-    #                 "detail": openapi.Schema(type=openapi.TYPE_STRING),
-    #                 "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
-    #                 "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
-    #             },
-    #         ),
-    #         400: _ERROR_VALIDATION_SCHEMA,
-    #         401: _ERROR_DETAIL_SCHEMA,
-    #         403: _ERROR_DETAIL_SCHEMA,
-    #         404: _ERROR_DETAIL_SCHEMA,
-    #     },
-    # )
-    # def patch(self, request, property_id, *args, **kwargs):
-    #     return self._update(request, property_id)
-
-    # def _update(self, request, property_id, *, partial: bool):
-    #     current = self._partner_property_or_404(str(property_id))
-    #     property_type = str(current["property_kind"])
-    #     logger.info(
-    #         "property_update_request property_id=%s property_type=%s partner_user_id=%s payload_keys=%s",
-    #         property_id,
-    #         property_type,
-    #         getattr(request.user, "id", None),
-    #         sorted((request.data or {}).keys())
-    #         if hasattr(request.data, "keys")
-    #         else [],
-    #     )
-    #     if property_type == PROPERTY_KIND_COTTAGE:
-    #         serializer = CottageUpdateSerializer(
-    #             data=request.data, partial=partial, context={"is_update": True}
-    #         )
-    #         serializer.is_valid(raise_exception=True)
-    #         logger.info(
-    #             "property_update_normalized property_id=%s property_type=cottage normalized_keys=%s",
-    #             property_id,
-    #             sorted(serializer.validated_data.get("normalized_values", {}).keys()),
-    #         )
-    #         updated = update_cottage(
-    #             cottage_id=int(current["id"]),
-    #             partner_user_id=int(request.user.id),
-    #             values=serializer.validated_data["normalized_values"],
-    #         )
-    #     else:
-    #         serializer = ApartmentUpdateSerializer(
-    #             data=request.data, partial=partial, context={"request": request}
-    #         )
-    #         serializer.is_valid(raise_exception=True)
-    #         normalized = serializer.validated_data.get("normalized_values", {})
-    #         logger.info(
-    #             "property_update_normalized property_id=%s property_type=apartment normalized_keys=%s services_count=%s desc_ru_len=%s desc_uz_len=%s",
-    #             property_id,
-    #             sorted(normalized.keys()),
-    #             len(normalized.get("services") or []),
-    #             len(str(normalized.get("description_ru") or "")),
-    #             len(str(normalized.get("description_uz") or "")),
-    #         )
-    #         updated = update_apartment(
-    #             apartment_id=int(current["id"]),
-    #             partner_user_id=int(request.user.id),
-    #             values=serializer.validated_data["normalized_values"],
-    #         )
-    #     if not updated:
-    #         raise NotFound(_("Property not found"))
-    #     is_verified = bool(updated.get("is_verified"))
-    #     payload = {
-    #         "detail": "Your changes have been saved successfully",
-    #         "status_code": 200,
-    #     }
-    #     if not is_verified:
-    #         payload["warning"] = (
-    #             "Property has been sent for re-verification, please wait while we verify it"
-    #         )
-    #     return Response(payload, status=status.HTTP_200_OK)
+    @swagger_auto_schema(
+        operation_id="fullUpdateProperty",
+        operation_summary="Fully update a property",
+        operation_description="Partner-only full update for an apartment or cottage. Mutating fields resets verification status to pending.",
+        tags=["Property / Partner"],
+        request_body=ApartmentUpdateSerializer,
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "warning": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                },
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def patch(self, request, property_id, *args, **kwargs):
+        current = self._partner_property_or_404(str(property_id))
+        property_type = str(current["property_kind"])
+        logger.info(
+            "property_update_request property_id=%s property_type=%s partner_user_id=%s payload_keys=%s",
+            property_id,
+            property_type,
+            getattr(request.user, "id", None),
+            sorted((request.data or {}).keys())
+            if hasattr(request.data, "keys")
+            else [],
+        )
+        if property_type == PROPERTY_KIND_COTTAGE:
+            serializer = CottageUpdateSerializer(
+                data=request.data, partial=True, context={"request": request}
+            )
+            serializer.is_valid(raise_exception=True)
+            logger.info(
+                "property_update_normalized property_id=%s property_type=cottage normalized_keys=%s",
+                property_id,
+                sorted(serializer.validated_data.get("normalized_values", {}).keys()),
+            )
+            updated = update_cottage(
+                cottage_id=int(current["id"]),
+                partner_user_id=int(request.user.id),
+                values=serializer.validated_data["normalized_values"],
+            )
+        else:
+            serializer = ApartmentUpdateSerializer(
+                data=request.data, partial=True, context={"request": request}
+            )
+            serializer.is_valid(raise_exception=True)
+            values = serializer.validated_data.get("values") or {}
+            logger.info(
+                "property_update_normalized property_id=%s property_type=apartment prepared_keys=%s services_count=%s desc_ru_len=%s desc_uz_len=%s",
+                property_id,
+                sorted(values.keys()),
+                len(values.get("services") or []),
+                len(str(values.get("description_ru") or "")),
+                len(str(values.get("description_uz") or "")),
+            )
+            updated = update_apartment(
+                apartment_id=int(current["id"]),
+                partner_user_id=int(request.user.id),
+                values=values,
+            )
+        if not updated:
+            raise NotFound(_("Property not found"))
+        is_verified = bool(updated.get("is_verified"))
+        payload = {
+            "detail": "Your changes have been saved successfully",
+            "status_code": 200,
+        }
+        if not is_verified:
+            payload["warning"] = (
+                "Property has been sent for re-verification, please wait while we verify it"
+            )
+        return Response(payload, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         operation_id="deleteProperty",
