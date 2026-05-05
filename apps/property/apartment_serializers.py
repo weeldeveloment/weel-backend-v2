@@ -678,8 +678,6 @@ class ApartmentUpdateSerializer(serializers.Serializer):
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
 
-    partner_user_id = serializers.IntegerField(required=False, allow_null=True)
-
     verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
 
     comment_count = serializers.IntegerField(
@@ -808,9 +806,7 @@ class ApartmentUpdateSerializer(serializers.Serializer):
                 district_id=district_id, prefecture_guid=prefecture_id
             ):
                 raise serializers.ValidationError(
-                    {
-                        "prefecture_id": "Выбранная префектура не соответствует району."
-                    }
+                    {"prefecture_id": "Выбранная префектура не соответствует району."}
                 )
         elif prefecture_id:
             raise serializers.ValidationError(

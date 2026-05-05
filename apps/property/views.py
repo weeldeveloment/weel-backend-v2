@@ -1527,7 +1527,9 @@ class ApartmentPropertyListCreateView(APIView):
         },
     )
     def post(self, request, *args, **kwargs):
-        serializer = ApartmentCreateSerializer(data=request.data, context={"request": request})
+        serializer = ApartmentCreateSerializer(
+            data=request.data, context={"request": request}
+        )
         serializer.is_valid(raise_exception=True)
         created = create_apartment(
             partner_user_id=int(request.user.id),
@@ -3119,10 +3121,10 @@ class AdminApartmentPatchView(APIView):
         )
 
     @swagger_auto_schema(
-        tags=["Admin / Property"],
-        operation_summary="Patch apartment (admin)",
+        tags=["Partner / Property"],
+        operation_summary="Patch apartment (Partner)",
         operation_description=(
-            "Admin-only full update for every writable field on the apartment table, "
+            "Partner-only full update for every writable field on the apartment table, "
         ),
         request_body=ApartmentUpdateSerializer,
         responses={200: ApartmentAdminListSerializer},
@@ -3141,7 +3143,7 @@ class AdminApartmentPatchView(APIView):
         prepared = serializer.validated_data.get("values") or {}
 
         logger.info(
-            "admin_apartment_patch apartment_guid=%s admin_user_id=%s prepared_keys=%s",
+            "partner_apartment_patch apartment_guid=%s partner_user_id=%s prepared_keys=%s",
             apartment_id,
             getattr(request.user, "id", None),
             sorted(prepared.keys()),
