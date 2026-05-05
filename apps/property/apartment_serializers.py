@@ -250,26 +250,6 @@ class ApartmentPartnerUserSerializer(serializers.Serializer):
         ref_name = "ApartmentPartnerUser"
 
 
-class ApartmentPartnerUserUpdateSerializer(serializers.Serializer):
-    id = serializers.IntegerField(required=False, allow_null=True)
-    role = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    first_name = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
-    last_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    phone_number = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
-    email = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    username = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    avatar = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    is_active = serializers.BooleanField(required=False)
-    is_verified = serializers.BooleanField(required=False)
-
-    class Meta:
-        ref_name = "ApartmentPartnerUserUpdate"
-
-
 class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
@@ -524,9 +504,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
 
         title = str(attrs.get("title") or "").strip()
         if not title:
-            raise serializers.ValidationError(
-                {"title": "Укажите название."}
-            )
+            raise serializers.ValidationError({"title": "Укажите название."})
         prepared["title"] = title
         prepared["title_sort"] = title.lower()
 
@@ -612,9 +590,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
                 district_id=district_id, prefecture_guid=prefecture_id
             ):
                 raise serializers.ValidationError(
-                    {
-                        "prefecture_id": "Выбранная префектура не соответствует району."
-                    }
+                    {"prefecture_id": "Выбранная префектура не соответствует району."}
                 )
         elif prefecture_id:
             raise serializers.ValidationError(
@@ -695,14 +671,14 @@ class ApartmentUpdateSerializer(serializers.Serializer):
     beds = serializers.IntegerField(required=False)
     bathrooms = serializers.IntegerField(required=False)
 
-    # ===== Admin-only fields =====
+    # ===== Verification / admin fields =====
     is_verified = serializers.BooleanField(required=False)
     verified_at = serializers.DateTimeField(required=False, allow_null=True)
     verification_status = serializers.CharField(required=False, allow_blank=True)
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
 
-    partner_user = ApartmentPartnerUserUpdateSerializer(required=False, allow_null=True)
+    partner_user_id = serializers.IntegerField(required=False, allow_null=True)
 
     verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
 
@@ -714,18 +690,6 @@ class ApartmentUpdateSerializer(serializers.Serializer):
 
     legacy_property_id = serializers.IntegerField(required=False, allow_null=True)
 
-    ADMIN_ONLY_FIELDS = {
-        "is_verified",
-        "verified_at",
-        "verification_status",
-        "is_archived",
-        "is_recommended",
-        "partner_user",
-        "verified_by_user_id",
-        "comment_count",
-        "legacy_property_id",
-    }
-
     def validate_title(self, value):
         return value.strip()
 
@@ -734,38 +698,7 @@ class ApartmentUpdateSerializer(serializers.Serializer):
             return None
         return value.strip().lower()
 
-    def validate_partner_user(self, value):
-        if value in (None, "", "null", "None"):
-            return None
-
-        if not isinstance(value, dict):
-            raise serializers.ValidationError("Ожидается объект пользователя.")
-
-        if "id" not in value or value["id"] in (None, "", "null"):
-            raise serializers.ValidationError({"id": "Укажите ID пользователя."})
-
-        return value
-
-    def _request_is_admin(self) -> bool:
-        request = (self.context or {}).get("request")
-        if request is None:
-            return False
-        user = getattr(request, "user", None)
-        return getattr(user, "role", None) == "admin"
-
     def validate(self, attrs):
-        is_admin = self._request_is_admin()
-
-        if not is_admin:
-            forbidden = self.ADMIN_ONLY_FIELDS.intersection(attrs.keys())
-            if forbidden:
-                raise serializers.ValidationError(
-                    {
-                        field: "Недостаточно прав для изменения этого поля."
-                        for field in forbidden
-                    }
-                )
-
         prepared: dict[str, Any] = {}
 
         if "title" in attrs:
@@ -845,74 +778,54 @@ class ApartmentUpdateSerializer(serializers.Serializer):
                 [str(s) for s in services if s is not None] if services else []
             )
 
-        if is_admin:
-            for key in self.ADMIN_ONLY_FIELDS:
-                if key in attrs:
-                    if key == "verification_status":
-                        value = attrs.get(key)
-                        if value not in (None, ""):
-                            prepared[key] = str(value).strip().lower()
-                    elif key == "partner_user":
-                        value = attrs.get(key)
-                        if value in (None, "", "null", "None", "undefined"):
-                            prepared["partner_user_id"] = None
-                        elif isinstance(value, dict):
-                            partner_id = value.get("id")
-                            if partner_id in (None, "", "null", "None", "undefined"):
-                                raise serializers.ValidationError(
-                                    {"partner_user": {"id": "Укажите ID пользователя."}}
-                                )
-                            prepared["partner_user_id"] = int(partner_id)
-                        else:
-                            raise serializers.ValidationError(
-                                {"partner_user": "Ожидается объект пользователя."}
-                            )
-                    else:
-                        prepared[key] = attrs.get(key)
+        for key in (
+            "is_verified",
+            "verified_at",
+            "verification_status",
+            "is_archived",
+            "is_recommended",
+            "partner_user_id",
+            "verified_by_user_id",
+            "comment_count",
+            "legacy_property_id",
+        ):
+            if key in attrs:
+                if key == "verification_status":
+                    value = attrs.get(key)
+                    if value not in (None, ""):
+                        prepared[key] = str(value).strip().lower()
+                else:
+                    prepared[key] = attrs.get(key)
 
         district_id = prepared.get("district_id")
         prefecture_id = prepared.get("prefecture_id")
-        if not is_admin:
-            if district_id in {75, 82}:
-                if not prefecture_id:
-                    raise serializers.ValidationError(
-                        {"prefecture_id": "Укажите префектуру для выбранного района."}
-                    )
-                if not is_prefecture_linked_to_district(
-                    district_id=district_id, prefecture_guid=prefecture_id
-                ):
-                    raise serializers.ValidationError(
-                        {
-                            "prefecture_id": "Выбранная префектура не соответствует району."
-                        }
-                    )
-            elif prefecture_id:
+        if district_id in {75, 82}:
+            if not prefecture_id:
                 raise serializers.ValidationError(
-                    {"prefecture_id": "Префектура недоступна для выбранного района."}
+                    {"prefecture_id": "Укажите префектуру для выбранного района."}
                 )
+            if not is_prefecture_linked_to_district(
+                district_id=district_id, prefecture_guid=prefecture_id
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "prefecture_id": "Выбранная префектура не соответствует району."
+                    }
+                )
+        elif prefecture_id:
+            raise serializers.ValidationError(
+                {"prefecture_id": "Префектура недоступна для выбранного района."}
+            )
 
         attrs["values"] = prepared
         return attrs
 
     def update(self, instance, validated_data):
-        partner_payload = validated_data.pop("partner_user", None)
-
-        # update apartment fields
         for key, value in validated_data.items():
             setattr(instance, key, value)
 
-        # derived field
         if "title" in validated_data:
             instance.title_sort = instance.title.lower()
-
-        # handle partner_user update
-        if partner_payload is not None:
-            partner_id = partner_payload.get("id")
-            if partner_id:
-                instance.partner_user_id = int(partner_id)
-
-            # optional: update user fields here if needed
-            # (depends on your service layer / repository)
 
         instance.save()
         return instance
