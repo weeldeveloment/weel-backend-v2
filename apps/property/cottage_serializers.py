@@ -36,17 +36,17 @@ def _cottage_type_title(language: str) -> str:
     return "Dacha"
 
 
-def _build_media_url(request, media_path: Any) -> list[str]:
+def _build_media_url(request, media_path: Any) -> dict[str, str]:
     if not media_path:
-        return []
+        return {}
     values = media_path if isinstance(media_path, list) else [media_path]
-    urls: list[str] = []
-    for value in values:
+    urls: dict[str, str] = {}
+    for idx, value in enumerate(values, start=1):
         if not value:
             continue
         item = str(value)
         if item.startswith("http://") or item.startswith("https://"):
-            urls.append(item)
+            urls[str(idx)] = item
             continue
         try:
             url = default_storage.url(item)
@@ -54,7 +54,7 @@ def _build_media_url(request, media_path: Any) -> list[str]:
             url = item
         if request:
             url = request.build_absolute_uri(url)
-        urls.append(url)
+        urls[str(idx)] = url
     return urls
 
 
@@ -258,7 +258,7 @@ class RawDistrictSerializer(serializers.Serializer):
 class CottageListSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
-    img = serializers.ListField(child=serializers.CharField(), allow_empty=True)
+    img = serializers.DictField(child=serializers.CharField(), required=False, default=dict)
     price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
@@ -385,7 +385,7 @@ class CottageAdminListSerializer(CottagePartnerListSerializer):
 class CottageDetailSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
-    img = serializers.ListField(child=serializers.CharField(), allow_empty=True)
+    img = serializers.DictField(child=serializers.CharField(), required=False, default=dict)
     created_at = serializers.DateTimeField()
     currency = serializers.CharField(allow_blank=True, allow_null=True)
     price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
