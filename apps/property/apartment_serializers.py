@@ -449,10 +449,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
         if detail_payload:
             for key, value in detail_payload.items():
                 if key in {"check_in", "check_out"}:
-                    try:
-                        normalized[key] = value
-                    except Exception:
-                        pass
+                    normalized[key] = value
                 elif key.startswith("is_"):
                     normalized[key] = bool(value)
                 elif key in {"description_en", "description_ru", "description_uz", "apartment_number", "home_number", "entrance_number", "floor_number", "pass_code"}:

@@ -10,6 +10,7 @@ from uuid import uuid4
 from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
@@ -1268,6 +1269,7 @@ class ApartmentPropertyListCreateView(APIView):
             403: _ERROR_DETAIL_SCHEMA,
         },
     )
+    @transaction.atomic
     def post(self, request, *args, **kwargs):
         serializer = ApartmentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -1347,6 +1349,7 @@ class CottagePropertyListCreateView(APIView):
             403: _ERROR_DETAIL_SCHEMA,
         },
     )
+    @transaction.atomic
     def post(self, request, *args, **kwargs):
         serializer = CottageCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
