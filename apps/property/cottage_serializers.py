@@ -400,26 +400,72 @@ class CottageDetailSerializer(serializers.Serializer):
     price_on_weekends = serializers.DecimalField(
         max_digits=18, decimal_places=2, allow_null=True
     )
-    price_per_person = serializers.DecimalField(
-        max_digits=18, decimal_places=2, required=False, allow_null=True
-    )
-    price_on_working_days = serializers.DecimalField(
-        max_digits=18, decimal_places=2, required=False, allow_null=True
-    )
-    price_on_weekends = serializers.DecimalField(
-        max_digits=18, decimal_places=2, required=False, allow_null=True
-    )
-    latitude = serializers.CharField(required=True, allow_blank=True, allow_null=True)
-    longitude = serializers.CharField(required=True, allow_blank=True, allow_null=True)
-    country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    district_id = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
-    prefecture_id = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
+    description = serializers.CharField(allow_blank=True, allow_null=True)
+    comment_count = serializers.IntegerField()
+    average_rating = serializers.FloatField(allow_null=True)
+    is_favorite = serializers.BooleanField()
+    property_services = serializers.ListField()
+    region_id = serializers.IntegerField(allow_null=True)
+    district_id = serializers.IntegerField(allow_null=True)
+    prefecture_id = serializers.CharField(allow_blank=True, allow_null=True)
+    latitude = serializers.CharField(allow_blank=True, allow_null=True)
+    longitude = serializers.CharField(allow_blank=True, allow_null=True)
+    country = serializers.CharField(allow_blank=True, allow_null=True)
+    city = serializers.CharField(allow_blank=True, allow_null=True)
+    property_location = PropertyLocationOutputSerializer(required=False)
+    check_in = serializers.TimeField(allow_null=True)
+    check_out = serializers.TimeField(allow_null=True)
+    is_allowed_alcohol = serializers.BooleanField()
+    is_allowed_corporate = serializers.BooleanField()
+    is_allowed_pets = serializers.BooleanField()
+    is_quiet_hours = serializers.BooleanField()
+
+    def _resolve_description(self, row: dict[str, Any]) -> str:
+        request = self.context.get("request")
+        lang = ""
+        if request is not None:
+            lang = str(request.query_params.get("lang") or "").strip().lower()
+            if not lang:
+                header = (
+                    str(request.headers.get("Accept-Language") or "").strip().lower()
+                )
+                if header:
+                    lang = header.split(",")[0].split("-")[0]
+        if lang not in {"en", "ru", "uz"}:
+            lang = "en"
+        value = row.get(f"description_{lang}")
+        if value:
+            return str(value)
+        return str(
+            row.get("description_en")
+            or row.get("description_ru")
+            or row.get("description_uz")
+            or ""
+        )
+
+    def to_representation(self, instance):
+        request = self.context.get("request")
+        row = dict(instance)
+        row["img"] = _build_media_url(request, row.get("img"))
+        row_currency = row.get("currency")
+        row["price_per_person"] = _convert_price_for_output(
+            row.get("price_per_person"), row_currency
+        )
+        row["price_on_working_days"] = _convert_price_for_output(
+            row.get("price_on_working_days"), row_currency
+        )
+        row["price_on_weekends"] = _convert_price_for_output(
+            row.get("price_on_weekends"), row_currency
+        )
+        row["description"] = self._resolve_description(row)
+        row["comment_count"] = int(
+            row.get("review_count") or row.get("comment_count") or 0
+        )
+        favorites = _favorite_guid_set(self.context)
+        row["is_favorite"] = str(row.get("guid")) in favorites
+        row["property_services"] = row.get("services") or []
+        row["property_location"] = _build_property_location(row)
+        return super().to_representation(row)
 
 
 class CottageCreateSerializer(serializers.Serializer):
