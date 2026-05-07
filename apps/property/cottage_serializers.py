@@ -269,6 +269,7 @@ class CottageListSerializer(serializers.Serializer):
     rooms = serializers.IntegerField(allow_null=True)
     beds = serializers.IntegerField(allow_null=True)
     bathrooms = serializers.IntegerField(allow_null=True)
+    property_room = serializers.DictField(required=False)
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
     is_allowed_corporate = serializers.BooleanField()
@@ -315,6 +316,12 @@ class CottageListSerializer(serializers.Serializer):
         row["rooms"] = _parse_int_maybe(row.get("rooms"))
         row["beds"] = _parse_int_maybe(row.get("beds"))
         row["bathrooms"] = _parse_int_maybe(row.get("bathrooms"))
+        row["property_room"] = {
+            "guests": _parse_int_maybe(row.get("guests")),
+            "rooms": _parse_int_maybe(row.get("rooms")),
+            "beds": _parse_int_maybe(row.get("beds")),
+            "bathrooms": _parse_int_maybe(row.get("bathrooms")),
+        }
         lang = _preferred_language(request)
         row["property_type_id"] = str(COTTAGE_TYPE_GUID)
         row["property_type"] = {
@@ -419,6 +426,11 @@ class CottageDetailSerializer(serializers.Serializer):
     is_allowed_corporate = serializers.BooleanField()
     is_allowed_pets = serializers.BooleanField()
     is_quiet_hours = serializers.BooleanField()
+    guests = serializers.IntegerField(allow_null=True)
+    rooms = serializers.IntegerField(allow_null=True)
+    beds = serializers.IntegerField(allow_null=True)
+    bathrooms = serializers.IntegerField(allow_null=True)
+    property_room = serializers.DictField(required=False)
 
     def _resolve_description(self, row: dict[str, Any]) -> str:
         request = self.context.get("request")
@@ -465,6 +477,16 @@ class CottageDetailSerializer(serializers.Serializer):
         row["is_favorite"] = str(row.get("guid")) in favorites
         row["property_services"] = row.get("services") or []
         row["property_location"] = _build_property_location(row)
+        row["guests"] = _parse_int_maybe(row.get("guests"))
+        row["rooms"] = _parse_int_maybe(row.get("rooms"))
+        row["beds"] = _parse_int_maybe(row.get("beds"))
+        row["bathrooms"] = _parse_int_maybe(row.get("bathrooms"))
+        row["property_room"] = {
+            "guests": _parse_int_maybe(row.get("guests")),
+            "rooms": _parse_int_maybe(row.get("rooms")),
+            "beds": _parse_int_maybe(row.get("beds")),
+            "bathrooms": _parse_int_maybe(row.get("bathrooms")),
+        }
         return super().to_representation(row)
 
 

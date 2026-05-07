@@ -187,6 +187,7 @@ class ApartmentListSerializer(serializers.Serializer):
     rooms = serializers.IntegerField(allow_null=True)
     beds = serializers.IntegerField(allow_null=True)
     bathrooms = serializers.IntegerField(allow_null=True)
+    property_room = serializers.DictField(required=False)
     apartment_number = serializers.CharField(
         allow_blank=True, allow_null=True, required=False
     )
@@ -219,6 +220,12 @@ class ApartmentListSerializer(serializers.Serializer):
         row["rooms"] = _parse_int_maybe(row.get("rooms"))
         row["beds"] = _parse_int_maybe(row.get("beds"))
         row["bathrooms"] = _parse_int_maybe(row.get("bathrooms"))
+        row["property_room"] = {
+            "guests": _parse_int_maybe(row.get("guests")),
+            "rooms": _parse_int_maybe(row.get("rooms")),
+            "beds": _parse_int_maybe(row.get("beds")),
+            "bathrooms": _parse_int_maybe(row.get("bathrooms")),
+        }
         lang = _preferred_language(request)
         row["property_type_id"] = str(APARTMENT_TYPE_GUID)
         row["property_type"] = {
@@ -306,6 +313,7 @@ class ApartmentDetailSerializer(serializers.Serializer):
     rooms = serializers.IntegerField(allow_null=True)
     beds = serializers.IntegerField(allow_null=True)
     bathrooms = serializers.IntegerField(allow_null=True)
+    property_room = serializers.DictField(required=False)
 
     def to_representation(self, instance):
         request = self.context.get("request")
@@ -323,6 +331,12 @@ class ApartmentDetailSerializer(serializers.Serializer):
         row["is_favorite"] = str(row.get("guid")) in favorites
         row["services"] = row.get("services") or []
         row["property_location"] = _build_property_location(row)
+        row["property_room"] = {
+            "guests": _parse_int_maybe(row.get("guests")),
+            "rooms": _parse_int_maybe(row.get("rooms")),
+            "beds": _parse_int_maybe(row.get("beds")),
+            "bathrooms": _parse_int_maybe(row.get("bathrooms")),
+        }
         row["guests"] = _parse_int_maybe(row.get("guests"))
         row["rooms"] = _parse_int_maybe(row.get("rooms"))
         row["beds"] = _parse_int_maybe(row.get("beds"))
