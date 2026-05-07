@@ -16,6 +16,7 @@ class RawPropertyTypeSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
     icon_url = serializers.CharField(allow_null=True)
+    kind = serializers.CharField()
 
 
 class PropertyTypeSlugRelatedField(serializers.UUIDField):

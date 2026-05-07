@@ -90,10 +90,12 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
             title = row["title_en"]
         else:
             title = row["title_uz"]
+        kind = TYPE_GUID_TO_KIND.get(row["guid"], "")
         result.append({
             "guid": row["guid"],
             "title": title,
             "icon_url": row["icon"],
+            "kind": kind,
         })
     return result
 
