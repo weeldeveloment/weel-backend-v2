@@ -671,30 +671,8 @@ class ApartmentUpdateSerializer(serializers.Serializer):
     beds = serializers.IntegerField(required=False)
     bathrooms = serializers.IntegerField(required=False)
 
-    # ===== Verification / admin fields =====
-    is_verified = serializers.BooleanField(required=False)
-    verified_at = serializers.DateTimeField(required=False, allow_null=True)
-    verification_status = serializers.CharField(required=False, allow_blank=True)
-    is_archived = serializers.BooleanField(required=False)
-    is_recommended = serializers.BooleanField(required=False)
-
-    verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
-
-    comment_count = serializers.IntegerField(
-        required=False,
-        min_value=0,
-        error_messages={"min_value": "Количество комментариев не может быть меньше 0."},
-    )
-
-    legacy_property_id = serializers.IntegerField(required=False, allow_null=True)
-
     def validate_title(self, value):
         return value.strip()
-
-    def validate_verification_status(self, value):
-        if value in (None, ""):
-            return None
-        return value.strip().lower()
 
     def validate(self, attrs):
         prepared: dict[str, Any] = {}
@@ -719,9 +697,6 @@ class ApartmentUpdateSerializer(serializers.Serializer):
                 prepared["img"] = [str(img_value)]
             else:
                 prepared["img"] = []
-
-        if "comment_count" in attrs:
-            prepared["comment_count"] = _parse_int_maybe(attrs.get("comment_count"))
 
         for key in ("latitude", "longitude", "country", "city"):
             if key in attrs:
@@ -776,25 +751,6 @@ class ApartmentUpdateSerializer(serializers.Serializer):
                 [str(s) for s in services if s is not None] if services else []
             )
 
-        for key in (
-            "is_verified",
-            "verified_at",
-            "verification_status",
-            "is_archived",
-            "is_recommended",
-            "partner_user_id",
-            "verified_by_user_id",
-            "comment_count",
-            "legacy_property_id",
-        ):
-            if key in attrs:
-                if key == "verification_status":
-                    value = attrs.get(key)
-                    if value not in (None, ""):
-                        prepared[key] = str(value).strip().lower()
-                else:
-                    prepared[key] = attrs.get(key)
-
         district_id = prepared.get("district_id")
         prefecture_id = prepared.get("prefecture_id")
         if district_id in {75, 82}:
@@ -825,3 +781,53 @@ class ApartmentUpdateSerializer(serializers.Serializer):
 
         instance.save()
         return instance
+
+
+class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
+    """Admin-only partial updater that permits mutating every apartment field.
+
+    Extends the partner update flow with verification/archival flags and
+    owner reassignment that only administrators are allowed to touch.
+    """
+
+    is_verified = serializers.BooleanField(required=False)
+    verified_at = serializers.DateTimeField(required=False, allow_null=True)
+    verification_status = serializers.CharField(required=False, allow_blank=True)
+    is_archived = serializers.BooleanField(required=False)
+    is_recommended = serializers.BooleanField(required=False)
+    partner_user_id = serializers.IntegerField(required=False, allow_null=True)
+    verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
+    comment_count = serializers.IntegerField(
+        required=False,
+        min_value=0,
+        error_messages={"min_value": "Количество комментариев не может быть меньше 0."},
+    )
+    legacy_property_id = serializers.IntegerField(required=False, allow_null=True)
+
+    _ADMIN_ONLY_FIELDS = (
+        "is_verified",
+        "verified_at",
+        "verification_status",
+        "is_archived",
+        "is_recommended",
+        "partner_user_id",
+        "verified_by_user_id",
+        "comment_count",
+        "legacy_property_id",
+    )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        prepared = attrs.get("values") or {}
+
+        for key in self._ADMIN_ONLY_FIELDS:
+            if key in attrs:
+                if key == "verification_status":
+                    value = attrs.get(key)
+                    if value not in (None, ""):
+                        prepared[key] = str(value).strip().lower()
+                else:
+                    prepared[key] = attrs.get(key)
+
+        attrs["values"] = prepared
+        return attrs
