@@ -61,6 +61,7 @@ from .apartment_repository import (
 )
 from .apartment_serializers import (
     ApartmentAdminListSerializer,
+    ApartmentAdminUpdateSerializer,
     ApartmentCreateSerializer,
     ApartmentDetailSerializer,
     ApartmentListSerializer,
@@ -3119,12 +3120,12 @@ class AdminApartmentPatchView(APIView):
         )
 
     @swagger_auto_schema(
-        tags=["Partner / Property"],
-        operation_summary="Patch apartment (Partner)",
+        tags=["Admin / Property"],
+        operation_summary="Patch apartment (Admin)",
         operation_description=(
-            "Partner-only full update for every writable field on the apartment table, "
+            "Admin-only full update for every writable field on the apartment table, "
         ),
-        request_body=ApartmentUpdateSerializer,
+        request_body=ApartmentAdminUpdateSerializer,
         responses={200: ApartmentAdminListSerializer},
     )
     def patch(self, request, apartment_id, *args, **kwargs):
@@ -3132,7 +3133,7 @@ class AdminApartmentPatchView(APIView):
         if not current:
             raise NotFound(_("Apartment not found"))
 
-        serializer = ApartmentUpdateSerializer(
+        serializer = ApartmentAdminUpdateSerializer(
             data=request.data,
             partial=True,
             context={"request": request},

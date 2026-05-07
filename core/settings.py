@@ -102,7 +102,10 @@ for _origin in (
 ):
     if _origin not in CORS_ALLOWED_ORIGINS:
         CORS_ALLOWED_ORIGINS.append(_origin)
-CORS_ALLOW_ALL_ORIGINS = False
+
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all origins in DEBUG mode
+if not DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     "DELETE",

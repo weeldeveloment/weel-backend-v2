@@ -263,16 +263,14 @@ class UtilTests(SimpleTestCase):
         self.assertIsNone(values.get("latitude"))
         self.assertIsNone(values.get("longitude"))
 
-    def test_cottage_create_serializer_normalizes_blank_property_location_coordinates(self):
+    def test_cottage_create_serializer_normalizes_blank_location_coordinates(self):
         serializer = CottageCreateSerializer(
             data={
                 "title": "Test cottage",
-                "property_location": {
-                    "latitude": "",
-                    "longitude": "",
-                    "country": "Uzbekistan",
-                    "city": "Tashkent",
-                },
+                "latitude": "",
+                "longitude": "",
+                "country": "Uzbekistan",
+                "city": "Tashkent",
             },
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
@@ -338,17 +336,15 @@ class UtilTests(SimpleTestCase):
         self.assertEqual(values.get("is_allowed_alcohol"), True)
         self.assertEqual(values.get("is_allowed_pets"), True)
 
-    def test_cottage_update_serializer_processes_property_services(self):
+    def test_cottage_update_serializer_processes_services(self):
         serializer = CottageCreateSerializer(
             data={
                 "title": "Test cottage",
-                "property_services": ["service1", "service2"],
-                "property_location": {
-                    "latitude": "41.3",
-                    "longitude": "69.2",
-                    "country": "Uzbekistan",
-                    "city": "Tashkent",
-                },
+                "services": ["service1", "service2"],
+                "latitude": "41.3",
+                "longitude": "69.2",
+                "country": "Uzbekistan",
+                "city": "Tashkent",
             },
             context={"is_update": True},
         )

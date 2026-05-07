@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from decimal import Decimal
-from decimal import InvalidOperation
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
 from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
-from rest_framework import serializers
-
 from payment.exchange_rate import to_uzs
+from rest_framework import serializers
 from shared.date import month_end, month_start
+
 from .apartment_repository import COTTAGE_TYPE_GUID, is_prefecture_linked_to_district
 
 MAX_PRICE_ABS = Decimal("9999999999.99")
@@ -207,38 +206,26 @@ def _normalize_uuid_list(values: Any) -> list[UUID]:
         try:
             normalized.append(UUID(str(value)))
         except (ValueError, TypeError, AttributeError):
-            raise serializers.ValidationError(_("Property services must contain valid UUID values."))
+            raise serializers.ValidationError(
+                _("Property services must contain valid UUID values.")
+            )
     return normalized
 
 
 class _PropertyLocationInputSerializer(serializers.Serializer):
-    latitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
-    longitude = serializers.DecimalField(max_digits=18, decimal_places=8, required=False, allow_null=True)
+    latitude = serializers.DecimalField(
+        max_digits=18, decimal_places=8, required=False, allow_null=True
+    )
+    longitude = serializers.DecimalField(
+        max_digits=18, decimal_places=8, required=False, allow_null=True
+    )
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     region_id = serializers.IntegerField(required=False, allow_null=True)
     district_id = serializers.IntegerField(required=False, allow_null=True)
-    prefecture_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-
-
-class _PropertyDetailInputSerializer(serializers.Serializer):
-    description_en = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    description_ru = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    description_uz = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    check_in = serializers.TimeField(required=False, allow_null=True)
-    check_out = serializers.TimeField(required=False, allow_null=True)
-    is_allowed_alcohol = serializers.BooleanField(required=False)
-    is_allowed_corporate = serializers.BooleanField(required=False)
-    is_allowed_pets = serializers.BooleanField(required=False)
-    is_quiet_hours = serializers.BooleanField(required=False)
-
-
-class _PropertyRoomInputSerializer(serializers.Serializer):
-    guests = serializers.IntegerField(required=False, allow_null=True)
-    rooms = serializers.IntegerField(required=False, allow_null=True)
-    beds = serializers.IntegerField(required=False, allow_null=True)
-    bathrooms = serializers.IntegerField(required=False, allow_null=True)
-
+    prefecture_id = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
 
 class RawRegionSerializer(serializers.Serializer):
     id = serializers.IntegerField(required=False, allow_null=True)
@@ -259,9 +246,15 @@ class CottageListSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
     img = serializers.ListField(child=serializers.CharField(), allow_empty=True)
-    price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    price_per_person = serializers.DecimalField(
+        max_digits=18, decimal_places=2, allow_null=True
+    )
+    price_on_working_days = serializers.DecimalField(
+        max_digits=18, decimal_places=2, allow_null=True
+    )
+    price_on_weekends = serializers.DecimalField(
+        max_digits=18, decimal_places=2, allow_null=True
+    )
     currency = serializers.CharField(allow_blank=True, allow_null=True)
     latitude = serializers.CharField(allow_blank=True, allow_null=True)
     longitude = serializers.CharField(allow_blank=True, allow_null=True)
@@ -276,6 +269,7 @@ class CottageListSerializer(serializers.Serializer):
     rooms = serializers.IntegerField(allow_null=True)
     beds = serializers.IntegerField(allow_null=True)
     bathrooms = serializers.IntegerField(allow_null=True)
+    property_room = serializers.DictField(required=False)
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
     is_allowed_corporate = serializers.BooleanField()
@@ -288,9 +282,15 @@ class CottageListSerializer(serializers.Serializer):
         row = dict(instance)
         row["img"] = _build_media_url(request, row.get("img"))
         row_currency = row.get("currency")
-        row["price_per_person"] = _convert_price_for_output(row.get("price_per_person"), row_currency)
-        row["price_on_working_days"] = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
-        row["price_on_weekends"] = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
+        row["price_per_person"] = _convert_price_for_output(
+            row.get("price_per_person"), row_currency
+        )
+        row["price_on_working_days"] = _convert_price_for_output(
+            row.get("price_on_working_days"), row_currency
+        )
+        row["price_on_weekends"] = _convert_price_for_output(
+            row.get("price_on_weekends"), row_currency
+        )
         row["services"] = row.get("services") or []
         row["property_location"] = _build_property_location(row)
         if row.get("region_id") is None:
@@ -316,6 +316,12 @@ class CottageListSerializer(serializers.Serializer):
         row["rooms"] = _parse_int_maybe(row.get("rooms"))
         row["beds"] = _parse_int_maybe(row.get("beds"))
         row["bathrooms"] = _parse_int_maybe(row.get("bathrooms"))
+        row["property_room"] = {
+            "guests": _parse_int_maybe(row.get("guests")),
+            "rooms": _parse_int_maybe(row.get("rooms")),
+            "beds": _parse_int_maybe(row.get("beds")),
+            "bathrooms": _parse_int_maybe(row.get("bathrooms")),
+        }
         lang = _preferred_language(request)
         row["property_type_id"] = str(COTTAGE_TYPE_GUID)
         row["property_type"] = {
@@ -350,9 +356,13 @@ class CottagePartnerUserSerializer(serializers.Serializer):
 class CottagePartnerUserUpdateSerializer(serializers.Serializer):
     id = serializers.IntegerField(required=False, allow_null=True)
     role = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    first_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    first_name = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     last_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    phone_number = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     email = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     username = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     avatar = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -388,17 +398,20 @@ class CottageDetailSerializer(serializers.Serializer):
     img = serializers.ListField(child=serializers.CharField(), allow_empty=True)
     created_at = serializers.DateTimeField()
     currency = serializers.CharField(allow_blank=True, allow_null=True)
-    price_per_person = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    price_on_working_days = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    price_on_weekends = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    price = serializers.ListField(required=False, allow_empty=True)
-    minimum_weekend_day_stay = serializers.BooleanField(required=False, default=False)
+    price_per_person = serializers.DecimalField(
+        max_digits=18, decimal_places=2, allow_null=True
+    )
+    price_on_working_days = serializers.DecimalField(
+        max_digits=18, decimal_places=2, allow_null=True
+    )
+    price_on_weekends = serializers.DecimalField(
+        max_digits=18, decimal_places=2, allow_null=True
+    )
     description = serializers.CharField(allow_blank=True, allow_null=True)
     comment_count = serializers.IntegerField()
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
     property_services = serializers.ListField()
-    property_room = serializers.DictField()
     region_id = serializers.IntegerField(allow_null=True)
     district_id = serializers.IntegerField(allow_null=True)
     prefecture_id = serializers.CharField(allow_blank=True, allow_null=True)
@@ -413,6 +426,11 @@ class CottageDetailSerializer(serializers.Serializer):
     is_allowed_corporate = serializers.BooleanField()
     is_allowed_pets = serializers.BooleanField()
     is_quiet_hours = serializers.BooleanField()
+    guests = serializers.IntegerField(allow_null=True)
+    rooms = serializers.IntegerField(allow_null=True)
+    beds = serializers.IntegerField(allow_null=True)
+    bathrooms = serializers.IntegerField(allow_null=True)
+    property_room = serializers.DictField(required=False)
 
     def _resolve_description(self, row: dict[str, Any]) -> str:
         request = self.context.get("request")
@@ -420,7 +438,9 @@ class CottageDetailSerializer(serializers.Serializer):
         if request is not None:
             lang = str(request.query_params.get("lang") or "").strip().lower()
             if not lang:
-                header = str(request.headers.get("Accept-Language") or "").strip().lower()
+                header = (
+                    str(request.headers.get("Accept-Language") or "").strip().lower()
+                )
                 if header:
                     lang = header.split(",")[0].split("-")[0]
         if lang not in {"en", "ru", "uz"}:
@@ -428,71 +448,54 @@ class CottageDetailSerializer(serializers.Serializer):
         value = row.get(f"description_{lang}")
         if value:
             return str(value)
-        return str(row.get("description_en") or row.get("description_ru") or row.get("description_uz") or "")
+        return str(
+            row.get("description_en")
+            or row.get("description_ru")
+            or row.get("description_uz")
+            or ""
+        )
 
     def to_representation(self, instance):
         request = self.context.get("request")
         row = dict(instance)
         row["img"] = _build_media_url(request, row.get("img"))
         row_currency = row.get("currency")
-        row["price_per_person"] = _convert_price_for_output(row.get("price_per_person"), row_currency)
-        row["price_on_working_days"] = _convert_price_for_output(row.get("price_on_working_days"), row_currency)
-        row["price_on_weekends"] = _convert_price_for_output(row.get("price_on_weekends"), row_currency)
-        row["minimum_weekend_day_stay"] = bool(row.get("minimum_weekend_day_stay", False))
+        row["price_per_person"] = _convert_price_for_output(
+            row.get("price_per_person"), row_currency
+        )
+        row["price_on_working_days"] = _convert_price_for_output(
+            row.get("price_on_working_days"), row_currency
+        )
+        row["price_on_weekends"] = _convert_price_for_output(
+            row.get("price_on_weekends"), row_currency
+        )
         row["description"] = self._resolve_description(row)
-        row["comment_count"] = int(row.get("review_count") or row.get("comment_count") or 0)
+        row["comment_count"] = int(
+            row.get("review_count") or row.get("comment_count") or 0
+        )
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
         row["property_services"] = row.get("services") or []
+        row["property_location"] = _build_property_location(row)
+        row["guests"] = _parse_int_maybe(row.get("guests"))
+        row["rooms"] = _parse_int_maybe(row.get("rooms"))
+        row["beds"] = _parse_int_maybe(row.get("beds"))
+        row["bathrooms"] = _parse_int_maybe(row.get("bathrooms"))
         row["property_room"] = {
-            "guid": None,
             "guests": _parse_int_maybe(row.get("guests")),
             "rooms": _parse_int_maybe(row.get("rooms")),
             "beds": _parse_int_maybe(row.get("beds")),
             "bathrooms": _parse_int_maybe(row.get("bathrooms")),
         }
-        row["property_location"] = _build_property_location(row)
-        # Process monthly price data from separate cottage_price table
-        price_data = row.get("price")
-        if price_data:
-            if isinstance(price_data, str):
-                try:
-                    import json
-                    price_data = json.loads(price_data)
-                except (json.JSONDecodeError, TypeError):
-                    price_data = []
-            if isinstance(price_data, list):
-                # Convert Decimal prices to strings in price items
-                processed_prices = []
-                for item in price_data:
-                    if isinstance(item, dict):
-                        processed_item = dict(item)
-                        # Convert any Decimal values to string for JSON serialization
-                        for key in ('price_per_person', 'price_on_working_days', 'price_on_weekends'):
-                            if key in processed_item and processed_item[key] is not None:
-                                processed_item[key] = str(processed_item[key])
-                        processed_prices.append(processed_item)
-                row["price"] = processed_prices
-            else:
-                row["price"] = []
-        else:
-            row["price"] = []
         return super().to_representation(row)
 
-class PropertyLocation(serializers.Serializer):
-    latitude = serializers.CharField(required=True, allow_blank=True, allow_null=True)
-    longitude = serializers.CharField(required=True, allow_blank=True, allow_null=True)
-    country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    prefecture_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 class CottageCreateSerializer(serializers.Serializer):
     title = serializers.CharField(required=False, allow_blank=True)
     currency = serializers.ChoiceField(required=False, choices=["USD", "UZS"])
-    weekend_only_sunday_inclusive = serializers.BooleanField(required=False, default=False)
-    price = serializers.ListField(required=False, allow_empty=True)
+    weekend_only_sunday_inclusive = serializers.BooleanField(
+        required=False, default=False
+    )
     price_per_person = serializers.DecimalField(
         max_digits=18, decimal_places=2, required=False, allow_null=True
     )
@@ -506,20 +509,17 @@ class CottageCreateSerializer(serializers.Serializer):
     month_to = serializers.DateField(required=False, allow_null=True)
     next_month_from = serializers.DateField(required=False, allow_null=True)
     next_month_to = serializers.DateField(required=False, allow_null=True)
-    property_location = PropertyLocation(required=False)
-    property_detail = _PropertyDetailInputSerializer(required=False)
-    property_services = serializers.ListField(required=False, allow_empty=True)
-    services = serializers.ListField(required=False, allow_empty=True)
-    property_room = _PropertyRoomInputSerializer(required=False)
-
-    latitude = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    longitude = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    latitude = serializers.CharField(required=True, allow_blank=True, allow_null=True)
+    longitude = serializers.CharField(required=True, allow_blank=True, allow_null=True)
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     region_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    district_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    prefecture_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-
+    district_id = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    prefecture_id = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     description_en = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     description_ru = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     description_uz = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -529,33 +529,12 @@ class CottageCreateSerializer(serializers.Serializer):
     is_allowed_corporate = serializers.BooleanField(required=False)
     is_allowed_pets = serializers.BooleanField(required=False)
     is_quiet_hours = serializers.BooleanField(required=False)
-
+    services = serializers.ListField(required=False, allow_empty=True)
     guests = serializers.IntegerField(required=False, allow_null=True)
     rooms = serializers.IntegerField(required=False, allow_null=True)
     beds = serializers.IntegerField(required=False, allow_null=True)
     bathrooms = serializers.IntegerField(required=False, allow_null=True)
     img = serializers.JSONField(required=False)
-
-    _DETAIL_FLAT_KEYS = (
-        "description_en",
-        "description_ru",
-        "description_uz",
-        "check_in",
-        "check_out",
-        "is_allowed_alcohol",
-        "is_allowed_corporate",
-        "is_allowed_pets",
-        "is_quiet_hours",
-    )
-    _LOCATION_MERGE_KEYS = (
-        "latitude",
-        "longitude",
-        "country",
-        "city",
-        "region_id",
-        "district_id",
-        "prefecture_id",
-    )
 
     def validate(self, attrs):
         is_update = bool(self.context.get("is_update"))
@@ -565,61 +544,29 @@ class CottageCreateSerializer(serializers.Serializer):
         if not is_update and not title:
             raise serializers.ValidationError({"title": _("This field is required.")})
 
-        detail_merged: dict[str, Any] = dict(attrs.get("property_detail") or {})
-        for key in self._DETAIL_FLAT_KEYS:
-            if key in attrs:
-                detail_merged[key] = attrs[key]
-        detail_serializer = _PropertyDetailInputSerializer(data=detail_merged, partial=True)
-        detail_serializer.is_valid(raise_exception=True)
-
-        raw_price_list = attrs.get("price")
-        m1f, m1t, m2f, m2t = (
-            attrs.get("month_from"),
-            attrs.get("month_to"),
-            attrs.get("next_month_from"),
-            attrs.get("next_month_to"),
-        )
-        flat_months_complete = all(x is not None for x in (m1f, m1t, m2f, m2t))
-        flat_months_any = any(x is not None for x in (m1f, m1t, m2f, m2t))
-        if flat_months_any and not flat_months_complete:
-            raise serializers.ValidationError(
-                _(
-                    "month_from, month_to, next_month_from, and next_month_to must all be set together, "
-                    "or omit all four to use default current and next calendar month."
-                )
-            )
-
-        list_nonempty = isinstance(raw_price_list, list) and len(raw_price_list) > 0
-        if list_nonempty and flat_months_complete:
-            raise serializers.ValidationError(
-                {
-                    "price": _(
-                        "Do not send `price` together with month_from/month_to/next_month_*; use flat month fields only."
-                    )
-                }
-            )
-
-        if list_nonempty:
-            raw_monthly_prices = raw_price_list
-            monthly_prices_present = True
-        elif flat_months_complete:
-            raw_monthly_prices = [
-                {"month_from": m1f, "month_to": m1t},
-                {"month_from": m2f, "month_to": m2t},
-            ]
-            monthly_prices_present = True
-        elif raw_price_list is None or (isinstance(raw_price_list, list) and len(raw_price_list) == 0):
-            raw_monthly_prices = None
-            monthly_prices_present = False
-        else:
-            raise serializers.ValidationError({"price": _("Must be a list of price objects.")})
-
         price_fields_present = any(
-            key in attrs for key in ("price_per_person", "price_on_working_days", "price_on_weekends")
+            key in attrs
+            for key in (
+                "price_per_person",
+                "price_on_working_days",
+                "price_on_weekends",
+            )
         )
-        per_person = _to_decimal(attrs.get("price_per_person")) if "price_per_person" in attrs else None
-        working = _to_decimal(attrs.get("price_on_working_days")) if "price_on_working_days" in attrs else None
-        weekends = _to_decimal(attrs.get("price_on_weekends")) if "price_on_weekends" in attrs else None
+        per_person = (
+            _to_decimal(attrs.get("price_per_person"))
+            if "price_per_person" in attrs
+            else None
+        )
+        working = (
+            _to_decimal(attrs.get("price_on_working_days"))
+            if "price_on_working_days" in attrs
+            else None
+        )
+        weekends = (
+            _to_decimal(attrs.get("price_on_weekends"))
+            if "price_on_weekends" in attrs
+            else None
+        )
 
         if not is_update:
             if working is None and weekends is None and per_person is None:
@@ -638,16 +585,50 @@ class CottageCreateSerializer(serializers.Serializer):
         _validate_price_bounds(working, "price_on_working_days")
         _validate_price_bounds(weekends, "price_on_weekends")
 
+        m1f, m1t, m2f, m2t = (
+            attrs.get("month_from"),
+            attrs.get("month_to"),
+            attrs.get("next_month_from"),
+            attrs.get("next_month_to"),
+        )
+        flat_months_complete = all(x is not None for x in (m1f, m1t, m2f, m2t))
+        flat_months_any = any(x is not None for x in (m1f, m1t, m2f, m2t))
+        if flat_months_any and not flat_months_complete:
+            raise serializers.ValidationError(
+                _(
+                    "month_from, month_to, next_month_from, and next_month_to must all be set together, "
+                    "or omit all four to use default current and next calendar month."
+                )
+            )
+
+        if flat_months_complete:
+            raw_monthly_prices = [
+                {"month_from": m1f, "month_to": m1t},
+                {"month_from": m2f, "month_to": m2t},
+            ]
+            monthly_prices_present = True
+        else:
+            raw_monthly_prices = None
+            monthly_prices_present = False
+
         normalized_monthly_prices: list[dict[str, Any]] = []
         if monthly_prices_present:
-            for index, item in enumerate(raw_monthly_prices):
+            for item in raw_monthly_prices:
                 if not isinstance(item, dict):
-                    raise serializers.ValidationError({"price": _("Each price item must be an object.")})
+                    raise serializers.ValidationError(
+                        {"price": _("Each price item must be an object.")}
+                    )
 
                 raw_month_from = item.get("month_from")
                 raw_month_to = item.get("month_to")
                 if not raw_month_from or not raw_month_to:
-                    raise serializers.ValidationError({"price": _("month_from and month_to are required for each price item.")})
+                    raise serializers.ValidationError(
+                        {
+                            "price": _(
+                                "month_from and month_to are required for each price item."
+                            )
+                        }
+                    )
 
                 try:
                     raw_mf = str(raw_month_from).split("T", 1)[0]
@@ -655,17 +636,27 @@ class CottageCreateSerializer(serializers.Serializer):
                     parsed_from = date.fromisoformat(raw_mf)
                     parsed_to = date.fromisoformat(raw_mt)
                 except ValueError:
-                    raise serializers.ValidationError({"price": _("Invalid month date format in price items.")})
+                    raise serializers.ValidationError(
+                        {"price": _("Invalid month date format in price items.")}
+                    )
 
                 if month_start(parsed_from) != month_start(parsed_to):
                     raise serializers.ValidationError(
-                        {"price": _("month_from and month_to must be in the same calendar month.")}
+                        {
+                            "price": _(
+                                "month_from and month_to must be in the same calendar month."
+                            )
+                        }
                     )
                 month_from = month_start(parsed_from)
                 month_to = month_end(month_from)
                 if parsed_to < parsed_from:
                     raise serializers.ValidationError(
-                        {"price": _("month_to must be greater than or equal to month_from.")}
+                        {
+                            "price": _(
+                                "month_to must be greater than or equal to month_from."
+                            )
+                        }
                     )
 
                 item_per_person = _to_decimal(item.get("price_per_person"))
@@ -708,15 +699,23 @@ class CottageCreateSerializer(serializers.Serializer):
                 )
 
             normalized_monthly_prices.sort(key=lambda item: item["month_from"])
-            if len({item["month_from"] for item in normalized_monthly_prices}) != len(normalized_monthly_prices):
-                raise serializers.ValidationError({"price": _("Duplicate month_from values are not allowed.")})
+            if len({item["month_from"] for item in normalized_monthly_prices}) != len(
+                normalized_monthly_prices
+            ):
+                raise serializers.ValidationError(
+                    {"price": _("Duplicate month_from values are not allowed.")}
+                )
 
         if monthly_prices_present:
             if len(normalized_monthly_prices) != 2:
-                raise serializers.ValidationError({"price": _("Exactly 2 monthly prices are required.")})
+                raise serializers.ValidationError(
+                    {"price": _("Exactly 2 monthly prices are required.")}
+                )
 
             current_month_start = date.today().replace(day=1)
-            next_month_start = (current_month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            next_month_start = (
+                current_month_start.replace(day=28) + timedelta(days=4)
+            ).replace(day=1)
             required_months = {
                 (current_month_start.year, current_month_start.month),
                 (next_month_start.year, next_month_start.month),
@@ -726,13 +725,17 @@ class CottageCreateSerializer(serializers.Serializer):
                 for item in normalized_monthly_prices
             }
             if provided_months != required_months:
-                raise serializers.ValidationError({"price": _("Prices must be provided for current and next month.")})
+                raise serializers.ValidationError(
+                    {"price": _("Prices must be provided for current and next month.")}
+                )
         elif not is_update:
             pp = per_person if per_person is not None else Decimal("0")
             wd = working if working is not None else Decimal("0")
             we = weekends if weekends is not None else wd
             current_month_start = date.today().replace(day=1)
-            next_month_start = (current_month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            next_month_start = (
+                current_month_start.replace(day=28) + timedelta(days=4)
+            ).replace(day=1)
             normalized_monthly_prices = [
                 {
                     "month_from": current_month_start,
@@ -755,7 +758,9 @@ class CottageCreateSerializer(serializers.Serializer):
             normalized["title"] = title
             normalized["title_sort"] = title.lower()
         if "weekend_only_sunday_inclusive" in attrs:
-            normalized["weekend_only_sunday_inclusive"] = bool(attrs.get("weekend_only_sunday_inclusive"))
+            normalized["weekend_only_sunday_inclusive"] = bool(
+                attrs.get("weekend_only_sunday_inclusive")
+            )
         elif not is_update:
             normalized["weekend_only_sunday_inclusive"] = False
         if "currency" in attrs:
@@ -771,59 +776,77 @@ class CottageCreateSerializer(serializers.Serializer):
             else:
                 normalized["img"] = []
         if price_fields_present or not is_update:
-            normalized["price_per_person"] = per_person if per_person is not None else Decimal("0")
-            normalized["price_on_working_days"] = working if working is not None else Decimal("0")
-            normalized["price_on_weekends"] = weekends if weekends is not None else normalized["price_on_working_days"]
+            normalized["price_per_person"] = (
+                per_person if per_person is not None else Decimal("0")
+            )
+            normalized["price_on_working_days"] = (
+                working if working is not None else Decimal("0")
+            )
+            normalized["price_on_weekends"] = (
+                weekends
+                if weekends is not None
+                else normalized["price_on_working_days"]
+            )
         if normalized_monthly_prices:
             normalized["price"] = normalized_monthly_prices
             first_item = normalized_monthly_prices[0]
             normalized["price_per_person"] = first_item["price_per_person"]
             normalized["price_on_working_days"] = first_item["price_on_working_days"]
             normalized["price_on_weekends"] = first_item["price_on_weekends"]
-
-        location_merged: dict[str, Any] = {}
-        nested_loc = attrs.get("property_location")
-        if isinstance(nested_loc, dict):
-            location_merged.update(nested_loc)
-        for key in self._LOCATION_MERGE_KEYS:
+        location_payload: dict[str, Any] = {}
+        for key in (
+            "latitude",
+            "longitude",
+            "country",
+            "city",
+            "region_id",
+            "district_id",
+            "prefecture_id",
+        ):
             if key in attrs:
-                location_merged[key] = attrs[key]
-        if location_merged:
-            cleaned_location_payload = {}
-            for key, value in location_merged.items():
+                location_payload[key] = attrs[key]
+        if location_payload:
+            cleaned_location = {}
+            for key, value in location_payload.items():
                 if key in {"latitude", "longitude"}:
-                    cleaned_location_payload[key] = _parse_decimal_maybe_permissive(value)
+                    cleaned_location[key] = _parse_decimal_maybe_permissive(value)
                 elif key in {"region_id", "district_id"}:
-                    cleaned_location_payload[key] = _parse_int_maybe(value)
+                    cleaned_location[key] = _parse_int_maybe(value)
                 else:
-                    cleaned_location_payload[key] = None if value in ("", "null", "None", "undefined") else value
-            location_serializer = _PropertyLocationInputSerializer(data=cleaned_location_payload, partial=True)
+                    cleaned_location[key] = (
+                        None if value in ("", "null", "None", "undefined") else value
+                    )
+            location_serializer = _PropertyLocationInputSerializer(
+                data=cleaned_location, partial=True
+            )
             location_serializer.is_valid(raise_exception=True)
             normalized.update(location_serializer.validated_data)
-        if detail_serializer.validated_data:
-            normalized.update(detail_serializer.validated_data)
+
+        for key in (
+            "description_en",
+            "description_ru",
+            "description_uz",
+            "check_in",
+            "check_out",
+            "is_allowed_alcohol",
+            "is_allowed_corporate",
+            "is_allowed_pets",
+            "is_quiet_hours",
+        ):
+            if key in attrs:
+                normalized[key] = attrs[key]
+
         if "services" in attrs:
             normalized["services"] = _normalize_uuid_list(attrs.get("services"))
-        elif "property_services" in attrs:
-            normalized["services"] = _normalize_uuid_list(attrs.get("property_services"))
-        if "property_room" in attrs:
-            room_payload = attrs.get("property_room") or {}
-            if not isinstance(room_payload, dict):
-                raise serializers.ValidationError({"property_room": _("Expected an object.")})
-            for key in ("guests", "rooms", "beds", "bathrooms"):
-                if key in room_payload:
-                    normalized[key] = _parse_int_maybe(room_payload.get(key))
+
         for key in ("guests", "rooms", "beds", "bathrooms"):
             if key in attrs:
                 normalized[key] = _parse_int_maybe(attrs.get(key))
-        if "region_id" in attrs or "region" in attrs:
-            normalized["region_id"] = _parse_int_maybe(
-                attrs.get("region_id") if attrs.get("region_id") is not None else attrs.get("region")
-            )
-        if "district_id" in attrs or "district" in attrs:
-            normalized["district_id"] = _parse_int_maybe(
-                attrs.get("district_id") if attrs.get("district_id") is not None else attrs.get("district")
-            )
+
+        if "region_id" in attrs:
+            normalized["region_id"] = _parse_int_maybe(attrs.get("region_id"))
+        if "district_id" in attrs:
+            normalized["district_id"] = _parse_int_maybe(attrs.get("district_id"))
         prefecture_value = attrs.get("prefecture_id")
         if prefecture_value is not None:
             normalized["prefecture_id"] = str(prefecture_value)
@@ -833,11 +856,31 @@ class CottageCreateSerializer(serializers.Serializer):
         if not is_admin:
             if district_id in {75, 82}:
                 if not prefecture_id:
-                    raise serializers.ValidationError({"prefecture_id": _("This field is required for selected district.")})
-                if not is_prefecture_linked_to_district(district_id=district_id, prefecture_guid=prefecture_id):
-                    raise serializers.ValidationError({"prefecture_id": _("Invalid prefecture for selected district.")})
+                    raise serializers.ValidationError(
+                        {
+                            "prefecture_id": _(
+                                "This field is required for selected district."
+                            )
+                        }
+                    )
+                if not is_prefecture_linked_to_district(
+                    district_id=district_id, prefecture_guid=prefecture_id
+                ):
+                    raise serializers.ValidationError(
+                        {
+                            "prefecture_id": _(
+                                "Invalid prefecture for selected district."
+                            )
+                        }
+                    )
             elif prefecture_id:
-                raise serializers.ValidationError({"prefecture_id": _("Prefecture can be set only for district 75 or 82.")})
+                raise serializers.ValidationError(
+                    {
+                        "prefecture_id": _(
+                            "Prefecture can be set only for district 75 or 82."
+                        )
+                    }
+                )
 
         attrs["normalized_values"] = normalized
         return attrs
@@ -856,11 +899,15 @@ class CottageAdminUpdateSerializer(CottageUpdateSerializer):
 
     is_verified = serializers.BooleanField(required=False)
     verified_at = serializers.DateTimeField(required=False, allow_null=True)
-    verification_status = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    verification_status = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
     services = serializers.ListField(required=False, allow_empty=True)
-    img = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
+    img = serializers.ListField(
+        child=serializers.CharField(), required=False, allow_empty=True
+    )
     partner_user = CottagePartnerUserUpdateSerializer(required=False, allow_null=True)
     verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
     comment_count = serializers.IntegerField(required=False, min_value=0)
@@ -879,13 +926,7 @@ class CottageAdminUpdateSerializer(CottageUpdateSerializer):
     )
 
     def get_fields(self):
-        fields = super().get_fields()
-        # Admin update endpoint should not accept nested location/detail payloads.
-        fields.pop("property_location", None)
-        fields.pop("property_detail", None)
-        # Admin update endpoint uses `services` only.
-        fields.pop("property_services", None)
-        return fields
+        return super().get_fields()
 
     def validate(self, attrs):
         admin_overrides = {
@@ -906,10 +947,14 @@ class CottageAdminUpdateSerializer(CottageUpdateSerializer):
                 elif isinstance(value, dict):
                     partner_id = value.get("id")
                     if partner_id in (None, "", "null", "None", "undefined"):
-                        raise serializers.ValidationError({"partner_user": {"id": _("This field is required.")}})
+                        raise serializers.ValidationError(
+                            {"partner_user": {"id": _("This field is required.")}}
+                        )
                     normalized["partner_user_id"] = int(partner_id)
                 else:
-                    raise serializers.ValidationError({"partner_user": _("Expected an object payload.")})
+                    raise serializers.ValidationError(
+                        {"partner_user": _("Expected an object payload.")}
+                    )
             else:
                 normalized[key] = value
         attrs["normalized_values"] = normalized
