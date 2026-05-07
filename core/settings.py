@@ -81,6 +81,11 @@ if "host.docker.internal" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("host.docker.internal")
 ALLOWED_HOSTS.append("0.0.0.0")
 
+# Allow all ngrok-free.app subdomains (for development with ngrok tunnels)
+_ngrok_pattern = ".ngrok-free.app"
+if _ngrok_pattern not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(_ngrok_pattern)
+
 # CORS
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 if DEBUG and not CORS_ALLOWED_ORIGINS:
@@ -102,7 +107,12 @@ for _origin in (
 ):
     if _origin not in CORS_ALLOWED_ORIGINS:
         CORS_ALLOWED_ORIGINS.append(_origin)
-CORS_ALLOW_ALL_ORIGINS = False
+
+# Allow all ngrok-free.app origins via regex (django-cors-headers 4.0+)
+# For older versions, use custom middleware or CORS_ALLOW_ALL_ORIGINS = DEBUG
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all origins in DEBUG mode (for ngrok/dev)
+if not DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     "DELETE",
@@ -160,6 +170,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
+    "core.middleware.cors_ngrok.NgrokCorsMiddleware",  # Allow ngrok origins in DEBUG mode
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
