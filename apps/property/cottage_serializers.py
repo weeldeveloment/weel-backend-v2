@@ -431,6 +431,7 @@ class CottageDetailSerializer(serializers.Serializer):
     beds = serializers.IntegerField(allow_null=True)
     bathrooms = serializers.IntegerField(allow_null=True)
     property_room = serializers.DictField(required=False)
+    price = serializers.ListField(required=False, allow_empty=True)
 
     def _resolve_description(self, row: dict[str, Any]) -> str:
         request = self.context.get("request")
@@ -487,6 +488,11 @@ class CottageDetailSerializer(serializers.Serializer):
             "beds": _parse_int_maybe(row.get("beds")),
             "bathrooms": _parse_int_maybe(row.get("bathrooms")),
         }
+        raw_price = row.get("price")
+        if isinstance(raw_price, list):
+            row["price"] = raw_price
+        else:
+            row["price"] = []
         return super().to_representation(row)
 
 

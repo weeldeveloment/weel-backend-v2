@@ -32,6 +32,19 @@ from .raw_repository import fetch_calendar_dates_by_status, upsert_calendar_days
 logger = logging.getLogger(__name__)
 
 
+def _resolve_cottage_day_price(
+    price_rows: list[dict[str, Any]] | None, day: date
+) -> dict[str, Any] | None:
+    if not price_rows:
+        return None
+    for item in price_rows:
+        month_from = item.get("month_from")
+        month_to = item.get("month_to")
+        if month_from and month_to and month_from <= day <= month_to:
+            return item
+    return None
+
+
 class RawBookingCreateService:
     def __init__(self, client: RawUser):
         self.client = client
@@ -133,12 +146,21 @@ class RawBookingCreateService:
                 raise ValidationError(_("Pricing is not configured for this property"))
             base_total_price = price
         else:
+            price_rows = property_row.get("price")
             for day in self._date_range(check_in, check_out):
                 base_day_value = (
                     property_row.get("price_on_weekends")
                     if day.weekday() >= 4
                     else property_row.get("price_on_working_days")
                 )
+                if price_rows:
+                    price_item = _resolve_cottage_day_price(price_rows, day)
+                    if price_item:
+                        base_day_value = (
+                            price_item.get("price_on_weekends")
+                            if day.weekday() >= 4
+                            else price_item.get("price_on_working_days")
+                        )
                 if base_day_value is None:
                     raise ValidationError(_("Pricing is not configured for this property"))
                 base_total_price += self._as_decimal(base_day_value)
