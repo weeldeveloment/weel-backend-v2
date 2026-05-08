@@ -84,7 +84,7 @@ urlpatterns = [
         name="apartment-property-image-create",
     ),
     path(
-        "apartments/<uuid:property_id>/images/<uuid:image_id>/",
+        "apartments/<uuid:property_id>/images/<str:image_id>/",
         PropertyImageUpdateDeleteView.as_view(),
         name="apartment-property-image-update-delete",
     ),
@@ -119,7 +119,7 @@ urlpatterns = [
         name="cottage-property-image-create",
     ),
     path(
-        "cottages/<uuid:property_id>/images/<uuid:image_id>/",
+        "cottages/<uuid:property_id>/images/<str:image_id>/",
         PropertyImageUpdateDeleteView.as_view(),
         name="cottage-property-image-update-delete",
     ),

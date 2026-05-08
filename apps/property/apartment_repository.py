@@ -687,6 +687,82 @@ def set_apartment_primary_image(
     return get_apartment_for_partner(str(row["guid"]), partner_user_id)
 
 
+def append_apartment_images(
+    *,
+    apartment_id: int,
+    partner_user_id: int,
+    image_paths: list[str],
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT img FROM {APARTMENT_TABLE} WHERE id = %s AND partner_user_id = %s",
+        [apartment_id, partner_user_id],
+    )
+    if not row:
+        return None
+    current = row.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = list(current) + image_paths
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [new_img, timezone.now(), False, "pending", apartment_id, partner_user_id],
+    )
+    if not updated:
+        return None
+    return get_apartment_for_partner(str(updated["guid"]), partner_user_id)
+
+
+def remove_apartment_image(
+    *,
+    apartment_id: int,
+    partner_user_id: int,
+    image_path: str,
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT img FROM {APARTMENT_TABLE} WHERE id = %s AND partner_user_id = %s",
+        [apartment_id, partner_user_id],
+    )
+    if not row:
+        return None
+    current = row.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [p for p in current if p != image_path]
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [new_img, timezone.now(), False, "pending", apartment_id, partner_user_id],
+    )
+    if not updated:
+        return None
+    return get_apartment_for_partner(str(updated["guid"]), partner_user_id)
+
+
+def replace_apartment_image(
+    *,
+    apartment_id: int,
+    partner_user_id: int,
+    old_image_path: str,
+    new_image_path: str,
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT img FROM {APARTMENT_TABLE} WHERE id = %s AND partner_user_id = %s",
+        [apartment_id, partner_user_id],
+    )
+    if not row:
+        return None
+    current = row.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [new_image_path if p == old_image_path else p for p in current]
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [new_img, timezone.now(), False, "pending", apartment_id, partner_user_id],
+    )
+    if not updated:
+        return None
+    return get_apartment_for_partner(str(updated["guid"]), partner_user_id)
+
+
 def effective_apartment_price(row: dict[str, Any]) -> Decimal:
     val = row.get("price")
     if val is not None:
