@@ -29,7 +29,10 @@ from .raw_booking_repository import (
     update_booking_status,
 )
 from .raw_calendar_service import RawCalendarDateService
-from .raw_create_service import RawBookingCreateService
+from .raw_create_service import (
+    RawBookingCreateService,
+    _resolve_cottage_day_price,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -254,11 +257,19 @@ class BookingPriceService:
                 raise ValidationError(_("Pricing is not configured for this property"))
             base_total_price = price
         else:
+            price_rows = property_row.get("price")
             for day in self._date_range(check_in, check_out):
                 if day.weekday() >= 4:
                     base_day = _to_decimal(property_row.get("price_on_weekends"))
                 else:
                     base_day = _to_decimal(property_row.get("price_on_working_days"))
+                if price_rows:
+                    price_item = _resolve_cottage_day_price(price_rows, day)
+                    if price_item:
+                        if day.weekday() >= 4:
+                            base_day = _to_decimal(price_item.get("price_on_weekends"))
+                        else:
+                            base_day = _to_decimal(price_item.get("price_on_working_days"))
                 base_total_price += base_day
 
         extra_total_uzs = extra_guest_fee_total(guests, property_row)

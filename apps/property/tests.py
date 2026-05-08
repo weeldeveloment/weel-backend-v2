@@ -222,7 +222,8 @@ class DetailSerializerTests(SimpleTestCase):
         data = CottageDetailSerializer(row, context={"request": request}).data
         self.assertEqual(str(data["price_per_person"]), "200000.00")
         self.assertEqual(str(data["price_on_working_days"]), "1500000.00")
-        self.assertNotIn("price", data)
+        self.assertIsInstance(data.get("price"), list)
+        self.assertEqual(len(data["price"]), 0)
 
 
 class UtilTests(SimpleTestCase):

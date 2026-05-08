@@ -61,9 +61,25 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
             u.username AS partner_username,
             u.first_name AS partner_first_name,
             u.last_name AS partner_last_name,
-            u.phone_number AS partner_phone_number
+            u.phone_number AS partner_phone_number,
+            COALESCE(monthly_prices.price_data, '[]'::jsonb) AS price
         FROM {get_table_name("cottage")} c
         LEFT JOIN {get_table_name("users")} u ON u.id = c.partner_user_id
+        LEFT JOIN LATERAL (
+            SELECT
+                jsonb_agg(
+                    jsonb_build_object(
+                        'guid', cp.guid,
+                        'month_from', cp.month_from,
+                        'month_to', cp.month_to,
+                        'price_per_person', cp.price_per_person,
+                        'price_on_working_days', cp.price_on_working_days,
+                        'price_on_weekends', cp.price_on_weekends
+                    ) ORDER BY cp.month_from
+                ) AS price_data
+            FROM {get_table_name("cottage_price")} cp
+            WHERE cp.cottage_id = c.id
+        ) monthly_prices ON TRUE
         WHERE c.guid = %s
           AND COALESCE(c.is_verified, FALSE) = TRUE
         """,
