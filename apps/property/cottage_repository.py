@@ -605,16 +605,20 @@ def append_cottage_images(
         f"SELECT img FROM {COTTAGE_TABLE} WHERE id = %s AND partner_user_id = %s",
         [cottage_id, partner_user_id],
     )
+    logger.info("[append_cottage_images] SELECT img for cottage_id=%s: row=%s", cottage_id, row)
     if not row:
         return None
     current = row.get("img") or []
+    logger.info("[append_cottage_images] raw current img=%r type=%s", current, type(current).__name__)
     if not isinstance(current, list):
         current = [current] if current else []
     new_img = list(current) + image_paths
+    logger.info("[append_cottage_images] new_img=%r", new_img)
     updated = fetch_one(
         f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
         [new_img, timezone.now(), False, VerificationStatus.WAITING.value, cottage_id, partner_user_id],
     )
+    logger.info("[append_cottage_images] UPDATE result=%s", updated)
     if not updated:
         return None
     return get_cottage_for_partner(str(updated["guid"]), partner_user_id)

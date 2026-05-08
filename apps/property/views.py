@@ -59,7 +59,6 @@ from .apartment_repository import (
     remove_apartment_image,
     replace_apartment_image,
     resolve_region_id_by_guid,
-    set_apartment_primary_image,
     update_apartment,
 )
 from .apartment_serializers import (
@@ -83,7 +82,6 @@ from .cottage_repository import (
     list_cottages,
     remove_cottage_image,
     replace_cottage_image,
-    set_cottage_primary_image,
     update_cottage,
 )
 from .cottage_serializers import (
@@ -2083,6 +2081,10 @@ class PropertyImageCreateView(APIView):
         },
     )
     def post(self, request, property_id, *args, **kwargs):
+        import logging
+        log = logging.getLogger(__name__)
+        log.info("[PropertyImageCreateView.post] property_id=%s user=%s", property_id, request.user.id)
+
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
             raise NotFound(_("Property not found"))
@@ -2102,6 +2104,7 @@ class PropertyImageCreateView(APIView):
             default_storage.save(f"property/images/{uuid4()}_{file.name}", file)
             for file in uploaded_files
         ]
+        log.info("[PropertyImageCreateView.post] saved_paths=%s property_kind=%s", saved_paths, property_row.get("property_kind"))
 
         property_type = str(property_row["property_kind"])
         if property_type == PROPERTY_KIND_COTTAGE:
@@ -2116,6 +2119,7 @@ class PropertyImageCreateView(APIView):
                 partner_user_id=int(request.user.id),
                 image_paths=saved_paths,
             )
+        log.info("[PropertyImageCreateView.post] updated img=%s", updated.get("img") if updated else None)
 
         if not updated:
             raise NotFound(_("Property not found"))
