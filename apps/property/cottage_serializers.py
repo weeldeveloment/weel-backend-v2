@@ -276,6 +276,7 @@ class CottageListSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
     property_type_id = serializers.UUIDField()
     property_type = serializers.DictField()
+    price = serializers.ListField(required=False, allow_empty=True)
 
     def to_representation(self, instance):
         request = self.context.get("request")
@@ -330,6 +331,11 @@ class CottageListSerializer(serializers.Serializer):
         }
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
+        raw_price = row.get("price")
+        if isinstance(raw_price, list):
+            row["price"] = raw_price
+        else:
+            row["price"] = []
         return super().to_representation(row)
 
 
