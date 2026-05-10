@@ -547,6 +547,7 @@ class CottageCreateSerializer(serializers.Serializer):
     beds = serializers.IntegerField(required=False, allow_null=True)
     bathrooms = serializers.IntegerField(required=False, allow_null=True)
     img = serializers.JSONField(required=False)
+    price = serializers.ListField(required=False, allow_empty=True)
 
     def validate(self, attrs):
         is_update = bool(self.context.get("is_update"))
@@ -613,15 +614,31 @@ class CottageCreateSerializer(serializers.Serializer):
                 )
             )
 
-        if flat_months_complete:
+        raw_price_list = attrs.get("price")
+        list_nonempty = isinstance(raw_price_list, list) and len(raw_price_list) > 0
+        if list_nonempty and flat_months_complete:
+            raise serializers.ValidationError(
+                {
+                    "price": _(
+                        "Do not send `price` together with month_from/month_to/next_month_*; use flat month fields only."
+                    )
+                }
+            )
+
+        if list_nonempty:
+            raw_monthly_prices = raw_price_list
+            monthly_prices_present = True
+        elif flat_months_complete:
             raw_monthly_prices = [
                 {"month_from": m1f, "month_to": m1t},
                 {"month_from": m2f, "month_to": m2t},
             ]
             monthly_prices_present = True
-        else:
+        elif raw_price_list is None or (isinstance(raw_price_list, list) and len(raw_price_list) == 0):
             raw_monthly_prices = None
             monthly_prices_present = False
+        else:
+            raise serializers.ValidationError({"price": _("Must be a list of price objects.")})
 
         normalized_monthly_prices: list[dict[str, Any]] = []
         if monthly_prices_present:

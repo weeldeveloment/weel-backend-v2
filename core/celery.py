@@ -14,6 +14,7 @@ load_dotenv(find_dotenv(), override=True)
 
 TASK_MODULES = [
     "booking.tasks",
+    "property.tasks",
     "stories.tasks",
     "notification.tasks",
     "payment.tasks",
@@ -78,6 +79,10 @@ app.conf.beat_schedule = {
     "send_partner_property_check_reminders": {
         "task": "users.send_partner_property_check_reminders",
         "schedule": crontab(hour=11, minute=0),  # daily at 11:00 (3-day gating inside task)
+    },
+    "send_cottage_price_reminders": {
+        "task": "property.tasks.send_cottage_price_reminders",
+        "schedule": crontab(day_of_month=1, hour=9, minute=0),  # 1st of every month at 09:00
     },
 }
 

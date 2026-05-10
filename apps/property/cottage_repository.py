@@ -684,3 +684,29 @@ def effective_cottage_price(row: dict[str, Any], reference_date: date) -> Decima
         except (InvalidOperation, TypeError, ValueError):
             pass
     return Decimal("0")
+
+
+def list_partners_with_expired_cottage_prices() -> list[dict[str, Any]]:
+    """Return partners who own verified, non-archived cottages missing current-month prices."""
+    return fetch_all(
+        f"""
+        SELECT DISTINCT c.partner_user_id AS partner_id, u.phone_number
+        FROM {COTTAGE_TABLE} c
+        JOIN {USERS_TABLE} u ON u.id = c.partner_user_id
+        WHERE COALESCE(c.is_archived, FALSE) = FALSE
+          AND COALESCE(c.is_verified, FALSE) = TRUE
+          AND (
+              NOT EXISTS (
+                  SELECT 1 FROM {COTTAGE_PRICE_TABLE} cp
+                  WHERE cp.cottage_id = c.id
+              )
+              OR NOT EXISTS (
+                  SELECT 1 FROM {COTTAGE_PRICE_TABLE} cp
+                  WHERE cp.cottage_id = c.id
+                    AND cp.month_from >= DATE_TRUNC('month', CURRENT_DATE)
+                    AND cp.month_from <  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+              )
+          )
+        ORDER BY c.partner_user_id
+        """
+    )
