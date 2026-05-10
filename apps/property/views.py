@@ -1905,7 +1905,7 @@ class PropertyRetrieveUpdateDestroyView(APIView):
         )
         if property_type == PROPERTY_KIND_COTTAGE:
             serializer = CottageUpdateSerializer(
-                data=request.data, partial=True, context={"request": request}
+                data=request.data, partial=True, context={"request": request, "is_update": True}
             )
             serializer.is_valid(raise_exception=True)
             logger.info(
