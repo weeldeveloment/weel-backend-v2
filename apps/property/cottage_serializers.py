@@ -429,6 +429,9 @@ class CottageDetailSerializer(serializers.Serializer):
         max_digits=18, decimal_places=2, allow_null=True
     )
     description = serializers.CharField(allow_blank=True, allow_null=True)
+    description_ru = serializers.CharField(allow_blank=True, allow_null=True)
+    description_uz = serializers.CharField(allow_blank=True, allow_null=True)
+    description_en = serializers.CharField(allow_blank=True, allow_null=True)
     comment_count = serializers.IntegerField()
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
@@ -492,6 +495,9 @@ class CottageDetailSerializer(serializers.Serializer):
             row.get("price_on_weekends"), row_currency
         )
         row["description"] = self._resolve_description(row)
+        row["description_ru"] = row.get("description_ru") or ""
+        row["description_uz"] = row.get("description_uz") or ""
+        row["description_en"] = row.get("description_en") or ""
         row["comment_count"] = int(
             row.get("review_count") or row.get("comment_count") or 0
         )
