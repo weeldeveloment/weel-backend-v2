@@ -468,7 +468,7 @@ def create_apartment(
             FALSE, 'pending', FALSE, FALSE,
             %s,
             %s, %s, %s, %s,
-            %s,
+            %s::uuid[],
             %s, %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s,
