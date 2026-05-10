@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -14,6 +15,24 @@ from shared.date import month_end, month_start
 from .apartment_repository import COTTAGE_TYPE_GUID, is_prefecture_linked_to_district
 
 MAX_PRICE_ABS = Decimal("9999999999.99")
+
+
+def _parse_jsonb_price(raw_price: Any) -> list[dict[str, Any]]:
+    """Parse a JSONB `price` column returned by psycopg2.
+
+    Plain psycopg2 cursors return JSONB as a string; this normalises
+    both string and already-deserialised list representations.
+    """
+    if isinstance(raw_price, list):
+        return raw_price
+    if isinstance(raw_price, str):
+        try:
+            parsed = json.loads(raw_price)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return []
 
 
 def _preferred_language(request: Any) -> str:
@@ -331,11 +350,7 @@ class CottageListSerializer(serializers.Serializer):
         }
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
-        raw_price = row.get("price")
-        if isinstance(raw_price, list):
-            row["price"] = raw_price
-        else:
-            row["price"] = []
+        row["price"] = _parse_jsonb_price(row.get("price"))
         return super().to_representation(row)
 
 
@@ -494,11 +509,7 @@ class CottageDetailSerializer(serializers.Serializer):
             "beds": _parse_int_maybe(row.get("beds")),
             "bathrooms": _parse_int_maybe(row.get("bathrooms")),
         }
-        raw_price = row.get("price")
-        if isinstance(raw_price, list):
-            row["price"] = raw_price
-        else:
-            row["price"] = []
+        row["price"] = _parse_jsonb_price(row.get("price"))
         return super().to_representation(row)
 
 
