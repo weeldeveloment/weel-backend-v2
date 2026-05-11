@@ -2014,16 +2014,23 @@ class CottagePropertyRetrieveUpdateDestroyView(PropertyRetrieveUpdateDestroyView
 # ---------------------------------------------------------------------------
 
 
-def _resolve_image_path(request, property_row, image_id):
+def _resolve_image_path(request, property_row, image_url):
     """Map a public image URL (or raw path) back to the stored path in DB."""
+    # Normalize incoming image_url: fix single-slash protocols and strip trailing slash
+    normalized = image_url.rstrip("/")
+    if normalized.startswith("https:/") and not normalized.startswith("https://"):
+        normalized = "https://" + normalized[7:]
+    if normalized.startswith("http:/") and not normalized.startswith("http://"):
+        normalized = "http://" + normalized[6:]
+
     current_paths = property_row.get("img") or []
     if not isinstance(current_paths, list):
         current_paths = [current_paths] if current_paths else []
     for path in current_paths:
-        if path == image_id:
+        if path == normalized:
             return path
         url = _build_media_url(request, path)
-        if url == image_id:
+        if url and url.rstrip("/") == normalized:
             return path
     return None
 
@@ -2166,7 +2173,7 @@ class PropertyImageUpdateDeleteView(APIView):
                 description="Property GUID.",
             ),
             openapi.Parameter(
-                "image_id",
+                "image_url",
                 openapi.IN_PATH,
                 type=openapi.TYPE_STRING,
                 description="Image URL or stored path of the image to replace.",
@@ -2193,12 +2200,12 @@ class PropertyImageUpdateDeleteView(APIView):
             404: _ERROR_DETAIL_SCHEMA,
         },
     )
-    def patch(self, request, property_id, image_id, *args, **kwargs):
+    def patch(self, request, property_id, image_url, *args, **kwargs):
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
             raise NotFound(_("Property not found"))
 
-        old_path = _resolve_image_path(request, property_row, image_id)
+        old_path = _resolve_image_path(request, property_row, image_url)
         if not old_path:
             raise NotFound(_("Property image not found"))
 
@@ -2260,7 +2267,7 @@ class PropertyImageUpdateDeleteView(APIView):
                 description="Property GUID.",
             ),
             openapi.Parameter(
-                "image_id",
+                "image_url",
                 openapi.IN_PATH,
                 type=openapi.TYPE_STRING,
                 description="Image URL or stored path of the image to delete.",
@@ -2273,12 +2280,12 @@ class PropertyImageUpdateDeleteView(APIView):
             404: _ERROR_DETAIL_SCHEMA,
         },
     )
-    def delete(self, request, property_id, image_id, *args, **kwargs):
+    def delete(self, request, property_id, image_url, *args, **kwargs):
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
             raise NotFound(_("Property not found"))
 
-        old_path = _resolve_image_path(request, property_row, image_id)
+        old_path = _resolve_image_path(request, property_row, image_url)
         if not old_path:
             raise NotFound(_("Property image not found"))
 
