@@ -24,6 +24,8 @@ from .views import (
     AdminRegionListView,
     AdminDistrictListView,
     AdminPrefectureListView,
+    AdminPropertyImageCreateView,
+    AdminPropertyImageDeleteView,
     SavedPropertyListView,
     PropertyFavoriteToggleView,
     RegionListView,
@@ -167,6 +169,26 @@ urlpatterns = [
         "admin/apartments/<uuid:apartment_id>/",
         AdminApartmentPatchView.as_view(),
         name="admin-apartment-patch",
+    ),
+    path(
+        "admin/cottages/<uuid:property_id>/images/",
+        AdminPropertyImageCreateView.as_view(),
+        name="admin-cottage-image-create",
+    ),
+    path(
+        "admin/cottages/<uuid:property_id>/images/<str:image_id>/",
+        AdminPropertyImageDeleteView.as_view(),
+        name="admin-cottage-image-delete",
+    ),
+    path(
+        "admin/apartments/<uuid:property_id>/images/",
+        AdminPropertyImageCreateView.as_view(),
+        name="admin-apartment-image-create",
+    ),
+    path(
+        "admin/apartments/<uuid:property_id>/images/<str:image_id>/",
+        AdminPropertyImageDeleteView.as_view(),
+        name="admin-apartment-image-delete",
     ),
     path(
         "admin/regions/",

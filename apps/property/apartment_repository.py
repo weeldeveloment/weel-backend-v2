@@ -671,6 +671,54 @@ def admin_delete_apartment(*, apartment_guid: str) -> int:
     )
 
 
+def admin_append_apartment_images(
+    *,
+    apartment_guid: str,
+    image_paths: list[str],
+) -> dict[str, Any] | None:
+    existing = fetch_one(
+        f"SELECT id, img FROM {APARTMENT_TABLE} WHERE guid = %s LIMIT 1",
+        [apartment_guid],
+    )
+    if not existing:
+        return None
+    current = existing.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = list(current) + image_paths
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [new_img, timezone.now(), int(existing["id"])],
+    )
+    if not updated:
+        return None
+    return admin_get_apartment(apartment_guid)
+
+
+def admin_remove_apartment_image(
+    *,
+    apartment_guid: str,
+    image_path: str,
+) -> dict[str, Any] | None:
+    existing = fetch_one(
+        f"SELECT id, img FROM {APARTMENT_TABLE} WHERE guid = %s LIMIT 1",
+        [apartment_guid],
+    )
+    if not existing:
+        return None
+    current = existing.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [p for p in current if p != image_path]
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [new_img, timezone.now(), int(existing["id"])],
+    )
+    if not updated:
+        return None
+    return admin_get_apartment(apartment_guid)
+
+
 def set_apartment_primary_image(
     *,
     apartment_id: int,

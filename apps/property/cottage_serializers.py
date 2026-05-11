@@ -246,6 +246,7 @@ class _PropertyLocationInputSerializer(serializers.Serializer):
         required=False, allow_blank=True, allow_null=True
     )
 
+
 class RawRegionSerializer(serializers.Serializer):
     id = serializers.IntegerField(required=False, allow_null=True)
     guid = serializers.UUIDField(allow_null=True)
@@ -356,6 +357,10 @@ class CottageListSerializer(serializers.Serializer):
 
 class CottagePartnerListSerializer(CottageListSerializer):
     verification_status = serializers.CharField(allow_blank=True, allow_null=True)
+    weekend_only_sunday_inclusive = serializers.BooleanField(
+        required=False, allow_null=True
+    )
+    is_recommended = serializers.BooleanField(required=False, allow_null=True)
 
 
 class CottagePartnerUserSerializer(serializers.Serializer):
@@ -406,10 +411,18 @@ class CottageAdminListSerializer(CottagePartnerListSerializer):
             row["partner_user"] = partner_payload
         else:
             row["partner_user"] = None
+        # Capture raw prices before super() mutates them with USD→UZS conversion
+        raw_price_per_person = _to_decimal(row.get("price_per_person"))
+        raw_price_on_working_days = _to_decimal(row.get("price_on_working_days"))
+        raw_price_on_weekends = _to_decimal(row.get("price_on_weekends"))
         data = super().to_representation(row)
         data["is_verified"] = bool(row.get("is_verified"))
         data["is_archived"] = bool(row.get("is_archived"))
         data["partner_user"] = row.get("partner_user")
+        # Return raw DB prices for admin (no USD→UZS conversion)
+        data["price_per_person"] = raw_price_per_person
+        data["price_on_working_days"] = raw_price_on_working_days
+        data["price_on_weekends"] = raw_price_on_weekends
         return data
 
 
@@ -549,9 +562,15 @@ class CottageCreateSerializer(serializers.Serializer):
     prefecture_id = serializers.CharField(
         required=False, allow_blank=True, allow_null=True
     )
-    description_en = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    description_ru = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    description_uz = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    description_en = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    description_ru = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    description_uz = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     check_in = serializers.TimeField(required=False, allow_null=True)
     check_out = serializers.TimeField(required=False, allow_null=True)
     is_allowed_alcohol = serializers.BooleanField(required=False)
@@ -651,11 +670,15 @@ class CottageCreateSerializer(serializers.Serializer):
                 {"month_from": m2f, "month_to": m2t},
             ]
             monthly_prices_present = True
-        elif raw_price_list is None or (isinstance(raw_price_list, list) and len(raw_price_list) == 0):
+        elif raw_price_list is None or (
+            isinstance(raw_price_list, list) and len(raw_price_list) == 0
+        ):
             raw_monthly_prices = None
             monthly_prices_present = False
         else:
-            raise serializers.ValidationError({"price": _("Must be a list of price objects.")})
+            raise serializers.ValidationError(
+                {"price": _("Must be a list of price objects.")}
+            )
 
         normalized_monthly_prices: list[dict[str, Any]] = []
         if monthly_prices_present:
@@ -821,7 +844,7 @@ class CottageCreateSerializer(serializers.Serializer):
                 normalized["img"] = [str(image_value)]
             else:
                 normalized["img"] = []
-        if price_fields_present or not is_update:
+        if not is_update:
             normalized["price_per_person"] = (
                 per_person if per_person is not None else Decimal("0")
             )
@@ -833,6 +856,13 @@ class CottageCreateSerializer(serializers.Serializer):
                 if weekends is not None
                 else normalized["price_on_working_days"]
             )
+        elif price_fields_present:
+            if per_person is not None:
+                normalized["price_per_person"] = per_person
+            if working is not None:
+                normalized["price_on_working_days"] = working
+            if weekends is not None:
+                normalized["price_on_weekends"] = weekends
         if normalized_monthly_prices:
             normalized["price"] = normalized_monthly_prices
             first_item = normalized_monthly_prices[0]

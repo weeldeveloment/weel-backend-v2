@@ -37,7 +37,9 @@ from .apartment_repository import (
     COTTAGE_TYPE_GUID,
     PROPERTY_KIND_APARTMENT,
     PROPERTY_KIND_COTTAGE,
+    admin_append_apartment_images,
     admin_get_apartment,
+    admin_remove_apartment_image,
     admin_update_apartment,
     append_apartment_images,
     create_apartment,
@@ -71,7 +73,9 @@ from .apartment_serializers import (
     ApartmentUpdateSerializer,
 )
 from .cottage_repository import (
+    admin_append_cottage_images,
     admin_get_cottage,
+    admin_remove_cottage_image,
     admin_update_cottage,
     append_cottage_images,
     create_cottage,
@@ -2293,6 +2297,175 @@ class PropertyImageUpdateDeleteView(APIView):
             updated = remove_apartment_image(
                 apartment_id=int(property_row["id"]),
                 partner_user_id=int(request.user.id),
+                image_path=old_path,
+            )
+        if not updated:
+            raise NotFound(_("Property not found"))
+
+        try:
+            default_storage.delete(old_path)
+        except Exception:
+            pass
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Admin Image Management (no partner ownership check, no verification reset)
+# ---------------------------------------------------------------------------
+
+
+class AdminPropertyImageCreateView(APIView):
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_id="adminCreatePropertyImage",
+        operation_summary="Upload property image(s) (admin)",
+        operation_description="Admin-only. Uploads image file(s) and appends them to the property's gallery.",
+        tags=["Admin / Property"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+            openapi.Parameter(
+                "image",
+                openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=True,
+                description="Image file to upload (JPEG/PNG/WebP).",
+            ),
+        ],
+        responses={
+            201: openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                        "order": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "is_pending": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                        "image_url": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def post(self, request, property_id, *args, **kwargs):
+        property_row = admin_get_apartment(str(property_id))
+        if not property_row:
+            property_row = admin_get_cottage(str(property_id))
+        if not property_row:
+            raise NotFound(_("Property not found"))
+
+        uploaded_files = request.FILES.getlist("images")
+        if not uploaded_files:
+            single = request.FILES.get("image")
+            if single is not None:
+                uploaded_files = [single]
+        if not uploaded_files:
+            raise ValidationError({"images": [_("This field is required.")]})
+
+        for file in uploaded_files:
+            _validate_image_upload(file)
+
+        saved_paths = [
+            default_storage.save(f"property/images/{uuid4()}_{file.name}", file)
+            for file in uploaded_files
+        ]
+
+        property_type = str(property_row["property_kind"])
+        if property_type == PROPERTY_KIND_COTTAGE:
+            updated = admin_append_cottage_images(
+                cottage_guid=str(property_id),
+                image_paths=saved_paths,
+            )
+        else:
+            updated = admin_append_apartment_images(
+                apartment_guid=str(property_id),
+                image_paths=saved_paths,
+            )
+
+        if not updated:
+            raise NotFound(_("Property not found"))
+
+        updated_img = updated.get("img") or []
+        if not isinstance(updated_img, list):
+            updated_img = [updated_img] if updated_img else []
+        return Response(
+            [
+                {
+                    "guid": uuid4(),
+                    "order": idx + 1,
+                    "is_pending": False,
+                    "image_url": _build_media_url(request, path),
+                }
+                for idx, path in enumerate(updated_img)
+            ],
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminPropertyImageDeleteView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_id="adminDeletePropertyImage",
+        operation_summary="Delete a specific property image (admin)",
+        operation_description="Admin-only. Removes a specific image from the property's gallery.",
+        tags=["Admin / Property"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+            openapi.Parameter(
+                "image_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                description="Image URL or stored path of the image to delete.",
+            ),
+        ],
+        responses={
+            204: None,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def delete(self, request, property_id, image_id, *args, **kwargs):
+        property_row = admin_get_apartment(str(property_id))
+        if not property_row:
+            property_row = admin_get_cottage(str(property_id))
+        if not property_row:
+            raise NotFound(_("Property not found"))
+
+        old_path = _resolve_image_path(request, property_row, image_id)
+        if not old_path:
+            raise NotFound(_("Property image not found"))
+
+        property_type = str(property_row["property_kind"])
+        if property_type == PROPERTY_KIND_COTTAGE:
+            updated = admin_remove_cottage_image(
+                cottage_guid=str(property_id),
+                image_path=old_path,
+            )
+        else:
+            updated = admin_remove_apartment_image(
+                apartment_guid=str(property_id),
                 image_path=old_path,
             )
         if not updated:

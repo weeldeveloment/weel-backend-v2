@@ -239,6 +239,7 @@ class ApartmentListSerializer(serializers.Serializer):
 
 class ApartmentPartnerListSerializer(ApartmentListSerializer):
     verification_status = serializers.CharField(allow_blank=True, allow_null=True)
+    is_recommended = serializers.BooleanField(required=False, allow_null=True)
 
 
 class ApartmentPartnerUserSerializer(serializers.Serializer):
@@ -269,10 +270,14 @@ class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
             row["partner_user"] = partner_payload
         else:
             row["partner_user"] = None
+        # Capture raw price before super() mutates it with USD→UZS conversion
+        raw_price = _to_decimal(row.get("price"))
         data = super().to_representation(row)
         data["is_verified"] = bool(row.get("is_verified"))
         data["is_archived"] = bool(row.get("is_archived"))
         data["partner_user"] = row.get("partner_user")
+        # Return raw DB price for admin (no USD→UZS conversion)
+        data["price"] = raw_price
         return data
 
 

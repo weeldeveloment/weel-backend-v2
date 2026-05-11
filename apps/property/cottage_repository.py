@@ -579,6 +579,54 @@ def admin_delete_cottage(*, cottage_guid: str) -> int:
     )
 
 
+def admin_append_cottage_images(
+    *,
+    cottage_guid: str,
+    image_paths: list[str],
+) -> dict[str, Any] | None:
+    existing = fetch_one(
+        f"SELECT id, img FROM {COTTAGE_TABLE} WHERE guid = %s LIMIT 1",
+        [cottage_guid],
+    )
+    if not existing:
+        return None
+    current = existing.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = list(current) + image_paths
+    updated = fetch_one(
+        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [new_img, timezone.now(), int(existing["id"])],
+    )
+    if not updated:
+        return None
+    return admin_get_cottage(cottage_guid)
+
+
+def admin_remove_cottage_image(
+    *,
+    cottage_guid: str,
+    image_path: str,
+) -> dict[str, Any] | None:
+    existing = fetch_one(
+        f"SELECT id, img FROM {COTTAGE_TABLE} WHERE guid = %s LIMIT 1",
+        [cottage_guid],
+    )
+    if not existing:
+        return None
+    current = existing.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [p for p in current if p != image_path]
+    updated = fetch_one(
+        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [new_img, timezone.now(), int(existing["id"])],
+    )
+    if not updated:
+        return None
+    return admin_get_cottage(cottage_guid)
+
+
 def set_cottage_primary_image(
     *,
     cottage_id: int,
