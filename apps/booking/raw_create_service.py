@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from datetime import date, timedelta
@@ -32,14 +33,43 @@ from .raw_repository import fetch_calendar_dates_by_status, upsert_calendar_days
 logger = logging.getLogger(__name__)
 
 
+def _parse_price_rows(price_rows) -> list[dict[str, Any]] | None:
+    if not price_rows:
+        return None
+    if isinstance(price_rows, list):
+        return price_rows
+    if isinstance(price_rows, str):
+        try:
+            parsed = json.loads(price_rows)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return None
+
+
+def _parse_date(value) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
 def _resolve_cottage_day_price(
     price_rows: list[dict[str, Any]] | None, day: date
 ) -> dict[str, Any] | None:
-    if not price_rows:
+    parsed_rows = _parse_price_rows(price_rows)
+    if not parsed_rows:
         return None
-    for item in price_rows:
-        month_from = item.get("month_from")
-        month_to = item.get("month_to")
+    for item in parsed_rows:
+        if not isinstance(item, dict):
+            continue
+        month_from = _parse_date(item.get("month_from"))
+        month_to = _parse_date(item.get("month_to"))
         if month_from and month_to and month_from <= day <= month_to:
             return item
     return None
