@@ -458,6 +458,8 @@ def update_cottage(
     if should_send_to_moderation:
         updates["is_verified"] = False
         updates["verification_status"] = VerificationStatus.WAITING.value
+        from stories.raw_repository import reset_stories_verification_for_property
+        reset_stories_verification_for_property(cottage_id, "cottage")
 
     assignments_parts: list[str] = []
     for col in updates:

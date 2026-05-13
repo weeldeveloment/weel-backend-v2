@@ -18,6 +18,7 @@ from admin_auth.permissions import IsAdminUser
 from .raw_repository import (
     count_stories_for_admin,
     delete_story_by_guid,
+    get_story_by_guid,
     list_stories_for_admin,
     update_story_verification,
 )
@@ -140,9 +141,24 @@ class AdminStoryModerateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        is_verified = serializer.validated_data["is_verified"]
+
+        if is_verified:
+            story_row = get_story_by_guid(story_guid, active_only=False)
+            if not story_row:
+                return Response(
+                    {"detail": _("Story not found")},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if not story_row.get("property_is_verified"):
+                return Response(
+                    {"detail": _("Property is not verified. Cannot approve story.")},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         story = update_story_verification(
             story_guid,
-            is_verified=serializer.validated_data["is_verified"],
+            is_verified=is_verified,
             verified_by_user_id=request.user.id,
         )
         if not story:

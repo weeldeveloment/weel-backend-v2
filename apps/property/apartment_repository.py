@@ -555,6 +555,8 @@ def update_apartment(
     if should_send_to_moderation:
         updates["is_verified"] = False
         updates["verification_status"] = "pending"
+        from stories.raw_repository import reset_stories_verification_for_property
+        reset_stories_verification_for_property(apartment_id, "apartment")
 
     assignments_parts: list[str] = []
     for col in updates:
