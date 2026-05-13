@@ -72,7 +72,10 @@ class RawBookingCreateService:
 
     @staticmethod
     def _as_decimal(value: Any) -> Decimal:
-        return Decimal(str(value))
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValidationError(_("Pricing is not configured for this property"))
 
     @staticmethod
     def _generate_booking_number() -> str:
@@ -142,7 +145,7 @@ class RawBookingCreateService:
         base_total_price = Decimal("0")
         if property_kind == "apartment":
             price = self._as_decimal(property_row.get("price"))
-            if price is None or price <= 0:
+            if price <= 0:
                 raise ValidationError(_("Pricing is not configured for this property"))
             base_total_price = price
         else:
@@ -275,7 +278,7 @@ class RawBookingCreateService:
         create_hold_transaction(
             booking_id=int(booking["id"]),
             client_user_id=int(self.client.id),
-            partner_user_id=int(property_row["partner_user_id"]),
+            partner_user_id=int(property_row["partner_user_id"]) if property_row.get("partner_user_id") is not None else None,
             amount=hold_amount,
             transaction_id=hold_result.get("transactionId"),
             hold_id=hold_result.get("holdId"),

@@ -9,3 +9,10 @@ class CustomStaticFilesStorage(CompressedManifestStaticFilesStorage):
     """
 
     manifest_strict = False
+
+    def url(self, name, force=False):
+        try:
+            return super().url(name, force=force)
+        except ValueError:
+            # Return the original path if the file is not found
+            return f"{self.base_url}{name}"
