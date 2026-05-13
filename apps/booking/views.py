@@ -482,7 +482,7 @@ class ClientBookingListCreateView(ListCreateAPIView):
                 "partner": {
                     "username": property_row.get("partner_username"),
                     "first_name": property_row.get("partner_first_name"),
-                    "last_name": property_row.get("partner_first_name"),
+                    "last_name": property_row.get("partner_last_name"),
                     "phone_number": property_row.get("partner_phone_number"),
                 },
                 "check_in": booking["check_in"],
