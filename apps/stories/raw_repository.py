@@ -15,6 +15,7 @@ PROPERTY_TITLE_EXPR = "COALESCE(a.title, c.title)"
 PROPERTY_IMAGE_EXPR = "COALESCE(NULLIF(a.img[1], ''), NULLIF(c.img[1], ''))"
 PROPERTY_PARTNER_EXPR = "COALESCE(a.partner_user_id, c.partner_user_id)"
 PROPERTY_ARCHIVED_EXPR = "COALESCE(a.is_archived, c.is_archived, FALSE)"
+PROPERTY_VERIFIED_EXPR = "COALESCE(a.is_verified, c.is_verified, FALSE)"
 PROPERTY_KIND_EXPR = "CASE WHEN s.property_apartment_id IS NOT NULL THEN 'apartment' ELSE 'cottage' END"
 PROPERTY_TYPE_LABEL_EXPR = (
     "CASE WHEN s.property_apartment_id IS NOT NULL THEN 'Apartment' ELSE 'Cottages' END"
@@ -28,6 +29,7 @@ STORY_SELECT = f"""
         {PROPERTY_IMAGE_EXPR} AS property_img,
         {PROPERTY_PARTNER_EXPR} AS partner_user_id,
         {PROPERTY_ARCHIVED_EXPR} AS property_is_archived,
+        {PROPERTY_VERIFIED_EXPR} AS property_is_verified,
         {PROPERTY_KIND_EXPR} AS property_kind,
         {PROPERTY_TYPE_LABEL_EXPR} AS property_type_label
     FROM {get_table_name("stories")} s
@@ -99,6 +101,7 @@ def list_active_stories(
 
     if public_only:
         where.append("s.is_verified = TRUE")
+        where.append(f"{PROPERTY_VERIFIED_EXPR} = TRUE")
     if partner_user_id is not None:
         where.append(f"{PROPERTY_PARTNER_EXPR} = %s")
         params.append(partner_user_id)
@@ -449,4 +452,26 @@ def delete_story_by_guid(story_guid: uuid.UUID | str) -> int:
         WHERE guid = %s
         """,
         [story_guid],
+    )
+
+
+def reset_stories_verification_for_property(property_id: int, property_kind: str) -> int:
+    """Reset is_verified to FALSE for all active stories linked to a property."""
+    if property_kind == "apartment":
+        where = "property_apartment_id = %s"
+    elif property_kind == "cottage":
+        where = "property_cottage_id = %s"
+    else:
+        return 0
+    return execute(
+        f"""
+        UPDATE {get_table_name("stories")}
+        SET is_verified = FALSE,
+            verified_by_user_id = NULL,
+            verified_at = NULL,
+            updated_at = %s
+        WHERE {where}
+          AND expires_at > %s
+        """,
+        [timezone.now(), property_id, timezone.now()],
     )
