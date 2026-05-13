@@ -557,7 +557,7 @@ MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100MB
 
 
-ALLOWED_PHOTO_EXTENSION = ["jpg", "jpeg", "png", "heif", "heic"]
+ALLOWED_PHOTO_EXTENSION = ["jpg", "jpeg", "png", "heif", "heic", "webp"]
 ALLOWED_VIDEO_EXTENSION = ["mp4", "mov", "avi", "mkv"]
 
 # Default primary key field type

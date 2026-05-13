@@ -856,6 +856,21 @@ def _validate_image_upload(uploaded):
     name = (uploaded.name or "").lower()
     ext = name.rsplit(".", 1)[-1] if "." in name else ""
     content_type = (uploaded.content_type or "").lower()
+
+    # If no extension in filename but valid image content-type, derive ext from content_type
+    if not ext and content_type.startswith("image/"):
+        ext = content_type.split("/")[-1]
+        # Map common content-type suffixes to file extensions
+        ext_map = {
+            "jpeg": "jpg",
+            "png": "png",
+            "gif": "gif",
+            "webp": "webp",
+            "heic": "heic",
+            "heif": "heif",
+        }
+        ext = ext_map.get(ext, ext)
+
     if allowed_ext and ext not in allowed_ext:
         raise ValidationError({"image": [_("Unsupported file extension.")]})
     if content_type and not content_type.startswith("image/"):
