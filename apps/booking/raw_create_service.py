@@ -261,6 +261,9 @@ class RawBookingCreateService:
             if plum_api_error.status_code == 403:
                 raise PermissionDenied(plum_api_error.message)
             raise ValidationError(plum_api_error.message)
+        except Exception as exc:
+            logger.error("Payment service error: %s", exc)
+            raise ValidationError(_("Payment service is temporarily unavailable. Please try again later."))
 
         hold_result = (hold or {}).get("result") or {}
         hold_amount = hold_result.get("totalAmount") or booking_price["hold_amount"]
