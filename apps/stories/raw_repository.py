@@ -101,7 +101,6 @@ def list_active_stories(
 
     if public_only:
         where.append("s.is_verified = TRUE")
-        where.append(f"{PROPERTY_VERIFIED_EXPR} = TRUE")
     if partner_user_id is not None:
         where.append(f"{PROPERTY_PARTNER_EXPR} = %s")
         params.append(partner_user_id)
