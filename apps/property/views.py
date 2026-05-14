@@ -68,6 +68,8 @@ from .apartment_serializers import (
     ApartmentUpdateSerializer,
 )
 from .cottage_repository import (
+    admin_append_cottage_images,
+    admin_delete_cottage,
     admin_get_cottage,
     admin_update_cottage,
     create_cottage,
@@ -75,9 +77,8 @@ from .cottage_repository import (
     effective_cottage_price,
     get_cottage_for_partner,
     get_cottage_for_public,
-    list_cottages,
+    list_cottages_for_admin,
     set_cottage_primary_image,
-    update_cottage,
 )
 from .cottage_serializers import (
     CottageAdminListSerializer,
