@@ -1,5 +1,7 @@
 from PIL import Image
 
+from django.utils.translation import gettext_lazy as _
+
 from rest_framework import exceptions
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
@@ -158,7 +160,7 @@ def exception_errors_format_handler(exc, context):
     # Catch Pillow's DecompressionBombError
     if isinstance(exc, Image.DecompressionBombError):
         return Response(
-            {"images": {"Image resolution is too high. Please upload a smaller image"}},
+            {"images": {_("Image resolution is too high. Please upload a smaller image")}},
             status=400,
         )
 
@@ -167,7 +169,7 @@ def exception_errors_format_handler(exc, context):
     # If an unexpected error occurs (server error, etc.)
     if response is None:
         return Response(
-            {"errors": [{"detail": "Internal server error.", "status_code": 500}]},
+            {"errors": [{"detail": _("Internal server error."), "status_code": 500}]},
             status=500,
         )
     try:
@@ -193,7 +195,7 @@ def exception_errors_format_handler(exc, context):
 
 def _format_token_error_response(response):
     """Token not valid xatosi uchun bitta format va yo‘riqnoma."""
-    detail = "Token is invalid or expired."
+    detail = _("Token is invalid or expired.")
     if response.data and isinstance(response.data, dict):
         if "detail" in response.data:
             d = response.data["detail"]
@@ -203,7 +205,7 @@ def _format_token_error_response(response):
             {
                 ErrorsFormatter.DETAIL: detail,
                 ErrorsFormatter.STATUS_CODE: response.status_code,
-                "hint": "Use the Access token (from login/verify). If expired, use POST /api/users/refresh/ with Refresh token to get new tokens.",
+                "hint": _("Your session has expired. Please log in again."),
             }
         ]
     }

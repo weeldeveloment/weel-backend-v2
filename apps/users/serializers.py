@@ -92,10 +92,10 @@ class ClientRegisterSerializer(serializers.Serializer):
     last_name = serializers.CharField(required=False, min_length=2, max_length=64)
 
     def validate_first_name(self, value):
-        return _validate_name(value, "First name")
+        return _validate_name(value, _("First name"))
 
     def validate_last_name(self, value):
-        return _validate_name(value, "Last name")
+        return _validate_name(value, _("Last name"))
 
     def validate_phone_number(self, value):
         if exists_user_by_phone(value, role="client"):
@@ -204,10 +204,10 @@ class PartnerOTPRegisterSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False, write_only=True)
 
     def validate_first_name(self, value):
-        return _validate_name(value, "First name")
+        return _validate_name(value, _("First name"))
 
     def validate_last_name(self, value):
-        return _validate_name(value, "Last name")
+        return _validate_name(value, _("Last name"))
 
     def validate_phone_number(self, value):
         if exists_user_by_phone(value, role="partner"):
