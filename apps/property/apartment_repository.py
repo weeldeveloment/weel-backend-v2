@@ -11,6 +11,7 @@ from django.db.utils import ProgrammingError
 from payment.exchange_rate import exchange_rate
 from shared.raw.compat import get_table_name, is_postgresql
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
+from property.models import VerificationStatus
 from shared.raw.tables import BOOKING_TABLE
 
 APARTMENT_TYPE_GUID = UUID("11111111-1111-1111-1111-111111111111")
@@ -465,7 +466,7 @@ def create_apartment(
         ) VALUES (
             %s, %s, %s,
             %s, %s,
-            FALSE, 'pending', FALSE, FALSE,
+            FALSE, %s, FALSE, FALSE,
             %s,
             %s, %s, %s, %s,
             %s::uuid[],
@@ -482,6 +483,7 @@ def create_apartment(
         [
             uuid4(), now, now,
             values.get("title"), values.get("title_sort"),
+            VerificationStatus.WAITING.value,
             int(values.get("comment_count", 0)),
             values.get("price"), values.get("currency"), values.get("img"),
             partner_user_id,
@@ -554,7 +556,7 @@ def update_apartment(
     should_send_to_moderation = bool(changed_non_price_fields)
     if should_send_to_moderation:
         updates["is_verified"] = False
-        updates["verification_status"] = "pending"
+        updates["verification_status"] = VerificationStatus.WAITING.value
         from stories.raw_repository import reset_stories_verification_for_property
         reset_stories_verification_for_property(apartment_id, "apartment")
 
@@ -642,7 +644,7 @@ def admin_update_apartment(
             updates.setdefault("verified_at", timezone.now())
             if admin_user_id is not None:
                 updates.setdefault("verified_by_user_id", int(admin_user_id))
-            updates.setdefault("verification_status", "accepted")
+            updates.setdefault("verification_status", VerificationStatus.ACCEPTED.value)
         else:
             updates.setdefault("verified_at", None)
 
@@ -730,7 +732,7 @@ def set_apartment_primary_image(
     image_payload = [image_path] if image_path else []
     row = fetch_one(
         f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [image_payload, timezone.now(), False, "pending", apartment_id, partner_user_id],
+        [image_payload, timezone.now(), False, VerificationStatus.WAITING.value, apartment_id, partner_user_id],
     )
     if not row:
         return None
@@ -755,7 +757,7 @@ def append_apartment_images(
     new_img = list(current) + image_paths
     updated = fetch_one(
         f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [new_img, timezone.now(), False, "pending", apartment_id, partner_user_id],
+        [new_img, timezone.now(), False, VerificationStatus.WAITING.value, apartment_id, partner_user_id],
     )
     if not updated:
         return None
@@ -780,7 +782,7 @@ def remove_apartment_image(
     new_img = [p for p in current if p != image_path]
     updated = fetch_one(
         f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [new_img, timezone.now(), False, "pending", apartment_id, partner_user_id],
+        [new_img, timezone.now(), False, VerificationStatus.WAITING.value, apartment_id, partner_user_id],
     )
     if not updated:
         return None
@@ -806,7 +808,7 @@ def replace_apartment_image(
     new_img = [new_image_path if p == old_image_path else p for p in current]
     updated = fetch_one(
         f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [new_img, timezone.now(), False, "pending", apartment_id, partner_user_id],
+        [new_img, timezone.now(), False, VerificationStatus.WAITING.value, apartment_id, partner_user_id],
     )
     if not updated:
         return None
