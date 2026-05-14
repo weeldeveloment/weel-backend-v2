@@ -1513,7 +1513,7 @@ class ApartmentPropertyListCreateView(APIView):
     @swagger_auto_schema(
         operation_id="createApartment",
         operation_summary="Create an apartment",
-        operation_description="Partner-only. Creates a new apartment listing. The property is created with verification_status=pending.",
+        operation_description="Partner-only. Creates a new apartment listing. The property is created with verification_status=waiting.",
         tags=["Property / Partner"],
         request_body=ApartmentCreateSerializer,
         responses={
@@ -2152,7 +2152,7 @@ class PropertyImageCreateView(APIView):
 
         if not bool(updated.get("is_verified")):
             return Response(
-                {"detail": _("Your image(s) are pending approval"), "status": "pending"},
+                {"detail": _("Your image(s) are waiting for approval"), "status": "waiting"},
                 status=status.HTTP_200_OK,
             )
 
@@ -2181,7 +2181,7 @@ class PropertyImageUpdateDeleteView(APIView):
     @swagger_auto_schema(
         operation_id="updatePropertyImage",
         operation_summary="Update a specific property image",
-        operation_description="Partner-only. Replaces a specific image in the property's gallery. If the property is not yet verified, the image is marked as pending approval.",
+        operation_description="Partner-only. Replaces a specific image in the property's gallery. If the property is not yet verified, the image is marked as waiting for approval.",
         tags=["Property / Partner"],
         manual_parameters=[
             openapi.Parameter(
@@ -2266,8 +2266,8 @@ class PropertyImageUpdateDeleteView(APIView):
 
         return Response(
             {
-                "detail": _("Your image has been updated and is pending approval"),
-                "status": "pending",
+                "detail": _("Your image has been updated and is waiting for approval"),
+                "status": "waiting",
             },
             status=status.HTTP_200_OK,
         )

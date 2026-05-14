@@ -12,7 +12,7 @@ from shared.models import BaseModel, HardDeleteBaseModel, VerifiedByMixin
 class VerificationStatus(ChoiceEnum):
     WAITING = "waiting"
     ACCEPTED = "accepted"
-    REJECTED = "rejected"
+    CANCELLED = "cancelled"
 
 
 VerificationStatus.choices = build_choices(VerificationStatus)
