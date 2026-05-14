@@ -74,6 +74,7 @@ from .apartment_serializers import (
 )
 from .cottage_repository import (
     admin_append_cottage_images,
+    admin_delete_cottage,
     admin_get_cottage,
     admin_remove_cottage_image,
     admin_update_cottage,
@@ -3463,6 +3464,24 @@ class AdminCottagePatchView(APIView):
             CottageAdminListSerializer(updated, context=ctx).data,
             status=status.HTTP_200_OK,
         )
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_id="deleteAdminCottage",
+        operation_summary="Delete cottage (admin)",
+        operation_description="Admin-only hard delete of a cottage by its guid.",
+        responses={
+            204: None,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def delete(self, request, cottage_id, *args, **kwargs):
+        deleted = admin_delete_cottage(cottage_guid=str(cottage_id))
+        if not deleted:
+            raise NotFound(_("Cottage not found"))
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ApartmentPartnerPropertyListView(APIView):
