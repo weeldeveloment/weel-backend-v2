@@ -57,6 +57,7 @@ from .apartment_repository import (
     prepare_property_rows,
     resolve_region_id_by_guid,
     set_apartment_primary_image,
+    admin_set_apartment_primary_image,
     update_apartment,
 )
 from .apartment_serializers import (
@@ -77,6 +78,7 @@ from .cottage_repository import (
     get_cottage_for_public,
     list_cottages,
     set_cottage_primary_image,
+    admin_set_cottage_primary_image,
     update_cottage,
 )
 from .cottage_serializers import (
@@ -2029,13 +2031,13 @@ class CottagePropertyRetrieveUpdateDestroyView(PropertyRetrieveUpdateDestroyView
 
 class PropertyImageCreateView(APIView):
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
-    authentication_classes = [PartnerJWTAuthentication]
-    permission_classes = [IsPartner]
+    authentication_classes = [PartnerJWTAuthentication, AdminJWTAuthentication]
+    permission_classes = [IsPartnerOrAdmin]
 
     @swagger_auto_schema(
         operation_id="createPropertyImage",
         operation_summary="Upload a property image",
-        operation_description="Partner-only. Uploads a single image file and sets it as the primary image for the property. If the property is not yet verified, the image is marked as pending approval.",
+        operation_description="Partner or admin. Uploads a single image file and sets it as the primary image for the property. If the property is not yet verified, the image is marked as pending approval (partners only).",
         tags=["Property / Partner"],
         manual_parameters=[
             openapi.Parameter(
@@ -2080,7 +2082,18 @@ class PropertyImageCreateView(APIView):
         },
     )
     def post(self, request, property_id, *args, **kwargs):
-        property_row = _get_property_for_partner(str(property_id), int(request.user.id))
+        user = request.user
+        is_admin = getattr(user, "role", None) == "admin"
+
+        if is_admin:
+            hinted_kind = _property_kind_hint_from_path(getattr(request, "path", ""))
+            if hinted_kind == PROPERTY_KIND_COTTAGE:
+                property_row = admin_get_cottage(str(property_id))
+            else:
+                property_row = admin_get_apartment(str(property_id))
+        else:
+            property_row = _get_property_for_partner(str(property_id), int(user.id))
+
         if not property_row:
             raise NotFound(_("Property not found"))
 
@@ -2102,17 +2115,29 @@ class PropertyImageCreateView(APIView):
 
         property_type = str(property_row["property_kind"])
         if property_type == PROPERTY_KIND_COTTAGE:
-            updated = set_cottage_primary_image(
-                cottage_id=int(property_row["id"]),
-                partner_user_id=int(request.user.id),
-                image_path=saved_path,
-            )
+            if is_admin:
+                updated = admin_set_cottage_primary_image(
+                    cottage_id=int(property_row["id"]),
+                    image_path=saved_path,
+                )
+            else:
+                updated = set_cottage_primary_image(
+                    cottage_id=int(property_row["id"]),
+                    partner_user_id=int(user.id),
+                    image_path=saved_path,
+                )
         else:
-            updated = set_apartment_primary_image(
-                apartment_id=int(property_row["id"]),
-                partner_user_id=int(request.user.id),
-                image_path=saved_path,
-            )
+            if is_admin:
+                updated = admin_set_apartment_primary_image(
+                    apartment_id=int(property_row["id"]),
+                    image_path=saved_path,
+                )
+            else:
+                updated = set_apartment_primary_image(
+                    apartment_id=int(property_row["id"]),
+                    partner_user_id=int(user.id),
+                    image_path=saved_path,
+                )
 
         if not updated:
             raise NotFound(_("Property not found"))
@@ -2138,13 +2163,13 @@ class PropertyImageCreateView(APIView):
 
 class PropertyImageUpdateDeleteView(APIView):
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
-    authentication_classes = [PartnerJWTAuthentication]
-    permission_classes = [IsPartner]
+    authentication_classes = [PartnerJWTAuthentication, AdminJWTAuthentication]
+    permission_classes = [IsPartnerOrAdmin]
 
     @swagger_auto_schema(
         operation_id="updatePropertyImage",
         operation_summary="Update property primary image",
-        operation_description="Partner-only. Replaces the property's primary image with a newly uploaded file. If the property is not yet verified, the image is marked as pending approval.",
+        operation_description="Partner or admin. Replaces the property's primary image with a newly uploaded file. If the property is not yet verified, the image is marked as pending approval (partners only).",
         tags=["Property / Partner"],
         manual_parameters=[
             openapi.Parameter(
@@ -2184,7 +2209,18 @@ class PropertyImageUpdateDeleteView(APIView):
         },
     )
     def patch(self, request, property_id, image_id, *args, **kwargs):
-        property_row = _get_property_for_partner(str(property_id), int(request.user.id))
+        user = request.user
+        is_admin = getattr(user, "role", None) == "admin"
+
+        if is_admin:
+            hinted_kind = _property_kind_hint_from_path(getattr(request, "path", ""))
+            if hinted_kind == PROPERTY_KIND_COTTAGE:
+                property_row = admin_get_cottage(str(property_id))
+            else:
+                property_row = admin_get_apartment(str(property_id))
+        else:
+            property_row = _get_property_for_partner(str(property_id), int(user.id))
+
         if not property_row:
             raise NotFound(_("Property not found"))
 
@@ -2201,17 +2237,29 @@ class PropertyImageUpdateDeleteView(APIView):
             )
             property_type = str(property_row["property_kind"])
             if property_type == PROPERTY_KIND_COTTAGE:
-                updated = set_cottage_primary_image(
-                    cottage_id=int(property_row["id"]),
-                    partner_user_id=int(request.user.id),
-                    image_path=image_path,
-                )
+                if is_admin:
+                    updated = admin_set_cottage_primary_image(
+                        cottage_id=int(property_row["id"]),
+                        image_path=image_path,
+                    )
+                else:
+                    updated = set_cottage_primary_image(
+                        cottage_id=int(property_row["id"]),
+                        partner_user_id=int(user.id),
+                        image_path=image_path,
+                    )
             else:
-                updated = set_apartment_primary_image(
-                    apartment_id=int(property_row["id"]),
-                    partner_user_id=int(request.user.id),
-                    image_path=image_path,
-                )
+                if is_admin:
+                    updated = admin_set_apartment_primary_image(
+                        apartment_id=int(property_row["id"]),
+                        image_path=image_path,
+                    )
+                else:
+                    updated = set_apartment_primary_image(
+                        apartment_id=int(property_row["id"]),
+                        partner_user_id=int(user.id),
+                        image_path=image_path,
+                    )
             if not updated:
                 raise NotFound(_("Property not found"))
         elif not image_path:
@@ -2254,7 +2302,18 @@ class PropertyImageUpdateDeleteView(APIView):
         },
     )
     def delete(self, request, property_id, image_id, *args, **kwargs):
-        property_row = _get_property_for_partner(str(property_id), int(request.user.id))
+        user = request.user
+        is_admin = getattr(user, "role", None) == "admin"
+
+        if is_admin:
+            hinted_kind = _property_kind_hint_from_path(getattr(request, "path", ""))
+            if hinted_kind == PROPERTY_KIND_COTTAGE:
+                property_row = admin_get_cottage(str(property_id))
+            else:
+                property_row = admin_get_apartment(str(property_id))
+        else:
+            property_row = _get_property_for_partner(str(property_id), int(user.id))
+
         if not property_row:
             raise NotFound(_("Property not found"))
         image_path = property_row.get("img")
@@ -2263,17 +2322,29 @@ class PropertyImageUpdateDeleteView(APIView):
 
         property_type = str(property_row["property_kind"])
         if property_type == PROPERTY_KIND_COTTAGE:
-            updated = set_cottage_primary_image(
-                cottage_id=int(property_row["id"]),
-                partner_user_id=int(request.user.id),
-                image_path=None,
-            )
+            if is_admin:
+                updated = admin_set_cottage_primary_image(
+                    cottage_id=int(property_row["id"]),
+                    image_path=None,
+                )
+            else:
+                updated = set_cottage_primary_image(
+                    cottage_id=int(property_row["id"]),
+                    partner_user_id=int(user.id),
+                    image_path=None,
+                )
         else:
-            updated = set_apartment_primary_image(
-                apartment_id=int(property_row["id"]),
-                partner_user_id=int(request.user.id),
-                image_path=None,
-            )
+            if is_admin:
+                updated = admin_set_apartment_primary_image(
+                    apartment_id=int(property_row["id"]),
+                    image_path=None,
+                )
+            else:
+                updated = set_apartment_primary_image(
+                    apartment_id=int(property_row["id"]),
+                    partner_user_id=int(user.id),
+                    image_path=None,
+                )
         if not updated:
             raise NotFound(_("Property not found"))
         try:

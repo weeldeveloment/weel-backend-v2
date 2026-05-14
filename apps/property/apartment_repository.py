@@ -685,6 +685,22 @@ def set_apartment_primary_image(
     return get_apartment_for_partner(str(row["guid"]), partner_user_id)
 
 
+def admin_set_apartment_primary_image(
+    *,
+    apartment_id: int,
+    image_path: str | None,
+) -> dict[str, Any] | None:
+    """Update apartment image as admin. No partner ownership check and no verification reset."""
+    image_payload = [image_path] if image_path else []
+    row = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [image_payload, timezone.now(), apartment_id],
+    )
+    if not row:
+        return None
+    return admin_get_apartment(str(row["guid"]))
+
+
 def effective_apartment_price(row: dict[str, Any]) -> Decimal:
     val = row.get("price")
     if val is not None:

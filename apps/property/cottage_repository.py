@@ -595,6 +595,22 @@ def set_cottage_primary_image(
     return get_cottage_for_partner(str(row["guid"]), partner_user_id)
 
 
+def admin_set_cottage_primary_image(
+    *,
+    cottage_id: int,
+    image_path: str | None,
+) -> dict[str, Any] | None:
+    """Update cottage image as admin. No partner ownership check and no verification reset."""
+    image_payload = [image_path] if image_path else []
+    row = fetch_one(
+        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [image_payload, timezone.now(), cottage_id],
+    )
+    if not row:
+        return None
+    return admin_get_cottage(str(row["guid"]))
+
+
 def effective_cottage_price(row: dict[str, Any], reference_date: date) -> Decimal:
     field = "price_on_weekends" if reference_date.weekday() >= 4 else "price_on_working_days"
     val = row.get(field)
