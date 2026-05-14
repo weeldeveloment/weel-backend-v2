@@ -1513,7 +1513,7 @@ class ApartmentPropertyListCreateView(APIView):
     @swagger_auto_schema(
         operation_id="createApartment",
         operation_summary="Create an apartment",
-        operation_description="Partner-only. Creates a new apartment listing. The property is created with verification_status=pending.",
+        operation_description="Partner-only. Creates a new apartment listing. The property is created with verification_status=waiting.",
         tags=["Property / Partner"],
         request_body=ApartmentCreateSerializer,
         responses={
@@ -1892,7 +1892,7 @@ class PropertyRetrieveUpdateDestroyView(APIView):
     @swagger_auto_schema(
         operation_id="fullUpdateProperty",
         operation_summary="Fully update a property",
-        operation_description="Partner-only full update for an apartment or cottage. Mutating fields resets verification status to pending.",
+        operation_description="Partner-only full update for an apartment or cottage. Mutating fields resets verification status to waiting.",
         tags=["Property / Partner"],
         request_body=ApartmentUpdateSerializer,
         responses={

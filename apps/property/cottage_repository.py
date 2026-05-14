@@ -548,7 +548,7 @@ def admin_update_cottage(
             updates.setdefault("verified_at", timezone.now())
             if admin_user_id is not None:
                 updates.setdefault("verified_by_user_id", int(admin_user_id))
-            updates.setdefault("verification_status", "accepted")
+            updates.setdefault("verification_status", VerificationStatus.ACCEPTED.value)
         else:
             updates.setdefault("verified_at", None)
 
