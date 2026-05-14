@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.utils.translation import gettext_lazy as _
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission
@@ -136,13 +137,13 @@ class ChatViewSet(viewsets.GenericViewSet):
         try:
             counterpart_id = int(partner_id)
         except (TypeError, ValueError):
-            return Response({"error": "Invalid partner id"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": _("Invalid partner id")}, status=status.HTTP_400_BAD_REQUEST)
 
         if is_admin_actor(user):
             target_role = "client" if requested_role == "client" else "partner"
             counterpart = get_active_actor(counterpart_id, target_role)
             if not counterpart:
-                return Response({"error": f"{target_role.capitalize()} not found"}, status=status.HTTP_404_NOT_FOUND)
+                return Response({"error": _("%(role)s not found") % {"role": target_role.capitalize()}}, status=status.HTTP_404_NOT_FOUND)
             try:
                 conversation = get_or_create_conversation(
                     admin_user_id=user.id,
@@ -154,7 +155,7 @@ class ChatViewSet(viewsets.GenericViewSet):
         elif is_partner_actor(user):
             admin_user = get_active_actor(counterpart_id, "admin")
             if not admin_user:
-                return Response({"error": "Admin user not found"}, status=status.HTTP_404_NOT_FOUND)
+                return Response({"error": _("Admin user not found")}, status=status.HTTP_404_NOT_FOUND)
             conversation = get_or_create_conversation(
                 admin_user_id=admin_user.id,
                 counterpart_user_id=user.id,
@@ -165,7 +166,7 @@ class ChatViewSet(viewsets.GenericViewSet):
             if not admin_user:
                 admin_user = get_first_active_admin()
             if not admin_user:
-                return Response({"error": "No admin user available"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": _("No admin user available")}, status=status.HTTP_400_BAD_REQUEST)
 
             conversation = get_or_create_conversation(
                 admin_user_id=admin_user.id,
@@ -173,7 +174,7 @@ class ChatViewSet(viewsets.GenericViewSet):
                 counterpart_role="client",
             )
         else:
-            return Response({"error": "Unauthorized actor"}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": _("Unauthorized actor")}, status=status.HTTP_403_FORBIDDEN)
 
         messages = list_messages_for_conversation(conversation.id)
         mark_conversation_messages_read(
@@ -195,7 +196,7 @@ class ChatViewSet(viewsets.GenericViewSet):
         """Return the single active admin recipient for partner chat."""
         admin_user = get_first_active_admin()
         if not admin_user:
-            return Response({"error": "Admin user not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": _("Admin user not found")}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(ActorSerializer.from_admin(admin_user), status=status.HTTP_200_OK)
 
@@ -212,21 +213,21 @@ class ChatViewSet(viewsets.GenericViewSet):
         content = (request.data.get("content") or "").strip()
         if raw_receiver_id in (None, "") or not content:
             return Response(
-                {"error": "receiver_id and content are required"},
+                {"error": _("receiver_id and content are required")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             requested_receiver_id = int(raw_receiver_id)
         except (TypeError, ValueError):
-            return Response({"error": "Invalid receiver_id"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": _("Invalid receiver_id")}, status=status.HTTP_400_BAD_REQUEST)
 
         sender = request.user
         if is_admin_actor(sender):
             target_role = "client" if receiver_type_param == "client" else "partner"
             counterpart = get_active_actor(requested_receiver_id, target_role)
             if not counterpart:
-                return Response({"error": f"{target_role.capitalize()} not found"}, status=status.HTTP_404_NOT_FOUND)
+                return Response({"error": _("%(role)s not found") % {"role": target_role.capitalize()}}, status=status.HTTP_404_NOT_FOUND)
 
             try:
                 conversation = get_or_create_conversation(
@@ -284,7 +285,7 @@ class ChatViewSet(viewsets.GenericViewSet):
             if not admin_user:
                 admin_user = get_first_active_admin()
             if not admin_user:
-                return Response({"error": "No admin user available"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": _("No admin user available")}, status=status.HTTP_400_BAD_REQUEST)
 
             conversation = get_or_create_conversation(
                 admin_user_id=admin_user.id,
@@ -322,7 +323,7 @@ class ChatViewSet(viewsets.GenericViewSet):
             )
             touch_conversation(conversation.id)
         else:
-            return Response({"error": "Unauthorized actor"}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": _("Unauthorized actor")}, status=status.HTTP_403_FORBIDDEN)
 
         data = ChatMessageSerializer(message).data
 
@@ -342,11 +343,11 @@ class ChatViewSet(viewsets.GenericViewSet):
     def read_messages(self, request):
         message_ids = request.data.get("message_ids") or []
         if not isinstance(message_ids, list):
-            return Response({"error": "message_ids must be a list"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": _("message_ids must be a list")}, status=status.HTTP_400_BAD_REQUEST)
 
         user = request.user
         if not (is_admin_actor(user) or is_partner_actor(user) or is_client_actor(user)):
-            return Response({"error": "Unauthorized actor"}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": _("Unauthorized actor")}, status=status.HTTP_403_FORBIDDEN)
 
         updated_count = mark_message_ids_read(
             message_ids=message_ids,

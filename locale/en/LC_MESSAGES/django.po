@@ -16,196 +16,194 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=4; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
-"n%10<=4 && (n%100<12 || n%100>14) ? 1 : n%10==0 || (n%10>=5 && n%10<=9) || "
-"(n%100>=11 && n%100<=14)? 2 : 3);\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 #: apps/admin_auth/authentication.py:45 apps/chat/authentication.py:23
 #: apps/users/authentication.py:38 apps/users/authentication.py:82
 msgid "Invalid authorization header"
-msgstr "Неверный заголовок авторизации"
+msgstr ""
 
 #: apps/admin_auth/authentication.py:55 apps/chat/authentication.py:39
 msgid "Invalid admin token"
-msgstr "Неверный токен администратора"
+msgstr ""
 
 #: apps/admin_auth/authentication.py:61 apps/admin_auth/views.py:70
 #: apps/chat/authentication.py:45 apps/chat/views.py:158 apps/chat/views.py:199
 msgid "Admin user not found"
-msgstr "Пользователь-администратор не найден"
+msgstr ""
 
 #: apps/admin_auth/views.py:61
 msgid "Refresh token is required"
-msgstr "Требуется токен обновления."
+msgstr ""
 
 #: apps/admin_auth/views.py:64
 msgid "Invalid token type"
-msgstr "Неверный тип токена"
+msgstr ""
 
 #: apps/admin_auth/views.py:66
 msgid "Invalid admin refresh token"
-msgstr "Неверный токен обновления администратора"
+msgstr ""
 
 #: apps/admin_auth/views.py:74
 msgid "Invalid refresh token"
-msgstr "Неверный токен обновления"
+msgstr ""
 
 #: apps/booking/apps.py:7 apps/property/templates/admin/index.html:49
 #: core/unfold_settings.py:153 templates/admin/index.html:46
 msgid "Booking"
-msgstr "Бронирование"
+msgstr ""
 
 #: apps/booking/filters.py:36
 msgid "from_date and to_date are required"
-msgstr "from_date и to_date являются обязательными"
+msgstr ""
 
 #: apps/booking/filters.py:38 apps/booking/views.py:137
 msgid "to_date must be greater than from_date"
-msgstr "to_date должно быть больше, чем from_date"
+msgstr ""
 
 #: apps/booking/filters.py:47
 msgid "Calendar range can start only in current or next months"
-msgstr "Календарный диапазон может начинаться только в текущем или следующих месяцах."
+msgstr ""
 
 #: apps/booking/filters.py:49
 msgid "For the current month, from_date must be today or later"
-msgstr "Для текущего месяца from_date должно быть сегодня или позже."
+msgstr ""
 
 #: apps/booking/filters.py:53
 msgid "Calendar range can cover at most current and next month"
-msgstr "Диапазон календаря может охватывать максимум текущий и следующий месяц."
+msgstr ""
 
 #: apps/booking/helpers.py:24
 #, python-format
 msgid "You can cancel this booking only within %(minutes)s minutes after booking"
-msgstr "Вы можете отменить это бронирование только в течение %(minutes)s минут после бронирования."
+msgstr ""
 
 #: apps/booking/mixins.py:26 apps/booking/mixins.py:35
 #, python-brace-format
 msgid "{end_date} must be greater than {start_date}"
-msgstr "{end_date} должна быть больше, чем {start_date}"
+msgstr ""
 
 #: apps/booking/mixins.py:48 apps/booking/mixins.py:57
 msgid "Past dates aren't allowed"
-msgstr "Прошлые даты не допускаются"
+msgstr ""
 
 #: apps/booking/mixins.py:53 apps/booking/mixins.py:64
 msgid "Date range is allowed only for current and next months"
-msgstr "Диапазон дат разрешен только для текущего и следующих месяцев."
+msgstr ""
 
 #: apps/booking/raw_calendar_service.py:65
 #, python-brace-format
 msgid "Some dates are booked and can't be modified: {booked_dates}"
-msgstr "Некоторые даты забронированы и не могут быть изменены: {booked_dates}"
+msgstr ""
 
 #: apps/booking/raw_calendar_service.py:80
 #, python-brace-format
 msgid "Some dates are temporarily held by partners and can't be blocked: {held_dates}"
-msgstr "Некоторые даты временно удерживаются партнерами и не могут быть заблокированы: {held_dates}"
+msgstr ""
 
 #: apps/booking/raw_calendar_service.py:102
 #: apps/booking/raw_calendar_service.py:154
 #, python-brace-format
 msgid "Some dates are already blocked: {existing_blocked_dates}"
-msgstr "Некоторые даты уже заблокированы: {existing_blocked_dates}"
+msgstr ""
 
 #: apps/booking/raw_calendar_service.py:126
 msgid "No blocked dates were found in the specified range"
-msgstr "В указанном диапазоне не найдено заблокированных дат."
+msgstr ""
 
 #: apps/booking/raw_calendar_service.py:164
 #, python-brace-format
 msgid "Some dates are temporarily held: {held_days}"
-msgstr "Некоторые даты временно задерживаются: {held_days}"
+msgstr ""
 
 #: apps/booking/raw_calendar_service.py:183
 msgid "No held dates were found in the specified range"
-msgstr "В указанном диапазоне не найдено дат удерживания"
+msgstr ""
 
 #: apps/booking/raw_create_service.py:108
 #: apps/booking/raw_create_service.py:179
 #: apps/booking/raw_create_service.py:198 apps/booking/services.py:257
 msgid "Pricing is not configured for this property"
-msgstr "Для этого объекта не настроены цены."
+msgstr ""
 
 #: apps/booking/raw_create_service.py:137
 #, python-brace-format
 msgid "This property is temporarily reserved for these dates. The first guest has 30 minutes to complete payment. If they do not pay in time, the property will become available again. Unavailable dates: {unavailable_days}"
-msgstr "Этот объект размещения временно зарезервирован на эти даты. Первому гостю дается 30 минут на оплату. Если они не заплатят вовремя, недвижимость снова станет доступной. Недоступные даты: {unavailable_days}"
+msgstr ""
 
 #: apps/booking/raw_create_service.py:154
 #, python-brace-format
 msgid "This property is temporarily reserved for these dates. The first guest has 30 minutes to complete payment. If they do not pay in time, the property will become available again. Reserved dates: {held_days}"
-msgstr "Этот объект размещения временно зарезервирован на эти даты. Первому гостю дается 30 минут на оплату. Если они не заплатят вовремя, недвижимость снова станет доступной. Зарезервированные даты: {held_days}"
+msgstr ""
 
 #: apps/booking/raw_create_service.py:208 apps/booking/services.py:282
 msgid "Unsupported currency"
-msgstr "Неподдерживаемая валюта"
+msgstr ""
 
 #: apps/booking/raw_create_service.py:252
 msgid "Unable to create booking. Please try again."
-msgstr "Не удалось создать бронирование. Пожалуйста, попробуйте еще раз."
+msgstr ""
 
 #: apps/booking/raw_create_service.py:296
 msgid "Payment service is temporarily unavailable. Please try again later."
-msgstr "Платежный сервис временно недоступен. Пожалуйста, повторите попытку позже."
+msgstr ""
 
 #: apps/booking/raw_serializers.py:147
 #, python-format
 msgid "The total number of adults and children must be between 1 and %(max)s. If the guest count exceeds what the listing allows, the host may decline the request."
-msgstr "Общее количество взрослых и детей должно находиться в диапазоне от 1 до %(max)s. Если количество гостей превышает допустимое в объявлении, хозяин может отклонить запрос."
+msgstr ""
 
 #: apps/booking/raw_serializers.py:158
 msgid "This property requires minimum 2 nights stay, when booking starts on Friday"
-msgstr "Для этого объекта размещения требуется минимум 2 ночи проживания, если бронирование начинается в пятницу."
+msgstr ""
 
 #: apps/booking/raw_serializers.py:192
 #, python-format
 msgid "This property requires the stay to include Sunday for any weekend night booked. Please extend your check-out to %(sunday_date)s or later."
-msgstr "Для любого забронированного вечера выходного дня в этом объекте проживания должно быть включено воскресенье. Пожалуйста, продлите выезд до %(sunday_date)s или позже."
+msgstr ""
 
 #: apps/booking/services.py:112
 msgid "Property context is invalid for raw booking flow"
-msgstr "Контекст свойства недействителен для необработанного потока бронирования."
+msgstr ""
 
 #: apps/booking/services.py:188 apps/booking/views.py:531
 #: apps/booking/views.py:581 apps/booking/views.py:607
 #: apps/booking/views.py:667 apps/booking/views.py:702
 #: apps/booking/views.py:775 apps/booking/views.py:837
 msgid "Booking not found"
-msgstr "Бронирование не найдено"
+msgstr ""
 
 #: apps/booking/services.py:315
 msgid "Client context is invalid"
-msgstr "Контекст клиента недействителен."
+msgstr ""
 
 #: apps/booking/services.py:375 apps/booking/views.py:679
 msgid "You can only accept bookings with **pending** statuses"
-msgstr "Вы можете принимать заказы только со статусом **ожидает**."
+msgstr ""
 
 #: apps/booking/services.py:387 apps/booking/views.py:714
 msgid "Partner can cancel only bookings with status `PENDING`"
-msgstr "Партнер может отменить только бронирования со статусом «ОЖИДАНИЕ»."
+msgstr ""
 
 #: apps/booking/services.py:478 apps/booking/views.py:787
 msgid "Only confirmed bookings can be completed"
-msgstr "Только подтвержденные бронирования могут быть завершены."
+msgstr ""
 
 #: apps/booking/services.py:482
 msgid "Payment transaction not found"
-msgstr "Платежная транзакция не найдена"
+msgstr ""
 
 #: apps/booking/services.py:515 apps/booking/views.py:849
 msgid "Only confirmed bookings can be marked as no-show"
-msgstr "Только подтвержденные бронирования могут быть отмечены как незаезды."
+msgstr ""
 
 #: apps/booking/views.py:92
 msgid "You don't have permission to modify this property"
-msgstr "У вас нет разрешения на изменение этого свойства."
+msgstr ""
 
 #: apps/booking/views.py:104 apps/booking/views.py:938
 #, python-brace-format
 msgid "Invalid status: {invalid_status}, allowed are: {valid_statuses}"
-msgstr "Неверный статус: {invalid_status}, разрешены: {valid_statuses}"
+msgstr ""
 
 #: apps/booking/views.py:122 apps/booking/views.py:215
 #: apps/booking/views.py:273 apps/booking/views.py:332
@@ -222,491 +220,491 @@ msgstr "Неверный статус: {invalid_status}, разрешены: {va
 #: apps/property/views.py:3659 apps/stories/serializers.py:119
 #: apps/stories/serializers.py:174
 msgid "Property not found"
-msgstr "Недвижимость не найдена"
+msgstr ""
 
 #: apps/booking/views.py:150
 #, python-brace-format
 msgid "Invalid status: {status}, allowed are: {allowed}"
-msgstr "Неверный статус: {status}, разрешены: {allowed}"
+msgstr ""
 
 #: apps/booking/views.py:245
 msgid "You have successfully blocked the booking dates"
-msgstr "Вы успешно заблокировали даты бронирования."
+msgstr ""
 
 #: apps/booking/views.py:304
 msgid "You have successfully unblocked the booking dates"
-msgstr "Вы успешно разблокировали даты бронирования."
+msgstr ""
 
 #: apps/booking/views.py:362
 msgid "You have successfully held your booking dates for 30 minutes"
-msgstr "Вы успешно задержали даты бронирования на 30 минут."
+msgstr ""
 
 #: apps/booking/views.py:420
 msgid "You have successfully unheld the booking dates"
-msgstr "Вы успешно отменили даты бронирования."
+msgstr ""
 
 #: apps/booking/views.py:453
 msgid "Property not found or is not a verified property"
-msgstr "Объект не найден или не является проверенным объектом"
+msgstr ""
 
 #: apps/booking/views.py:459 apps/property/cottage_serializers.py:594
 #: apps/property/cottage_serializers.py:1027 apps/property/views.py:855
 #: apps/property/views.py:1753 apps/property/views.py:2124
 #: apps/property/views.py:2237 apps/property/views.py:2398
 msgid "This field is required."
-msgstr "Это поле обязательно к заполнению."
+msgstr ""
 
 #: apps/chat/authentication.py:54 apps/users/authentication.py:68
 #: apps/users/authentication.py:112
 msgid "Authentication failed"
-msgstr "Аутентификация не удалась"
+msgstr ""
 
 #: apps/chat/views.py:140
 msgid "Invalid partner id"
-msgstr "Неверный идентификатор партнера"
+msgstr ""
 
 #: apps/chat/views.py:146 apps/chat/views.py:230
 #, python-format
 msgid "%(role)s not found"
-msgstr "%(role)s не найдено"
+msgstr ""
 
 #: apps/chat/views.py:169 apps/chat/views.py:288
 msgid "No admin user available"
-msgstr "Нет доступного пользователя-администратора"
+msgstr ""
 
 #: apps/chat/views.py:177 apps/chat/views.py:326 apps/chat/views.py:350
 msgid "Unauthorized actor"
-msgstr "Несанкционированный актер"
+msgstr ""
 
 #: apps/chat/views.py:216
 msgid "receiver_id and content are required"
-msgstr "Требуется идентификатор получателя и контент."
+msgstr ""
 
 #: apps/chat/views.py:223
 msgid "Invalid receiver_id"
-msgstr "Неверный идентификатор получателя"
+msgstr ""
 
 #: apps/chat/views.py:346
 msgid "message_ids must be a list"
-msgstr "message_ids должен быть списком"
+msgstr ""
 
 #: apps/notification/apps.py:8 core/unfold_settings.py:167
 msgid "Notification"
-msgstr "Уведомление"
+msgstr ""
 
 #: apps/notification/views.py:82
 msgid "FCM token updated successfully"
-msgstr "Токен FCM успешно обновлен"
+msgstr ""
 
 #: apps/notification/views.py:101 apps/notification/views.py:132
 msgid "Partner FCM token updated successfully"
-msgstr "Токен партнера FCM успешно обновлен."
+msgstr ""
 
 #: apps/notification/views.py:300 apps/notification/views.py:322
 #: apps/notification/views.py:379 apps/notification/views.py:402
 msgid "Notifications marked as read"
-msgstr "Уведомления помечены как прочитанные"
+msgstr ""
 
 #: apps/notification/views.py:341 apps/notification/views.py:358
 #: apps/notification/views.py:423 apps/notification/views.py:441
 msgid "All notifications marked as read"
-msgstr "Все уведомления отмечены как прочитанные"
+msgstr ""
 
 #: apps/payment/apps.py:8
 msgid "Payment"
-msgstr "Оплата"
+msgstr ""
 
 #: apps/payment/exchange_rate.py:53
 msgid "Exchange rate isn't synchronized today"
-msgstr "Курс валюты сегодня не синхронизирован"
+msgstr ""
 
 #: apps/payment/services.py:98
 msgid "Plum API returned 403 Forbidden (access denied). Typical causes: server IP not whitelisted by Plum, invalid credentials, or nginx/proxy blocking the request."
-msgstr "Plum API вернул 403 Forbidden (доступ запрещен). Типичные причины: IP-адрес сервера не внесен в белый список Plum, неверные учетные данные или nginx/прокси, блокирующий запрос."
+msgstr ""
 
 #: apps/payment/services.py:105
 msgid "Invalid response from Plum API (response is not valid JSON). Check server logs for details."
-msgstr "Неверный ответ от Plum API (недопустимый ответ JSON). Подробности проверьте журналы сервера."
+msgstr ""
 
 #: apps/property/apartment_serializers.py:526
 msgid "Please enter a title."
-msgstr "Пожалуйста, введите название."
+msgstr ""
 
 #: apps/property/apps.py:8
 msgid "Property"
-msgstr "Свойство"
+msgstr ""
 
 #: apps/property/cottage_serializers.py:194
 msgid "Invalid numeric value."
-msgstr "Недопустимое числовое значение."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:209
 #, python-brace-format
 msgid "{field_name} must be non-negative."
-msgstr "{field_name} должно быть неотрицательным."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:212
 #, python-brace-format
 msgid "{field_name} must be less than or equal to {MAX_PRICE_ABS}."
-msgstr "Значение {field_name} должно быть меньше или равно {MAX_PRICE_ABS}."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:220
 msgid "Expected a list of UUID values."
-msgstr "Ожидается список значений UUID."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:229
 msgid "Property services must contain valid UUID values."
-msgstr "Службы свойств должны содержать допустимые значения UUID."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:648
 msgid "month_from, month_to, next_month_from, and next_month_to must all be set together, or omit all four to use default current and next calendar month."
-msgstr "Month_from,month_to, next_month_from и next_month_to должны быть установлены вместе или опущены все четыре, чтобы использовать текущий и следующий календарный месяц по умолчанию."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:659
 msgid "Do not send `price` together with month_from/month_to/next_month_*; use flat month fields only."
-msgstr "Не отправляйте `price` вместе с Month_from/month_to/next_month_*; используйте только поля с плоским месяцем."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:680
 msgid "Must be a list of price objects."
-msgstr "Должен быть список объектов цены."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:688
 msgid "Each price item must be an object."
-msgstr "Каждый ценовой элемент должен быть объектом."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:697
 msgid "month_from and month_to are required for each price item."
-msgstr "Месяц_от и месяц_до необходимы для каждой позиции цены."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:709
 msgid "Invalid month date format in price items."
-msgstr "Неверный формат даты месяца в ценовых позициях."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:716
 msgid "month_from and month_to must be in the same calendar month."
-msgstr "«month_from» и «month_to» должны относиться к одному и тому же календарному месяцу."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:726
 msgid "month_to must be greater than or equal to month_from."
-msgstr "месяц_то должен быть больше или равен месяцу_от."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:748
 msgid "Working days and weekend prices are required in each item or via top-level price_on_working_days / price_on_weekends."
-msgstr "Цены рабочих дней и выходных обязательны для каждого товара или через цену верхнего уровня_price_on_working_days/price_on_weekends."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:775
 msgid "Duplicate month_from values are not allowed."
-msgstr "Повторяющиеся значения Month_from не допускаются."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:781
 msgid "Exactly 2 monthly prices are required."
-msgstr "Требуются ровно 2 месячные цены."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:798
 msgid "Prices must be provided for current and next month."
-msgstr "Цены должны быть указаны на текущий и следующий месяц."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:938
 msgid "This field is required for selected district."
-msgstr "Это поле обязательно для выбранного района."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:948
 msgid "Invalid prefecture for selected district."
-msgstr "Недопустимая префектура для выбранного района."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:956
 msgid "Prefecture can be set only for district 75 or 82."
-msgstr "Префектуру можно установить только для округа 75 или 82."
+msgstr ""
 
 #: apps/property/cottage_serializers.py:1032
 msgid "Expected an object payload."
-msgstr "Ожидается полезная нагрузка объекта."
+msgstr ""
 
 #: apps/property/mixins.py:67 apps/property/mixins.py:106
 msgid "Invalid property type"
-msgstr "Неверный тип свойства"
+msgstr ""
 
 #: apps/property/mixins.py:80
 msgid "Property type not found"
-msgstr "Тип недвижимости не найден"
+msgstr ""
 
 #: apps/property/mixins.py:86
 msgid "Duplication is prohibited"
-msgstr "Дублирование запрещено"
+msgstr ""
 
 #: apps/property/mixins.py:100
 msgid "Price is too large, maximum 12 digits allowed"
-msgstr "Цена слишком большая, допускается максимум 12 цифр."
+msgstr ""
 
 #: apps/property/mixins.py:115
 msgid "Price must be a list of objects with: month_from, month_to, price_per_person, price_on_weekends, price_on_working_days. Or use a single number for current month (e.g. 100)."
-msgstr "Цена должна представлять собой список объектов со следующими параметрами: Month_from, Month_To, Price_per_person, Price_on_weekends, Price_on_working_days. Или используйте одно число для текущего месяца (например, 100)."
+msgstr ""
 
 #: apps/property/mixins.py:141
 msgid "month_from and month_to are required"
-msgstr "«month_from» и «month_to» являются обязательными."
+msgstr ""
 
 #: apps/property/mixins.py:156
 msgid "Duplication price for this month isn't allowed"
-msgstr "Дублирование цены за этот месяц не допускается."
+msgstr ""
 
 #: apps/property/mixins.py:167
 msgid "Each item in price list must be a dict"
-msgstr "Каждая позиция в прайс-листе должна быть диктом"
+msgstr ""
 
 #: apps/property/mixins.py:180
 msgid "Missing fields for price: "
-msgstr "Недостающие поля для цены:"
+msgstr ""
 
 #: apps/property/mixins.py:202
 msgid "Price should only be determined for one month"
-msgstr "Цена должна быть определена только за один месяц"
+msgstr ""
 
 #: apps/property/mixins.py:207
 msgid "You can't modify prices for past months"
-msgstr "Вы не можете изменить цены за прошлые месяцы."
+msgstr ""
 
 #: apps/property/mixins.py:212
 msgid "You can set only price for current or next month"
-msgstr "Вы можете установить цену только на текущий или следующий месяц."
+msgstr ""
 
 #: apps/property/mixins.py:218
 msgid "Price should cover whole month"
-msgstr "Цена должна охватывать весь месяц."
+msgstr ""
 
 #: apps/property/templates/admin/index.html:5 templates/admin/index.html:5
 msgid "Django site admin"
-msgstr "Администратор сайта Джанго"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:15 templates/admin/index.html:17
 msgid "Quick tables"
-msgstr "Быстрые таблицы"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:18
 msgid "Open the required sections quickly from the center panel."
-msgstr "Быстро открывайте нужные разделы с центральной панели."
+msgstr ""
 
 #: apps/property/templates/admin/index.html:24 templates/admin/index.html:26
 msgid "Apartments"
-msgstr "Квартиры"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:25
 msgid "Open apartments table"
-msgstr "Открытая таблица квартир"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:29 templates/admin/index.html:30
 msgid "Cottages"
-msgstr "Коттеджи"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:30
 msgid "Open cottages table"
-msgstr "Открытый стол для дачи"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:34 core/unfold_settings.py:160
 #: templates/admin/index.html:34
 msgid "Sanatorium"
-msgstr "Санаторий"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:35
 msgid "Open ..sanatorium table"
-msgstr "Открытый ..столик в санатории"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:39 templates/admin/index.html:38
 msgid "Clients"
-msgstr "Клиенты"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:40
 msgid "Open clients table"
-msgstr "Открыть таблицу клиентов"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:44 templates/admin/index.html:42
 msgid "Partners"
-msgstr "Партнеры"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:45
 msgid "Open partners table"
-msgstr "Открыть таблицу партнеров"
+msgstr ""
 
 #: apps/property/templates/admin/index.html:50
 msgid "Open booking table"
-msgstr "Открыть таблицу бронирования"
+msgstr ""
 
 #: apps/property/views.py:879
 msgid "Unsupported file extension."
-msgstr "Неподдерживаемое расширение файла."
+msgstr ""
 
 #: apps/property/views.py:881
 msgid "Only image uploads are allowed."
-msgstr "Разрешена только загрузка изображений."
+msgstr ""
 
 #: apps/property/views.py:883
 msgid "File too large."
-msgstr "Файл слишком большой."
+msgstr ""
 
 #: apps/property/views.py:1545
 msgid "Apartment could not be created"
-msgstr "Квартира не может быть создана"
+msgstr ""
 
 #: apps/property/views.py:1549 apps/property/views.py:1640
 #: apps/property/views.py:1718
 msgid "Property has been created successfully, please wait while we verify it"
-msgstr "Ресурс успешно создан, подождите, пока мы его проверим."
+msgstr ""
 
 #: apps/property/views.py:1636
 msgid "Cottage could not be created"
-msgstr "Не удалось создать коттедж"
+msgstr ""
 
 #: apps/property/views.py:1714
 msgid "Property could not be created"
-msgstr "Не удалось создать свойство"
+msgstr ""
 
 #: apps/property/views.py:1963
 msgid "Your changes have been saved successfully"
-msgstr "Ваши изменения успешно сохранены"
+msgstr ""
 
 #: apps/property/views.py:1968
 msgid "Property has been sent for re-verification, please wait while we verify it"
-msgstr "Объект отправлен на повторную проверку. Подождите, пока мы его проверим."
+msgstr ""
 
 #: apps/property/views.py:2155
 msgid "Your image(s) are pending approval"
-msgstr "Ваши изображения ожидают одобрения"
+msgstr ""
 
 #: apps/property/views.py:2229 apps/property/views.py:2309
 #: apps/property/views.py:2480
 msgid "Property image not found"
-msgstr "Изображение объекта недвижимости не найдено"
+msgstr ""
 
 #: apps/property/views.py:2269
 msgid "Your image has been updated and is pending approval"
-msgstr "Ваше изображение обновлено и ожидает одобрения."
+msgstr ""
 
 #: apps/property/views.py:2588
 msgid "You can leave a review only for accepted or completed bookings"
-msgstr "Вы можете оставить отзыв только о принятых или завершенных бронированиях."
+msgstr ""
 
 #: apps/property/views.py:2599
 msgid "Review could not be created"
-msgstr "Не удалось создать отзыв."
+msgstr ""
 
 #: apps/property/views.py:2850
 msgid "Invalid range"
-msgstr "Неверный диапазон"
+msgstr ""
 
 #: apps/property/views.py:3091
 msgid "This field is required when using an admin token."
-msgstr "Это поле является обязательным при использовании токена администратора."
+msgstr ""
 
 #: apps/property/views.py:3098
 msgid "Enter a valid integer."
-msgstr "Введите допустимое целое число."
+msgstr ""
 
 #: apps/property/views.py:3101
 msgid "No active partner account found for this id."
-msgstr "Для этого идентификатора не найден активный партнерский аккаунт."
+msgstr ""
 
 #: apps/property/views.py:3324 apps/property/views.py:3350
 #: apps/property/views.py:3373
 msgid "Apartment not found"
-msgstr "Квартира не найдена"
+msgstr ""
 
 #: apps/property/views.py:3403 apps/property/views.py:3430
 #: apps/property/views.py:3453
 msgid "Cottage not found"
-msgstr "Коттедж не найден"
+msgstr ""
 
 #: apps/property/views.py:3619 apps/property/views.py:3664
 msgid "Removed from favorites"
-msgstr "Удалено из избранного"
+msgstr ""
 
 #: apps/property/views.py:3625
 msgid "Added to favorites"
-msgstr "Добавлено в избранное"
+msgstr ""
 
 #: apps/shared/compress_image.py:17 apps/stories/serializers.py:134
 msgid "Invalid image format, allowed are: jpg, jpeg, png, heif, heic"
-msgstr "Недопустимый формат изображения. Разрешены: jpg, jpeg, png, heif, heic."
+msgstr ""
 
 #: apps/shared/compress_video.py:88 apps/stories/serializers.py:149
 msgid "Invalid video format, allowed are: mp4, mov, avi, mkv"
-msgstr "Неверный формат видео. Разрешены: mp4, mov, avi, mkv."
+msgstr ""
 
 #: apps/shared/compress_video.py:114
 msgid "Unsupported file type"
-msgstr "Неподдерживаемый тип файла"
+msgstr ""
 
 #: apps/shared/compress_video.py:121
 #, python-format
 msgid "Input temp file not created: %(input_path)s"
-msgstr "Входной временный файл не создан: %(input_path)s"
+msgstr ""
 
 #: apps/shared/compress_video.py:174
 msgid "Compressed video file is empty or missing"
-msgstr "Сжатый видеофайл пуст или отсутствует."
+msgstr ""
 
 #: apps/shared/compress_video.py:189
 msgid "Video compression took too long. Please upload a shorter video."
-msgstr "Сжатие видео занимало слишком много времени. Пожалуйста, загрузите более короткое видео."
+msgstr ""
 
 #: apps/shared/date.py:22
 msgid "Must be a date string YYYY-MM-DD"
-msgstr "Должна быть строкой даты ГГГГ-ММ-ДД."
+msgstr ""
 
 #: apps/shared/permissions.py:33
 msgid "Authentication credentials were not provided for partner."
-msgstr "Учетные данные для аутентификации не были предоставлены партнеру."
+msgstr ""
 
 #: apps/shared/permissions.py:40
 msgid "Authentication credentials were not provided for client."
-msgstr "Учетные данные для аутентификации не были предоставлены клиенту."
+msgstr ""
 
 #: apps/shared/permissions.py:49 apps/shared/permissions.py:65
 msgid "Authentication credentials were not provided."
-msgstr "Учетные данные для аутентификации не были предоставлены."
+msgstr ""
 
 #: apps/shared/permissions.py:80
 msgid "You don't have permission to modify"
-msgstr "У вас нет разрешения на изменение"
+msgstr ""
 
 #: apps/shared/permissions.py:85
 msgid "Authentication credentials were not provided for partner"
-msgstr "Учетные данные для аутентификации не были предоставлены партнеру."
+msgstr ""
 
 #: apps/shared/permissions.py:101
 msgid "You don't have permission to edit this property"
-msgstr "У вас нет разрешения на редактирование этого ресурса."
+msgstr ""
 
 #: apps/shared/permissions.py:103
 msgid "You don't have permission to delete this property"
-msgstr "У вас нет разрешения на удаление этого ресурса."
+msgstr ""
 
 #: apps/shared/permissions.py:110
 msgid "This endpoint is available only via Telegram Web App"
-msgstr "Эта конечная точка доступна только через веб-приложение Telegram."
+msgstr ""
 
 #: apps/shared/utils.py:162
 msgid "Image resolution is too high. Please upload a smaller image"
-msgstr "Разрешение изображения слишком высокое. Пожалуйста, загрузите изображение меньшего размера"
+msgstr ""
 
 #: apps/shared/utils.py:171
 msgid "Internal server error."
-msgstr "Внутренняя ошибка сервера."
+msgstr ""
 
 #: apps/shared/utils.py:197
 msgid "Token is invalid or expired."
-msgstr "Токен недействителен или срок его действия истек."
+msgstr ""
 
 #: apps/shared/utils.py:207
 msgid "Use the Access token (from login/verify). If expired, use POST /api/users/refresh/ with Refresh token to get new tokens."
-msgstr "Используйте токен доступа (при входе/проверке). Если срок действия истек, используйте POST /api/users/refresh/ с токеном обновления, чтобы получить новые токены."
+msgstr ""
 
 #: apps/shared/views.py:26
 msgid "Invalid log token"
-msgstr "Неверный токен журнала"
+msgstr ""
 
 #: apps/stories/admin_views.py:140 apps/stories/admin_views.py:197
 msgid "Invalid story GUID"
-msgstr "Неверный GUID истории."
+msgstr ""
 
 #: apps/stories/admin_views.py:150 apps/stories/admin_views.py:166
 #: apps/stories/admin_views.py:204 apps/stories/serializers.py:196
@@ -714,264 +712,264 @@ msgstr "Неверный GUID истории."
 #: apps/stories/views.py:131 apps/stories/views.py:192
 #: apps/stories/views.py:221 apps/stories/views.py:226
 msgid "Story not found"
-msgstr "История не найдена"
+msgstr ""
 
 #: apps/stories/admin_views.py:155
 msgid "Property is not verified. Cannot approve story."
-msgstr "Собственность не проверена. Невозможно одобрить историю."
+msgstr ""
 
 #: apps/stories/apps.py:7 core/unfold_settings.py:139
 msgid "Stories"
-msgstr "Истории"
+msgstr ""
 
 #: apps/stories/serializers.py:141
 msgid "Image file too large, maximum size is 20MB"
-msgstr "Файл изображения слишком велик. Максимальный размер — 20 МБ."
+msgstr ""
 
 #: apps/stories/serializers.py:156
 msgid "Video file too large, maximum size is 100MB"
-msgstr "Видеофайл слишком велик. Максимальный размер — 100 МБ."
+msgstr ""
 
 #: apps/stories/serializers.py:160
 msgid "Unsupported media type"
-msgstr "Неподдерживаемый тип носителя"
+msgstr ""
 
 #: apps/stories/views.py:79 apps/stories/views.py:284
 msgid "Parametrlar kerak. property_type yuboring."
-msgstr "Параметры керака. property_type юборинг."
+msgstr ""
 
 #: apps/stories/views.py:135 apps/stories/views.py:231
 msgid "Media not found"
-msgstr "Носитель не найден"
+msgstr ""
 
 #: apps/stories/views.py:227
 msgid "You don't have permission to delete this story media"
-msgstr "У вас нет разрешения на удаление этой истории."
+msgstr ""
 
 #: apps/users/apps.py:10 core/unfold_settings.py:125
 msgid "Users"
-msgstr "Пользователи"
+msgstr ""
 
 #: apps/users/authentication.py:60 apps/users/serializers.py:83
 #: apps/users/views.py:258 apps/users/views.py:455 apps/users/views.py:474
 msgid "Client not found"
-msgstr "Клиент не найден"
+msgstr ""
 
 #: apps/users/authentication.py:104 apps/users/serializers.py:193
 #: apps/users/views.py:721 apps/users/views.py:941 apps/users/views.py:961
 msgid "Partner not found"
-msgstr "Партнер не найден"
+msgstr ""
 
 #: apps/users/raw_repository.py:230
 msgid "Failed to insert user"
-msgstr "Не удалось вставить пользователя"
+msgstr ""
 
 #: apps/users/serializers.py:30
 #, python-brace-format
 msgid "{field} must contain only letters, spaces, hyphens or apostrophes."
-msgstr "{field} должно содержать только буквы, пробелы, дефисы и апострофы."
+msgstr ""
 
 #: apps/users/serializers.py:53 apps/users/serializers.py:275
 msgid "Phone number must start with 998"
-msgstr "Номер телефона должен начинаться с цифры 998."
+msgstr ""
 
 #: apps/users/serializers.py:103
 msgid "Client with this phone number already exists"
-msgstr "Клиент с таким номером телефона уже существует"
+msgstr ""
 
 #: apps/users/serializers.py:130 apps/users/serializers.py:252
 msgid "Registration data not found. Please start registration again"
-msgstr "Регистрационные данные не найдены. Пожалуйста, начните регистрацию заново"
+msgstr ""
 
 #: apps/users/serializers.py:140
 msgid "Client already registered"
-msgstr "Клиент уже зарегистрирован"
+msgstr ""
 
 #: apps/users/serializers.py:215
 msgid "Partner with this phone number already exists"
-msgstr "Партнер с таким номером телефона уже существует"
+msgstr ""
 
 #: apps/users/serializers.py:221
 msgid "Username already exists"
-msgstr "Имя пользователя уже существует"
+msgstr ""
 
 #: apps/users/serializers.py:227
 msgid "Partner with this email already exists"
-msgstr "Партнер с этим адресом электронной почты уже существует"
+msgstr ""
 
 #: apps/users/serializers.py:263
 msgid "Partner already registered"
-msgstr "Партнер уже зарегистрирован"
+msgstr ""
 
 #: apps/users/serializers.py:299
 msgid "File size must be ≤ 5MB"
-msgstr "Размер файла должен быть ≤ 5 МБ."
+msgstr ""
 
 #: apps/users/services.py:144
 msgid "Token not found in response"
-msgstr "Токен не найден в ответе"
+msgstr ""
 
 #: apps/users/services.py:248
 msgid "Eskiz SMS provider did not accept the message"
-msgstr "SMS-провайдер Eskiz не принял сообщение"
+msgstr ""
 
 #: apps/users/services.py:260
 msgid "The confirmation code sent successfully"
-msgstr "Код подтверждения успешно отправлен"
+msgstr ""
 
 #: apps/users/services.py:415 apps/users/services.py:434
 msgid "OTP verified successfully"
-msgstr "OTP успешно подтвержден"
+msgstr ""
 
 #: apps/users/services.py:416 apps/users/services.py:437
 msgid "Invalid OTP"
-msgstr "Неверный OTP"
+msgstr ""
 
 #: apps/users/services.py:423
 msgid "OTP expired. Please request a new one."
-msgstr "Срок действия ОТР истек. Пожалуйста, запросите новый."
+msgstr ""
 
 #: apps/users/services.py:430
 msgid "Too many attempts. Please resend OTP."
-msgstr "Слишком много попыток. Пожалуйста, отправьте OTP еще раз."
+msgstr ""
 
 #: apps/users/tokens.py:126 apps/users/views.py:355
 msgid "Invalid or expired refresh token"
-msgstr "Неверный или просроченный токен обновления."
+msgstr ""
 
 #: apps/users/views.py:90
 msgid "Client not found. Please register first"
-msgstr "Клиент не найден. Пожалуйста, сначала зарегистрируйтесь"
+msgstr ""
 
 #: apps/users/views.py:97 apps/users/views.py:109
 msgid "OTP sent successfully"
-msgstr "OTP отправлен успешно"
+msgstr ""
 
 #: apps/users/views.py:184 apps/users/views.py:508
 msgid "OTP sent successfully for registration"
-msgstr "OTP успешно отправлен для регистрации"
+msgstr ""
 
 #: apps/users/views.py:235 apps/users/views.py:594
 msgid "Registration completed successfully"
-msgstr "Регистрация завершена успешно"
+msgstr ""
 
 #: apps/users/views.py:265 apps/users/views.py:283 apps/users/views.py:327
 #: apps/users/views.py:728 apps/users/views.py:741 apps/users/views.py:780
 msgid "OTP resent successfully"
-msgstr "OTP успешно отправлен повторно"
+msgstr ""
 
 #: apps/users/views.py:272 apps/users/views.py:314 apps/users/views.py:732
 #: apps/users/views.py:769
 msgid "Please wait before resending OTP"
-msgstr "Пожалуйста, подождите, прежде чем повторно отправлять OTP."
+msgstr ""
 
 #: apps/users/views.py:308 apps/users/views.py:763
 msgid "Registration not started"
-msgstr "Регистрация не началась"
+msgstr ""
 
 #: apps/users/views.py:361
 msgid "Token refresh failed"
-msgstr "Обновление токена не удалось"
+msgstr ""
 
 #: apps/users/views.py:415
 msgid "Successfully logged out"
-msgstr "Успешно вышел из системы"
+msgstr ""
 
 #: apps/users/views.py:418
 msgid "Invalid token"
-msgstr "Неверный токен"
+msgstr ""
 
 #: apps/users/views.py:549
 msgid "User with this phone number already exists."
-msgstr "Пользователь с таким номером телефона уже существует."
+msgstr ""
 
 #: apps/users/views.py:556
 msgid "User with this username already exists."
-msgstr "Пользователь с таким именем пользователя уже существует."
+msgstr ""
 
 #: apps/users/views.py:623
 msgid "Partner not found. Please register first."
-msgstr "Партнер не найден. Пожалуйста, сначала зарегистрируйтесь."
+msgstr ""
 
 #: apps/users/views.py:632 apps/users/views.py:644
 msgid "OTP Send successfully"
-msgstr "OTP отправлен успешно"
+msgstr ""
 
 #: apps/users/views.py:694
 msgid "Login successful"
-msgstr "Вход успешен"
+msgstr ""
 
 #: apps/users/views.py:830
 msgid "Successfully logged out."
-msgstr "Успешно вышел из системы."
+msgstr ""
 
 #: apps/users/views.py:834
 msgid "Logout failed."
-msgstr "Выход из системы не удался."
+msgstr ""
 
 #: apps/users/views.py:876 apps/users/views.py:915
 msgid "Account has been deleted."
-msgstr "Аккаунт удален."
+msgstr ""
 
 #: apps/users/views.py:995
 msgid "Passport upload is temporarily disabled in normalized raw-sql mode."
-msgstr "Загрузка паспорта временно отключена в нормализованном режиме raw-sql."
+msgstr ""
 
 #: apps/users/views.py:1020 apps/users/views.py:1160
 msgid "Failed to fetch cards"
-msgstr "Не удалось получить карты."
+msgstr ""
 
 #: apps/users/views.py:1053
 msgid "card_number and expire_date required"
-msgstr "необходимо указать номер карты и дату истечения срока действия."
+msgstr ""
 
 #: apps/users/views.py:1095
 msgid "session and otp required"
-msgstr "требуется сессия и отп"
+msgstr ""
 
 #: apps/users/views.py:1132
 msgid "session is required"
-msgstr "требуется сеанс"
+msgstr ""
 
 #: apps/users/views.py:1167
 msgid "You cannot delete a card that does not belong to you"
-msgstr "Вы не можете удалить карту, которая вам не принадлежит."
+msgstr ""
 
 #: core/settings.py:402 core/unfold_settings.py:88
 msgid "English"
-msgstr "Английский"
+msgstr ""
 
 #: core/settings.py:403 core/unfold_settings.py:95
 msgid "Russian"
-msgstr "Русский"
+msgstr ""
 
 #: core/settings.py:404 core/unfold_settings.py:102
 msgid "Uzbek"
-msgstr "Узбекский"
+msgstr ""
 
 #: core/unfold_settings.py:6
 msgid "WEEL"
-msgstr "КОЛЕСО"
+msgstr ""
 
 #: core/unfold_settings.py:7 core/unfold_settings.py:8
 msgid "Booking Service"
-msgstr "Служба бронирования"
+msgstr ""
 
 #: core/unfold_settings.py:12
 msgid "My site"
-msgstr "Мой сайт"
+msgstr ""
 
 #: core/unfold_settings.py:113
 msgid "Navigation"
-msgstr "Навигация"
+msgstr ""
 
 #: core/unfold_settings.py:132
 msgid "Properties"
-msgstr "Характеристики"
+msgstr ""
 
 #: core/unfold_settings.py:146
 msgid "Payments"
-msgstr "Платежи"
+msgstr ""
 
 #: templates/admin/index.html:20
 msgid "Open only required sections from here."

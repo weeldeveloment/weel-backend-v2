@@ -1960,12 +1960,12 @@ class PropertyRetrieveUpdateDestroyView(APIView):
             raise NotFound(_("Property not found"))
         is_verified = bool(updated.get("is_verified"))
         payload = {
-            "detail": "Your changes have been saved successfully",
+            "detail": _("Your changes have been saved successfully"),
             "status_code": 200,
         }
         if not is_verified:
             payload["warning"] = (
-                "Property has been sent for re-verification, please wait while we verify it"
+                _("Property has been sent for re-verification, please wait while we verify it")
             )
         return Response(payload, status=status.HTTP_200_OK)
 
@@ -2152,7 +2152,7 @@ class PropertyImageCreateView(APIView):
 
         if not bool(updated.get("is_verified")):
             return Response(
-                {"detail": "Your image(s) are pending approval", "status": "pending"},
+                {"detail": _("Your image(s) are pending approval"), "status": "pending"},
                 status=status.HTTP_200_OK,
             )
 

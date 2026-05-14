@@ -1,828 +1,976 @@
-# Uzbek translations for WEEL admin
-# Copyright (C) 2025
-# This file is distributed under the same license as the WEEL package.
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
 #
+#, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: WEEL\n"
+"Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-02-19 12:00+0500\n"
-"PO-Revision-Date: 2025-02-19 12:00+0500\n"
-"Last-Translator: \n"
-"Language-Team: Uzbek\n"
-"Language: uz\n"
+"POT-Creation-Date: 2026-05-14 10:22+0500\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
+#: apps/admin_auth/authentication.py:45 apps/chat/authentication.py:23
+#: apps/users/authentication.py:38 apps/users/authentication.py:82
+msgid "Invalid authorization header"
+msgstr "Avtorizatsiya sarlavhasi yaroqsiz"
+
+#: apps/admin_auth/authentication.py:55 apps/chat/authentication.py:39
+msgid "Invalid admin token"
+msgstr "Administrator tokeni noto‘g‘ri"
+
+#: apps/admin_auth/authentication.py:61 apps/admin_auth/views.py:70
+#: apps/chat/authentication.py:45 apps/chat/views.py:158 apps/chat/views.py:199
+msgid "Admin user not found"
+msgstr "Administrator foydalanuvchi topilmadi"
+
+#: apps/admin_auth/views.py:61
+msgid "Refresh token is required"
+msgstr "Tokenni yangilash talab qilinadi"
+
+#: apps/admin_auth/views.py:64
+msgid "Invalid token type"
+msgstr "Token turi yaroqsiz"
+
+#: apps/admin_auth/views.py:66
+msgid "Invalid admin refresh token"
+msgstr "Administratorni yangilash tokeni noto‘g‘ri"
+
+#: apps/admin_auth/views.py:74
+msgid "Invalid refresh token"
+msgstr "Yaroqsiz yangilash belgisi"
+
+#: apps/booking/apps.py:7 apps/property/templates/admin/index.html:49
+#: core/unfold_settings.py:153 templates/admin/index.html:46
+msgid "Booking"
+msgstr "Rezervasyon"
+
+#: apps/booking/filters.py:36
+msgid "from_date and to_date are required"
+msgstr "from_date va to_date talab qilinadi"
+
+#: apps/booking/filters.py:38 apps/booking/views.py:137
+msgid "to_date must be greater than from_date"
+msgstr "to_date from_date dan katta bo'lishi kerak"
+
+#: apps/booking/filters.py:47
+msgid "Calendar range can start only in current or next months"
+msgstr "Taqvim diapazoni faqat joriy yoki keyingi oylarda boshlanishi mumkin"
+
+#: apps/booking/filters.py:49
+msgid "For the current month, from_date must be today or later"
+msgstr "Joriy oy uchun from_date bugun yoki keyinroq bo'lishi kerak"
+
+#: apps/booking/filters.py:53
+msgid "Calendar range can cover at most current and next month"
+msgstr "Taqvim oralig'i eng ko'p joriy va keyingi oyni qamrab olishi mumkin"
+
+#: apps/booking/helpers.py:24
+#, python-format
+msgid "You can cancel this booking only within %(minutes)s minutes after booking"
+msgstr "Bu bandlovni bandlovdan keyin %(minutes)s daqiqa ichida bekor qilishingiz mumkin"
+
+#: apps/booking/mixins.py:26 apps/booking/mixins.py:35
+#, python-brace-format
+msgid "{end_date} must be greater than {start_date}"
+msgstr "{end_date} {start_date} dan katta boʻlishi kerak"
+
+#: apps/booking/mixins.py:48 apps/booking/mixins.py:57
+msgid "Past dates aren't allowed"
+msgstr "O'tgan sanalarga ruxsat berilmagan"
+
+#: apps/booking/mixins.py:53 apps/booking/mixins.py:64
+msgid "Date range is allowed only for current and next months"
+msgstr "Sana diapazoni faqat joriy va keyingi oylar uchun ruxsat etiladi"
+
+#: apps/booking/raw_calendar_service.py:65
+#, python-brace-format
+msgid "Some dates are booked and can't be modified: {booked_dates}"
+msgstr "Baʼzi sanalar band qilingan va ularni oʻzgartirib boʻlmaydi: {booked_dates}"
+
+#: apps/booking/raw_calendar_service.py:80
+#, python-brace-format
+msgid "Some dates are temporarily held by partners and can't be blocked: {held_dates}"
+msgstr "Ayrim sanalar vaqtincha hamkorlar tomonidan saqlanadi va ularni bloklab bo‘lmaydi: {held_dates}"
+
+#: apps/booking/raw_calendar_service.py:102
+#: apps/booking/raw_calendar_service.py:154
+#, python-brace-format
+msgid "Some dates are already blocked: {existing_blocked_dates}"
+msgstr "Ayrim sanalar allaqachon bloklangan: {existing_blocked_dates}"
+
+#: apps/booking/raw_calendar_service.py:126
+msgid "No blocked dates were found in the specified range"
+msgstr "Belgilangan oraliqda bloklangan sanalar topilmadi"
+
+#: apps/booking/raw_calendar_service.py:164
+#, python-brace-format
+msgid "Some dates are temporarily held: {held_days}"
+msgstr "Ayrim sanalar vaqtincha ushlab turiladi: {held_days}"
+
+#: apps/booking/raw_calendar_service.py:183
+msgid "No held dates were found in the specified range"
+msgstr "Belgilangan diapazonda o'tkazilayotgan sanalar topilmadi"
+
+#: apps/booking/raw_create_service.py:108
+#: apps/booking/raw_create_service.py:179
+#: apps/booking/raw_create_service.py:198 apps/booking/services.py:257
+msgid "Pricing is not configured for this property"
+msgstr "Narxlar bu mulk uchun sozlanmagan"
+
+#: apps/booking/raw_create_service.py:137
+#, python-brace-format
+msgid "This property is temporarily reserved for these dates. The first guest has 30 minutes to complete payment. If they do not pay in time, the property will become available again. Unavailable dates: {unavailable_days}"
+msgstr "Ushbu mulk vaqtinchalik ushbu sanalar uchun ajratilgan. Birinchi mehmonga toʻlovni bajarish uchun 30 daqiqa vaqt beriladi. Agar ular o'z vaqtida to'lamasa, mulk yana mavjud bo'ladi. Mavjud bo'lmagan sanalar: {unavailable_days}"
+
+#: apps/booking/raw_create_service.py:154
+#, python-brace-format
+msgid "This property is temporarily reserved for these dates. The first guest has 30 minutes to complete payment. If they do not pay in time, the property will become available again. Reserved dates: {held_days}"
+msgstr "Ushbu mulk vaqtinchalik ushbu sanalar uchun ajratilgan. Birinchi mehmonga toʻlovni bajarish uchun 30 daqiqa vaqt beriladi. Agar ular o'z vaqtida to'lamasa, mulk yana mavjud bo'ladi. Bandlangan sanalar: {held_days}"
+
+#: apps/booking/raw_create_service.py:208 apps/booking/services.py:282
+msgid "Unsupported currency"
+msgstr "Qo'llab-quvvatlanmaydigan valyuta"
+
+#: apps/booking/raw_create_service.py:252
+msgid "Unable to create booking. Please try again."
+msgstr "Bandlov yaratib bo‘lmadi. Iltimos, qayta urinib koʻring."
+
+#: apps/booking/raw_create_service.py:296
+msgid "Payment service is temporarily unavailable. Please try again later."
+msgstr "Toʻlov xizmati vaqtincha ishlamayapti. Keyinroq qayta urinib ko‘ring."
+
+#: apps/booking/raw_serializers.py:147
+#, python-format
+msgid "The total number of adults and children must be between 1 and %(max)s. If the guest count exceeds what the listing allows, the host may decline the request."
+msgstr "Kattalar va bolalarning umumiy soni 1 va %(max)s orasida bo‘lishi kerak. Agar mehmonlar soni ro'yxat ruxsat berganidan oshsa, uy egasi so'rovni rad etishi mumkin."
+
+#: apps/booking/raw_serializers.py:158
+msgid "This property requires minimum 2 nights stay, when booking starts on Friday"
+msgstr "Bu mehmonxonada bronlash juma kuni boshlanganda kamida 2 kecha qolish talab etiladi"
+
+#: apps/booking/raw_serializers.py:192
+#, python-format
+msgid "This property requires the stay to include Sunday for any weekend night booked. Please extend your check-out to %(sunday_date)s or later."
+msgstr "Bu mulk bron qilingan har qanday hafta oxiri tuniga yakshanba kunini kiritishni talab qiladi. Iltimos, chiqish muddatini %(sunday_date)s yoki undan keyinroq uzaytiring."
+
+#: apps/booking/services.py:112
+msgid "Property context is invalid for raw booking flow"
+msgstr "Xom bronlash oqimi uchun mulk konteksti yaroqsiz"
+
+#: apps/booking/services.py:188 apps/booking/views.py:531
+#: apps/booking/views.py:581 apps/booking/views.py:607
+#: apps/booking/views.py:667 apps/booking/views.py:702
+#: apps/booking/views.py:775 apps/booking/views.py:837
+msgid "Booking not found"
+msgstr "Bandlov topilmadi"
+
+#: apps/booking/services.py:315
+msgid "Client context is invalid"
+msgstr "Mijoz konteksti yaroqsiz"
+
+#: apps/booking/services.py:375 apps/booking/views.py:679
+msgid "You can only accept bookings with **pending** statuses"
+msgstr "Siz faqat **kutishda** maqomlari bilan bandlovlarni qabul qilishingiz mumkin"
+
+#: apps/booking/services.py:387 apps/booking/views.py:714
+msgid "Partner can cancel only bookings with status `PENDING`"
+msgstr "Hamkor faqat “PENDING” holatidagi bandlovlarni bekor qilishi mumkin"
+
+#: apps/booking/services.py:478 apps/booking/views.py:787
+msgid "Only confirmed bookings can be completed"
+msgstr "Faqat tasdiqlangan buyurtmalar bajarilishi mumkin"
+
+#: apps/booking/services.py:482
+msgid "Payment transaction not found"
+msgstr "Toʻlov tranzaksiyasi topilmadi"
+
+#: apps/booking/services.py:515 apps/booking/views.py:849
+msgid "Only confirmed bookings can be marked as no-show"
+msgstr "Faqat tasdiqlangan buyurtmalar noshow sifatida belgilanishi mumkin"
+
+#: apps/booking/views.py:92
+msgid "You don't have permission to modify this property"
+msgstr "Sizda bu xususiyatni o‘zgartirishga ruxsatingiz yo‘q"
+
+#: apps/booking/views.py:104 apps/booking/views.py:938
+#, python-brace-format
+msgid "Invalid status: {invalid_status}, allowed are: {valid_statuses}"
+msgstr "Yaroqsiz holat: {invalid_status}, ruxsat berilgan: {valid_statuses}"
+
+#: apps/booking/views.py:122 apps/booking/views.py:215
+#: apps/booking/views.py:273 apps/booking/views.py:332
+#: apps/booking/views.py:390 apps/property/views.py:1856
+#: apps/property/views.py:1871 apps/property/views.py:1960
+#: apps/property/views.py:1996 apps/property/views.py:2116
+#: apps/property/views.py:2151 apps/property/views.py:2225
+#: apps/property/views.py:2260 apps/property/views.py:2305
+#: apps/property/views.py:2325 apps/property/views.py:2390
+#: apps/property/views.py:2421 apps/property/views.py:2476
+#: apps/property/views.py:2494 apps/property/views.py:2520
+#: apps/property/views.py:2633 apps/property/views.py:2837
+#: apps/property/views.py:2846 apps/property/views.py:3612
+#: apps/property/views.py:3659 apps/stories/serializers.py:119
+#: apps/stories/serializers.py:174
+msgid "Property not found"
+msgstr "Mulk topilmadi"
+
+#: apps/booking/views.py:150
+#, python-brace-format
+msgid "Invalid status: {status}, allowed are: {allowed}"
+msgstr "Yaroqsiz holat: {status}, ruxsat berilgan: {allowed}"
+
+#: apps/booking/views.py:245
+msgid "You have successfully blocked the booking dates"
+msgstr "Siz bron qilish sanalarini muvaffaqiyatli blokladingiz"
+
+#: apps/booking/views.py:304
+msgid "You have successfully unblocked the booking dates"
+msgstr "Siz bron qilish sanalarini muvaffaqiyatli blokdan chiqardingiz"
+
+#: apps/booking/views.py:362
+msgid "You have successfully held your booking dates for 30 minutes"
+msgstr "Siz bron qilish sanalarini 30 daqiqa davomida muvaffaqiyatli o'tkazdingiz"
+
+#: apps/booking/views.py:420
+msgid "You have successfully unheld the booking dates"
+msgstr "Siz bron qilish sanalarini muvaffaqiyatli bekor qildingiz"
+
+#: apps/booking/views.py:453
+msgid "Property not found or is not a verified property"
+msgstr "Mulk topilmadi yoki tasdiqlangan mulk emas"
+
+#: apps/booking/views.py:459 apps/property/cottage_serializers.py:594
+#: apps/property/cottage_serializers.py:1027 apps/property/views.py:855
+#: apps/property/views.py:1753 apps/property/views.py:2124
+#: apps/property/views.py:2237 apps/property/views.py:2398
+msgid "This field is required."
+msgstr "Ushbu qator to'ldirilishi shart."
+
+#: apps/chat/authentication.py:54 apps/users/authentication.py:68
+#: apps/users/authentication.py:112
+msgid "Authentication failed"
+msgstr "Autentifikatsiya amalga oshmadi"
+
+#: apps/chat/views.py:140
+msgid "Invalid partner id"
+msgstr "Hamkor identifikatori yaroqsiz"
+
+#: apps/chat/views.py:146 apps/chat/views.py:230
+#, python-format
+msgid "%(role)s not found"
+msgstr "%(role)s topilmadi"
+
+#: apps/chat/views.py:169 apps/chat/views.py:288
+msgid "No admin user available"
+msgstr "Administrator foydalanuvchisi mavjud emas"
+
+#: apps/chat/views.py:177 apps/chat/views.py:326 apps/chat/views.py:350
+msgid "Unauthorized actor"
+msgstr "Ruxsatsiz aktyor"
+
+#: apps/chat/views.py:216
+msgid "receiver_id and content are required"
+msgstr "receiver_id va kontent talab qilinadi"
+
+#: apps/chat/views.py:223
+msgid "Invalid receiver_id"
+msgstr "Qabul qiluvchining_identifikatori noto‘g‘ri"
+
+#: apps/chat/views.py:346
+msgid "message_ids must be a list"
+msgstr "message_ids roʻyxati boʻlishi kerak"
+
+#: apps/notification/apps.py:8 core/unfold_settings.py:167
+msgid "Notification"
+msgstr "Bildirishnoma"
+
+#: apps/notification/views.py:82
+msgid "FCM token updated successfully"
+msgstr "FCM tokeni muvaffaqiyatli yangilandi"
+
+#: apps/notification/views.py:101 apps/notification/views.py:132
+msgid "Partner FCM token updated successfully"
+msgstr "Hamkor FCM tokeni muvaffaqiyatli yangilandi"
+
+#: apps/notification/views.py:300 apps/notification/views.py:322
+#: apps/notification/views.py:379 apps/notification/views.py:402
+msgid "Notifications marked as read"
+msgstr "Bildirishnomalar o‘qilgan deb belgilandi"
+
+#: apps/notification/views.py:341 apps/notification/views.py:358
+#: apps/notification/views.py:423 apps/notification/views.py:441
+msgid "All notifications marked as read"
+msgstr "Barcha bildirishnomalar o'qilgan deb belgilangan"
+
+#: apps/payment/apps.py:8
+msgid "Payment"
+msgstr "To'lov"
+
+#: apps/payment/exchange_rate.py:53
+msgid "Exchange rate isn't synchronized today"
+msgstr "Valyuta kursi bugun sinxronlashtirilmagan"
+
+#: apps/payment/services.py:98
+msgid "Plum API returned 403 Forbidden (access denied). Typical causes: server IP not whitelisted by Plum, invalid credentials, or nginx/proxy blocking the request."
+msgstr "Plum API 403 taqiqlangan (kirish taqiqlangan) ni qaytardi. Oddiy sabablar: Plum tomonidan oq ro'yxatga kiritilmagan server IP, noto'g'ri hisob ma'lumotlari yoki so'rovni blokirovka qiluvchi nginx/proksi."
+
+#: apps/payment/services.py:105
+msgid "Invalid response from Plum API (response is not valid JSON). Check server logs for details."
+msgstr "Plum API dan noto‘g‘ri javob (javob noto‘g‘ri JSON). Tafsilotlar uchun server jurnallarini tekshiring."
+
+#: apps/property/apartment_serializers.py:526
+msgid "Please enter a title."
+msgstr "Iltimos, sarlavha kiriting."
+
+#: apps/property/apps.py:8
+msgid "Property"
+msgstr "Mulk"
+
+#: apps/property/cottage_serializers.py:194
+msgid "Invalid numeric value."
+msgstr "Raqamli qiymat noto‘g‘ri."
+
+#: apps/property/cottage_serializers.py:209
+#, python-brace-format
+msgid "{field_name} must be non-negative."
+msgstr "{field_name} manfiy boʻlmasligi kerak."
+
+#: apps/property/cottage_serializers.py:212
+#, python-brace-format
+msgid "{field_name} must be less than or equal to {MAX_PRICE_ABS}."
+msgstr "{field_name} {MAX_PRICE_ABS} dan kichik yoki unga teng boʻlishi kerak."
+
+#: apps/property/cottage_serializers.py:220
+msgid "Expected a list of UUID values."
+msgstr "UUID qiymatlari roʻyxati kutilmoqda."
+
+#: apps/property/cottage_serializers.py:229
+msgid "Property services must contain valid UUID values."
+msgstr "Mulk xizmatlarida yaroqli UUID qiymatlari boʻlishi kerak."
+
+#: apps/property/cottage_serializers.py:648
+msgid "month_from, month_to, next_month_from, and next_month_to must all be set together, or omit all four to use default current and next calendar month."
+msgstr "month_from, month_to, next_month_from va next_month_to hammasi birgalikda sozlanishi yoki joriy va keyingi kalendar oyini birlamchi ishlatish uchun toʻrttasini qoʻyib yuborish kerak."
+
+#: apps/property/cottage_serializers.py:659
+msgid "Do not send `price` together with month_from/month_to/next_month_*; use flat month fields only."
+msgstr "Oydan/oydan/keyingi_oyga_* bilan birga “narx”ni yubormang; faqat tekis oy maydonlaridan foydalaning."
+
+#: apps/property/cottage_serializers.py:680
+msgid "Must be a list of price objects."
+msgstr "Narx ob'ektlari ro'yxati bo'lishi kerak."
+
+#: apps/property/cottage_serializers.py:688
+msgid "Each price item must be an object."
+msgstr "Har bir narx elementi ob'ekt bo'lishi kerak."
+
+#: apps/property/cottage_serializers.py:697
+msgid "month_from and month_to are required for each price item."
+msgstr "Har bir narx elementi uchun month_from va month_to koʻrsatkichlari talab qilinadi."
+
+#: apps/property/cottage_serializers.py:709
+msgid "Invalid month date format in price items."
+msgstr "Narx bandlarida oy sanasi formati yaroqsiz."
+
+#: apps/property/cottage_serializers.py:716
+msgid "month_from and month_to must be in the same calendar month."
+msgstr "month_from va month_to bir xil kalendar oyida bo'lishi kerak."
+
+#: apps/property/cottage_serializers.py:726
+msgid "month_to must be greater than or equal to month_from."
+msgstr "month_to. month_from dan katta yoki teng boʻlishi kerak."
+
+#: apps/property/cottage_serializers.py:748
+msgid "Working days and weekend prices are required in each item or via top-level price_on_working_days / price_on_weekends."
+msgstr "Ish kunlari va dam olish kunlari narxlari har bir elementda yoki ish kunidagi yuqori darajadagi narx / dam olish kunlaridagi narxlar orqali talab qilinadi."
+
+#: apps/property/cottage_serializers.py:775
+msgid "Duplicate month_from values are not allowed."
+msgstr "Takroriy month_from qiymatlariga ruxsat berilmaydi."
+
+#: apps/property/cottage_serializers.py:781
+msgid "Exactly 2 monthly prices are required."
+msgstr "Aynan 2 oylik narxlar talab qilinadi."
+
+#: apps/property/cottage_serializers.py:798
+msgid "Prices must be provided for current and next month."
+msgstr "Narxlar joriy va keyingi oy uchun taqdim etilishi kerak."
+
+#: apps/property/cottage_serializers.py:938
+msgid "This field is required for selected district."
+msgstr "Bu maydon tanlangan tuman uchun talab qilinadi."
+
+#: apps/property/cottage_serializers.py:948
+msgid "Invalid prefecture for selected district."
+msgstr "Tanlangan tuman uchun prefektura yaroqsiz."
+
+#: apps/property/cottage_serializers.py:956
+msgid "Prefecture can be set only for district 75 or 82."
+msgstr "Prefektura faqat 75 yoki 82 tumanlar uchun belgilanishi mumkin."
+
+#: apps/property/cottage_serializers.py:1032
+msgid "Expected an object payload."
+msgstr "Ob'ektning foydali yuki kutilmoqda."
+
+#: apps/property/mixins.py:67 apps/property/mixins.py:106
+msgid "Invalid property type"
+msgstr "Mulk turi yaroqsiz"
+
+#: apps/property/mixins.py:80
+msgid "Property type not found"
+msgstr "Mulk turi topilmadi"
+
+#: apps/property/mixins.py:86
+msgid "Duplication is prohibited"
+msgstr "Takrorlash taqiqlanadi"
+
+#: apps/property/mixins.py:100
+msgid "Price is too large, maximum 12 digits allowed"
+msgstr "Narx juda katta, ruxsat etilgan maksimal 12 ta raqam"
+
+#: apps/property/mixins.py:115
+msgid "Price must be a list of objects with: month_from, month_to, price_per_person, price_on_weekends, price_on_working_days. Or use a single number for current month (e.g. 100)."
+msgstr "Narx ob'ektlar ro'yxatidan iborat bo'lishi kerak: oydan_kungacha, oydan_togacha, kishi boshiga_narx, dam olish kunlaridagi narx, ish_kunlaridagi narx. Yoki joriy oy uchun bitta raqamdan foydalaning (masalan, 100)."
+
+#: apps/property/mixins.py:141
+msgid "month_from and month_to are required"
+msgstr "month_from va month_to talab qilinadi"
+
+#: apps/property/mixins.py:156
+msgid "Duplication price for this month isn't allowed"
+msgstr "Bu oy uchun takroriy narxga ruxsat berilmagan"
+
+#: apps/property/mixins.py:167
+msgid "Each item in price list must be a dict"
+msgstr "Narxlar ro'yxatidagi har bir element dikt bo'lishi kerak"
+
+#: apps/property/mixins.py:180
+msgid "Missing fields for price: "
+msgstr "Narx uchun etishmayotgan maydonlar:"
+
+#: apps/property/mixins.py:202
+msgid "Price should only be determined for one month"
+msgstr "Narx faqat bir oyga belgilanishi kerak"
+
+#: apps/property/mixins.py:207
+msgid "You can't modify prices for past months"
+msgstr "Oʻtgan oylar uchun narxlarni oʻzgartira olmaysiz"
+
+#: apps/property/mixins.py:212
+msgid "You can set only price for current or next month"
+msgstr "Siz faqat joriy yoki keyingi oy uchun narx belgilashingiz mumkin"
+
+#: apps/property/mixins.py:218
+msgid "Price should cover whole month"
+msgstr "Narx butun oyni qoplashi kerak"
+
+#: apps/property/templates/admin/index.html:5 templates/admin/index.html:5
+msgid "Django site admin"
+msgstr "Django sayt administratori"
+
+#: apps/property/templates/admin/index.html:15 templates/admin/index.html:17
+msgid "Quick tables"
+msgstr "Tez jadvallar"
+
+#: apps/property/templates/admin/index.html:18
+msgid "Open the required sections quickly from the center panel."
+msgstr "Markaziy paneldan kerakli bo'limlarni tezda oching."
+
+#: apps/property/templates/admin/index.html:24 templates/admin/index.html:26
+msgid "Apartments"
+msgstr "Kvartiralar"
+
+#: apps/property/templates/admin/index.html:25
+msgid "Open apartments table"
+msgstr "Ochiq kvartiralar stoli"
+
+#: apps/property/templates/admin/index.html:29 templates/admin/index.html:30
+msgid "Cottages"
+msgstr "Kottejlar"
+
+#: apps/property/templates/admin/index.html:30
+msgid "Open cottages table"
+msgstr "Ochiq kottejlar stoli"
+
+#: apps/property/templates/admin/index.html:34 core/unfold_settings.py:160
+#: templates/admin/index.html:34
+msgid "Sanatorium"
+msgstr "Sanatoriy"
+
+#: apps/property/templates/admin/index.html:35
+msgid "Open ..sanatorium table"
+msgstr "Ochiq ..sanatoriya stoli"
+
+#: apps/property/templates/admin/index.html:39 templates/admin/index.html:38
+msgid "Clients"
+msgstr "Mijozlar"
+
+#: apps/property/templates/admin/index.html:40
+msgid "Open clients table"
+msgstr "Mijozlar jadvalini oching"
+
+#: apps/property/templates/admin/index.html:44 templates/admin/index.html:42
+msgid "Partners"
+msgstr "Hamkorlar"
+
+#: apps/property/templates/admin/index.html:45
+msgid "Open partners table"
+msgstr "Hamkorlar jadvalini oching"
+
+#: apps/property/templates/admin/index.html:50
+msgid "Open booking table"
+msgstr "Ochiq bron qilish stoli"
+
+#: apps/property/views.py:879
+msgid "Unsupported file extension."
+msgstr "Qo'llab-quvvatlanmaydigan fayl kengaytmasi."
+
+#: apps/property/views.py:881
+msgid "Only image uploads are allowed."
+msgstr "Faqat rasm yuklashga ruxsat beriladi."
+
+#: apps/property/views.py:883
+msgid "File too large."
+msgstr "Fayl juda katta."
+
+#: apps/property/views.py:1545
+msgid "Apartment could not be created"
+msgstr "Kvartira yaratib bo‘lmadi"
+
+#: apps/property/views.py:1549 apps/property/views.py:1640
+#: apps/property/views.py:1718
+msgid "Property has been created successfully, please wait while we verify it"
+msgstr "Mulk muvaffaqiyatli yaratildi, tasdiqlangunga qadar kuting"
+
+#: apps/property/views.py:1636
+msgid "Cottage could not be created"
+msgstr "Kottej yaratib bo'lmadi"
+
+#: apps/property/views.py:1714
+msgid "Property could not be created"
+msgstr "Mulk yaratilmadi"
+
+#: apps/property/views.py:1963
+msgid "Your changes have been saved successfully"
+msgstr "O'zgarishlaringiz muvaffaqiyatli saqlandi"
+
+#: apps/property/views.py:1968
+msgid "Property has been sent for re-verification, please wait while we verify it"
+msgstr "Mulk qayta tekshirish uchun yuborildi, biz uni tasdiqlaguncha kuting"
+
+#: apps/property/views.py:2155
+msgid "Your image(s) are pending approval"
+msgstr "Rasm(lar)ingiz tasdiqlashni kutmoqda"
+
+#: apps/property/views.py:2229 apps/property/views.py:2309
+#: apps/property/views.py:2480
+msgid "Property image not found"
+msgstr "Mulk tasviri topilmadi"
+
+#: apps/property/views.py:2269
+msgid "Your image has been updated and is pending approval"
+msgstr "Rasmingiz yangilandi va tasdiqlash kutilmoqda"
+
+#: apps/property/views.py:2588
+msgid "You can leave a review only for accepted or completed bookings"
+msgstr "Siz faqat qabul qilingan yoki tugallangan bandlovlar uchun sharh qoldirishingiz mumkin"
+
+#: apps/property/views.py:2599
+msgid "Review could not be created"
+msgstr "Sharh yaratib bo‘lmadi"
+
+#: apps/property/views.py:2850
+msgid "Invalid range"
+msgstr "Yaroqsiz diapazon"
+
+#: apps/property/views.py:3091
+msgid "This field is required when using an admin token."
+msgstr "Bu maydon administrator tokenidan foydalanganda talab qilinadi."
+
+#: apps/property/views.py:3098
+msgid "Enter a valid integer."
+msgstr "Yaroqli butun son kiriting."
+
+#: apps/property/views.py:3101
+msgid "No active partner account found for this id."
+msgstr "Bu identifikator uchun faol hamkor hisobi topilmadi."
+
+#: apps/property/views.py:3324 apps/property/views.py:3350
+#: apps/property/views.py:3373
+msgid "Apartment not found"
+msgstr "Kvartira topilmadi"
+
+#: apps/property/views.py:3403 apps/property/views.py:3430
+#: apps/property/views.py:3453
+msgid "Cottage not found"
+msgstr "Kottej topilmadi"
+
+#: apps/property/views.py:3619 apps/property/views.py:3664
+msgid "Removed from favorites"
+msgstr "Sevimlilardan olib tashlandi"
+
+#: apps/property/views.py:3625
+msgid "Added to favorites"
+msgstr "Sevimlilarga qo'shildi"
+
+#: apps/shared/compress_image.py:17 apps/stories/serializers.py:134
+msgid "Invalid image format, allowed are: jpg, jpeg, png, heif, heic"
+msgstr "Rasm formati noto‘g‘ri, ruxsat berilgan: jpg, jpeg, png, heif, heic"
+
+#: apps/shared/compress_video.py:88 apps/stories/serializers.py:149
+msgid "Invalid video format, allowed are: mp4, mov, avi, mkv"
+msgstr "Video formati noto‘g‘ri, ruxsat berilgan: mp4, mov, avi, mkv"
+
+#: apps/shared/compress_video.py:114
+msgid "Unsupported file type"
+msgstr "Qo'llab-quvvatlanmaydigan fayl turi"
+
+#: apps/shared/compress_video.py:121
+#, python-format
+msgid "Input temp file not created: %(input_path)s"
+msgstr "Kirish temp fayli yaratilmadi: %(input_path)s"
+
+#: apps/shared/compress_video.py:174
+msgid "Compressed video file is empty or missing"
+msgstr "Siqilgan video fayl boʻsh yoki yoʻq"
+
+#: apps/shared/compress_video.py:189
+msgid "Video compression took too long. Please upload a shorter video."
+msgstr "Videoni siqish juda uzoq davom etdi. Iltimos, qisqaroq video yuklang."
+
+#: apps/shared/date.py:22
+msgid "Must be a date string YYYY-MM-DD"
+msgstr "YYYY-AA-DD sana qatori bo'lishi kerak"
+
+#: apps/shared/permissions.py:33
+msgid "Authentication credentials were not provided for partner."
+msgstr "Hamkor uchun autentifikatsiya hisob maʼlumotlari taqdim etilmagan."
+
+#: apps/shared/permissions.py:40
+msgid "Authentication credentials were not provided for client."
+msgstr "Mijoz uchun autentifikatsiya maʼlumotlari taqdim etilmagan."
+
+#: apps/shared/permissions.py:49 apps/shared/permissions.py:65
+msgid "Authentication credentials were not provided."
+msgstr "Autentifikatsiya ma'lumotlari taqdim etilmagan."
+
+#: apps/shared/permissions.py:80
+msgid "You don't have permission to modify"
+msgstr "Sizda o‘zgartirishga ruxsat yo‘q"
+
+#: apps/shared/permissions.py:85
+msgid "Authentication credentials were not provided for partner"
+msgstr "Hamkor uchun autentifikatsiya hisob maʼlumotlari taqdim etilmagan"
+
+#: apps/shared/permissions.py:101
+msgid "You don't have permission to edit this property"
+msgstr "Sizda bu xususiyatni tahrirlash uchun ruxsat yo‘q"
+
+#: apps/shared/permissions.py:103
+msgid "You don't have permission to delete this property"
+msgstr "Sizda bu xususiyatni o‘chirishga ruxsatingiz yo‘q"
+
+#: apps/shared/permissions.py:110
+msgid "This endpoint is available only via Telegram Web App"
+msgstr "Ushbu so'nggi nuqta faqat Telegram veb-ilovasi orqali mavjud"
+
+#: apps/shared/utils.py:162
+msgid "Image resolution is too high. Please upload a smaller image"
+msgstr "Rasm ruxsati juda yuqori. Iltimos, kichikroq rasm yuklang"
+
+#: apps/shared/utils.py:171
+msgid "Internal server error."
+msgstr "Serverdagi ichki xatolik."
+
+#: apps/shared/utils.py:197
+msgid "Token is invalid or expired."
+msgstr "Token yaroqsiz yoki muddati tugagan."
+
+#: apps/shared/utils.py:207
+msgid "Use the Access token (from login/verify). If expired, use POST /api/users/refresh/ with Refresh token to get new tokens."
+msgstr "Kirish tokenidan foydalaning (kirish/tekshirish orqali). Muddati tugagan bo'lsa, yangi tokenlarni olish uchun POST /api/users/refresh/ Refresh tokenidan foydalaning."
+
+#: apps/shared/views.py:26
+msgid "Invalid log token"
+msgstr "Yaroqsiz jurnal belgisi"
+
+#: apps/stories/admin_views.py:140 apps/stories/admin_views.py:197
+msgid "Invalid story GUID"
+msgstr "Yaroqsiz hikoya GUID"
+
+#: apps/stories/admin_views.py:150 apps/stories/admin_views.py:166
+#: apps/stories/admin_views.py:204 apps/stories/serializers.py:196
+#: apps/stories/views.py:124 apps/stories/views.py:128
+#: apps/stories/views.py:131 apps/stories/views.py:192
+#: apps/stories/views.py:221 apps/stories/views.py:226
+msgid "Story not found"
+msgstr "Hikoya topilmadi"
+
+#: apps/stories/admin_views.py:155
+msgid "Property is not verified. Cannot approve story."
+msgstr "Mulk tasdiqlanmagan. Hikoyani tasdiqlab bo'lmaydi."
+
+#: apps/stories/apps.py:7 core/unfold_settings.py:139
+msgid "Stories"
+msgstr "Hikoyalar"
+
+#: apps/stories/serializers.py:141
+msgid "Image file too large, maximum size is 20MB"
+msgstr "Tasvir fayli juda katta, maksimal hajmi 20 MB"
+
+#: apps/stories/serializers.py:156
+msgid "Video file too large, maximum size is 100MB"
+msgstr "Video fayl juda katta, maksimal hajmi 100 MB"
+
+#: apps/stories/serializers.py:160
+msgid "Unsupported media type"
+msgstr "Qo'llab-quvvatlanmaydigan media turi"
+
+#: apps/stories/views.py:79 apps/stories/views.py:284
+msgid "Parametrlar kerak. property_type yuboring."
+msgstr "Parametrlar kerak. property_type yuboring."
+
+#: apps/stories/views.py:135 apps/stories/views.py:231
+msgid "Media not found"
+msgstr "Media topilmadi"
+
+#: apps/stories/views.py:227
+msgid "You don't have permission to delete this story media"
+msgstr "Sizda bu hikoya mediasini o‘chirishga ruxsatingiz yo‘q"
+
+#: apps/users/apps.py:10 core/unfold_settings.py:125
+msgid "Users"
+msgstr "Foydalanuvchilar"
+
+#: apps/users/authentication.py:60 apps/users/serializers.py:83
+#: apps/users/views.py:258 apps/users/views.py:455 apps/users/views.py:474
+msgid "Client not found"
+msgstr "Mijoz topilmadi"
+
+#: apps/users/authentication.py:104 apps/users/serializers.py:193
+#: apps/users/views.py:721 apps/users/views.py:941 apps/users/views.py:961
+msgid "Partner not found"
+msgstr "Hamkor topilmadi"
+
+#: apps/users/raw_repository.py:230
+msgid "Failed to insert user"
+msgstr "Foydalanuvchi kiritilmadi"
+
+#: apps/users/serializers.py:30
+#, python-brace-format
+msgid "{field} must contain only letters, spaces, hyphens or apostrophes."
+msgstr "{field} faqat harflar, boʻshliqlar, defislar yoki apostroflardan iborat boʻlishi kerak."
+
+#: apps/users/serializers.py:53 apps/users/serializers.py:275
+msgid "Phone number must start with 998"
+msgstr "Telefon raqami 998 bilan boshlanishi kerak"
+
+#: apps/users/serializers.py:103
+msgid "Client with this phone number already exists"
+msgstr "Bu telefon raqamiga ega mijoz allaqachon mavjud"
+
+#: apps/users/serializers.py:130 apps/users/serializers.py:252
+msgid "Registration data not found. Please start registration again"
+msgstr "Roʻyxatdan oʻtish maʼlumotlari topilmadi. Iltimos, roʻyxatdan oʻtishni qaytadan boshlang"
+
+#: apps/users/serializers.py:140
+msgid "Client already registered"
+msgstr "Mijoz allaqachon ro'yxatdan o'tgan"
+
+#: apps/users/serializers.py:215
+msgid "Partner with this phone number already exists"
+msgstr "Bu telefon raqami bilan hamkor allaqachon mavjud"
+
+#: apps/users/serializers.py:221
+msgid "Username already exists"
+msgstr "Foydalanuvchi nomi allaqachon mavjud"
+
+#: apps/users/serializers.py:227
+msgid "Partner with this email already exists"
+msgstr "Bu email bilan hamkor allaqachon mavjud"
+
+#: apps/users/serializers.py:263
+msgid "Partner already registered"
+msgstr "Hamkor allaqachon ro'yxatdan o'tgan"
+
+#: apps/users/serializers.py:299
+msgid "File size must be ≤ 5MB"
+msgstr "Fayl hajmi ≤ 5MB boʻlishi kerak"
+
+#: apps/users/services.py:144
+msgid "Token not found in response"
+msgstr "Token javobda topilmadi"
+
+#: apps/users/services.py:248
+msgid "Eskiz SMS provider did not accept the message"
+msgstr "Eskiz SMS provayderi xabarni qabul qilmadi"
+
+#: apps/users/services.py:260
+msgid "The confirmation code sent successfully"
+msgstr "Tasdiqlash kodi muvaffaqiyatli yuborildi"
+
+#: apps/users/services.py:415 apps/users/services.py:434
+msgid "OTP verified successfully"
+msgstr "OTP muvaffaqiyatli tasdiqlandi"
+
+#: apps/users/services.py:416 apps/users/services.py:437
+msgid "Invalid OTP"
+msgstr "Yaroqsiz OTP"
+
+#: apps/users/services.py:423
+msgid "OTP expired. Please request a new one."
+msgstr "OTP muddati tugadi. Iltimos, yangisini so'rang."
+
+#: apps/users/services.py:430
+msgid "Too many attempts. Please resend OTP."
+msgstr "Juda koʻp urinishlar. Iltimos, OTPni qayta yuboring."
+
+#: apps/users/tokens.py:126 apps/users/views.py:355
+msgid "Invalid or expired refresh token"
+msgstr "Yaroqsiz yoki muddati o‘tgan yangilash tokeni"
+
+#: apps/users/views.py:90
+msgid "Client not found. Please register first"
+msgstr "Mijoz topilmadi. Iltimos, avval ro'yxatdan o'ting"
+
+#: apps/users/views.py:97 apps/users/views.py:109
+msgid "OTP sent successfully"
+msgstr "OTP muvaffaqiyatli yuborildi"
+
+#: apps/users/views.py:184 apps/users/views.py:508
+msgid "OTP sent successfully for registration"
+msgstr "OTP roʻyxatdan oʻtish uchun muvaffaqiyatli yuborildi"
+
+#: apps/users/views.py:235 apps/users/views.py:594
+msgid "Registration completed successfully"
+msgstr "Roʻyxatdan oʻtish muvaffaqiyatli yakunlandi"
+
+#: apps/users/views.py:265 apps/users/views.py:283 apps/users/views.py:327
+#: apps/users/views.py:728 apps/users/views.py:741 apps/users/views.py:780
+msgid "OTP resent successfully"
+msgstr "OTP qayta yuborildi"
+
+#: apps/users/views.py:272 apps/users/views.py:314 apps/users/views.py:732
+#: apps/users/views.py:769
+msgid "Please wait before resending OTP"
+msgstr "OTPni qayta yuborishdan oldin kuting"
+
+#: apps/users/views.py:308 apps/users/views.py:763
+msgid "Registration not started"
+msgstr "Ro‘yxatdan o‘tish boshlanmadi"
+
+#: apps/users/views.py:361
+msgid "Token refresh failed"
+msgstr "Tokenni yangilash amalga oshmadi"
+
+#: apps/users/views.py:415
+msgid "Successfully logged out"
+msgstr "Hisobdan muvaffaqiyatli chiqdi"
+
+#: apps/users/views.py:418
+msgid "Invalid token"
+msgstr "Token yaroqsiz"
+
+#: apps/users/views.py:549
+msgid "User with this phone number already exists."
+msgstr "Bu telefon raqamiga ega foydalanuvchi allaqachon mavjud."
+
+#: apps/users/views.py:556
+msgid "User with this username already exists."
+msgstr "Bu foydalanuvchi nomiga ega foydalanuvchi allaqachon mavjud."
+
+#: apps/users/views.py:623
+msgid "Partner not found. Please register first."
+msgstr "Hamkor topilmadi. Iltimos, avval ro'yxatdan o'ting."
+
+#: apps/users/views.py:632 apps/users/views.py:644
+msgid "OTP Send successfully"
+msgstr "OTP yuborildi"
+
+#: apps/users/views.py:694
+msgid "Login successful"
+msgstr "Kirish muvaffaqiyatli"
+
+#: apps/users/views.py:830
+msgid "Successfully logged out."
+msgstr "Hisobdan muvaffaqiyatli chiqdi."
+
+#: apps/users/views.py:834
+msgid "Logout failed."
+msgstr "Chiqish amalga oshmadi."
+
+#: apps/users/views.py:876 apps/users/views.py:915
+msgid "Account has been deleted."
+msgstr "Hisob o'chirildi."
+
+#: apps/users/views.py:995
+msgid "Passport upload is temporarily disabled in normalized raw-sql mode."
+msgstr "Pasportni yuklash normallashtirilgan raw-SQL rejimida vaqtincha o'chirib qo'yilgan."
+
+#: apps/users/views.py:1020 apps/users/views.py:1160
+msgid "Failed to fetch cards"
+msgstr "Kartalarni olib bo‘lmadi"
+
+#: apps/users/views.py:1053
+msgid "card_number and expire_date required"
+msgstr "karta_raqami va amal qilish muddati talab qilinadi"
+
+#: apps/users/views.py:1095
+msgid "session and otp required"
+msgstr "sessiya va otp talab qilinadi"
+
+#: apps/users/views.py:1132
+msgid "session is required"
+msgstr "sessiya talab qilinadi"
+
+#: apps/users/views.py:1167
+msgid "You cannot delete a card that does not belong to you"
+msgstr "Sizga tegishli bo'lmagan kartani o'chira olmaysiz"
+
+#: core/settings.py:402 core/unfold_settings.py:88
+msgid "English"
+msgstr "Ingliz"
+
+#: core/settings.py:403 core/unfold_settings.py:95
+msgid "Russian"
+msgstr "rus"
+
+#: core/settings.py:404 core/unfold_settings.py:102
+msgid "Uzbek"
+msgstr "o'zbek"
+
+#: core/unfold_settings.py:6
+msgid "WEEL"
+msgstr "WEEL"
+
+#: core/unfold_settings.py:7 core/unfold_settings.py:8
+msgid "Booking Service"
+msgstr "Buyurtma xizmati"
 
 #: core/unfold_settings.py:12
 msgid "My site"
 msgstr "Mening saytim"
 
-#: core/unfold_settings.py:107
+#: core/unfold_settings.py:113
 msgid "Navigation"
 msgstr "Navigatsiya"
 
-#: core/unfold_settings.py:119 apps/users/apps.py:10
-msgid "Users"
-msgstr "Foydalanuvchilar"
-
-#: apps/notification/models.py:48
-msgid "Notifications"
-msgstr "Bildirishnomalar"
-
-#: apps/payment/apps.py:9
-msgid "Payment"
-msgstr "To'lov"
-
-#: apps/users/models/partners.py apps/users/models/clients.py
-msgid "First name"
-msgstr "Ism"
-
-msgid "Last name"
-msgstr "Familiya"
-
-msgid "Username"
-msgstr "Foydalanuvchi nomi"
-
-msgid "Phone number"
-msgstr "Telefon raqami"
-
-msgid "Email"
-msgstr "Elektron pochta"
-
-msgid "Email verified"
-msgstr "Pochta tasdiqlangan"
-
-msgid "Active"
-msgstr "Faol"
-
-msgid "Partners"
-msgstr "Hamkorlar"
-
-msgid "Partner Telegram user"
-msgstr "Hamkor Telegram"
-
-msgid "Partner Telegram users"
-msgstr "Hamkorlar Telegram"
-
-msgid "Partner session"
-msgstr "Hamkor sessiyasi"
-
-msgid "Partner sessions"
-msgstr "Hamkor sessiyalari"
-
-msgid "Device ID"
-msgstr "Qurilma ID"
-
-msgid "User agent"
-msgstr "User agent"
-
-msgid "Last IP"
-msgstr "Oxirgi IP"
-
-msgid "Partner document"
-msgstr "Hamkor hujjati"
-
-msgid "Partner documents"
-msgstr "Hamkor hujjatlari"
-
-msgid "Type"
-msgstr "Turi"
-
-msgid "Document"
-msgstr "Hujjat"
-
-msgid "Is verified"
-msgstr "Tasdiqlangan"
-
-msgid "Verified by"
-msgstr "Tekshiruvchi"
-
-msgid "Verified at"
-msgstr "Tekshirilgan vaqti"
-
-msgid "Certificate"
-msgstr "Guvohnoma"
-
-msgid "Passport"
-msgstr "Pasport"
-
-msgid "Clients"
-msgstr "Mijozlar"
-
-msgid "Client session"
-msgstr "Mijoz sessiyasi"
-
-msgid "Client sessions"
-msgstr "Mijoz sessiyalari"
-
-msgid "Device type"
-msgstr "Qurilma turi"
-
-msgid "Client device"
-msgstr "Mijoz qurilmasi"
-
-msgid "Client devices"
-msgstr "Mijoz qurilmalari"
-
-msgid "FCM token"
-msgstr "FCM token"
-
-#: core/unfold_settings.py:126
+#: core/unfold_settings.py:132
 msgid "Properties"
-msgstr "Ko'chmas mulklar"
+msgstr "Xususiyatlari"
 
-#: core/unfold_settings.py:133
-msgid "Stories"
-msgstr "Hikoyalar"
-
-#: core/unfold_settings.py:140
-msgid "Booking"
-msgstr "Bron qilish"
-
-#: core/unfold_settings.py:147
+#: core/unfold_settings.py:146
 msgid "Payments"
 msgstr "To'lovlar"
 
-#: core/unfold_settings.py:154 apps/notification/models.py:47
-msgid "Notification"
-msgstr "Bildirishnoma"
-
-#: apps/users/admin.py (admin filters and columns)
-msgid "Has property"
-msgstr "Property yaratgan"
-msgid "Yes (has property)"
-msgstr "Ha (property bor)"
-msgid "No (no property)"
-msgstr "Yoʻq (property yoʻq)"
-msgid "Last online"
-msgstr "Oxirgi online"
-msgid "Full name / email"
-msgstr "To'liq ism / email"
-msgid "Partner"
-msgstr "Hamkor"
-
-#: core/unfold_settings.py (site title/header)
-msgid "WEEL"
-msgstr "WEEL"
-msgid "Booking Service"
-msgstr "Bron xizmati"
-
-#: apps/booking/models.py
-msgid "Booking number"
-msgstr "Bron raqami"
-
-msgid "Reminder sent"
-msgstr "Eslatma yuborildi"
-
-msgid "Confirmed at"
-msgstr "Tasdiqlandi"
-
-msgid "Cancelled at"
-msgstr "Bekor qilindi"
-
-msgid "Completed at"
-msgstr "Yakunlandi"
-
-msgid "Cancellation reason"
-msgstr "Bekor qilish sababi"
-
-msgid "User cancelled"
-msgstr "Foydalanuvchi bekor qildi"
-
-msgid "User did not arrive"
-msgstr "Foydalanuvchi kelmadi"
-
-msgid "Partner cancelled"
-msgstr "Hamkor bekor qildi"
-
-msgid "System timeout"
-msgstr "Tizim vaqti tugadi"
-
-msgid "Subtotal"
-msgstr "Aralash yig'indi"
-
-msgid "Hold amount"
-msgstr "Bloklangan summa"
-
-msgid "Charge amount"
-msgstr "Yechib olingan summa"
-
-msgid "Service fee"
-msgstr "Xizmat haqi"
-
-msgid "Service fee percentage"
-msgstr "Xizmat haqi foizi"
-
-msgid "Booking price"
-msgstr "Bron narxi"
-
-msgid "Booking prices"
-msgstr "Bron narxlari"
-
-msgid "Booking transaction"
-msgstr "Bron tranzaksiyasi"
-
-msgid "Booking transactions"
-msgstr "Bron tranzaksiyalari"
-
-msgid "Held"
-msgstr "Band qilingan"
-
-msgid "Calendar Date"
-msgstr "Kalendar sanasi"
-
-msgid "Calendar Dates"
-msgstr "Kalendar sanalari"
-
-msgid "Calendar date for this property already exists"
-msgstr "Ushbu mulk uchun kalendar sanasi allaqachon mavjud"
-
-msgid "Story media"
-msgstr "Hikoya media"
-
-msgid "Video"
-msgstr "Video"
-
-msgid "Viewed at"
-msgstr "Ko'rilgan vaqti"
-
-msgid "Verified"
-msgstr "Tasdiqlangan"
-
-msgid "Bookings"
-msgstr "Bronlar"
-
-#: apps/property/models.py
-msgid "Property"
-msgstr "Ko'chmas mulk"
-
-#: apps/shared/models.py
-msgid "Created at"
-msgstr "Yaratilgan sana"
-
-#: apps/shared/models.py
-msgid "Updated at"
-msgstr "Yangilangan sana"
-
-#: core/settings.py
-msgid "English"
-msgstr "Ingliz tili"
-
-#: core/settings.py
-msgid "Russian"
-msgstr "Rus tili"
-
-#: core/settings.py
-msgid "Uzbek"
-msgstr "O'zbek tili"
-
-msgid "Pending"
-msgstr "Kutilmoqda"
-
-msgid "Confirmed"
-msgstr "Tasdiqlandi"
-
-msgid "Cancelled"
-msgstr "Bekor qilindi"
-
-msgid "Completed"
-msgstr "Yakunlandi"
-
-msgid "Client"
-msgstr "Mijoz"
-
-msgid "Check in"
-msgstr "Kirish vaqti"
-
-msgid "Check out"
-msgstr "Chiqish vaqti"
-
-msgid "Adults"
-msgstr "Kattalar"
-
-msgid "Children"
-msgstr "Bolalar"
-
-msgid "Babies"
-msgstr "Chaqaloqlar"
-
-msgid "Status"
-msgstr "Holat"
-
-msgid "Original price (from property)"
-msgstr "Asl narx (mulkdan)"
-
-msgid "Original currency (from property)"
-msgstr "Asl valyuta (mulkdan)"
-
-msgid "Exchange rate (USD -> UZS)"
-msgstr "Valyuta kursi (USD -> UZS)"
-
-msgid "Total price (UZS)"
-msgstr "Jami narx (UZS)"
-
-msgid "Plum transaction"
-msgstr "Plum tranzaksiyasi"
-
-msgid "Available"
-msgstr "Mavjud"
-
-msgid "Booked"
-msgstr "Band qilingan"
-
-msgid "Blocked"
-msgstr "Bloklangan"
-
-msgid "US Dollar"
-msgstr "AQSh dollari"
-
-msgid "Uzbekistan So'm"
-msgstr "O'zbekiston so'mi"
-
-msgid "Currency"
-msgstr "Valyuta"
-
-msgid "Rate"
-msgstr "Kurs"
-
-msgid "Date"
-msgstr "Sana"
-
-msgid "Exchange rate"
-msgstr "Valyuta kursi"
-
-msgid "Exchange rates"
-msgstr "Valyuta kurslari"
-
-msgid "Title"
-msgstr "Sarlavha"
-
-msgid "Invalid property type"
-msgstr "Yaroqsiz mulk turi"
-
-msgid ""
-"Price must be a single number for this property type. "
-"Only cottages support price as a list of dicts."
+#: templates/admin/index.html:20
+msgid "Open only required sections from here."
 msgstr ""
-"Ushbu mulk turi uchun narx bitta raqam bo'lishi kerak. "
-"Faqat Dachalar narxni lug'atlar ro'yxati sifatida qo'llab-quvvatlaydi."
-
-msgid "Each item in price list must be a dict"
-msgstr "Narxlar ro'yxatidagi har bir element lug'at bo'lishi kerak"
-
-msgid "Missing fields for cottage price: "
-msgstr ""
-
-msgid "Price should be a single number for non-cottage properties"
-msgstr "Dacha bo'lmagan mulklar uchun narx bitta raqam bo'lishi kerak"
-
-msgid "Price is too large, maximum 12 digits allowed"
-msgstr "Narx juda katta, ko'pi bilan 12 raqamga ruxsat beriladi"
-
-msgid "You can only set prices for months: {months}"
-msgstr "Siz faqat quyidagi oylar uchun narx belgilashingiz mumkin: {months}"
-
-msgid "The value of month_to must be greater than or equal to the value of month_from"
-msgstr "month_to qiymati month_from qiymatidan katta yoki teng bo'lishi kerak"
-
-msgid "Title (en)"
-msgstr "Sarlavha (en)"
-
-msgid "Title (ru)"
-msgstr "Sarlavha (ru)"
-
-msgid "Title (uz)"
-msgstr "Sarlavha (uz)"
-
-msgid "Icon"
-msgstr "Belgi"
-
-msgid "Property type"
-msgstr "Mulk turi"
-
-msgid "Property types"
-msgstr "Mulk turlari"
-
-msgid "Property service"
-msgstr "Mulk xizmati"
-
-msgid "Property services"
-msgstr "Mulk xizmatlari"
-
-msgid "Latitude"
-msgstr "Kenglik"
-
-msgid "Longitude"
-msgstr "Uzunlik"
-
-msgid "City"
-msgstr "Shahar"
-
-msgid "Country"
-msgstr "Mamlakat"
-
-msgid "Property location"
-msgstr "Mulk joylashuvi"
-
-msgid "Property locations"
-msgstr "Mulk joylashuvlari"
-
-msgid "Price"
-msgstr "Narx"
-
-msgid "Comment count"
-msgstr "Izohlar soni"
-
-msgid "Minimum weekend day stay"
-msgstr "Dam olish kunlarida minimal qolish"
-
-msgid "Partner"
-msgstr "Hamkor"
-
-msgid "Is archived"
-msgstr "Arxivlangan"
-
-msgid "Price valid from"
-msgstr "Narx amal qilish muddati davri (dan)"
-
-msgid "Price valid to"
-msgstr "Narx amal qilish muddati davri (gacha)"
-
-msgid "Price per person"
-msgstr "Kishi boshiga narx"
-
-msgid "Price on working days"
-msgstr "Ish kunlaridagi narx"
-
-msgid "Price on weekends"
-msgstr "Dam olish kunlaridagi narx"
-
-msgid "Property price"
-msgstr "Mulk narxi"
-
-msgid "Property prices"
-msgstr "Mulk narxlari"
-
-msgid "Order"
-msgstr "Buyurtma"
-
-msgid "Image"
-msgstr "Rasm"
-
-msgid "Is pending"
-msgstr "Kutilmoqda"
-
-msgid "Property image"
-msgstr "Mulk rasmi"
-
-msgid "Property images"
-msgstr "Mulk rasmlari"
-
-msgid "Description (en)"
-msgstr "Tavsif (en)"
-
-msgid "Description (ru)"
-msgstr "Tavsif (ru)"
-
-msgid "Description (uz)"
-msgstr "Tavsif (uz)"
-
-msgid "Is allowed alcohol"
-msgstr "Spirtli ichimliklarga ruxsat"
-
-msgid "Is allowed corporate"
-msgstr "Korporativlarga ruxsat"
-
-msgid "Is allowed pets"
-msgstr "Uy hayvonlariga ruxsat"
-
-msgid "Is quiet hours"
-msgstr "Tinch soatlar"
-
-msgid "Property detail"
-msgstr "Mulk tafsiloti"
-
-msgid "Property details"
-msgstr "Mulk tafsilotlari"
-
-msgid "Guests"
-msgstr "Mehmonlar"
-
-msgid "Rooms"
-msgstr "Xonalar"
-
-msgid "Beds"
-msgstr "Yotoqlar"
-
-msgid "Bathrooms"
-msgstr "Vannalar"
-
-msgid "Property room"
-msgstr "Mulk xonasi"
-
-msgid "Property rooms"
-msgstr "Mulk xonalari"
-
-msgid "Rating"
-msgstr "Reyting"
-
-msgid "Comment"
-msgstr "Izoh"
-
-msgid "Hide"
-msgstr "Yashirish"
-
-msgid "Property review"
-msgstr "Mulk sharhi"
-
-msgid "Property reviews"
-msgstr "Mulk sharhlari"
-
-msgid "You don't have permission to modify this property"
-msgstr "Sizda ushbu mulkni o'zgartirish huquqi yo'q"
-
-msgid "Authentication credentials were not provided for partner"
-msgstr "Hamkor uchun autentifikatsiya ma'lumotlari taqdim etilmadi"
-
-msgid "You don't have permission to edit this property"
-msgstr "Sizda ushbu mulkni tahrirlash huquqi yo'q"
-
-msgid "You don't have permission to delete this property"
-msgstr "Sizda ushbu mulkni o'chirish huquqi yo'q"
-
-msgid "Rating must be between 1 and 5"
-msgstr "Reyting 1 va 5 orasida bo'lishi kerak"
-
-msgid "You have already left reviews about this property"
-msgstr "Siz ushbu mulk haqida allaqachon sharh qoldirgansiz"
-
-msgid "Invalid value for property type"
-msgstr "Mulk turi uchun yaroqsiz qiymat"
-
-msgid "Property type with this GUID doesn't exist"
-msgstr "Ushbu GUID ga ega mulk turi mavjud emas"
-
-msgid "Invalid value in property services list"
-msgstr "Mulk xizmatlari ro'yxatida yaroqsiz qiymat"
-
-msgid "One or more if the selected property services don't exist"
-msgstr "Tanlangan mulk xizmatlaridan biri yoki bir nechtasi mavjud emas"
-
-msgid "Property type not found"
-msgstr "Mulk turi topilmadi"
-
-msgid ""
-"The following services don't belong to '{property_type.title_en}' property type: {', '.join(invalid_titles)}. "
-"Please select services that match the chosen property type."
-msgstr ""
-"Quyidagi xizmatlar '{property_type.title_en}' mulk turiga tegishli emas: {', '.join(invalid_titles)}. "
-"Tanlangan mulk turiga mos keladigan xizmatlarni tanlang."
-
-msgid "Duplication is prohibited"
-msgstr "Dublikat taqiqlanadi"
-
-msgid "Property type is required for price validation"
-msgstr "Narxni tasdiqlash uchun mulk turi talab qilinadi"
-
-msgid "Property not found"
-msgstr "Mulk topilmadi"
-
-msgid "This field is required"
-msgstr "Ushbu maydon majburiy"
-
-msgid "Invalid image format, allowed are: jpg, jpeg, png, heif, heic"
-msgstr "Yaroqsiz rasm formati, ruxsat etilganlar: jpg, jpeg, png, heif, heic"
-
-msgid "No fields provided for update"
-msgstr "Yangilash uchun maydonlar taqdim etilmadi"
-
-msgid "Invalid video format, allowed are: mp4, mov, avi, mkv"
-msgstr "Yaroqsiz video formati, ruxsat etilganlar: mp4, mov, avi, mkv"
-
-msgid "Authentication credentials were not provided for partner."
-msgstr "Hamkor uchun autentifikatsiya ma'lumotlari taqdim etilmadi."
-
-msgid "Authentication credentials were not provided for client."
-msgstr "Mijoz uchun autentifikatsiya ma'lumotlari taqdim etilmadi."
-
-msgid "Media"
-msgstr "Media"
-
-msgid "Media type"
-msgstr "Media turi"
-
-msgid "Expires at"
-msgstr "Tugash muddati"
-
-msgid "Views"
-msgstr "Ko'rishlar"
-
-msgid "Uploaded at"
-msgstr "Yuklangan vaqti"
-
-msgid "Story"
-msgstr "Hikoya"
-
-msgid "Story view"
-msgstr "Hikoya ko'rinishi"
-
-msgid "Story views"
-msgstr "Hikoya ko'rishlari"
-
-msgid "You don't have permission to delete this story"
-msgstr "Sizda ushbu hikoyani o'chirish huquqi yo'q"
-
-msgid "Client not found"
-msgstr "Mijoz topilmadi"
-
-msgid "Authentication failed"
-msgstr "Autentifikatsiya muvaffaqiyatsiz tugadi"
-
-msgid "Partner not found"
-msgstr "Hamkor topilmadi"
-
-msgid "Phone number must start with 998"
-msgstr "Telefon raqami 998 bilan boshlanishi kerak"
-
-msgid "Client with this phone number already exists"
-msgstr "Ushbu telefon raqamiga ega mijoz allaqachon mavjud"
-
-msgid "Registration data not found. Please start registration again"
-msgstr "Ro'yxatdan o'tish ma'lumotlari topilmadi. Iltimos, ro'yxatdan o'tishni qaytadan boshlang"
-
-msgid "Client already registered"
-msgstr "Mijoz allaqachon ro'yxatdan o'tgan"
-
-msgid "Partner with this phone number already exists"
-msgstr "Ushbu telefon raqamiga ega hamkor allaqachon mavjud"
-
-msgid "Username already exists"
-msgstr "Foydalanuvchi nomi allaqachon mavjud"
-
-msgid "Partner with this email already exists"
-msgstr "Ushbu elektron pochtaga ega hamkor allaqachon mavjud"
-
-msgid "Partner already registered"
-msgstr "Hamkor allaqachon ro'yxatdan o'tgan"
-
-msgid "OTP not found or expired"
-msgstr "OTP topilmadi yoki muddati tugagan"
-
-msgid "Invalid OTP data"
-msgstr "Yaroqsiz OTP ma'lumotlari"
-
-msgid "Too many failed attempts. Please request a new OTP."
-msgstr "Juda ko'p muvaffaqiyatsiz urinishlar. Iltimos, yangi OTP so'rang."
-
-msgid "OTP verified successfully"
-msgstr "OTP muvaffaqiyatli tasdiqlandi"
-
-msgid "Invalid OTP. {remaining_attempts} attempts remaining"
-msgstr "Yaroqsiz OTP. {remaining_attempts} ta urinish qoldi"
-
-msgid "Client not found. Please register first"
-msgstr "Mijoz topilmadi. Iltimos, avval ro'yxatdan o'ting"
-
-msgid "OTP sent successfully"
-msgstr "OTP muvaffaqiyatli yuborildi"
-
-msgid "OTP sent successfully for registration"
-msgstr "Ro'yxatdan o'tish uchun OTP muvaffaqiyatli yuborildi"
-
-msgid "Registration completed successfully"
-msgstr "Ro'yxatdan o'tish muvaffaqiyatli yakunlandi"
-
-msgid "Invalid or expired refresh token"
-msgstr "Yaroqsiz yoki muddati tugagan yangilash tokeni"
-
-msgid "Token refresh failed"
-msgstr "Tokenni yangilash muvaffaqiyatsiz bo'ldi"
-
-msgid "Successfully logged out"
-msgstr "Tizimdan muvaffaqiyatli chiqildi"
-
-msgid "Invalid token"
-msgstr "Yaroqsiz token"
-
-msgid "Partner not found. Please register first."
-msgstr "Hamkor topilmadi. Iltimos, avval ro'yxatdan o'ting."
-
-msgid "OTP Send successfully"
-msgstr "OTP muvaffaqiyatli yuborildi"
-
-msgid "Login successful"
-msgstr "Kirish muvaffaqiyatli"
-
-msgid "Successfully logged out."
-msgstr "Tizimdan muvaffaqiyatli chiqildi."
-
-msgid "Logout failed."
-msgstr "Chiqish muvaffaqiyatsiz bo'ldi."
-
-msgid "You cannot delete a card that does not belong to you"
-msgstr "Sizga tegishli bo'lmagan kartani o'chira olmaysiz"
-
-msgid "Sanatorium"
-msgstr "Sanatoriya"
-
-msgid "Sanatoriums"
-msgstr "Sanatoriyalar"
-
-msgid "Medical specialization"
-msgstr "Tibbiy mutaxassislik"
-
-msgid "Medical specializations"
-msgstr "Tibbiy mutaxassisliklar"
-
-msgid "Treatment"
-msgstr "Muolaja"
-
-msgid "Treatments"
-msgstr "Muolajalar"
-
-msgid "Room type"
-msgstr "Xona turi"
-
-msgid "Room types"
-msgstr "Xona turlari"
-
-msgid "Package type"
-msgstr "Paket turi"
-
-msgid "Package types"
-msgstr "Paket turlari"
-
-msgid "Room amenity"
-msgstr "Xona qulayligi"
-
-msgid "Room amenities"
-msgstr "Xona qulayliklari"
-
-msgid "Sanatorium location"
-msgstr "Sanatoriya joylashuvi"
-
-msgid "Sanatorium locations"
-msgstr "Sanatoriya joylashuvlari"
-
-msgid "Sanatorium image"
-msgstr "Sanatoriya rasmi"
-
-msgid "Sanatorium images"
-msgstr "Sanatoriya rasmlari"
-
-msgid "Sanatorium room"
-msgstr "Sanatoriya xonasi"
-
-msgid "Sanatorium rooms"
-msgstr "Sanatoriya xonalari"
-
-msgid "Room image"
-msgstr "Xona rasmi"
-
-msgid "Room images"
-msgstr "Xona rasmlari"
-
-msgid "Room price"
-msgstr "Xona narxi"
-
-msgid "Room prices"
-msgstr "Xona narxlari"
-
-msgid "Room calendar date"
-msgstr "Xona kalendar sanasi"
-
-msgid "Room calendar dates"
-msgstr "Xona kalendar sanalari"
-
-msgid "Sanatorium review"
-msgstr "Sanatoriya sharhi"
-
-msgid "Sanatorium reviews"
-msgstr "Sanatoriya sharhlari"
-
-msgid "Sanatorium favorite"
-msgstr "Sevimli sanatoriya"
-
-msgid "Sanatorium favorites"
-msgstr "Sevimli sanatoriyalar"
-
-msgid "Sanatorium booking"
-msgstr "Sanatoriya bronlashi"
-
-msgid "Sanatorium bookings"
-msgstr "Sanatoriya bronlashlari"
-
-msgid "Sanatorium booking price"
-msgstr "Sanatoriya bronlash narxi"
-
-msgid "Sanatorium booking prices"
-msgstr "Sanatoriya bronlash narxlari"
-
-msgid "Sanatorium booking transaction"
-msgstr "Sanatoriya bronlash tranzaksiyasi"
-
-msgid "Sanatorium booking transactions"
-msgstr "Sanatoriya bronlash tranzaksiyalari"

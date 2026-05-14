@@ -546,14 +546,14 @@ class PartnerRegisterVerifyView(APIView):
 
         if exists_user_by_phone(phone_number, role="partner"):
             return Response(
-                {"detail": "User with this phone number already exists."},
+                {"detail": _("User with this phone number already exists.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         username = partner_data.get("username")
         if username and exists_partner_username(username):
             return Response(
-                {"detail": "User with this username already exists."},
+                {"detail": _("User with this username already exists.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1017,7 +1017,7 @@ class ClientCardViewSet(viewsets.ViewSet):
         cards = service.get_client_cards(client)
         if cards is None:
             return Response(
-                {"detail": "Failed to fetch cards"}, status=status.HTTP_400_BAD_REQUEST
+                {"detail": _("Failed to fetch cards")}, status=status.HTTP_400_BAD_REQUEST
             )
         card_list = cards.get("result", {}).get("cards", [])
         for card in card_list:
@@ -1050,7 +1050,7 @@ class ClientCardViewSet(viewsets.ViewSet):
 
         if not card_number or not expire_date:
             return Response(
-                {"detail": "card_number and expire_date required"},
+                {"detail": _("card_number and expire_date required")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1092,7 +1092,7 @@ class ClientCardViewSet(viewsets.ViewSet):
 
         if not session or not otp:
             return Response(
-                {"detail": "session and otp required"},
+                {"detail": _("session and otp required")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1129,7 +1129,7 @@ class ClientCardViewSet(viewsets.ViewSet):
 
         if not session:
             return Response(
-                {"detail": "session is required"},
+                {"detail": _("session is required")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1157,7 +1157,7 @@ class ClientCardViewSet(viewsets.ViewSet):
 
         cards = service.get_client_cards(client)
         if not cards or "result" not in cards or "cards" not in cards["result"]:
-            return Response({"detail": "Failed to fetch cards"}, status=400)
+            return Response({"detail": _("Failed to fetch cards")}, status=400)
 
         user_cards = cards["result"]["cards"]
         card_ids = [str(card["id"]) for card in user_cards]

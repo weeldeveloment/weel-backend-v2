@@ -1,5 +1,6 @@
 import logging
 
+from django.utils.translation import gettext_lazy as _
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -78,7 +79,7 @@ class FCMTokenUpdateView(APIView):
         return Response(
             status=status.HTTP_200_OK,
             data={
-                "detail": "FCM token updated successfully",
+                "detail": _("FCM token updated successfully"),
             },
         )
 
@@ -97,7 +98,7 @@ class PartnerFCMTokenUpdateView(APIView):
                 description="Partner FCM token updated successfully",
                 examples={
                     "application/json": {
-                        "detail": "Partner FCM token updated successfully"
+                        "detail": _("Partner FCM token updated successfully")
                     }
                 },
             ),
@@ -128,7 +129,7 @@ class PartnerFCMTokenUpdateView(APIView):
         return Response(
             status=status.HTTP_200_OK,
             data={
-                "detail": "Partner FCM token updated successfully",
+                "detail": _("Partner FCM token updated successfully"),
             },
         )
 
@@ -296,7 +297,7 @@ class PartnerNotificationMarkAsReadView(APIView):
                 description="Notifications marked as read",
                 examples={
                     "application/json": {
-                        "detail": "Notifications marked as read",
+                        "detail": _("Notifications marked as read"),
                         "marked_count": 5
                     }
                 },
@@ -318,7 +319,7 @@ class PartnerNotificationMarkAsReadView(APIView):
         )
 
         return Response({
-            "detail": "Notifications marked as read",
+            "detail": _("Notifications marked as read"),
             "marked_count": count
         })
 
@@ -337,7 +338,7 @@ class PartnerNotificationMarkAllAsReadView(APIView):
                 description="All notifications marked as read",
                 examples={
                     "application/json": {
-                        "detail": "All notifications marked as read",
+                        "detail": _("All notifications marked as read"),
                         "marked_count": 5
                     }
                 },
@@ -354,7 +355,7 @@ class PartnerNotificationMarkAllAsReadView(APIView):
         )
 
         return Response({
-            "detail": "All notifications marked as read",
+            "detail": _("All notifications marked as read"),
             "marked_count": count
         })
 
@@ -375,7 +376,7 @@ class ClientNotificationMarkAsReadView(APIView):
                 description="Notifications marked as read",
                 examples={
                     "application/json": {
-                        "detail": "Notifications marked as read",
+                        "detail": _("Notifications marked as read"),
                         "marked_count": 5,
                     }
                 },
@@ -398,7 +399,7 @@ class ClientNotificationMarkAsReadView(APIView):
 
         return Response(
             {
-                "detail": "Notifications marked as read",
+                "detail": _("Notifications marked as read"),
                 "marked_count": count,
             }
         )
@@ -419,7 +420,7 @@ class ClientNotificationMarkAllAsReadView(APIView):
                 description="All notifications marked as read",
                 examples={
                     "application/json": {
-                        "detail": "All notifications marked as read",
+                        "detail": _("All notifications marked as read"),
                         "marked_count": 5,
                     }
                 },
@@ -437,7 +438,7 @@ class ClientNotificationMarkAllAsReadView(APIView):
 
         return Response(
             {
-                "detail": "All notifications marked as read",
+                "detail": _("All notifications marked as read"),
                 "marked_count": count,
             }
         )

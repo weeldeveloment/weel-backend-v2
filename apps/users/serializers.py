@@ -296,6 +296,6 @@ class PartnerPassportUploadSerializer(serializers.Serializer):
     def validate_document(self, file):
         max_size = 5 * 1024 * 1024  # 5MB
         if file.size > max_size:
-            raise serializers.ValidationError("File size must be ≤ 5MB")
+            raise serializers.ValidationError(_("File size must be ≤ 5MB"))
         return file
 

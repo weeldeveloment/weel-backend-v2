@@ -7,6 +7,7 @@ import requests
 from typing import Optional
 from decimal import Decimal
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 
 from dotenv import load_dotenv, find_dotenv
 
@@ -93,13 +94,17 @@ class PlumAPIService:
             )
             if resp.status_code == 403:
                 message = (
-                    "Plum API returned 403 Forbidden (access denied). "
-                    "Typical causes: server IP not whitelisted by Plum, invalid credentials, or nginx/proxy blocking the request."
+                    _(
+                        "Plum API returned 403 Forbidden (access denied). "
+                        "Typical causes: server IP not whitelisted by Plum, invalid credentials, or nginx/proxy blocking the request."
+                    )
                 )
             else:
                 message = (
-                    "Invalid response from Plum API (response is not valid JSON). "
-                    "Check server logs for details."
+                    _(
+                        "Invalid response from Plum API (response is not valid JSON). "
+                        "Check server logs for details."
+                    )
                 )
             raise PlumAPIError(
                 message=message,

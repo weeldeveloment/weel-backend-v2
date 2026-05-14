@@ -523,7 +523,7 @@ class ApartmentCreateSerializer(serializers.Serializer):
 
         title = str(attrs.get("title") or "").strip()
         if not title:
-            raise serializers.ValidationError({"title": "Укажите название."})
+            raise serializers.ValidationError({"title": _("Please enter a title.")})
         prepared["title"] = title
         prepared["title_sort"] = title.lower()
 

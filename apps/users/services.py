@@ -141,7 +141,7 @@ class EskizService:
                     elapsed_ms,
                     self._response_excerpt(response),
                 )
-                raise ValueError("Token not found in response")
+                raise ValueError(_("Token not found in response"))
 
             cache.set(self.ESKIZ_TOKEN_KEY, token, (3600 * 24 * 30) - 3600)
             logger.info("Successfully obtained new Eskiz token. elapsed_ms=%s", elapsed_ms)
@@ -245,7 +245,7 @@ class EskizService:
                     elapsed_ms,
                     self._response_excerpt(response),
                 )
-                raise ValueError("Eskiz SMS provider did not accept the message")
+                raise ValueError(_("Eskiz SMS provider did not accept the message"))
 
             logger.info(
                 "Eskiz SMS sent successfully. phone=%s status=%s elapsed_ms=%s provider_message_id=%s body=%s",
@@ -257,7 +257,7 @@ class EskizService:
             )
             return {
                 "status_code": response.status_code,
-                "detail": "The confirmation code sent successfully",
+                "detail": _("The confirmation code sent successfully"),
                 "provider_message_id": provider_message_id,
             }
         except requests.exceptions.RequestException as e:

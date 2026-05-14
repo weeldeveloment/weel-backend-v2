@@ -121,18 +121,18 @@ class StoryViewSet(viewsets.GenericViewSet):
     def retrieve_media(self, request, story_id=None, media_id=None):
         story = get_story_by_guid(story_id, active_only=True)
         if not story:
-            raise NotFound("Story not found")
+            raise NotFound(_("Story not found"))
 
         if _is_partner(request.user):
             if not story.get("is_verified") and int(story.get("partner_user_id") or 0) != request.user.id:
-                raise NotFound("Story not found")
+                raise NotFound(_("Story not found"))
         else:
             if not story.get("is_verified"):
-                raise NotFound("Story not found")
+                raise NotFound(_("Story not found"))
 
         media = get_story_media_by_guid(int(story["id"]), media_id)
         if not media:
-            raise NotFound("Media not found")
+            raise NotFound(_("Media not found"))
 
         if _is_client(request.user):
             viewer_key = f"story:{story['guid']}:viewer:{request.user.id}"
@@ -189,7 +189,7 @@ class StoryViewSet(viewsets.GenericViewSet):
         story_id = kwargs.get(self.lookup_url_kwarg)
         deleted = delete_story_for_partner(story_id, request.user.id)
         if not deleted:
-            raise NotFound("Story not found")
+            raise NotFound(_("Story not found"))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @swagger_auto_schema(
@@ -218,17 +218,17 @@ class StoryViewSet(viewsets.GenericViewSet):
     def destroy_media(self, request, story_id=None, media_id=None):
         story = get_story_by_guid(story_id, active_only=True)
         if not story:
-            raise NotFound("Story not found")
+            raise NotFound(_("Story not found"))
 
         owner_id = int(story.get("partner_user_id") or 0)
         if request.user.id != owner_id:
             if not story.get("is_verified"):
-                raise NotFound("Story not found")
+                raise NotFound(_("Story not found"))
             raise PermissionDenied(_("You don't have permission to delete this story media"))
 
         deleted = delete_story_media(int(story["id"]), media_id)
         if not deleted:
-            raise NotFound("Media not found")
+            raise NotFound(_("Media not found"))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

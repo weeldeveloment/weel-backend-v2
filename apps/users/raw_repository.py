@@ -227,7 +227,7 @@ def _insert_user(
         )
     
     if row is None:
-        raise RuntimeError("Failed to insert user")
+        raise RuntimeError(_("Failed to insert user"))
     return RawUser.from_row(row)
 
 

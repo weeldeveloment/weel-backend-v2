@@ -1,6 +1,7 @@
 from typing import Final
 
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 
 from rest_framework.request import Request
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, UntypedToken
@@ -122,7 +123,7 @@ def rotate_tokens(refresh_token: str) -> dict:
         token.blacklist()
         return {"refresh": str(new_refresh), "access": str(new_access)}
     except Exception as e:
-        raise ValueError("Invalid or expired refresh token")
+        raise ValueError(_("Invalid or expired refresh token"))
 
 
 def decode_token(token: str):

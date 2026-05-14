@@ -118,7 +118,7 @@ def compress_video(input_file, target_resolution=None):
         input_path = input_temp.name
 
         if not os.path.exists(input_path):
-            raise RuntimeError(f"Input temp file not created: {input_path}")
+            raise RuntimeError(_("Input temp file not created: %(input_path)s") % {"input_path": input_path})
 
         output_temp = NamedTemporaryFile(suffix=".mp4", delete=False)
         output_temp.close()
@@ -171,7 +171,7 @@ def compress_video(input_file, target_resolution=None):
             raise RuntimeError(f"Video compression failed", {result.stderr})
 
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            raise RuntimeError("Compressed video file is empty or missing")
+            raise RuntimeError(_("Compressed video file is empty or missing"))
 
         with open(output_path, "rb") as f:
             file_content = f.read()
@@ -186,7 +186,7 @@ def compress_video(input_file, target_resolution=None):
     except subprocess.TimeoutExpired:
         logger.error("Video compression timed out after 5 minutes")
         raise RuntimeError(
-            "Video compression took too long. Please upload a shorter video."
+            _("Video compression took too long. Please upload a shorter video.")
         )
 
     except Exception as e:

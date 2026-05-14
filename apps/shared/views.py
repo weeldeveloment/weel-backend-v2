@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from django.utils.translation import gettext_lazy as _
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -22,7 +23,7 @@ class FrontendLogView(APIView):
         provided = (request.headers.get("X-Frontend-Log-Token") or "").strip()
         if expected_token and provided != expected_token:
             return Response(
-                {"detail": "Invalid log token"},
+                {"detail": _("Invalid log token")},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
         level = (request.data.get("level") or "info").lower()
