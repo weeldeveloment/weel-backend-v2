@@ -37,8 +37,11 @@ from .apartment_repository import (
     COTTAGE_TYPE_GUID,
     PROPERTY_KIND_APARTMENT,
     PROPERTY_KIND_COTTAGE,
+    admin_append_apartment_images,
     admin_get_apartment,
+    admin_remove_apartment_image,
     admin_update_apartment,
+    append_apartment_images,
     create_apartment,
     create_review,
     delete_apartment,
@@ -55,12 +58,14 @@ from .apartment_repository import (
     list_reviews,
     parse_property_kind,
     prepare_property_rows,
+    remove_apartment_image,
+    replace_apartment_image,
     resolve_region_id_by_guid,
-    set_apartment_primary_image,
     update_apartment,
 )
 from .apartment_serializers import (
     ApartmentAdminListSerializer,
+    ApartmentAdminUpdateSerializer,
     ApartmentCreateSerializer,
     ApartmentDetailSerializer,
     ApartmentListSerializer,
@@ -71,7 +76,9 @@ from .cottage_repository import (
     admin_append_cottage_images,
     admin_delete_cottage,
     admin_get_cottage,
+    admin_remove_cottage_image,
     admin_update_cottage,
+    append_cottage_images,
     create_cottage,
     delete_cottage,
     effective_cottage_price,
@@ -544,6 +551,7 @@ class RawPropertyTypeSerializer(serializers.Serializer):
     guid = serializers.UUIDField()
     title = serializers.CharField()
     icon_url = serializers.CharField(allow_null=True)
+    kind = serializers.CharField()
 
 
 class RawPropertyReviewClientSerializer(serializers.Serializer):
@@ -841,35 +849,31 @@ def _get_or_set_cached_payload(request, cache_key: str, timeout: int, loader):
     return payload
 
 
-_BLOCKED_IMAGE_EXTENSIONS = {"heic", "heif"}
-_BLOCKED_IMAGE_CONTENT_TYPES = {
-    "image/heic",
-    "image/heif",
-    "image/heic-sequence",
-    "image/heif-sequence",
-}
-
-
 def _validate_image_upload(uploaded):
     if uploaded is None:
         raise ValidationError({"image": [_("This field is required.")]})
     max_size = getattr(settings, "MAX_IMAGE_SIZE", 20 * 1024 * 1024)
     allowed_ext = {
         ext.lower() for ext in getattr(settings, "ALLOWED_PHOTO_EXTENSION", [])
-    } - _BLOCKED_IMAGE_EXTENSIONS
+    }
     name = (uploaded.name or "").lower()
     ext = name.rsplit(".", 1)[-1] if "." in name else ""
     content_type = (uploaded.content_type or "").lower()
-    if ext in _BLOCKED_IMAGE_EXTENSIONS or content_type in _BLOCKED_IMAGE_CONTENT_TYPES:
-        raise ValidationError(
-            {
-                "image": [
-                    _(
-                        "HEIC/HEIF images are not supported. Please upload JPG, JPEG or PNG."
-                    )
-                ]
-            }
-        )
+
+    # If no extension in filename but valid image content-type, derive ext from content_type
+    if not ext and content_type.startswith("image/"):
+        ext = content_type.split("/")[-1]
+        # Map common content-type suffixes to file extensions
+        ext_map = {
+            "jpeg": "jpg",
+            "png": "png",
+            "gif": "gif",
+            "webp": "webp",
+            "heic": "heic",
+            "heif": "heif",
+        }
+        ext = ext_map.get(ext, ext)
+
     if allowed_ext and ext not in allowed_ext:
         raise ValidationError({"image": [_("Unsupported file extension.")]})
     if content_type and not content_type.startswith("image/"):
@@ -1021,7 +1025,7 @@ class PropertyTypeListView(APIView):
     @swagger_auto_schema(
         operation_id="listPropertyTypes",
         operation_summary="List property types",
-        operation_description="Returns the two property types (Cottage and Apartment) with localized titles and icon URLs. Results are cached for 10 minutes.",
+        operation_description="Returns the two property types (Cottage and Apartment) with localized titles, icon URLs, and `kind` field (\"apartment\"|\"cottage\"). Results are cached for 10 minutes.",
         tags=["Property / Meta"],
         manual_parameters=[
             openapi.Parameter(
@@ -1508,7 +1512,7 @@ class ApartmentPropertyListCreateView(APIView):
     @swagger_auto_schema(
         operation_id="createApartment",
         operation_summary="Create an apartment",
-        operation_description="Partner-only. Creates a new apartment listing. The property is created with verification_status=pending.",
+        operation_description="Partner-only. Creates a new apartment listing. The property is created with verification_status=waiting.",
         tags=["Property / Partner"],
         request_body=ApartmentCreateSerializer,
         responses={
@@ -1887,7 +1891,7 @@ class PropertyRetrieveUpdateDestroyView(APIView):
     @swagger_auto_schema(
         operation_id="fullUpdateProperty",
         operation_summary="Fully update a property",
-        operation_description="Partner-only full update for an apartment or cottage. Mutating fields resets verification status to pending.",
+        operation_description="Partner-only full update for an apartment or cottage. Mutating fields resets verification status to waiting.",
         tags=["Property / Partner"],
         request_body=ApartmentUpdateSerializer,
         responses={
@@ -1919,7 +1923,7 @@ class PropertyRetrieveUpdateDestroyView(APIView):
         )
         if property_type == PROPERTY_KIND_COTTAGE:
             serializer = CottageUpdateSerializer(
-                data=request.data, partial=True, context={"request": request}
+                data=request.data, partial=True, context={"request": request, "is_update": True}
             )
             serializer.is_valid(raise_exception=True)
             logger.info(
@@ -2028,6 +2032,27 @@ class CottagePropertyRetrieveUpdateDestroyView(PropertyRetrieveUpdateDestroyView
 # ---------------------------------------------------------------------------
 
 
+def _resolve_image_path(request, property_row, image_url):
+    """Map a public image URL (or raw path) back to the stored path in DB."""
+    # Normalize incoming image_url: fix single-slash protocols and strip trailing slash
+    normalized = image_url.rstrip("/")
+    if normalized.startswith("https:/") and not normalized.startswith("https://"):
+        normalized = "https://" + normalized[7:]
+    if normalized.startswith("http:/") and not normalized.startswith("http://"):
+        normalized = "http://" + normalized[6:]
+
+    current_paths = property_row.get("img") or []
+    if not isinstance(current_paths, list):
+        current_paths = [current_paths] if current_paths else []
+    for path in current_paths:
+        if path == normalized:
+            return path
+        url = _build_media_url(request, path)
+        if url and url.rstrip("/") == normalized:
+            return path
+    return None
+
+
 class PropertyImageCreateView(APIView):
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
     authentication_classes = [PartnerJWTAuthentication]
@@ -2035,8 +2060,8 @@ class PropertyImageCreateView(APIView):
 
     @swagger_auto_schema(
         operation_id="createPropertyImage",
-        operation_summary="Upload a property image",
-        operation_description="Partner-only. Uploads a single image file and sets it as the primary image for the property. If the property is not yet verified, the image is marked as pending approval.",
+        operation_summary="Upload property image(s)",
+        operation_description="Partner-only. Uploads image file(s) and appends them to the property's gallery. If the property is not yet verified, the images are marked as pending approval.",
         tags=["Property / Partner"],
         manual_parameters=[
             openapi.Parameter(
@@ -2081,6 +2106,10 @@ class PropertyImageCreateView(APIView):
         },
     )
     def post(self, request, property_id, *args, **kwargs):
+        import logging
+        log = logging.getLogger(__name__)
+        log.info("[PropertyImageCreateView.post] property_id=%s user=%s", property_id, request.user.id)
+
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
             raise NotFound(_("Property not found"))
@@ -2096,24 +2125,26 @@ class PropertyImageCreateView(APIView):
         for file in uploaded_files:
             _validate_image_upload(file)
 
-        uploaded = uploaded_files[0]
-        saved_path = default_storage.save(
-            f"property/images/{uuid4()}_{uploaded.name}", uploaded
-        )
+        saved_paths = [
+            default_storage.save(f"property/images/{uuid4()}_{file.name}", file)
+            for file in uploaded_files
+        ]
+        log.info("[PropertyImageCreateView.post] saved_paths=%s property_kind=%s", saved_paths, property_row.get("property_kind"))
 
         property_type = str(property_row["property_kind"])
         if property_type == PROPERTY_KIND_COTTAGE:
-            updated = set_cottage_primary_image(
+            updated = append_cottage_images(
                 cottage_id=int(property_row["id"]),
                 partner_user_id=int(request.user.id),
-                image_path=saved_path,
+                image_paths=saved_paths,
             )
         else:
-            updated = set_apartment_primary_image(
+            updated = append_apartment_images(
                 apartment_id=int(property_row["id"]),
                 partner_user_id=int(request.user.id),
-                image_path=saved_path,
+                image_paths=saved_paths,
             )
+        log.info("[PropertyImageCreateView.post] updated img=%s", updated.get("img") if updated else None)
 
         if not updated:
             raise NotFound(_("Property not found"))
@@ -2124,14 +2155,18 @@ class PropertyImageCreateView(APIView):
                 status=status.HTTP_200_OK,
             )
 
+        updated_img = updated.get("img") or []
+        if not isinstance(updated_img, list):
+            updated_img = [updated_img] if updated_img else []
         return Response(
             [
                 {
                     "guid": uuid4(),
-                    "order": 1,
+                    "order": idx + 1,
                     "is_pending": False,
-                    "image_url": _build_media_url(request, updated.get("img")),
+                    "image_url": _build_media_url(request, path),
                 }
+                for idx, path in enumerate(updated_img)
             ],
             status=status.HTTP_201_CREATED,
         )
@@ -2144,8 +2179,8 @@ class PropertyImageUpdateDeleteView(APIView):
 
     @swagger_auto_schema(
         operation_id="updatePropertyImage",
-        operation_summary="Update property primary image",
-        operation_description="Partner-only. Replaces the property's primary image with a newly uploaded file. If the property is not yet verified, the image is marked as pending approval.",
+        operation_summary="Update a specific property image",
+        operation_description="Partner-only. Replaces a specific image in the property's gallery. If the property is not yet verified, the image is marked as pending approval.",
         tags=["Property / Partner"],
         manual_parameters=[
             openapi.Parameter(
@@ -2156,11 +2191,10 @@ class PropertyImageUpdateDeleteView(APIView):
                 description="Property GUID.",
             ),
             openapi.Parameter(
-                "image_id",
+                "image_url",
                 openapi.IN_PATH,
                 type=openapi.TYPE_STRING,
-                format="uuid",
-                description="Image GUID (for URL compatibility; the primary image is always replaced).",
+                description="Image URL or stored path of the image to replace.",
             ),
             openapi.Parameter(
                 "image",
@@ -2184,39 +2218,50 @@ class PropertyImageUpdateDeleteView(APIView):
             404: _ERROR_DETAIL_SCHEMA,
         },
     )
-    def patch(self, request, property_id, image_id, *args, **kwargs):
+    def patch(self, request, property_id, image_url, *args, **kwargs):
         property_row = _get_property_for_partner(str(property_id), int(request.user.id))
         if not property_row:
             raise NotFound(_("Property not found"))
+
+        old_path = _resolve_image_path(request, property_row, image_url)
+        if not old_path:
+            raise NotFound(_("Property image not found"))
 
         uploaded = request.FILES.get("image")
         if uploaded is None:
             images = request.FILES.getlist("images")
             if images:
                 uploaded = images[0]
-        image_path = property_row.get("img")
-        if uploaded is not None:
-            _validate_image_upload(uploaded)
-            image_path = default_storage.save(
-                f"property/images/{uuid4()}_{uploaded.name}", uploaded
+        if uploaded is None:
+            raise ValidationError({"image": [_("This field is required.")]})
+
+        _validate_image_upload(uploaded)
+        new_path = default_storage.save(
+            f"property/images/{uuid4()}_{uploaded.name}", uploaded
+        )
+
+        property_type = str(property_row["property_kind"])
+        if property_type == PROPERTY_KIND_COTTAGE:
+            updated = replace_cottage_image(
+                cottage_id=int(property_row["id"]),
+                partner_user_id=int(request.user.id),
+                old_image_path=old_path,
+                new_image_path=new_path,
             )
-            property_type = str(property_row["property_kind"])
-            if property_type == PROPERTY_KIND_COTTAGE:
-                updated = set_cottage_primary_image(
-                    cottage_id=int(property_row["id"]),
-                    partner_user_id=int(request.user.id),
-                    image_path=image_path,
-                )
-            else:
-                updated = set_apartment_primary_image(
-                    apartment_id=int(property_row["id"]),
-                    partner_user_id=int(request.user.id),
-                    image_path=image_path,
-                )
-            if not updated:
-                raise NotFound(_("Property not found"))
-        elif not image_path:
-            raise NotFound(_("Property image not found"))
+        else:
+            updated = replace_apartment_image(
+                apartment_id=int(property_row["id"]),
+                partner_user_id=int(request.user.id),
+                old_image_path=old_path,
+                new_image_path=new_path,
+            )
+        if not updated:
+            raise NotFound(_("Property not found"))
+
+        try:
+            default_storage.delete(old_path)
+        except Exception:
+            pass
 
         return Response(
             {
@@ -2228,9 +2273,178 @@ class PropertyImageUpdateDeleteView(APIView):
 
     @swagger_auto_schema(
         operation_id="deletePropertyImage",
-        operation_summary="Delete property primary image",
-        operation_description="Partner-only. Removes the property's primary image.",
+        operation_summary="Delete a specific property image",
+        operation_description="Partner-only. Removes a specific image from the property's gallery.",
         tags=["Property / Partner"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+            openapi.Parameter(
+                "image_url",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                description="Image URL or stored path of the image to delete.",
+            ),
+        ],
+        responses={
+            204: None,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def delete(self, request, property_id, image_url, *args, **kwargs):
+        property_row = _get_property_for_partner(str(property_id), int(request.user.id))
+        if not property_row:
+            raise NotFound(_("Property not found"))
+
+        old_path = _resolve_image_path(request, property_row, image_url)
+        if not old_path:
+            raise NotFound(_("Property image not found"))
+
+        property_type = str(property_row["property_kind"])
+        if property_type == PROPERTY_KIND_COTTAGE:
+            updated = remove_cottage_image(
+                cottage_id=int(property_row["id"]),
+                partner_user_id=int(request.user.id),
+                image_path=old_path,
+            )
+        else:
+            updated = remove_apartment_image(
+                apartment_id=int(property_row["id"]),
+                partner_user_id=int(request.user.id),
+                image_path=old_path,
+            )
+        if not updated:
+            raise NotFound(_("Property not found"))
+
+        try:
+            default_storage.delete(old_path)
+        except Exception:
+            pass
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Admin Image Management (no partner ownership check, no verification reset)
+# ---------------------------------------------------------------------------
+
+
+class AdminPropertyImageCreateView(APIView):
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_id="adminCreatePropertyImage",
+        operation_summary="Upload property image(s) (admin)",
+        operation_description="Admin-only. Uploads image file(s) and appends them to the property's gallery.",
+        tags=["Admin / Property"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                description="Property GUID.",
+            ),
+            openapi.Parameter(
+                "image",
+                openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=True,
+                description="Image file to upload (JPEG/PNG/WebP).",
+            ),
+        ],
+        responses={
+            201: openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                        "order": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "is_pending": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                        "image_url": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def post(self, request, property_id, *args, **kwargs):
+        property_row = admin_get_apartment(str(property_id))
+        if not property_row:
+            property_row = admin_get_cottage(str(property_id))
+        if not property_row:
+            raise NotFound(_("Property not found"))
+
+        uploaded_files = request.FILES.getlist("images")
+        if not uploaded_files:
+            single = request.FILES.get("image")
+            if single is not None:
+                uploaded_files = [single]
+        if not uploaded_files:
+            raise ValidationError({"images": [_("This field is required.")]})
+
+        for file in uploaded_files:
+            _validate_image_upload(file)
+
+        saved_paths = [
+            default_storage.save(f"property/images/{uuid4()}_{file.name}", file)
+            for file in uploaded_files
+        ]
+
+        property_type = str(property_row["property_kind"])
+        if property_type == PROPERTY_KIND_COTTAGE:
+            updated = admin_append_cottage_images(
+                cottage_guid=str(property_id),
+                image_paths=saved_paths,
+            )
+        else:
+            updated = admin_append_apartment_images(
+                apartment_guid=str(property_id),
+                image_paths=saved_paths,
+            )
+
+        if not updated:
+            raise NotFound(_("Property not found"))
+
+        updated_img = updated.get("img") or []
+        if not isinstance(updated_img, list):
+            updated_img = [updated_img] if updated_img else []
+        return Response(
+            [
+                {
+                    "guid": uuid4(),
+                    "order": idx + 1,
+                    "is_pending": False,
+                    "image_url": _build_media_url(request, path),
+                }
+                for idx, path in enumerate(updated_img)
+            ],
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminPropertyImageDeleteView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_id="adminDeletePropertyImage",
+        operation_summary="Delete a specific property image (admin)",
+        operation_description="Admin-only. Removes a specific image from the property's gallery.",
+        tags=["Admin / Property"],
         manual_parameters=[
             openapi.Parameter(
                 "property_id",
@@ -2243,8 +2457,7 @@ class PropertyImageUpdateDeleteView(APIView):
                 "image_id",
                 openapi.IN_PATH,
                 type=openapi.TYPE_STRING,
-                format="uuid",
-                description="Image GUID (for URL compatibility; the primary image is always deleted).",
+                description="Image URL or stored path of the image to delete.",
             ),
         ],
         responses={
@@ -2255,32 +2468,35 @@ class PropertyImageUpdateDeleteView(APIView):
         },
     )
     def delete(self, request, property_id, image_id, *args, **kwargs):
-        property_row = _get_property_for_partner(str(property_id), int(request.user.id))
+        property_row = admin_get_apartment(str(property_id))
+        if not property_row:
+            property_row = admin_get_cottage(str(property_id))
         if not property_row:
             raise NotFound(_("Property not found"))
-        image_path = property_row.get("img")
-        if not image_path:
+
+        old_path = _resolve_image_path(request, property_row, image_id)
+        if not old_path:
             raise NotFound(_("Property image not found"))
 
         property_type = str(property_row["property_kind"])
         if property_type == PROPERTY_KIND_COTTAGE:
-            updated = set_cottage_primary_image(
-                cottage_id=int(property_row["id"]),
-                partner_user_id=int(request.user.id),
-                image_path=None,
+            updated = admin_remove_cottage_image(
+                cottage_guid=str(property_id),
+                image_path=old_path,
             )
         else:
-            updated = set_apartment_primary_image(
-                apartment_id=int(property_row["id"]),
-                partner_user_id=int(request.user.id),
-                image_path=None,
+            updated = admin_remove_apartment_image(
+                apartment_guid=str(property_id),
+                image_path=old_path,
             )
         if not updated:
             raise NotFound(_("Property not found"))
+
         try:
-            default_storage.delete(image_path)
+            default_storage.delete(old_path)
         except Exception:
             pass
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -3119,12 +3335,12 @@ class AdminApartmentPatchView(APIView):
         )
 
     @swagger_auto_schema(
-        tags=["Partner / Property"],
-        operation_summary="Patch apartment (Partner)",
+        tags=["Admin / Property"],
+        operation_summary="Patch apartment (Admin)",
         operation_description=(
-            "Partner-only full update for every writable field on the apartment table, "
+            "Admin-only full update for every writable field on the apartment table, "
         ),
-        request_body=ApartmentUpdateSerializer,
+        request_body=ApartmentAdminUpdateSerializer,
         responses={200: ApartmentAdminListSerializer},
     )
     def patch(self, request, apartment_id, *args, **kwargs):
@@ -3132,7 +3348,7 @@ class AdminApartmentPatchView(APIView):
         if not current:
             raise NotFound(_("Apartment not found"))
 
-        serializer = ApartmentUpdateSerializer(
+        serializer = ApartmentAdminUpdateSerializer(
             data=request.data,
             partial=True,
             context={"request": request},

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from datetime import date, timedelta
@@ -32,6 +33,48 @@ from .raw_repository import fetch_calendar_dates_by_status, upsert_calendar_days
 logger = logging.getLogger(__name__)
 
 
+def _parse_price_rows(price_rows) -> list[dict[str, Any]] | None:
+    if not price_rows:
+        return None
+    if isinstance(price_rows, list):
+        return price_rows
+    if isinstance(price_rows, str):
+        try:
+            parsed = json.loads(price_rows)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return None
+
+
+def _parse_date(value) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _resolve_cottage_day_price(
+    price_rows: list[dict[str, Any]] | None, day: date
+) -> dict[str, Any] | None:
+    parsed_rows = _parse_price_rows(price_rows)
+    if not parsed_rows:
+        return None
+    for item in parsed_rows:
+        if not isinstance(item, dict):
+            continue
+        month_from = _parse_date(item.get("month_from"))
+        month_to = _parse_date(item.get("month_to"))
+        if month_from and month_to and month_from <= day <= month_to:
+            return item
+    return None
+
+
 class RawBookingCreateService:
     def __init__(self, client: RawUser):
         self.client = client
@@ -59,7 +102,10 @@ class RawBookingCreateService:
 
     @staticmethod
     def _as_decimal(value: Any) -> Decimal:
-        return Decimal(str(value))
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValidationError(_("Pricing is not configured for this property"))
 
     @staticmethod
     def _generate_booking_number() -> str:
@@ -129,16 +175,25 @@ class RawBookingCreateService:
         base_total_price = Decimal("0")
         if property_kind == "apartment":
             price = self._as_decimal(property_row.get("price"))
-            if price is None or price <= 0:
+            if price <= 0:
                 raise ValidationError(_("Pricing is not configured for this property"))
             base_total_price = price
         else:
+            price_rows = property_row.get("price")
             for day in self._date_range(check_in, check_out):
                 base_day_value = (
                     property_row.get("price_on_weekends")
                     if day.weekday() >= 4
                     else property_row.get("price_on_working_days")
                 )
+                if price_rows:
+                    price_item = _resolve_cottage_day_price(price_rows, day)
+                    if price_item:
+                        base_day_value = (
+                            price_item.get("price_on_weekends")
+                            if day.weekday() >= 4
+                            else price_item.get("price_on_working_days")
+                        )
                 if base_day_value is None:
                     raise ValidationError(_("Pricing is not configured for this property"))
                 base_total_price += self._as_decimal(base_day_value)
@@ -236,6 +291,9 @@ class RawBookingCreateService:
             if plum_api_error.status_code == 403:
                 raise PermissionDenied(plum_api_error.message)
             raise ValidationError(plum_api_error.message)
+        except Exception as exc:
+            logger.error("Payment service error: %s", exc)
+            raise ValidationError(_("Payment service is temporarily unavailable. Please try again later."))
 
         hold_result = (hold or {}).get("result") or {}
         hold_amount = hold_result.get("totalAmount") or booking_price["hold_amount"]
@@ -253,7 +311,7 @@ class RawBookingCreateService:
         create_hold_transaction(
             booking_id=int(booking["id"]),
             client_user_id=int(self.client.id),
-            partner_user_id=int(property_row["partner_user_id"]),
+            partner_user_id=int(property_row["partner_user_id"]) if property_row.get("partner_user_id") is not None else None,
             amount=hold_amount,
             transaction_id=hold_result.get("transactionId"),
             hold_id=hold_result.get("holdId"),

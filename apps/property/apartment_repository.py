@@ -11,6 +11,7 @@ from django.db.utils import ProgrammingError
 from payment.exchange_rate import exchange_rate
 from shared.raw.compat import get_table_name, is_postgresql
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
+from property.models import VerificationStatus
 from shared.raw.tables import BOOKING_TABLE
 
 APARTMENT_TYPE_GUID = UUID("11111111-1111-1111-1111-111111111111")
@@ -90,10 +91,12 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
             title = row["title_en"]
         else:
             title = row["title_uz"]
+        kind = TYPE_GUID_TO_KIND.get(row["guid"], "")
         result.append({
             "guid": row["guid"],
             "title": title,
             "icon_url": row["icon"],
+            "kind": kind,
         })
     return result
 
@@ -463,10 +466,10 @@ def create_apartment(
         ) VALUES (
             %s, %s, %s,
             %s, %s,
-            FALSE, 'pending', FALSE, FALSE,
+            FALSE, %s, FALSE, FALSE,
             %s,
             %s, %s, %s, %s,
-            %s,
+            %s::uuid[],
             %s, %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s,
@@ -480,6 +483,7 @@ def create_apartment(
         [
             uuid4(), now, now,
             values.get("title"), values.get("title_sort"),
+            VerificationStatus.WAITING.value,
             int(values.get("comment_count", 0)),
             values.get("price"), values.get("currency"), values.get("img"),
             partner_user_id,
@@ -552,7 +556,9 @@ def update_apartment(
     should_send_to_moderation = bool(changed_non_price_fields)
     if should_send_to_moderation:
         updates["is_verified"] = False
-        updates["verification_status"] = "pending"
+        updates["verification_status"] = VerificationStatus.WAITING.value
+        from stories.raw_repository import reset_stories_verification_for_property
+        reset_stories_verification_for_property(apartment_id, "apartment")
 
     assignments_parts: list[str] = []
     for col in updates:
@@ -638,7 +644,7 @@ def admin_update_apartment(
             updates.setdefault("verified_at", timezone.now())
             if admin_user_id is not None:
                 updates.setdefault("verified_by_user_id", int(admin_user_id))
-            updates.setdefault("verification_status", "accepted")
+            updates.setdefault("verification_status", VerificationStatus.ACCEPTED.value)
         else:
             updates.setdefault("verified_at", None)
 
@@ -669,6 +675,54 @@ def admin_delete_apartment(*, apartment_guid: str) -> int:
     )
 
 
+def admin_append_apartment_images(
+    *,
+    apartment_guid: str,
+    image_paths: list[str],
+) -> dict[str, Any] | None:
+    existing = fetch_one(
+        f"SELECT id, img FROM {APARTMENT_TABLE} WHERE guid = %s LIMIT 1",
+        [apartment_guid],
+    )
+    if not existing:
+        return None
+    current = existing.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = list(current) + image_paths
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [new_img, timezone.now(), int(existing["id"])],
+    )
+    if not updated:
+        return None
+    return admin_get_apartment(apartment_guid)
+
+
+def admin_remove_apartment_image(
+    *,
+    apartment_guid: str,
+    image_path: str,
+) -> dict[str, Any] | None:
+    existing = fetch_one(
+        f"SELECT id, img FROM {APARTMENT_TABLE} WHERE guid = %s LIMIT 1",
+        [apartment_guid],
+    )
+    if not existing:
+        return None
+    current = existing.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [p for p in current if p != image_path]
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [new_img, timezone.now(), int(existing["id"])],
+    )
+    if not updated:
+        return None
+    return admin_get_apartment(apartment_guid)
+
+
 def set_apartment_primary_image(
     *,
     apartment_id: int,
@@ -678,11 +732,87 @@ def set_apartment_primary_image(
     image_payload = [image_path] if image_path else []
     row = fetch_one(
         f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
-        [image_payload, timezone.now(), False, "pending", apartment_id, partner_user_id],
+        [image_payload, timezone.now(), False, VerificationStatus.WAITING.value, apartment_id, partner_user_id],
     )
     if not row:
         return None
     return get_apartment_for_partner(str(row["guid"]), partner_user_id)
+
+
+def append_apartment_images(
+    *,
+    apartment_id: int,
+    partner_user_id: int,
+    image_paths: list[str],
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT img FROM {APARTMENT_TABLE} WHERE id = %s AND partner_user_id = %s",
+        [apartment_id, partner_user_id],
+    )
+    if not row:
+        return None
+    current = row.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = list(current) + image_paths
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [new_img, timezone.now(), False, VerificationStatus.WAITING.value, apartment_id, partner_user_id],
+    )
+    if not updated:
+        return None
+    return get_apartment_for_partner(str(updated["guid"]), partner_user_id)
+
+
+def remove_apartment_image(
+    *,
+    apartment_id: int,
+    partner_user_id: int,
+    image_path: str,
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT img FROM {APARTMENT_TABLE} WHERE id = %s AND partner_user_id = %s",
+        [apartment_id, partner_user_id],
+    )
+    if not row:
+        return None
+    current = row.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [p for p in current if p != image_path]
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [new_img, timezone.now(), False, VerificationStatus.WAITING.value, apartment_id, partner_user_id],
+    )
+    if not updated:
+        return None
+    return get_apartment_for_partner(str(updated["guid"]), partner_user_id)
+
+
+def replace_apartment_image(
+    *,
+    apartment_id: int,
+    partner_user_id: int,
+    old_image_path: str,
+    new_image_path: str,
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT img FROM {APARTMENT_TABLE} WHERE id = %s AND partner_user_id = %s",
+        [apartment_id, partner_user_id],
+    )
+    if not row:
+        return None
+    current = row.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [new_image_path if p == old_image_path else p for p in current]
+    updated = fetch_one(
+        f"UPDATE {APARTMENT_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [new_img, timezone.now(), False, VerificationStatus.WAITING.value, apartment_id, partner_user_id],
+    )
+    if not updated:
+        return None
+    return get_apartment_for_partner(str(updated["guid"]), partner_user_id)
 
 
 def effective_apartment_price(row: dict[str, Any]) -> Decimal:

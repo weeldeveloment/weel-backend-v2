@@ -458,6 +458,8 @@ def update_cottage(
     if should_send_to_moderation:
         updates["is_verified"] = False
         updates["verification_status"] = VerificationStatus.WAITING.value
+        from stories.raw_repository import reset_stories_verification_for_property
+        reset_stories_verification_for_property(cottage_id, "cottage")
 
     assignments_parts: list[str] = []
     for col in updates:
@@ -546,7 +548,7 @@ def admin_update_cottage(
             updates.setdefault("verified_at", timezone.now())
             if admin_user_id is not None:
                 updates.setdefault("verified_by_user_id", int(admin_user_id))
-            updates.setdefault("verification_status", "accepted")
+            updates.setdefault("verification_status", VerificationStatus.ACCEPTED.value)
         else:
             updates.setdefault("verified_at", None)
 
@@ -579,6 +581,54 @@ def admin_delete_cottage(*, cottage_guid: str) -> int:
     )
 
 
+def admin_append_cottage_images(
+    *,
+    cottage_guid: str,
+    image_paths: list[str],
+) -> dict[str, Any] | None:
+    existing = fetch_one(
+        f"SELECT id, img FROM {COTTAGE_TABLE} WHERE guid = %s LIMIT 1",
+        [cottage_guid],
+    )
+    if not existing:
+        return None
+    current = existing.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = list(current) + image_paths
+    updated = fetch_one(
+        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [new_img, timezone.now(), int(existing["id"])],
+    )
+    if not updated:
+        return None
+    return admin_get_cottage(cottage_guid)
+
+
+def admin_remove_cottage_image(
+    *,
+    cottage_guid: str,
+    image_path: str,
+) -> dict[str, Any] | None:
+    existing = fetch_one(
+        f"SELECT id, img FROM {COTTAGE_TABLE} WHERE guid = %s LIMIT 1",
+        [cottage_guid],
+    )
+    if not existing:
+        return None
+    current = existing.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [p for p in current if p != image_path]
+    updated = fetch_one(
+        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s WHERE id = %s RETURNING guid",
+        [new_img, timezone.now(), int(existing["id"])],
+    )
+    if not updated:
+        return None
+    return admin_get_cottage(cottage_guid)
+
+
 def set_cottage_primary_image(
     *,
     cottage_id: int,
@@ -595,6 +645,86 @@ def set_cottage_primary_image(
     return get_cottage_for_partner(str(row["guid"]), partner_user_id)
 
 
+def append_cottage_images(
+    *,
+    cottage_id: int,
+    partner_user_id: int,
+    image_paths: list[str],
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT img FROM {COTTAGE_TABLE} WHERE id = %s AND partner_user_id = %s",
+        [cottage_id, partner_user_id],
+    )
+    logger.info("[append_cottage_images] SELECT img for cottage_id=%s: row=%s", cottage_id, row)
+    if not row:
+        return None
+    current = row.get("img") or []
+    logger.info("[append_cottage_images] raw current img=%r type=%s", current, type(current).__name__)
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = list(current) + image_paths
+    logger.info("[append_cottage_images] new_img=%r", new_img)
+    updated = fetch_one(
+        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [new_img, timezone.now(), False, VerificationStatus.WAITING.value, cottage_id, partner_user_id],
+    )
+    logger.info("[append_cottage_images] UPDATE result=%s", updated)
+    if not updated:
+        return None
+    return get_cottage_for_partner(str(updated["guid"]), partner_user_id)
+
+
+def remove_cottage_image(
+    *,
+    cottage_id: int,
+    partner_user_id: int,
+    image_path: str,
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT img FROM {COTTAGE_TABLE} WHERE id = %s AND partner_user_id = %s",
+        [cottage_id, partner_user_id],
+    )
+    if not row:
+        return None
+    current = row.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [p for p in current if p != image_path]
+    updated = fetch_one(
+        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [new_img, timezone.now(), False, VerificationStatus.WAITING.value, cottage_id, partner_user_id],
+    )
+    if not updated:
+        return None
+    return get_cottage_for_partner(str(updated["guid"]), partner_user_id)
+
+
+def replace_cottage_image(
+    *,
+    cottage_id: int,
+    partner_user_id: int,
+    old_image_path: str,
+    new_image_path: str,
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT img FROM {COTTAGE_TABLE} WHERE id = %s AND partner_user_id = %s",
+        [cottage_id, partner_user_id],
+    )
+    if not row:
+        return None
+    current = row.get("img") or []
+    if not isinstance(current, list):
+        current = [current] if current else []
+    new_img = [new_image_path if p == old_image_path else p for p in current]
+    updated = fetch_one(
+        f"UPDATE {COTTAGE_TABLE} SET img = %s, updated_at = %s, is_verified = %s, verification_status = %s WHERE id = %s AND partner_user_id = %s RETURNING guid",
+        [new_img, timezone.now(), False, VerificationStatus.WAITING.value, cottage_id, partner_user_id],
+    )
+    if not updated:
+        return None
+    return get_cottage_for_partner(str(updated["guid"]), partner_user_id)
+
+
 def effective_cottage_price(row: dict[str, Any], reference_date: date) -> Decimal:
     field = "price_on_weekends" if reference_date.weekday() >= 4 else "price_on_working_days"
     val = row.get(field)
@@ -604,3 +734,29 @@ def effective_cottage_price(row: dict[str, Any], reference_date: date) -> Decima
         except (InvalidOperation, TypeError, ValueError):
             pass
     return Decimal("0")
+
+
+def list_partners_with_expired_cottage_prices() -> list[dict[str, Any]]:
+    """Return partners who own verified, non-archived cottages missing current-month prices."""
+    return fetch_all(
+        f"""
+        SELECT DISTINCT c.partner_user_id AS partner_id, u.phone_number
+        FROM {COTTAGE_TABLE} c
+        JOIN {USERS_TABLE} u ON u.id = c.partner_user_id
+        WHERE COALESCE(c.is_archived, FALSE) = FALSE
+          AND COALESCE(c.is_verified, FALSE) = TRUE
+          AND (
+              NOT EXISTS (
+                  SELECT 1 FROM {COTTAGE_PRICE_TABLE} cp
+                  WHERE cp.cottage_id = c.id
+              )
+              OR NOT EXISTS (
+                  SELECT 1 FROM {COTTAGE_PRICE_TABLE} cp
+                  WHERE cp.cottage_id = c.id
+                    AND cp.month_from >= DATE_TRUNC('month', CURRENT_DATE)
+                    AND cp.month_from <  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+              )
+          )
+        ORDER BY c.partner_user_id
+        """
+    )

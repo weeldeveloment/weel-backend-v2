@@ -102,7 +102,10 @@ for _origin in (
 ):
     if _origin not in CORS_ALLOWED_ORIGINS:
         CORS_ALLOWED_ORIGINS.append(_origin)
-CORS_ALLOW_ALL_ORIGINS = False
+
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all origins in DEBUG mode
+if not DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     "DELETE",
@@ -163,6 +166,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "core.middleware.locale.HeaderLocaleMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
     "request_logging.middleware.LoggingMiddleware",  # django-request-logging
@@ -431,7 +435,7 @@ STORAGES = {
         "OPTIONS": {"location": _media_root},
     },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        "BACKEND": "core.storage.CustomStaticFilesStorage",
     },
 }
 
@@ -522,7 +526,7 @@ if USE_MINIO and HAS_DJANGO_STORAGES:
     STORAGES = {
         "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},
         "staticfiles": {
-            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
+            "BACKEND": "core.storage.CustomStaticFilesStorage"
         },
     }
 else:
@@ -554,7 +558,7 @@ MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100MB
 
 
-ALLOWED_PHOTO_EXTENSION = ["jpg", "jpeg", "png", "heif", "heic"]
+ALLOWED_PHOTO_EXTENSION = ["jpg", "jpeg", "png", "heif", "heic", "webp"]
 ALLOWED_VIDEO_EXTENSION = ["mp4", "mov", "avi", "mkv"]
 
 # Default primary key field type

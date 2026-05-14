@@ -43,7 +43,7 @@ def create_hold_transaction(
     *,
     booking_id: int,
     client_user_id: int,
-    partner_user_id: int,
+    partner_user_id: int | None,
     amount,
     transaction_id: str | None,
     hold_id: str | None,

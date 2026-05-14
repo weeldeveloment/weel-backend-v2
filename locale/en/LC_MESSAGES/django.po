@@ -1,0 +1,104 @@
+# English translations for WEEL
+# Copyright (C) 2025
+# This file is distributed under the same license as the WEEL package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: WEEL\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-05-14 12:00+0500\n"
+"PO-Revision-Date: 2025-05-14 12:00+0500\n"
+"Last-Translator: \n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Client not found. Please register first"
+msgstr "Client not found. Please register first"
+
+msgid "OTP sent successfully"
+msgstr "OTP sent successfully"
+
+msgid "OTP sent successfully for registration"
+msgstr "OTP sent successfully for registration"
+
+msgid "Registration completed successfully"
+msgstr "Registration completed successfully"
+
+msgid "Client not found"
+msgstr "Client not found"
+
+msgid "Please wait before resending OTP"
+msgstr "Please wait before resending OTP"
+
+msgid "OTP resent successfully"
+msgstr "OTP resent successfully"
+
+msgid "Registration not started"
+msgstr "Registration not started"
+
+msgid "Invalid or expired refresh token"
+msgstr "Invalid or expired refresh token"
+
+msgid "Token refresh failed"
+msgstr "Token refresh failed"
+
+msgid "Successfully logged out"
+msgstr "Successfully logged out"
+
+msgid "Invalid token"
+msgstr "Invalid token"
+
+msgid "Phone number must start with 998"
+msgstr "Phone number must start with 998"
+
+msgid "Client with this phone number already exists"
+msgstr "Client with this phone number already exists"
+
+msgid "Registration data not found. Please start registration again"
+msgstr "Registration data not found. Please start registration again"
+
+msgid "Client already registered"
+msgstr "Client already registered"
+
+msgid "OTP verified successfully"
+msgstr "OTP verified successfully"
+
+msgid "Invalid OTP"
+msgstr "Invalid OTP"
+
+msgid "OTP expired. Please request a new one."
+msgstr "OTP expired. Please request a new one."
+
+msgid "Too many attempts. Please resend OTP."
+msgstr "Too many attempts. Please resend OTP."
+
+msgid "Invalid authorization header"
+msgstr "Invalid authorization header"
+
+msgid "Authentication failed"
+msgstr "Authentication failed"
+
+msgid "First name"
+msgstr "First name"
+
+msgid "Last name"
+msgstr "Last name"
+
+msgid "{field} must contain only letters, spaces, hyphens or apostrophes."
+msgstr "{field} must contain only letters, spaces, hyphens or apostrophes."
+
+msgid "Image resolution is too high. Please upload a smaller image"
+msgstr "Image resolution is too high. Please upload a smaller image"
+
+msgid "Internal server error."
+msgstr "Internal server error."
+
+msgid "Token is invalid or expired."
+msgstr "Token is invalid or expired."
+
+msgid "Your session has expired. Please log in again."
+msgstr "Your session has expired. Please log in again."

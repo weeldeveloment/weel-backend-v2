@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from rest_framework import serializers
 from django.utils.translation import gettext_lazy as _
 
@@ -16,6 +18,20 @@ from .raw_repository import (
 
 CLIENT_DEVICE_TYPE_CHOICES = (("ios", "iOS"), ("android", "Android"))
 PARTNER_DEVICE_TYPE_CHOICES = (("ios", "iOS"), ("android", "Android"))
+
+_NAME_REGEX = re.compile(r"^[a-zA-Zа-яА-ЯёЁўЎқҚғҒҳҲъЪіІ\s'-]+$")
+
+
+def _validate_name(value: str | None, field_name: str) -> str | None:
+    if not value:
+        return value
+    if not _NAME_REGEX.match(value):
+        raise serializers.ValidationError(
+            _("{field} must contain only letters, spaces, hyphens or apostrophes.").format(
+                field=field_name
+            )
+        )
+    return value
 
 
 class OTPCodeFieldAliasMixin:
@@ -180,6 +196,12 @@ class PartnerOTPRegisterSerializer(serializers.Serializer):
     first_name = serializers.CharField(required=True, min_length=2, max_length=64)
     last_name = serializers.CharField(required=True, min_length=2, max_length=64)
     email = serializers.EmailField(required=False, write_only=True)
+
+    def validate_first_name(self, value):
+        return _validate_name(value, _("First name"))
+
+    def validate_last_name(self, value):
+        return _validate_name(value, _("Last name"))
 
     def validate_phone_number(self, value):
         if exists_user_by_phone(value, role="partner"):
