@@ -826,3 +826,33 @@ msgstr "Sanatoriya bronlash tranzaksiyasi"
 
 msgid "Sanatorium booking transactions"
 msgstr "Sanatoriya bronlash tranzaksiyalari"
+
+msgid "Please wait before resending OTP"
+msgstr "Iltimos, OTP qayta yuborishdan oldin kuting"
+
+msgid "OTP resent successfully"
+msgstr "OTP muvaffaqiyatli qayta yuborildi"
+
+msgid "Registration not started"
+msgstr "Ro'yxatdan o'tish boshlanmagan"
+
+msgid "OTP expired. Please request a new one."
+msgstr "OTP muddati tugagan. Iltimos, yangi OTP so'rang."
+
+msgid "Too many attempts. Please resend OTP."
+msgstr "Juda ko'p urinishlar. Iltimos, OTP qayta yuboring."
+
+msgid "Invalid OTP"
+msgstr "Yaroqsiz OTP"
+
+msgid "Image resolution is too high. Please upload a smaller image"
+msgstr "Rasmning o'lchami juda katta. Iltimos, kichikroq rasm yuklang"
+
+msgid "Internal server error."
+msgstr "Ichki server xatosi."
+
+msgid "Token is invalid or expired."
+msgstr "Token yaroqsiz yoki muddati tugagan."
+
+msgid "Your session has expired. Please log in again."
+msgstr "Sessiyangiz muddati tugagan. Iltimos, qayta kiring."

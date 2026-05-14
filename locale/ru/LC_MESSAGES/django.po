@@ -1032,3 +1032,33 @@ msgid "WEEL"
 msgstr "WEEL"
 msgid "Booking Service"
 msgstr "Сервис бронирования"
+
+msgid "Please wait before resending OTP"
+msgstr "Пожалуйста, подождите перед повторной отправкой OTP"
+
+msgid "OTP resent successfully"
+msgstr "OTP успешно переотправлен"
+
+msgid "Registration not started"
+msgstr "Регистрация не начата"
+
+msgid "OTP expired. Please request a new one."
+msgstr "Срок действия OTP истек. Пожалуйста, запросите новый."
+
+msgid "Too many attempts. Please resend OTP."
+msgstr "Слишком много попыток. Пожалуйста, запросите OTP повторно."
+
+msgid "Invalid OTP"
+msgstr "Неверный OTP"
+
+msgid "Image resolution is too high. Please upload a smaller image"
+msgstr "Разрешение изображения слишком высокое. Пожалуйста, загрузите изображение меньшего размера"
+
+msgid "Internal server error."
+msgstr "Внутренняя ошибка сервера."
+
+msgid "Token is invalid or expired."
+msgstr "Токен недействителен или срок его действия истек."
+
+msgid "Your session has expired. Please log in again."
+msgstr "Ваша сессия истекла. Пожалуйста, войдите заново."
