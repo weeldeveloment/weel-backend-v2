@@ -3168,7 +3168,7 @@ class AdminApartmentPatchView(APIView):
 
 
 class AdminCottagePatchView(APIView):
-    """Admin-only endpoint for patching any field of a cottage record."""
+    """Admin-only endpoint for retrieving, patching, or deleting a cottage record."""
 
     authentication_classes = [AdminJWTAuthentication]
     permission_classes = [IsAdminUser]
@@ -3245,6 +3245,26 @@ class AdminCottagePatchView(APIView):
             CottageAdminListSerializer(updated, context=ctx).data,
             status=status.HTTP_200_OK,
         )
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Delete cottage (admin)",
+        operation_description="Permanently deletes a cottage record. This action is irreversible.",
+        responses={204: "No content"},
+    )
+    def delete(self, request, cottage_id, *args, **kwargs):
+        row = admin_get_cottage(str(cottage_id))
+        if not row:
+            raise NotFound(_("Cottage not found"))
+
+        logger.info(
+            "admin_cottage_delete cottage_guid=%s admin_user_id=%s",
+            cottage_id,
+            getattr(request.user, "id", None),
+        )
+
+        admin_delete_cottage(cottage_guid=str(cottage_id))
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ApartmentPartnerPropertyListView(APIView):
