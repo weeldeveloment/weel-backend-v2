@@ -403,6 +403,9 @@ class CottageAdminListSerializer(CottagePartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
     partner_user = CottagePartnerUserSerializer(allow_null=True, read_only=True)
+    description_en = serializers.CharField(allow_blank=True, allow_null=True)
+    description_ru = serializers.CharField(allow_blank=True, allow_null=True)
+    description_uz = serializers.CharField(allow_blank=True, allow_null=True)
 
     def to_representation(self, instance):
         row = dict(instance)
@@ -931,15 +934,7 @@ class CottageCreateSerializer(serializers.Serializer):
         prefecture_id = normalized.get("prefecture_id")
         if not is_admin:
             if district_id in {75, 82}:
-                if not prefecture_id:
-                    raise serializers.ValidationError(
-                        {
-                            "prefecture_id": _(
-                                "This field is required for selected district."
-                            )
-                        }
-                    )
-                if not is_prefecture_linked_to_district(
+                if prefecture_id and not is_prefecture_linked_to_district(
                     district_id=district_id, prefecture_guid=prefecture_id
                 ):
                     raise serializers.ValidationError(
