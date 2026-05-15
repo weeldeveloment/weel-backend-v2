@@ -12,7 +12,6 @@ from admin_auth.permissions import IsAdminUser
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
-from django.db import IntegrityError
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
@@ -111,9 +110,6 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
-
-class Conflict(APIException):
-    status_code = status.HTTP_409_CONFLICT
 
 
 _FAVORITES_CACHE_TTL_SECONDS = 60 * 60 * 24 * 30
@@ -3484,12 +3480,6 @@ class AdminCottagePatchView(APIView):
     def delete(self, request, cottage_id, *args, **kwargs):
         try:
             deleted = admin_delete_cottage(cottage_guid=str(cottage_id))
-        except IntegrityError as exc:
-            logger.exception(
-                "admin_cottage_delete integrity error cottage_guid=%s",
-                cottage_id,
-            )
-            raise Conflict(_("Cannot delete cottage because related records exist")) from exc
         except Exception as exc:
             logger.exception("admin_cottage_delete failed cottage_guid=%s", cottage_id)
             raise APIException(_("Failed to delete cottage")) from exc
