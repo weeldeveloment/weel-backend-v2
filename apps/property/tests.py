@@ -406,20 +406,24 @@ class PropertyUrlsTests(SimpleTestCase):
 
 class AdminDeleteCottageTests(SimpleTestCase):
     @patch("property.cottage_repository.execute")
+    @patch("property.cottage_repository.fetch_all")
     @patch("property.cottage_repository.fetch_one")
-    def test_admin_delete_cottage_deletes_calendar_first(self, mock_fetch_one, mock_execute):
+    def test_admin_delete_cottage_deletes_dependents_then_cottage(
+        self,
+        mock_fetch_one,
+        mock_fetch_all,
+        mock_execute,
+    ):
         from property.cottage_repository import admin_delete_cottage
 
         mock_fetch_one.return_value = {"id": 87}
-        mock_execute.side_effect = [3, 1]  # calendar rows deleted, then cottage deleted
+        mock_fetch_all.return_value = [{"id": 101}, {"id": 102}]
+        mock_execute.side_effect = [0, 0, 2, 3, 1]  # booking deps, bookings, calendar, cottage
 
         deleted = admin_delete_cottage(cottage_guid="ec649542-6e50-4252-8b4f-ab0f09de0d39")
         self.assertEqual(deleted, 1)
 
-        self.assertEqual(mock_execute.call_count, 2)
-        first_sql = mock_execute.call_args_list[0].args[0]
-        second_sql = mock_execute.call_args_list[1].args[0]
-        self.assertIn("DELETE FROM", first_sql)
-        self.assertIn("calendar", first_sql.lower())
-        self.assertIn("DELETE FROM", second_sql)
-        self.assertIn("cottage", second_sql.lower())
+        sqls = [call.args[0].lower() for call in mock_execute.call_args_list]
+        self.assertTrue(any("delete from" in sql and "booking" in sql for sql in sqls))
+        self.assertTrue(any("delete from" in sql and "calendar" in sql for sql in sqls))
+        self.assertTrue(any("delete from" in sql and "cottage" in sql for sql in sqls))

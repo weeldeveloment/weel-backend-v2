@@ -33,6 +33,9 @@ def _table(*candidates: str) -> str:
 COTTAGE_TABLE = _table("cottage", "property_cottage")
 COTTAGE_PRICE_TABLE = _table("cottage_price", "property_cottageprice")
 CALENDAR_TABLE = _table("calendar")
+BOOKING_TABLE = _table("booking", "booking_booking")
+BOOKING_PRICE_TABLE = _table("booking_price", "booking_bookingprice")
+BOOKING_TRANSACTION_TABLE = _table("booking_transaction", "booking_bookingtransaction")
 USERS_TABLE = _table("users", "users_user")
 REVIEW_TABLE = _table("review", "property_review")
 DISTRICT_TABLE = _table("district", "property_district")
@@ -584,6 +587,37 @@ def admin_delete_cottage(*, cottage_guid: str) -> int:
         return 0
 
     cottage_id = int(existing["id"])
+
+    booking_rows = fetch_all(
+        f"SELECT id FROM {BOOKING_TABLE} WHERE property_cottage_id = %s",
+        [cottage_id],
+    )
+    booking_ids = [int(row["id"]) for row in booking_rows if row.get("id") is not None]
+    if booking_ids:
+        if is_postgresql():
+            execute(
+                f"DELETE FROM {BOOKING_TRANSACTION_TABLE} WHERE booking_id = ANY(%s)",
+                [booking_ids],
+            )
+            execute(
+                f"DELETE FROM {BOOKING_PRICE_TABLE} WHERE booking_id = ANY(%s)",
+                [booking_ids],
+            )
+        else:
+            placeholders = ",".join(["%s"] * len(booking_ids))
+            execute(
+                f"DELETE FROM {BOOKING_TRANSACTION_TABLE} WHERE booking_id IN ({placeholders})",
+                booking_ids,
+            )
+            execute(
+                f"DELETE FROM {BOOKING_PRICE_TABLE} WHERE booking_id IN ({placeholders})",
+                booking_ids,
+            )
+        execute(
+            f"DELETE FROM {BOOKING_TABLE} WHERE property_cottage_id = %s",
+            [cottage_id],
+        )
+
     execute(
         f"DELETE FROM {CALENDAR_TABLE} WHERE property_cottage_id = %s",
         [cottage_id],
