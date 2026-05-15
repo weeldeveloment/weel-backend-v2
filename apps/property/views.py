@@ -17,7 +17,7 @@ from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import parsers, serializers, status
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError, APIException
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -3478,7 +3478,11 @@ class AdminCottagePatchView(APIView):
         },
     )
     def delete(self, request, cottage_id, *args, **kwargs):
-        deleted = admin_delete_cottage(cottage_guid=str(cottage_id))
+        try:
+            deleted = admin_delete_cottage(cottage_guid=str(cottage_id))
+        except Exception as exc:
+            logger.exception("admin_cottage_delete failed cottage_guid=%s", cottage_id)
+            raise APIException(_("Failed to delete cottage")) from exc
         if not deleted:
             raise NotFound(_("Cottage not found"))
         return Response(status=status.HTTP_204_NO_CONTENT)
