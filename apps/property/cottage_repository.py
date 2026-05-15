@@ -32,6 +32,7 @@ def _table(*candidates: str) -> str:
 
 COTTAGE_TABLE = _table("cottage", "property_cottage")
 COTTAGE_PRICE_TABLE = _table("cottage_price", "property_cottageprice")
+CALENDAR_TABLE = _table("calendar")
 USERS_TABLE = _table("users", "users_user")
 REVIEW_TABLE = _table("review", "property_review")
 DISTRICT_TABLE = _table("district", "property_district")
@@ -575,9 +576,21 @@ def admin_update_cottage(
 
 
 def admin_delete_cottage(*, cottage_guid: str) -> int:
-    return execute(
-        f"DELETE FROM {COTTAGE_TABLE} WHERE guid = %s",
+    existing = fetch_one(
+        f"SELECT id FROM {COTTAGE_TABLE} WHERE guid = %s LIMIT 1",
         [cottage_guid],
+    )
+    if not existing:
+        return 0
+
+    cottage_id = int(existing["id"])
+    execute(
+        f"DELETE FROM {CALENDAR_TABLE} WHERE property_cottage_id = %s",
+        [cottage_id],
+    )
+    return execute(
+        f"DELETE FROM {COTTAGE_TABLE} WHERE id = %s",
+        [cottage_id],
     )
 
 
