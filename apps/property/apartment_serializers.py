@@ -261,6 +261,9 @@ class ApartmentPartnerUserSerializer(serializers.Serializer):
 class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
+    description_en = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    description_ru = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    description_uz = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
     partner_user = ApartmentPartnerUserSerializer(allow_null=True, read_only=True)
 
     def to_representation(self, instance):
@@ -278,6 +281,10 @@ class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
         data["partner_user"] = row.get("partner_user")
         # Return raw DB price for admin (no USD→UZS conversion)
         data["price"] = raw_price
+        # Add descriptions in all 3 languages
+        data["description_en"] = row.get("description_en") or ""
+        data["description_ru"] = row.get("description_ru") or ""
+        data["description_uz"] = row.get("description_uz") or ""
         return data
 
 

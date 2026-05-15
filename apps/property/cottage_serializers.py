@@ -402,6 +402,10 @@ class CottagePartnerUserUpdateSerializer(serializers.Serializer):
 class CottageAdminListSerializer(CottagePartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
+    description = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    description_en = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    description_ru = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    description_uz = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
     partner_user = CottagePartnerUserSerializer(allow_null=True, read_only=True)
 
     def to_representation(self, instance):
@@ -423,6 +427,15 @@ class CottageAdminListSerializer(CottagePartnerListSerializer):
         data["price_per_person"] = raw_price_per_person
         data["price_on_working_days"] = raw_price_on_working_days
         data["price_on_weekends"] = raw_price_on_weekends
+        # Add descriptions in all 3 languages
+        data["description_en"] = row.get("description_en") or ""
+        data["description_ru"] = row.get("description_ru") or ""
+        data["description_uz"] = row.get("description_uz") or ""
+        lang = _preferred_language(self.context.get("request"))
+        desc_value = row.get(f"description_{lang}")
+        if not desc_value:
+            desc_value = row.get("description_en") or row.get("description_ru") or row.get("description_uz") or ""
+        data["description"] = str(desc_value)
         return data
 
 
