@@ -402,3 +402,24 @@ class PropertyUrlsTests(SimpleTestCase):
     def test_cottage_detail_url_resolves(self):
         match = resolve("/api/property/cottages/00000000-0000-0000-0000-000000000001/")
         self.assertEqual(match.func.view_class.__name__, "PropertyRetrieveUpdateDestroyView")
+
+
+class AdminDeleteCottageTests(SimpleTestCase):
+    @patch("property.cottage_repository.execute")
+    @patch("property.cottage_repository.fetch_one")
+    def test_admin_delete_cottage_deletes_calendar_first(self, mock_fetch_one, mock_execute):
+        from property.cottage_repository import admin_delete_cottage
+
+        mock_fetch_one.return_value = {"id": 87}
+        mock_execute.side_effect = [3, 1]  # calendar rows deleted, then cottage deleted
+
+        deleted = admin_delete_cottage(cottage_guid="ec649542-6e50-4252-8b4f-ab0f09de0d39")
+        self.assertEqual(deleted, 1)
+
+        self.assertEqual(mock_execute.call_count, 2)
+        first_sql = mock_execute.call_args_list[0].args[0]
+        second_sql = mock_execute.call_args_list[1].args[0]
+        self.assertIn("DELETE FROM", first_sql)
+        self.assertIn("calendar", first_sql.lower())
+        self.assertIn("DELETE FROM", second_sql)
+        self.assertIn("cottage", second_sql.lower())
