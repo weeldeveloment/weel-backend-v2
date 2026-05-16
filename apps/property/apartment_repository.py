@@ -641,12 +641,17 @@ def admin_update_apartment(
 
     if "is_verified" in updates:
         if bool(updates["is_verified"]):
-            updates.setdefault("verified_at", timezone.now())
+            updates["verified_at"] = updates.get("verified_at") or timezone.now()
             if admin_user_id is not None:
-                updates.setdefault("verified_by_user_id", int(admin_user_id))
-            updates.setdefault("verification_status", VerificationStatus.ACCEPTED.value)
+                updates["verified_by_user_id"] = updates.get("verified_by_user_id") or int(
+                    admin_user_id
+                )
+            updates["verification_status"] = VerificationStatus.ACCEPTED.value
         else:
-            updates.setdefault("verified_at", None)
+            updates["verified_at"] = None
+            updates["verified_by_user_id"] = None
+            if updates.get("verification_status") != VerificationStatus.CANCELLED.value:
+                updates["verification_status"] = VerificationStatus.WAITING.value
 
     updates["updated_at"] = timezone.now()
 

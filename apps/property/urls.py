@@ -186,7 +186,7 @@ urlpatterns = [
         name="admin-apartment-image-create",
     ),
     path(
-        "admin/apartments/<uuid:property_id>/images/<str:image_id>/",
+        "admin/apartments/<uuid:property_id>/images/<path:image_id>/",
         AdminPropertyImageDeleteView.as_view(),
         name="admin-apartment-image-delete",
     ),
