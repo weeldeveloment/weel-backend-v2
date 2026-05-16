@@ -2037,21 +2037,52 @@ class CottagePropertyRetrieveUpdateDestroyView(PropertyRetrieveUpdateDestroyView
 def _resolve_image_path(request, property_row, image_url):
     """Map a public image URL (or raw path) back to the stored path in DB."""
     # Normalize incoming image_url: fix single-slash protocols and strip trailing slash
-    normalized = image_url.rstrip("/")
+    normalized = str(image_url or "").rstrip("/")
     if normalized.startswith("https:/") and not normalized.startswith("https://"):
         normalized = "https://" + normalized[7:]
     if normalized.startswith("http:/") and not normalized.startswith("http://"):
         normalized = "http://" + normalized[6:]
 
+    # Build candidate representations that might appear in the URL/path field.
+    candidates: set[str] = {normalized}
+    candidates.add(normalized.lstrip("/"))
+    # If client sent a full URL, also compare against its path component.
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(normalized)
+        if parsed.scheme and parsed.netloc:
+            candidates.add((parsed.path or "").rstrip("/"))
+            candidates.add((parsed.path or "").rstrip("/").lstrip("/"))
+    except Exception:
+        pass
+    # Accept common media prefixes that may be present in public URLs.
+    for value in list(candidates):
+        if value.startswith("weel-media/"):
+            candidates.add(value.removeprefix("weel-media/"))
+        if value.startswith("media/"):
+            candidates.add(value.removeprefix("media/"))
+
     current_paths = property_row.get("img") or []
     if not isinstance(current_paths, list):
         current_paths = [current_paths] if current_paths else []
     for path in current_paths:
-        if path == normalized:
+        if path in candidates:
             return path
         url = _build_media_url(request, path)
-        if url and url.rstrip("/") == normalized:
-            return path
+        if url:
+            url_normalized = url.rstrip("/")
+            if url_normalized in candidates:
+                return path
+            try:
+                from urllib.parse import urlparse
+
+                parsed_url = urlparse(url_normalized)
+                built_path = (parsed_url.path or "").rstrip("/")
+                if built_path in candidates or built_path.lstrip("/") in candidates:
+                    return path
+            except Exception:
+                pass
     return None
 
 
