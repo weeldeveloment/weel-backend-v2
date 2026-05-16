@@ -399,13 +399,25 @@ class CottagePartnerUserUpdateSerializer(serializers.Serializer):
         ref_name = "CottagePartnerUserUpdate"
 
 
+class CottageAdminPropertyDetailSerializer(serializers.Serializer):
+    description_ru = serializers.CharField(allow_null=True)
+    description_uz = serializers.CharField(allow_null=True)
+    description_en = serializers.CharField(allow_null=True)
+    check_in = serializers.CharField(allow_null=True)
+    check_out = serializers.CharField(allow_null=True)
+    is_allowed_alcohol = serializers.BooleanField()
+    is_allowed_corporate = serializers.BooleanField()
+    is_allowed_pets = serializers.BooleanField()
+    is_quiet_hours = serializers.BooleanField()
+
+
 class CottageAdminListSerializer(CottagePartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
     description = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
-    description_en = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
-    description_ru = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
-    description_uz = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    property_detail = CottageAdminPropertyDetailSerializer(
+        source="*", read_only=True
+    )
     partner_user = CottagePartnerUserSerializer(allow_null=True, read_only=True)
 
     def to_representation(self, instance):
@@ -415,7 +427,6 @@ class CottageAdminListSerializer(CottagePartnerListSerializer):
             row["partner_user"] = partner_payload
         else:
             row["partner_user"] = None
-        # Capture raw prices before super() mutates them with USD→UZS conversion
         raw_price_per_person = _to_decimal(row.get("price_per_person"))
         raw_price_on_working_days = _to_decimal(row.get("price_on_working_days"))
         raw_price_on_weekends = _to_decimal(row.get("price_on_weekends"))
@@ -423,19 +434,25 @@ class CottageAdminListSerializer(CottagePartnerListSerializer):
         data["is_verified"] = bool(row.get("is_verified"))
         data["is_archived"] = bool(row.get("is_archived"))
         data["partner_user"] = row.get("partner_user")
-        # Return raw DB prices for admin (no USD→UZS conversion)
         data["price_per_person"] = raw_price_per_person
         data["price_on_working_days"] = raw_price_on_working_days
         data["price_on_weekends"] = raw_price_on_weekends
-        # Add descriptions in all 3 languages
-        data["description_en"] = row.get("description_en") or ""
-        data["description_ru"] = row.get("description_ru") or ""
-        data["description_uz"] = row.get("description_uz") or ""
         lang = _preferred_language(self.context.get("request"))
         desc_value = row.get(f"description_{lang}")
         if not desc_value:
             desc_value = row.get("description_en") or row.get("description_ru") or row.get("description_uz") or ""
         data["description"] = str(desc_value)
+        data["property_detail"] = {
+            "description_ru": row.get("description_ru") or None,
+            "description_uz": row.get("description_uz") or None,
+            "description_en": row.get("description_en") or None,
+            "check_in": row.get("check_in") or None,
+            "check_out": row.get("check_out") or None,
+            "is_allowed_alcohol": bool(row.get("is_allowed_alcohol", False)),
+            "is_allowed_corporate": bool(row.get("is_allowed_corporate", False)),
+            "is_allowed_pets": bool(row.get("is_allowed_pets", False)),
+            "is_quiet_hours": bool(row.get("is_quiet_hours", False)),
+        }
         return data
 
 

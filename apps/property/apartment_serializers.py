@@ -258,12 +258,23 @@ class ApartmentPartnerUserSerializer(serializers.Serializer):
         ref_name = "ApartmentPartnerUser"
 
 
+class ApartmentAdminPropertyDetailSerializer(serializers.Serializer):
+    description_ru = serializers.CharField(allow_null=True)
+    description_uz = serializers.CharField(allow_null=True)
+    description_en = serializers.CharField(allow_null=True)
+    apartment_number = serializers.CharField(allow_null=True)
+    home_number = serializers.CharField(allow_null=True)
+    entrance_number = serializers.CharField(allow_null=True)
+    floor_number = serializers.CharField(allow_null=True)
+    pass_code = serializers.CharField(allow_null=True)
+
+
 class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
-    description_en = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
-    description_ru = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
-    description_uz = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    property_detail = ApartmentAdminPropertyDetailSerializer(
+        source="*", read_only=True
+    )
     partner_user = ApartmentPartnerUserSerializer(allow_null=True, read_only=True)
 
     def to_representation(self, instance):
@@ -273,18 +284,22 @@ class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
             row["partner_user"] = partner_payload
         else:
             row["partner_user"] = None
-        # Capture raw price before super() mutates it with USD→UZS conversion
         raw_price = _to_decimal(row.get("price"))
         data = super().to_representation(row)
         data["is_verified"] = bool(row.get("is_verified"))
         data["is_archived"] = bool(row.get("is_archived"))
         data["partner_user"] = row.get("partner_user")
-        # Return raw DB price for admin (no USD→UZS conversion)
         data["price"] = raw_price
-        # Add descriptions in all 3 languages
-        data["description_en"] = row.get("description_en") or ""
-        data["description_ru"] = row.get("description_ru") or ""
-        data["description_uz"] = row.get("description_uz") or ""
+        data["property_detail"] = {
+            "description_ru": row.get("description_ru") or None,
+            "description_uz": row.get("description_uz") or None,
+            "description_en": row.get("description_en") or None,
+            "apartment_number": row.get("apartment_number") or None,
+            "home_number": row.get("home_number") or None,
+            "entrance_number": row.get("entrance_number") or None,
+            "floor_number": row.get("floor_number") or None,
+            "pass_code": row.get("pass_code") or None,
+        }
         return data
 
 
