@@ -942,6 +942,22 @@ class CottageCreateSerializer(serializers.Serializer):
             if key in attrs:
                 normalized[key] = attrs[key]
 
+        pd = attrs.get("property_detail")
+        if isinstance(pd, dict):
+            for key in (
+                "description_en",
+                "description_ru",
+                "description_uz",
+                "check_in",
+                "check_out",
+                "is_allowed_alcohol",
+                "is_allowed_corporate",
+                "is_allowed_pets",
+                "is_quiet_hours",
+            ):
+                if key in pd:
+                    normalized[key] = pd[key]
+
         if "services" in attrs:
             normalized["services"] = _normalize_uuid_list(attrs.get("services"))
 

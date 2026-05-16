@@ -759,6 +759,15 @@ class ApartmentUpdateSerializer(serializers.Serializer):
             if key in attrs:
                 prepared[key] = attrs.get(key)
 
+        pd = attrs.get("property_detail")
+        if isinstance(pd, dict):
+            for key in ("description_en", "description_ru", "description_uz"):
+                if key in pd:
+                    prepared[key] = pd.get(key)
+            for key in ("apartment_number", "home_number", "entrance_number", "floor_number", "pass_code"):
+                if key in pd:
+                    prepared[key] = pd.get(key)
+
         for key in ("check_in", "check_out"):
             if key in attrs:
                 prepared[key] = attrs.get(key)
@@ -791,6 +800,15 @@ class ApartmentUpdateSerializer(serializers.Serializer):
             prepared["services"] = (
                 [str(s) for s in services if s is not None] if services else []
             )
+
+        pd = attrs.get("property_detail")
+        if isinstance(pd, dict):
+            for key in ("description_en", "description_ru", "description_uz"):
+                if key in pd:
+                    prepared[key] = pd.get(key)
+            for key in ("apartment_number", "home_number", "entrance_number", "floor_number", "pass_code"):
+                if key in pd:
+                    prepared[key] = pd.get(key)
 
         district_id = prepared.get("district_id")
         prefecture_id = prepared.get("prefecture_id")
