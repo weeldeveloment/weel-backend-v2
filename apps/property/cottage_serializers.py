@@ -562,6 +562,25 @@ class CottageDetailSerializer(serializers.Serializer):
         return super().to_representation(row)
 
 
+class CottageMonthlyPriceItemSerializer(serializers.Serializer):
+    """Input schema for monthly cottage prices (admin + partner PATCH/POST).
+
+    Validation and normalization rules are enforced in `CottageCreateSerializer.validate`.
+    """
+
+    month_from = serializers.DateField(required=False, allow_null=True)
+    month_to = serializers.DateField(required=False, allow_null=True)
+    price_per_person = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    price_on_working_days = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+    price_on_weekends = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True
+    )
+
+
 class CottageCreateSerializer(serializers.Serializer):
     title = serializers.CharField(required=False, allow_blank=True)
     currency = serializers.ChoiceField(required=False, choices=["USD", "UZS"])
@@ -613,7 +632,7 @@ class CottageCreateSerializer(serializers.Serializer):
     beds = serializers.IntegerField(required=False, allow_null=True)
     bathrooms = serializers.IntegerField(required=False, allow_null=True)
     img = serializers.JSONField(required=False)
-    price = serializers.ListField(required=False, allow_empty=True)
+    price = CottageMonthlyPriceItemSerializer(many=True, required=False)
 
     def validate(self, attrs):
         is_update = bool(self.context.get("is_update"))

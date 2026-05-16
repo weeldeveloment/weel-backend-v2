@@ -272,9 +272,7 @@ class ApartmentAdminPropertyDetailSerializer(serializers.Serializer):
 class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
-    property_detail = ApartmentAdminPropertyDetailSerializer(
-        source="*", read_only=True
-    )
+    property_detail = ApartmentAdminPropertyDetailSerializer(source="*", read_only=True)
     partner_user = ApartmentPartnerUserSerializer(allow_null=True, read_only=True)
 
     def to_representation(self, instance):
@@ -764,7 +762,13 @@ class ApartmentUpdateSerializer(serializers.Serializer):
             for key in ("description_en", "description_ru", "description_uz"):
                 if key in pd:
                     prepared[key] = pd.get(key)
-            for key in ("apartment_number", "home_number", "entrance_number", "floor_number", "pass_code"):
+            for key in (
+                "apartment_number",
+                "home_number",
+                "entrance_number",
+                "floor_number",
+                "pass_code",
+            ):
                 if key in pd:
                     prepared[key] = pd.get(key)
 
@@ -806,7 +810,13 @@ class ApartmentUpdateSerializer(serializers.Serializer):
             for key in ("description_en", "description_ru", "description_uz"):
                 if key in pd:
                     prepared[key] = pd.get(key)
-            for key in ("apartment_number", "home_number", "entrance_number", "floor_number", "pass_code"):
+            for key in (
+                "apartment_number",
+                "home_number",
+                "entrance_number",
+                "floor_number",
+                "pass_code",
+            ):
                 if key in pd:
                     prepared[key] = pd.get(key)
 
