@@ -149,6 +149,7 @@ class ClientProfileSerializer(serializers.Serializer):
     first_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
     last_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
     avatar = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
 
     def get_guid(self, obj):
         return str(obj.guid) if getattr(obj, "guid", None) else None
@@ -292,4 +293,3 @@ class PartnerPassportUploadSerializer(serializers.Serializer):
         if file.size > max_size:
             raise serializers.ValidationError("File size must be ≤ 5MB")
         return file
-
