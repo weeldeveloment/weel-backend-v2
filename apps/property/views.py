@@ -38,6 +38,7 @@ from .apartment_repository import (
     PROPERTY_KIND_APARTMENT,
     PROPERTY_KIND_COTTAGE,
     admin_append_apartment_images,
+    admin_create_apartment,
     admin_get_apartment,
     admin_remove_apartment_image,
     admin_update_apartment,
@@ -74,6 +75,7 @@ from .apartment_serializers import (
 )
 from .cottage_repository import (
     admin_append_cottage_images,
+    admin_create_cottage,
     admin_delete_cottage,
     admin_get_cottage,
     admin_remove_cottage_image,
@@ -3212,6 +3214,93 @@ class AdminAllPropertiesListView(APIView):
             + CottageAdminListSerializer(cot_rows, many=True, context=ctx).data
         )
         return Response(data, status=status.HTTP_200_OK)
+
+
+class AdminApartmentListCreateView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Create apartment (admin)",
+        operation_description="Admin-only apartment creation endpoint.",
+        request_body=ApartmentAdminUpdateSerializer,
+        responses={201: ApartmentAdminListSerializer},
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = ApartmentAdminUpdateSerializer(
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        prepared = serializer.validated_data.get("values") or {}
+        title = str(prepared.get("title") or "").strip()
+        if not title:
+            raise ValidationError({"title": _("This field is required.")})
+        prepared.setdefault("title", title)
+        prepared.setdefault("title_sort", title.lower())
+        partner_user_id = _parse_int(request.data.get("partner_user_id"))
+        created = admin_create_apartment(
+            values=prepared,
+            admin_user_id=getattr(request.user, "id", None),
+            partner_user_id=partner_user_id,
+        )
+        if not created:
+            raise APIException(_("Failed to create apartment"))
+        partner_id = _parse_int(created.get("partner_user_id"))
+        created = dict(created)
+        created["partner_user"] = (
+            _serialize_partner_user(get_user_by_id(partner_id))
+            if partner_id is not None
+            else None
+        )
+        ctx = {"request": request}
+        return Response(
+            ApartmentAdminListSerializer(created, context=ctx).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminCottageListCreateView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Create cottage (admin)",
+        operation_description="Admin-only cottage creation endpoint.",
+        request_body=CottageAdminUpdateSerializer,
+        responses={201: CottageAdminListSerializer},
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = CottageAdminUpdateSerializer(
+            data=request.data,
+            partial=False,
+            context={"is_admin": True, "request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        normalized = serializer.validated_data.get("normalized_values") or {}
+        partner_user_id = _parse_int(request.data.get("partner_user_id"))
+        created = admin_create_cottage(
+            values=normalized,
+            admin_user_id=getattr(request.user, "id", None),
+            partner_user_id=partner_user_id,
+        )
+        if not created:
+            raise APIException(_("Failed to create cottage"))
+        partner_id = _parse_int(created.get("partner_user_id"))
+        created = dict(created)
+        created["partner_user"] = (
+            _serialize_partner_user(get_user_by_id(partner_id))
+            if partner_id is not None
+            else None
+        )
+        ctx = {"request": request}
+        return Response(
+            CottageAdminListSerializer(created, context=ctx).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class AdminRegionListView(APIView):

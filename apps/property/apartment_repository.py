@@ -613,6 +613,67 @@ def admin_get_apartment(apartment_guid: str) -> dict[str, Any] | None:
     )
 
 
+def admin_create_apartment(
+    *,
+    values: dict[str, Any],
+    admin_user_id: int | None = None,
+    partner_user_id: int | None = None,
+) -> dict[str, Any] | None:
+    owner_id = (
+        int(partner_user_id)
+        if partner_user_id is not None
+        else int(admin_user_id)
+        if admin_user_id is not None
+        else None
+    )
+    if owner_id is None:
+        return None
+
+    create_values = dict(values or {})
+    create_values.setdefault("price", Decimal("0"))
+    create_values.setdefault("currency", "UZS")
+    create_values.setdefault("img", [])
+    create_values.setdefault("services", [])
+    create_values.setdefault("comment_count", 0)
+    create_values.setdefault("check_in", "14:00:00")
+    create_values.setdefault("check_out", "12:00:00")
+    create_values.setdefault("is_allowed_alcohol", False)
+    create_values.setdefault("is_allowed_corporate", False)
+    create_values.setdefault("is_allowed_pets", False)
+    create_values.setdefault("is_quiet_hours", False)
+    create_values.setdefault("apartment_number", 0)
+    create_values.setdefault("home_number", 0)
+    create_values.setdefault("entrance_number", 0)
+    create_values.setdefault("floor_number", 0)
+    create_values.setdefault("pass_code", 0)
+    create_values.setdefault("guests", 1)
+    create_values.setdefault("rooms", 1)
+    create_values.setdefault("beds", 1)
+    create_values.setdefault("bathrooms", 1)
+
+    created = create_apartment(partner_user_id=owner_id, values=create_values)
+    if not created:
+        return None
+
+    apartment_guid = str(created["guid"])
+    admin_values = {
+        k: v
+        for k, v in (values or {}).items()
+        if k in _APARTMENT_ADMIN_UPDATE_ALLOWED
+    }
+    if partner_user_id is not None:
+        admin_values["partner_user_id"] = int(partner_user_id)
+    if admin_values:
+        updated = admin_update_apartment(
+            apartment_guid=apartment_guid,
+            values=admin_values,
+            admin_user_id=admin_user_id,
+        )
+        if updated:
+            return updated
+    return admin_get_apartment(apartment_guid)
+
+
 def admin_update_apartment(
     *,
     apartment_guid: str,

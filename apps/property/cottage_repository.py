@@ -520,6 +520,51 @@ def admin_get_cottage(cottage_guid: str) -> dict[str, Any] | None:
     )
 
 
+def admin_create_cottage(
+    *,
+    values: dict[str, Any],
+    admin_user_id: int | None = None,
+    partner_user_id: int | None = None,
+) -> dict[str, Any] | None:
+    owner_id = (
+        int(partner_user_id)
+        if partner_user_id is not None
+        else int(admin_user_id)
+        if admin_user_id is not None
+        else None
+    )
+    if owner_id is None:
+        return None
+
+    create_values = dict(values or {})
+    create_values.setdefault("currency", "UZS")
+    create_values.setdefault("img", [])
+    create_values.setdefault("services", [])
+    create_values.setdefault("comment_count", 0)
+
+    created = create_cottage(partner_user_id=owner_id, values=create_values)
+    if not created:
+        return None
+
+    cottage_guid = str(created["guid"])
+    admin_values = {
+        k: v
+        for k, v in (values or {}).items()
+        if k in _COTTAGE_ADMIN_UPDATE_ALLOWED or k == "price"
+    }
+    if partner_user_id is not None:
+        admin_values["partner_user_id"] = int(partner_user_id)
+    if admin_values:
+        updated = admin_update_cottage(
+            cottage_guid=cottage_guid,
+            values=admin_values,
+            admin_user_id=admin_user_id,
+        )
+        if updated:
+            return updated
+    return admin_get_cottage(cottage_guid)
+
+
 def admin_update_cottage(
     *,
     cottage_guid: str,

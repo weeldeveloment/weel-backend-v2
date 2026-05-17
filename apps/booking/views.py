@@ -57,6 +57,7 @@ from .raw_serializers import (
 )
 from .raw_create_service import RawBookingCreateService
 from .helpers import client_can_cancel, get_cancellation_error_message
+from payment.exchange_rate import exchange_rate
 from payment.services import PlumAPIError, PlumAPIService
 
 property_id_param = openapi.Parameter(
@@ -930,6 +931,7 @@ class AdminBookingListView(ListAPIView):
         status_filter = request.query_params.get("status")
         search = request.query_params.get("search")
         ordering = request.query_params.get("ordering")
+        usd_to_uzs_rate = None
 
         if status_filter and status_filter not in BOOKING_ALLOWED_STATUSES:
             raise ValidationError(
@@ -954,9 +956,13 @@ class AdminBookingListView(ListAPIView):
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(rows, request, view=self)
+        try:
+            usd_to_uzs_rate = str(exchange_rate())
+        except Exception:
+            usd_to_uzs_rate = None
         serializer = self.serializer_class(
             page,
             many=True,
-            context={"request": request},
+            context={"request": request, "usd_to_uzs_rate": usd_to_uzs_rate},
         )
         return paginator.get_paginated_response(serializer.data)

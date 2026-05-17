@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
 
 from rest_framework import serializers
 
+from payment.exchange_rate import exchange_rate
 from shared.raw.compat import get_table_name
 from shared.raw.db import fetch_one
 
@@ -79,6 +81,40 @@ def _resolve_property_average_rating(obj) -> float:
         return 1.0
 
 
+def _to_decimal(value) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _convert_amount(
+    *,
+    amount: Decimal | None,
+    from_currency: str,
+    to_currency: str,
+    usd_to_uzs_rate: Decimal | None,
+) -> Decimal | None:
+    if amount is None:
+        return None
+
+    source = (from_currency or "UZS").upper()
+    target = (to_currency or source).upper()
+
+    if source == target:
+        return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if not usd_to_uzs_rate or usd_to_uzs_rate <= 0:
+        return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    if source == "UZS" and target == "USD":
+        return (amount / usd_to_uzs_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if source == "USD" and target == "UZS":
+        return (amount * usd_to_uzs_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 class RawBookingPriceSerializer(serializers.Serializer):
     guid = serializers.UUIDField(required=False, allow_null=True)
     subtotal = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
@@ -86,6 +122,7 @@ class RawBookingPriceSerializer(serializers.Serializer):
     charge_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
     service_fee = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
     service_fee_percentage = serializers.IntegerField(required=False, allow_null=True)
+    currency = serializers.CharField(required=False, allow_null=True)
 
     def to_representation(self, instance):
         if not instance:
@@ -96,6 +133,7 @@ class RawBookingPriceSerializer(serializers.Serializer):
                 "charge_amount": None,
                 "service_fee": None,
                 "service_fee_percentage": None,
+                "currency": None,
             }
         return super().to_representation(instance)
 
@@ -377,6 +415,7 @@ class RawAdminBookingPriceSerializer(serializers.Serializer):
     hold_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
     charge_amount = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
     service_fee = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
+    currency = serializers.CharField(required=False, allow_null=True)
 
     def to_representation(self, instance):
         if not instance:
@@ -385,6 +424,7 @@ class RawAdminBookingPriceSerializer(serializers.Serializer):
                 "hold_amount": None,
                 "charge_amount": None,
                 "service_fee": None,
+                "currency": None,
             }
         return super().to_representation(instance)
 
@@ -408,11 +448,54 @@ class RawAdminBookingListSerializer(serializers.Serializer):
     booking_price = serializers.SerializerMethodField("get_booking_price")
 
     def get_booking_price(self, obj):
+        source_currency = str(obj.get("booking_currency") or "UZS").upper()
+        display_currency = str(obj.get("property_currency") or source_currency).upper()
+        rate_from_context = self.context.get("usd_to_uzs_rate")
+        usd_to_uzs_rate = _to_decimal(rate_from_context)
+        if usd_to_uzs_rate is None:
+            try:
+                usd_to_uzs_rate = _to_decimal(exchange_rate())
+            except Exception:
+                usd_to_uzs_rate = None
+
+        service_fee = _to_decimal(obj.get("booking_service_fee"))
+        hold_amount = _to_decimal(obj.get("booking_hold_amount"))
+        charge_amount = _to_decimal(obj.get("booking_charge_amount"))
+        subtotal = _to_decimal(obj.get("booking_subtotal"))
+
+        service_fee_percentage = _to_decimal(obj.get("booking_service_fee_percentage")) or Decimal("20")
+        if service_fee is not None and service_fee_percentage > 0:
+            subtotal = (service_fee * Decimal("100") / service_fee_percentage).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP,
+            )
+
         price_payload = {
-            "subtotal": obj.get("booking_subtotal"),
-            "hold_amount": obj.get("booking_hold_amount"),
-            "charge_amount": obj.get("booking_charge_amount"),
-            "service_fee": obj.get("booking_service_fee"),
+            "subtotal": _convert_amount(
+                amount=subtotal,
+                from_currency=source_currency,
+                to_currency=display_currency,
+                usd_to_uzs_rate=usd_to_uzs_rate,
+            ),
+            "hold_amount": _convert_amount(
+                amount=hold_amount,
+                from_currency=source_currency,
+                to_currency=display_currency,
+                usd_to_uzs_rate=usd_to_uzs_rate,
+            ),
+            "charge_amount": _convert_amount(
+                amount=charge_amount,
+                from_currency=source_currency,
+                to_currency=display_currency,
+                usd_to_uzs_rate=usd_to_uzs_rate,
+            ),
+            "service_fee": _convert_amount(
+                amount=service_fee,
+                from_currency=source_currency,
+                to_currency=display_currency,
+                usd_to_uzs_rate=usd_to_uzs_rate,
+            ),
+            "currency": display_currency,
         }
         return RawAdminBookingPriceSerializer(price_payload).data
 

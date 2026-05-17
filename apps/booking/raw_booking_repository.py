@@ -122,6 +122,7 @@ BOOKING_BASE_SELECT = f"""
         COALESCE(a.longitude, c.longitude) AS property_longitude,
         COALESCE(a.city, c.city) AS property_city,
         COALESCE(a.country, c.country) AS property_country,
+        COALESCE(a.currency, c.currency, 'UZS') AS property_currency,
         COALESCE(a.guests, c.guests) AS property_guests,
         CASE
             WHEN b.property_apartment_id IS NOT NULL THEN 'Apartment'
@@ -138,7 +139,8 @@ BOOKING_BASE_SELECT = f"""
         bp.hold_amount AS booking_hold_amount,
         bp.charge_amount AS booking_charge_amount,
         bp.service_fee AS booking_service_fee,
-        bp.service_fee_percentage AS booking_service_fee_percentage
+        bp.service_fee_percentage AS booking_service_fee_percentage,
+        bp.currency AS booking_currency
 
     FROM {get_table_name("booking")} b
     LEFT JOIN {get_table_name("users")} client_u ON client_u.id = b.client_user_id
@@ -151,7 +153,8 @@ BOOKING_BASE_SELECT = f"""
             MAX(CASE WHEN COALESCE(th.type, '') <> 'CHRG' THEN th.amount END) AS hold_amount,
             MAX(CASE WHEN th.type = 'CHRG' THEN th.amount END) AS charge_amount,
             MAX(CASE WHEN COALESCE(th.type, '') <> 'CHRG' THEN th.amount END) AS service_fee,
-            20::smallint AS service_fee_percentage
+            20::smallint AS service_fee_percentage,
+            MAX(th.currency) AS currency
         FROM {get_table_name("transaction_history")} th
         WHERE th.booking_id = b.id
     ) bp ON TRUE
