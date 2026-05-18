@@ -61,6 +61,8 @@ from .apartment_repository import (
     prepare_property_rows,
     remove_apartment_image,
     replace_apartment_image,
+    resolve_district_id_by_guid,
+    resolve_prefecture_id_by_guid,
     resolve_region_id_by_guid,
     update_apartment,
 )
@@ -145,8 +147,22 @@ class ApartmentPagination(_OptionalLimitPagePagination):
 
 PROPERTY_LIST_QUERY_PARAMS = [
     openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+    openapi.Parameter(
+        "location_id",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        description="Location UUID or integer ID. Tried as region GUID → district GUID → prefecture GUID.",
+    ),
     openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
     openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+    openapi.Parameter("prefecture_id", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="uuid"),
+    openapi.Parameter(
+        "property_type",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        enum=["apartment", "cottage"],
+        description="Filter by property kind. Defaults to apartment for the generic /properties/ endpoint.",
+    ),
     openapi.Parameter("corporate", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN),
     openapi.Parameter("min_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
     openapi.Parameter("max_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
@@ -900,12 +916,31 @@ def _extract_list_params(source):
     if limit is not None:
         limit = max(1, min(limit, 100))
 
+    # Explicit params take precedence
+    region_id = _parse_region_id_or_guid(_source_get(source, "region_id"))
+    district_id = _parse_int(_source_get(source, "district_id"))
+    prefecture_id = None
+
+    # location_id is a generic fallback: try region GUID → district GUID → prefecture GUID
+    location_id = _source_get(source, "location_id")
+    if location_id is not None and region_id is None and district_id is None:
+        parsed_int = _parse_int(location_id)
+        if parsed_int is not None:
+            region_id = parsed_int
+        else:
+            raw = str(location_id).strip()
+            if raw:
+                region_id = resolve_region_id_by_guid(raw)
+                if region_id is None:
+                    district_id = resolve_district_id_by_guid(raw)
+                    if district_id is None:
+                        prefecture_id = resolve_prefecture_id_by_guid(raw)
+
     return {
         "search": _source_get(source, "search"),
-        "region_id": _parse_int(
-            _source_get(source, "region_id") or _source_get(source, "location_id")
-        ),
-        "district_id": _parse_int(_source_get(source, "district_id")),
+        "region_id": region_id,
+        "district_id": district_id,
+        "prefecture_id": prefecture_id,
         "corporate": corporate_filter,
         "min_price": _parse_decimal(_source_get(source, "min_price")),
         "max_price": _parse_decimal(_source_get(source, "max_price")),
@@ -1677,9 +1712,11 @@ class PropertyListCreateView(APIView):
             "request": request,
             "favorite_guids": _favorite_guids_from_request(request),
         }
-        requested_kind = self.forced_property_type or parse_property_kind(
+        kind_value = (
             request.query_params.get("property_type")
+            or request.query_params.get("kind")
         )
+        requested_kind = self.forced_property_type or parse_property_kind(kind_value)
         if requested_kind == PROPERTY_KIND_COTTAGE:
             rows = _list_cottage_rows(
                 request.query_params,
