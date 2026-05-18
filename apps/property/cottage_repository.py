@@ -185,6 +185,7 @@ def list_cottages(
     search: str | None = None,
     region_id: int | None = None,
     district_id: int | None = None,
+    prefecture_id: str | None = None,
     corporate: bool | None = None,
     min_price: Decimal | None = None,
     max_price: Decimal | None = None,
@@ -213,6 +214,9 @@ def list_cottages(
     if district_id is not None:
         where.append(f"{DISTRICT_SELECT_SQL} = %s")
         params.append(district_id)
+    if prefecture_id is not None:
+        where.append("CAST(c.prefecture_id AS TEXT) = %s")
+        params.append(str(prefecture_id))
     if corporate is not None:
         where.append("COALESCE(c.is_allowed_corporate, FALSE) = %s")
         params.append(bool(corporate))

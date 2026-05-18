@@ -281,6 +281,17 @@ def resolve_district_id_by_guid(district_guid: str | None) -> int | None:
         return None
 
 
+def resolve_prefecture_id_by_guid(prefecture_guid: str | None) -> str | None:
+    raw = str(prefecture_guid or "").strip()
+    if not raw:
+        return None
+    row = fetch_one(
+        f"SELECT p.id FROM {PREFECTURE_TABLE} p WHERE CAST(p.id AS TEXT) = %s LIMIT 1",
+        [raw],
+    )
+    return str(row["id"]) if row else None
+
+
 APARTMENT_SELECT = f"""
     SELECT
         'apartment' AS property_kind,
@@ -366,6 +377,7 @@ def list_apartments(
     search: str | None = None,
     region_id: int | None = None,
     district_id: int | None = None,
+    prefecture_id: str | None = None,
     corporate: bool | None = None,
     min_price: Decimal | None = None,
     max_price: Decimal | None = None,
@@ -394,6 +406,9 @@ def list_apartments(
     if district_id is not None:
         where.append("a.district_id = %s")
         params.append(district_id)
+    if prefecture_id is not None:
+        where.append("CAST(a.prefecture_id AS TEXT) = %s")
+        params.append(str(prefecture_id))
     if corporate is not None:
         where.append("COALESCE(a.is_allowed_corporate, FALSE) = %s")
         params.append(bool(corporate))
