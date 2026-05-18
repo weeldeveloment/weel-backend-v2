@@ -1717,6 +1717,7 @@ class PropertyListCreateView(APIView):
             or request.query_params.get("kind")
         )
         requested_kind = self.forced_property_type or parse_property_kind(kind_value)
+
         if requested_kind == PROPERTY_KIND_COTTAGE:
             rows = _list_cottage_rows(
                 request.query_params,
@@ -1724,12 +1725,31 @@ class PropertyListCreateView(APIView):
                 default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
             )
             return Response(CottageListSerializer(rows, many=True, context=ctx).data)
-        rows = _list_apartment_rows(
+
+        if requested_kind == PROPERTY_KIND_APARTMENT:
+            rows = _list_apartment_rows(
+                request.query_params,
+                public_only=True,
+                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            )
+            return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
+
+        # Default: return both apartments and cottages (mixed list)
+        apt_rows = _list_apartment_rows(
             request.query_params,
             public_only=True,
             default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
         )
-        return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
+        cot_rows = _list_cottage_rows(
+            request.query_params,
+            public_only=True,
+            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+        )
+        data = (
+            ApartmentListSerializer(apt_rows, many=True, context=ctx).data
+            + CottageListSerializer(cot_rows, many=True, context=ctx).data
+        )
+        return Response(data, status=status.HTTP_200_OK)
 
     def post(self, request, *args, **kwargs):
         if self.forced_property_type == PROPERTY_KIND_COTTAGE:
