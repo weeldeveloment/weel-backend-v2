@@ -3083,17 +3083,19 @@ class PartnerPropertyListView(APIView):
         operation_summary="List partner properties",
         operation_description="Partner-only. Returns the authenticated partner's own apartments and cottages, including unverified and archived. Supports the same filters as public list.",
         tags=["Property / Partner"],
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS
-        + [
-            openapi.Parameter(
-                "property_type",
-                openapi.IN_QUERY,
-                type=openapi.TYPE_STRING,
-                enum=["apartment", "cottage"],
-                required=False,
-                description="Filter by property kind. Omit to return both.",
-            ),
-        ],
+        manual_parameters=(
+            [p for p in PROPERTY_LIST_QUERY_PARAMS if p.name != "property_type"]
+            + [
+                openapi.Parameter(
+                    "property_type",
+                    openapi.IN_QUERY,
+                    type=openapi.TYPE_STRING,
+                    enum=["apartment", "cottage"],
+                    required=False,
+                    description="Filter by property kind. Omit to return both.",
+                ),
+            ]
+        ),
         responses={
             200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
             401: _ERROR_DETAIL_SCHEMA,
@@ -3219,7 +3221,7 @@ class AdminAllPropertiesListView(APIView):
     @swagger_auto_schema(
         tags=["Admin / Property"],
         manual_parameters=(
-            PROPERTY_LIST_QUERY_PARAMS
+            [p for p in PROPERTY_LIST_QUERY_PARAMS if p.name != "property_type"]
             + [
                 openapi.Parameter(
                     "property_type",
