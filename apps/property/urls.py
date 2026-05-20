@@ -53,7 +53,7 @@ urlpatterns = [
     ),
     path("districts/", DistrictListView.as_view(), name="district-list"),
     path("prefectures/", PrefectureListView.as_view(), name="prefecture-list"),
-    re_path(r"^ /?$", PrefectureListView.as_view(), name="prefecture-list-compat-space"),
+    re_path(r"^ ?$", PrefectureListView.as_view(), name="prefecture-list-compat-space"),
     path("services/", PropertyServiceListView.as_view(), name="property-service-list"),
     path(
         "recommendations/",
