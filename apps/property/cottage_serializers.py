@@ -350,6 +350,9 @@ class CottageListSerializer(serializers.Serializer):
             "guid": str(COTTAGE_TYPE_GUID),
             "title": _cottage_type_title(lang),
         }
+        row["comment_count"] = int(
+            row.get("review_count") or row.get("comment_count") or 0
+        )
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
         row["price"] = _parse_jsonb_price(row.get("price"))

@@ -1,8 +1,9 @@
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 
 from core.celery import app
 from django.conf import settings
+from django.utils import timezone
 
 from .services import EskizService, OTPRedisService, TelegramService
 from .models.logs import SmsPurpose
@@ -200,9 +201,12 @@ def send_partner_property_check_reminders(self):
 
     for partner in partners:
         last_sent_at = reminder_logs_by_phone.get(partner["phone_number"])
-        if last_sent_at and (last_sent_at + PARTNER_PROPERTY_REMINDER_INTERVAL) > self.app.now():
-            skipped_recent_count += 1
-            continue
+        if last_sent_at:
+            if timezone.is_naive(last_sent_at):
+                last_sent_at = timezone.make_aware(last_sent_at, timezone=dt_timezone.utc)
+            if (last_sent_at + PARTNER_PROPERTY_REMINDER_INTERVAL) > timezone.now():
+                skipped_recent_count += 1
+                continue
 
         try:
             eskiz_service.send_text_sms(
