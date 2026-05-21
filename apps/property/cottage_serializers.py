@@ -290,6 +290,7 @@ class CottageListSerializer(serializers.Serializer):
     beds = serializers.IntegerField(allow_null=True)
     bathrooms = serializers.IntegerField(allow_null=True)
     property_room = serializers.DictField(required=False)
+    comment_count = serializers.IntegerField()
     average_rating = serializers.FloatField(allow_null=True)
     is_favorite = serializers.BooleanField()
     is_allowed_corporate = serializers.BooleanField()
