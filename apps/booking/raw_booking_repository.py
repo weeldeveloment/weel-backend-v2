@@ -49,9 +49,9 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
             c.partner_user_id,
             c.title,
             c.weekend_only_sunday_inclusive,
-            c.price_per_person,
-            c.price_on_working_days,
-            c.price_on_weekends,
+            COALESCE(current_price.price_per_person, c.price_per_person) AS price_per_person,
+            COALESCE(current_price.price_on_working_days, c.price_on_working_days) AS price_on_working_days,
+            COALESCE(current_price.price_on_weekends, c.price_on_weekends) AS price_on_weekends,
             c.currency,
             c.latitude,
             c.longitude,
@@ -80,6 +80,16 @@ def get_verified_property_for_booking(property_guid: str) -> dict[str, Any] | No
             FROM {get_table_name("cottage_price")} cp
             WHERE cp.cottage_id = c.id
         ) monthly_prices ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT
+                cp.price_per_person,
+                cp.price_on_working_days,
+                cp.price_on_weekends
+            FROM {get_table_name("cottage_price")} cp
+            WHERE cp.cottage_id = c.id
+              AND CURRENT_DATE BETWEEN cp.month_from AND cp.month_to
+            LIMIT 1
+        ) current_price ON TRUE
         WHERE c.guid = %s
           AND COALESCE(c.is_verified, FALSE) = TRUE
         """,

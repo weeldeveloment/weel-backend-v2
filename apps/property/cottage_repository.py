@@ -98,9 +98,9 @@ COTTAGE_SELECT = f"""
         c.is_recommended,
         c.weekend_only_sunday_inclusive,
         c.comment_count,
-        c.price_per_person,
-        c.price_on_working_days,
-        c.price_on_weekends,
+        COALESCE(current_price.price_per_person, c.price_per_person) AS price_per_person,
+        COALESCE(current_price.price_on_working_days, c.price_on_working_days) AS price_on_working_days,
+        COALESCE(current_price.price_on_weekends, c.price_on_weekends) AS price_on_weekends,
         c.currency,
         c.img,
         c.partner_user_id,
@@ -173,6 +173,16 @@ COTTAGE_SELECT = f"""
         FROM {COTTAGE_PRICE_TABLE} cp
         WHERE cp.cottage_id = c.id
     ) monthly_prices ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT
+            cp.price_per_person,
+            cp.price_on_working_days,
+            cp.price_on_weekends
+        FROM {COTTAGE_PRICE_TABLE} cp
+        WHERE cp.cottage_id = c.id
+          AND CURRENT_DATE BETWEEN cp.month_from AND cp.month_to
+        LIMIT 1
+    ) current_price ON TRUE
 """
 
 
@@ -221,11 +231,16 @@ def list_cottages(
         where.append("COALESCE(c.is_allowed_corporate, FALSE) = %s")
         params.append(bool(corporate))
     # For cottages, check if at least one price falls within the range
+    # Prefer cottage_price (current effective row), fall back to legacy columns on cottage table.
     if min_price is not None:
-        where.append("(COALESCE(c.price_on_working_days, 0) >= %s OR COALESCE(c.price_on_weekends, 0) >= %s)")
+        where.append(
+            "(COALESCE(current_price.price_on_working_days, c.price_on_working_days, 0) >= %s OR COALESCE(current_price.price_on_weekends, c.price_on_weekends, 0) >= %s)"
+        )
         params.extend([min_price, min_price])
     if max_price is not None:
-        where.append("(COALESCE(c.price_on_working_days, 0) <= %s OR COALESCE(c.price_on_weekends, 0) <= %s)")
+        where.append(
+            "(COALESCE(current_price.price_on_working_days, c.price_on_working_days, 0) <= %s OR COALESCE(current_price.price_on_weekends, c.price_on_weekends, 0) <= %s)"
+        )
         params.extend([max_price, max_price])
 
     return fetch_all(
@@ -821,8 +836,37 @@ def replace_cottage_image(
     return get_cottage_for_partner(str(updated["guid"]), partner_user_id)
 
 
+def _parse_date(value) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
 def effective_cottage_price(row: dict[str, Any], reference_date: date) -> Decimal:
     field = "price_on_weekends" if reference_date.weekday() >= 4 else "price_on_working_days"
+
+    # Prefer cottage_price rows (SSOT), then fall back to legacy top-level columns.
+    price_rows = row.get("price")
+    if price_rows:
+        for item in price_rows:
+            if not isinstance(item, dict):
+                continue
+            month_from = _parse_date(item.get("month_from"))
+            month_to = _parse_date(item.get("month_to"))
+            if month_from and month_to and month_from <= reference_date <= month_to:
+                val = item.get(field)
+                if val is not None:
+                    try:
+                        return Decimal(str(val))
+                    except (InvalidOperation, TypeError, ValueError):
+                        pass
+                break
+
     val = row.get(field)
     if val is not None:
         try:
