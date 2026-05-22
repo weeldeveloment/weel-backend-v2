@@ -17,22 +17,47 @@ from .apartment_repository import COTTAGE_TYPE_GUID, is_prefecture_linked_to_dis
 MAX_PRICE_ABS = Decimal("9999999999.99")
 
 
-def _parse_jsonb_price(raw_price: Any) -> list[dict[str, Any]]:
+def _parse_jsonb_price(raw_price: Any, currency: str | None = None) -> list[dict[str, Any]]:
     """Parse a JSONB `price` column returned by psycopg2.
 
     Plain psycopg2 cursors return JSONB as a string; this normalises
     both string and already-deserialised list representations.
+    When *currency* is provided, nested price fields are converted
+    via `_convert_price_for_output` (e.g. USD -> UZS).
     """
+    items: list[dict[str, Any]] = []
     if isinstance(raw_price, list):
-        return raw_price
-    if isinstance(raw_price, str):
+        items = raw_price
+    elif isinstance(raw_price, str):
         try:
             parsed = json.loads(raw_price)
             if isinstance(parsed, list):
-                return parsed
+                items = parsed
         except (json.JSONDecodeError, TypeError):
             pass
-    return []
+
+    if not items or currency is None:
+        return items
+
+    converted: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        converted.append(
+            {
+                **item,
+                "price_per_person": _convert_price_for_output(
+                    item.get("price_per_person"), currency
+                ),
+                "price_on_working_days": _convert_price_for_output(
+                    item.get("price_on_working_days"), currency
+                ),
+                "price_on_weekends": _convert_price_for_output(
+                    item.get("price_on_weekends"), currency
+                ),
+            }
+        )
+    return converted
 
 
 def _preferred_language(request: Any) -> str:
@@ -355,7 +380,7 @@ class CottageListSerializer(serializers.Serializer):
         )
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
-        row["price"] = _parse_jsonb_price(row.get("price"))
+        row["price"] = _parse_jsonb_price(row.get("price"), row_currency)
         return super().to_representation(row)
 
 
@@ -562,7 +587,7 @@ class CottageDetailSerializer(serializers.Serializer):
             "beds": _parse_int_maybe(row.get("beds")),
             "bathrooms": _parse_int_maybe(row.get("bathrooms")),
         }
-        row["price"] = _parse_jsonb_price(row.get("price"))
+        row["price"] = _parse_jsonb_price(row.get("price"), row_currency)
         return super().to_representation(row)
 
 
