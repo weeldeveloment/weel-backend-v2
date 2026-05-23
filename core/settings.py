@@ -142,7 +142,9 @@ GLOBAL_APPS = [
 
 USE_NORM_DATASTORE = False  # Explicitly disable norm_* datastore usage
 
-LOCAL_APPS: list[str] = []
+LOCAL_APPS: list[str] = [
+    "apps.recommendation",
+]
 
 THIRD_PART_APPS = [
     "channels",

@@ -116,6 +116,23 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
+def _track_client_search(request) -> None:
+    user = getattr(request, "user", None)
+    if not user or not getattr(user, "is_authenticated", False):
+        return
+    if getattr(user, "role", None) != "client":
+        return
+
+    try:
+        from recommendation.graph import record_search
+
+        params = getattr(request, "query_params", None) or getattr(request, "GET", {})
+        flat = {k: v[0] if isinstance(v, (list, tuple)) else v for k, v in params.items()}
+        record_search(int(user.id), flat)
+    except Exception:
+        pass
+
+
 _FAVORITES_CACHE_TTL_SECONDS = 60 * 60 * 24 * 30
 _PROPERTY_META_CACHE_TTL_SECONDS = 60 * 10
 _PROPERTY_LIST_CACHE_TTL_SECONDS = 60
@@ -1526,6 +1543,7 @@ class ApartmentPropertyListCreateView(APIView):
         },
     )
     def get(self, request, *args, **kwargs):
+        _track_client_search(request)
         query_params = request.query_params.copy()
         query_params.pop("limit", None)
 
@@ -1619,6 +1637,7 @@ class CottagePropertyListCreateView(APIView):
         },
     )
     def get(self, request, *args, **kwargs):
+        _track_client_search(request)
         query_params = request.query_params.copy()
         query_params.pop("limit", None)
 
