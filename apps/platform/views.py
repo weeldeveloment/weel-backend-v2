@@ -105,7 +105,10 @@ class PmsSendOTPRegisterView(APIView):
             phone_number, SmsPurpose.PMS_REGISTER, registration_data
         )
 
-        send_otp_sms_eskiz.delay(phone_number, SmsPurpose.PMS_REGISTER, otp_code)
+        try:
+            send_otp_sms_eskiz.delay(phone_number, SmsPurpose.PMS_REGISTER, otp_code)
+        except Exception:
+            logger.warning("Failed to queue SMS task (Redis/Celery unavailable), OTP: %s", otp_code)
         logger.info("PMS Registration OTP for %s: %s", phone_number, otp_code)
 
         return Response({
@@ -213,7 +216,10 @@ class PmsSendOTPLoginView(APIView):
 
         otp_code = OTPRedisService.create_otp(phone_number, SmsPurpose.PMS_LOGIN)
         logger.info("PMS Login OTP for %s: %s", phone_number, otp_code)
-        send_otp_sms_eskiz.delay(phone_number, SmsPurpose.PMS_LOGIN, otp_code)
+        try:
+            send_otp_sms_eskiz.delay(phone_number, SmsPurpose.PMS_LOGIN, otp_code)
+        except Exception:
+            logger.warning("Failed to queue SMS task (Redis/Celery unavailable), OTP: %s", otp_code)
 
         return Response({
             "detail": _("OTP sent successfully"),
