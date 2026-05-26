@@ -12,9 +12,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
-
 from apps.platform.authentication import PmsJWTAuthentication
 
 from apps.pms.repository import (
@@ -123,12 +120,10 @@ def _require_org(request):
 class PropertyListCreateView(PMSBaseView):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
-    @swagger_auto_schema(responses={200: PropertySerializer(many=True)})
     def get(self, request):
         props = list_properties()
         return Response(PropertySerializer(props, many=True).data)
 
-    @swagger_auto_schema(responses={201: PropertySerializer()}, operation_description="Create a new property")
     def post(self, request):
         serializer = PropertySerializer(data=request.data)
         if not serializer.is_valid():
@@ -144,14 +139,12 @@ class PropertyListCreateView(PMSBaseView):
 class PropertyRetrieveUpdateDestroyView(PMSBaseView):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
-    @swagger_auto_schema(responses={200: PropertySerializer()})
     def get(self, request, property_id):
         prop = get_property(property_id)
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(PropertySerializer(prop).data)
 
-    @swagger_auto_schema(responses={200: PropertySerializer()})
     def patch(self, request, property_id):
         serializer = PropertySerializer(data=request.data, partial=True)
         if not serializer.is_valid():
@@ -162,7 +155,6 @@ class PropertyRetrieveUpdateDestroyView(PMSBaseView):
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(PropertySerializer(prop).data)
 
-    @swagger_auto_schema(responses={204: "Deleted"})
     def delete(self, request, property_id):
         if not delete_property(property_id):
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -172,7 +164,6 @@ class PropertyRetrieveUpdateDestroyView(PMSBaseView):
 class PropertyImageCreateView(PMSBaseView):
     parser_classes = [MultiPartParser, FormParser]
 
-    @swagger_auto_schema(responses={201: PropertyImageSerializer()})
     def post(self, request, property_id):
         prop = get_property(property_id)
         if not prop:
@@ -191,7 +182,6 @@ class PropertyImageCreateView(PMSBaseView):
 
 
 class PropertyImageDeleteView(PMSBaseView):
-    @swagger_auto_schema(responses={204: "Deleted"})
     def delete(self, request, property_id, image_id):
         if not delete_property_image(image_id):
             return Response({"detail": "Image not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -199,7 +189,6 @@ class PropertyImageDeleteView(PMSBaseView):
 
 
 class RoomTypeListCreateView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RoomTypeSerializer(many=True)})
     def get(self, request, property_id):
         prop = get_property(property_id)
         if not prop:
@@ -207,7 +196,6 @@ class RoomTypeListCreateView(PMSBaseView):
         types = list_room_types(property_id)
         return Response(RoomTypeSerializer(types, many=True).data)
 
-    @swagger_auto_schema(responses={201: RoomTypeSerializer()})
     def post(self, request, property_id):
         prop = get_property(property_id)
         if not prop:
@@ -224,14 +212,12 @@ class RoomTypeListCreateView(PMSBaseView):
 
 
 class RoomTypeRetrieveUpdateDestroyView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RoomTypeSerializer()})
     def get(self, request, property_id, room_type_id):
         rt = get_room_type(room_type_id, property_id)
         if not rt:
             return Response({"detail": "Room type not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(RoomTypeSerializer(rt).data)
 
-    @swagger_auto_schema(responses={200: RoomTypeSerializer()})
     def patch(self, request, property_id, room_type_id):
         serializer = RoomTypeSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
@@ -242,7 +228,6 @@ class RoomTypeRetrieveUpdateDestroyView(PMSBaseView):
             return Response({"detail": "Room type not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(RoomTypeSerializer(rt).data)
 
-    @swagger_auto_schema(responses={204: "Deleted"})
     def delete(self, request, property_id, room_type_id):
         if not delete_room_type(room_type_id):
             return Response({"detail": "Room type not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -252,7 +237,6 @@ class RoomTypeRetrieveUpdateDestroyView(PMSBaseView):
 class RoomListCreateView(PMSBaseView):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
-    @swagger_auto_schema(responses={200: RoomSerializer(many=True)})
     def get(self, request, property_id):
         prop = get_property(property_id)
         if not prop:
@@ -262,7 +246,6 @@ class RoomListCreateView(PMSBaseView):
         rooms = list_rooms(property_id, room_type_id=int(room_type_id) if room_type_id else None)
         return Response(RoomSerializer(rooms, many=True).data)
 
-    @swagger_auto_schema(responses={201: RoomSerializer()})
     def post(self, request, property_id):
         prop = get_property(property_id)
         if not prop:
@@ -279,14 +262,12 @@ class RoomListCreateView(PMSBaseView):
 
 
 class RoomRetrieveUpdateDestroyView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RoomSerializer()})
     def get(self, request, property_id, room_id):
         room = get_room(room_id, property_id)
         if not room:
             return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(RoomSerializer(room).data)
 
-    @swagger_auto_schema(responses={200: RoomSerializer()})
     def patch(self, request, property_id, room_id):
         serializer = RoomSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
@@ -297,7 +278,6 @@ class RoomRetrieveUpdateDestroyView(PMSBaseView):
             return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(RoomSerializer(room).data)
 
-    @swagger_auto_schema(responses={204: "Deleted"})
     def delete(self, request, property_id, room_id):
         if not delete_room(room_id):
             return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -305,7 +285,6 @@ class RoomRetrieveUpdateDestroyView(PMSBaseView):
 
 
 class RoomMassUpdateView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RoomSerializer(many=True)})
     def post(self, request, property_id):
         if not isinstance(request.data, list):
             return Response({"detail": "Expected a list of room updates."}, status=status.HTTP_400_BAD_REQUEST)
@@ -327,7 +306,6 @@ class RoomMassUpdateView(PMSBaseView):
 class RoomImageCreateView(PMSBaseView):
     parser_classes = [MultiPartParser, FormParser]
 
-    @swagger_auto_schema(responses={201: RoomImageSerializer()})
     def post(self, request, property_id, room_id):
         room = get_room(room_id, property_id)
         if not room:
@@ -346,7 +324,6 @@ class RoomImageCreateView(PMSBaseView):
 
 
 class CalendarView(PMSBaseView):
-    @swagger_auto_schema(responses={200: CalendarSlotSerializer(many=True)})
     def get(self, request, property_id):
         serializer = DateRangeSerializer(data=request.query_params)
         if not serializer.is_valid():
@@ -361,7 +338,6 @@ class CalendarView(PMSBaseView):
 
 
 class CalendarBlockView(PMSBaseView):
-    @swagger_auto_schema(responses={201: CalendarSlotSerializer(many=True)})
     def post(self, request, property_id):
         serializer = RoomIdsSerializer(data=request.data)
         if not serializer.is_valid():
@@ -376,7 +352,6 @@ class CalendarBlockView(PMSBaseView):
 
 
 class CalendarUnblockView(PMSBaseView):
-    @swagger_auto_schema(responses={200: openapi.Response("Unblocked count", openapi.Schema(type=openapi.TYPE_OBJECT, properties={"unblocked": openapi.Schema(type=openapi.TYPE_INTEGER)}))})
     def post(self, request, property_id):
         serializer = RoomIdsSerializer(data=request.data)
         if not serializer.is_valid():
@@ -391,7 +366,6 @@ class CalendarUnblockView(PMSBaseView):
 
 
 class CalendarHoldView(PMSBaseView):
-    @swagger_auto_schema(responses={201: CalendarSlotSerializer(many=True)})
     def post(self, request, property_id):
         serializer = RoomIdsSerializer(data=request.data)
         if not serializer.is_valid():
@@ -407,7 +381,6 @@ class CalendarHoldView(PMSBaseView):
 
 
 class CalendarUnholdView(PMSBaseView):
-    @swagger_auto_schema(responses={200: openapi.Response("Unheld count", openapi.Schema(type=openapi.TYPE_OBJECT, properties={"unheld": openapi.Schema(type=openapi.TYPE_INTEGER)}))})
     def post(self, request, property_id):
         serializer = RoomIdsSerializer(data=request.data)
         if not serializer.is_valid():
@@ -422,13 +395,11 @@ class CalendarUnholdView(PMSBaseView):
 
 
 class GuestListCreateView(PMSBaseView):
-    @swagger_auto_schema(responses={200: GuestSerializer(many=True)})
     def get(self, request):
         search = request.query_params.get("search")
         guests = list_guests(search=search)
         return Response(GuestSerializer(guests, many=True).data)
 
-    @swagger_auto_schema(responses={201: GuestSerializer()})
     def post(self, request):
         serializer = GuestSerializer(data=request.data)
         if not serializer.is_valid():
@@ -441,14 +412,12 @@ class GuestListCreateView(PMSBaseView):
 
 
 class GuestRetrieveUpdateView(PMSBaseView):
-    @swagger_auto_schema(responses={200: GuestSerializer()})
     def get(self, request, guest_id):
         guest = get_guest(guest_id)
         if not guest:
             return Response({"detail": "Guest not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(GuestSerializer(guest).data)
 
-    @swagger_auto_schema(responses={200: GuestSerializer()})
     def patch(self, request, guest_id):
         serializer = GuestSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
@@ -461,7 +430,6 @@ class GuestRetrieveUpdateView(PMSBaseView):
 
 
 class BookingListCreateView(PMSBaseView):
-    @swagger_auto_schema(responses={200: BookingSerializer(many=True)})
     def get(self, request, property_id):
         status_filter = request.query_params.get("status")
         from_date = request.query_params.get("from_date")
@@ -477,7 +445,6 @@ class BookingListCreateView(PMSBaseView):
         )
         return Response(BookingSerializer(bookings, many=True).data)
 
-    @swagger_auto_schema(responses={201: BookingSerializer()})
     def post(self, request, property_id):
         serializer = BookingSerializer(data=request.data)
         if not serializer.is_valid():
@@ -512,7 +479,6 @@ class BookingListCreateView(PMSBaseView):
 
 
 class BookingRetrieveView(PMSBaseView):
-    @swagger_auto_schema(responses={200: BookingSerializer()})
     def get(self, request, property_id, booking_id):
         booking = get_booking(booking_id, property_id)
         if not booking:
@@ -521,7 +487,6 @@ class BookingRetrieveView(PMSBaseView):
 
 
 class BookingAcceptView(PMSBaseView):
-    @swagger_auto_schema(responses={200: BookingSerializer()})
     def post(self, request, property_id, booking_id):
         booking = accept_booking(booking_id, _get_user_id(request))
         if not booking:
@@ -530,7 +495,6 @@ class BookingAcceptView(PMSBaseView):
 
 
 class BookingCancelView(PMSBaseView):
-    @swagger_auto_schema(responses={200: BookingSerializer()})
     def post(self, request, property_id, booking_id):
         booking = cancel_booking(booking_id, _get_user_id(request))
         if not booking:
@@ -539,7 +503,6 @@ class BookingCancelView(PMSBaseView):
 
 
 class BookingCheckInView(PMSBaseView):
-    @swagger_auto_schema(responses={200: BookingSerializer()})
     def post(self, request, property_id, booking_id):
         booking = check_in_booking(booking_id, _get_user_id(request))
         if not booking:
@@ -548,7 +511,6 @@ class BookingCheckInView(PMSBaseView):
 
 
 class BookingCheckOutView(PMSBaseView):
-    @swagger_auto_schema(responses={200: BookingSerializer()})
     def post(self, request, property_id, booking_id):
         booking = check_out_booking(booking_id, _get_user_id(request))
         if not booking:
@@ -557,7 +519,6 @@ class BookingCheckOutView(PMSBaseView):
 
 
 class BookingMoveView(PMSBaseView):
-    @swagger_auto_schema(responses={200: BookingSerializer()})
     def post(self, request, property_id, booking_id):
         serializer = MoveBookingSerializer(data=request.data)
         if not serializer.is_valid():
@@ -576,7 +537,6 @@ class BookingMoveView(PMSBaseView):
 
 
 class BookingMealPlanView(PMSBaseView):
-    @swagger_auto_schema(responses={200: BookingSerializer()})
     def post(self, request, property_id, booking_id):
         serializer = MealPlanChangeSerializer(data=request.data)
         if not serializer.is_valid():
@@ -593,20 +553,17 @@ class BookingMealPlanView(PMSBaseView):
 
 
 class BookingHistoryView(PMSBaseView):
-    @swagger_auto_schema(responses={200: BookingHistorySerializer(many=True)})
     def get(self, request, property_id, booking_id):
         history = get_booking_history(booking_id)
         return Response(BookingHistorySerializer(history, many=True).data)
 
 
 class RateListCreateView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RateSerializer(many=True)})
     def get(self, request, property_id):
         room_type_id = request.query_params.get("room_type_id")
         rates = list_rates(property_id, room_type_id=int(room_type_id) if room_type_id else None)
         return Response(RateSerializer(rates, many=True).data)
 
-    @swagger_auto_schema(responses={201: RateSerializer()})
     def post(self, request, property_id):
         serializer = RateSerializer(data=request.data)
         if not serializer.is_valid():
@@ -619,7 +576,6 @@ class RateListCreateView(PMSBaseView):
 
 
 class RateRetrieveUpdateDestroyView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RateSerializer()})
     def get(self, request, property_id, rate_id):
         rates = list_rates(property_id)
         rate = next((r for r in rates if r["id"] == rate_id), None)
@@ -627,7 +583,6 @@ class RateRetrieveUpdateDestroyView(PMSBaseView):
             return Response({"detail": "Rate not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(RateSerializer(rate).data)
 
-    @swagger_auto_schema(responses={200: RateSerializer()})
     def patch(self, request, property_id, rate_id):
         serializer = RateSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
@@ -638,7 +593,6 @@ class RateRetrieveUpdateDestroyView(PMSBaseView):
             return Response({"detail": "Rate not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(RateSerializer(rate).data)
 
-    @swagger_auto_schema(responses={204: "Deleted"})
     def delete(self, request, property_id, rate_id):
         if not delete_rate(rate_id):
             return Response({"detail": "Rate not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -646,7 +600,6 @@ class RateRetrieveUpdateDestroyView(PMSBaseView):
 
 
 class ReviewListCreateView(PMSBaseView):
-    @swagger_auto_schema(responses={200: ReviewSerializer(many=True)})
     def get(self, request, property_id):
         rating = request.query_params.get("rating")
         is_complained = request.query_params.get("is_complained")
@@ -657,7 +610,6 @@ class ReviewListCreateView(PMSBaseView):
         )
         return Response(ReviewSerializer(reviews, many=True).data)
 
-    @swagger_auto_schema(responses={201: ReviewSerializer()})
     def post(self, request, property_id):
         serializer = ReviewSerializer(data=request.data)
         if not serializer.is_valid():
@@ -670,7 +622,6 @@ class ReviewListCreateView(PMSBaseView):
 
 
 class ReviewRespondView(PMSBaseView):
-    @swagger_auto_schema(responses={200: ReviewSerializer()})
     def post(self, request, property_id, review_id):
         serializer = ReviewRespondSerializer(data=request.data)
         if not serializer.is_valid():
@@ -683,7 +634,6 @@ class ReviewRespondView(PMSBaseView):
 
 
 class ReviewComplainView(PMSBaseView):
-    @swagger_auto_schema(responses={200: ReviewSerializer()})
     def post(self, request, property_id, review_id):
         serializer = ReviewComplainSerializer(data=request.data)
         if not serializer.is_valid():
