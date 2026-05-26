@@ -264,6 +264,25 @@ def create_partner(
     )
 
 
+def create_pms_user(
+    *,
+    phone_number: str,
+    first_name: str = "",
+    last_name: str = "",
+) -> RawUser:
+    normalized = normalized_phone_candidates(phone_number)
+    stored_phone = normalized[0] if normalized else phone_number
+    return _insert_user(
+        role="pms",
+        first_name=first_name,
+        last_name=last_name,
+        phone_number=stored_phone,
+        username="",
+        email=None,
+        is_active=True,
+    )
+
+
 def create_sms_log(phone_number: str, purpose: str | Any, is_sent: bool) -> None:
     if not table_exists("users_smslog"):
         return
