@@ -169,64 +169,57 @@ class PmsVerifyOTPRegisterView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            slug_base = org_name.lower().replace(" ", "-").replace("_", "-")
-            slug = slug_base
-            counter = 1
-            while get_organization_by_slug(slug):
-                slug = f"{slug_base}-{counter}"
-                counter += 1
+        slug_base = org_name.lower().replace(" ", "-").replace("_", "-")
+        slug = slug_base
+        counter = 1
+        while get_organization_by_slug(slug):
+            slug = f"{slug_base}-{counter}"
+            counter += 1
 
-            schema_name = f"tenant_{uuid4().hex[:12]}"
+        schema_name = f"tenant_{uuid4().hex[:12]}"
 
-            user = create_pms_user(
-                phone_number=phone_number,
-                first_name=registration_data.get("first_name", ""),
-                last_name=registration_data.get("last_name", ""),
-            )
-            if not user:
-                return Response(
-                    {"detail": "Failed to create user."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
-            org = create_organization(name=org_name, slug=slug, schema_name=schema_name)
-            if not org:
-                return Response(
-                    {"detail": "Failed to create organization."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
-            create_organization_member(
-                organization_id=org["id"],
-                user_id=user.id,
-                role="owner",
-            )
-
-            user_dict = {
-                "id": user.id,
-                "phone_number": user.phone_number,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-            }
-
-            tokens = _create_pms_tokens(user_dict, organization_id=org["id"])
-
+        user = create_pms_user(
+            phone_number=phone_number,
+            first_name=registration_data.get("first_name", ""),
+            last_name=registration_data.get("last_name", ""),
+        )
+        if not user:
             return Response(
-                PmsLoginResponseSerializer({
-                    "access": tokens["access"],
-                    "refresh": tokens["refresh"],
-                    "user": PlatformUserSerializer(user_dict).data,
-                    "organization": OrganizationSerializer(org).data,
-                }).data,
-                status=status.HTTP_201_CREATED,
-            )
-        except Exception:
-            logger.exception("PMS register verify failed for phone=%s", phone_number)
-            return Response(
-                {"detail": "Internal server error.", "status_code": 500},
+                {"detail": "Failed to create user."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+        org = create_organization(name=org_name, slug=slug, schema_name=schema_name)
+        if not org:
+            return Response(
+                {"detail": "Failed to create organization."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        create_organization_member(
+            organization_id=org["id"],
+            user_id=user.id,
+            role="owner",
+        )
+
+        user_dict = {
+            "id": user.id,
+            "phone_number": user.phone_number,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        }
+
+        tokens = _create_pms_tokens(user_dict, organization_id=org["id"])
+
+        return Response(
+            PmsLoginResponseSerializer({
+                "access": tokens["access"],
+                "refresh": tokens["refresh"],
+                "user": PlatformUserSerializer(user_dict).data,
+                "organization": OrganizationSerializer(org).data,
+            }).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class PmsSendOTPLoginView(APIView):

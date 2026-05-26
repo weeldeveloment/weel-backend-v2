@@ -168,6 +168,17 @@ def exception_errors_format_handler(exc, context):
 
     # If an unexpected error occurs (server error, etc.)
     if response is None:
+        import logging
+        import traceback
+        logger = logging.getLogger("django.request")
+        request = context.get("request")
+        logger.exception(
+            "Unhandled exception: %s %s\nRequest data: %s\nTraceback:\n%s",
+            request.method if request else "?",
+            request.path if request else "?",
+            getattr(request, "data", {}),
+            traceback.format_exc(),
+        )
         return Response(
             {"errors": [{"detail": _("Internal server error."), "status_code": 500}]},
             status=500,
