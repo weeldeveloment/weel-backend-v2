@@ -222,6 +222,8 @@ if settings.PROMETHEUS_ENABLED:
 urlpatterns += [
     path("i18n/", include("django.conf.urls.i18n")),
     path("api/", include("apps.urls")),
+    path("api/platform/", include("apps.platform.urls")),
+    path("api/pms/", include("apps.pms.urls")),
 ]
 
 if settings.ENABLE_SWAGGER_UI:

@@ -144,6 +144,8 @@ USE_NORM_DATASTORE = False  # Explicitly disable norm_* datastore usage
 
 LOCAL_APPS: list[str] = [
     "apps.recommendation",
+    "apps.platform",
+    "apps.pms",
 ]
 
 THIRD_PART_APPS = [
@@ -170,6 +172,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.middleware.locale.HeaderLocaleMiddleware",
     "django.middleware.locale.LocaleMiddleware",
+    "core.middleware.tenant.TenantMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
     "request_logging.middleware.LoggingMiddleware",  # django-request-logging
     "core.middleware.exception_logging.ExceptionLoggingMiddleware",
