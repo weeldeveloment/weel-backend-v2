@@ -87,6 +87,7 @@ from apps.pms.serializers import (
     ReviewRespondSerializer,
     ReviewSerializer,
     RoomIdsSerializer,
+    RoomImageSerializer,
     RoomMassUpdateItemSerializer,
     RoomSerializer,
     RoomTypeSerializer,
