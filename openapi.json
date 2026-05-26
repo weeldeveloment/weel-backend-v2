@@ -3,19 +3,8 @@
   "info": {
     "title": "Weel API",
     "description": "API documentation for the Weel backend",
-    "contact": {
-      "name": "Weel Support",
-      "url": "https://weel.uz"
-    },
-    "license": {
-      "name": "Proprietary"
-    },
     "version": "v1"
   },
-  "host": "dev.weel.uz",
-  "schemes": [
-    "https"
-  ],
   "basePath": "/api",
   "consumes": [
     "application/json"
@@ -1243,10 +1232,28 @@
       "post": {
         "operationId": "platform_login_create",
         "description": "",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "data",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "required": [
+                "phone_number"
+              ],
+              "type": "object",
+              "properties": {
+                "phone_number": {
+                  "description": "Phone number",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "OTP sent successfully"
           }
         },
         "tags": [
@@ -1259,10 +1266,33 @@
       "post": {
         "operationId": "platform_login_verify_create",
         "description": "",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "data",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "required": [
+                "phone_number",
+                "otp_code"
+              ],
+              "type": "object",
+              "properties": {
+                "phone_number": {
+                  "description": "Phone number",
+                  "type": "string"
+                },
+                "otp_code": {
+                  "description": "OTP code",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "Login successful"
           }
         },
         "tags": [
@@ -1385,10 +1415,40 @@
       "post": {
         "operationId": "platform_register_create",
         "description": "",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "data",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "required": [
+                "phone_number"
+              ],
+              "type": "object",
+              "properties": {
+                "phone_number": {
+                  "description": "Phone number",
+                  "type": "string"
+                },
+                "org_name": {
+                  "description": "Organization name",
+                  "type": "string"
+                },
+                "first_name": {
+                  "description": "First name",
+                  "type": "string"
+                },
+                "last_name": {
+                  "description": "Last name",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "OTP sent successfully"
           }
         },
         "tags": [
@@ -1401,10 +1461,33 @@
       "post": {
         "operationId": "platform_register_verify_create",
         "description": "",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "data",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "required": [
+                "phone_number",
+                "otp_code"
+              ],
+              "type": "object",
+              "properties": {
+                "phone_number": {
+                  "description": "Phone number",
+                  "type": "string"
+                },
+                "otp_code": {
+                  "description": "OTP code",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ],
         "responses": {
           "201": {
-            "description": ""
+            "description": "Registration successful"
           }
         },
         "tags": [
@@ -1436,7 +1519,13 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Guest"
+              }
+            }
           }
         },
         "tags": [
@@ -1449,7 +1538,10 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Guest"
+            }
           }
         },
         "tags": [
@@ -1465,7 +1557,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Guest"
+            }
           }
         },
         "tags": [
@@ -1478,7 +1573,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Guest"
+            }
           }
         },
         "tags": [
@@ -1501,7 +1599,13 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Property"
+              }
+            }
           }
         },
         "tags": [
@@ -1510,11 +1614,14 @@
       },
       "post": {
         "operationId": "pms_properties_create",
-        "description": "",
+        "description": "Create a new property",
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Property"
+            }
           }
         },
         "tags": [
@@ -1530,7 +1637,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Property"
+            }
           }
         },
         "tags": [
@@ -1543,7 +1653,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Property"
+            }
           }
         },
         "tags": [
@@ -1556,7 +1669,7 @@
         "parameters": [],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
           }
         },
         "tags": [
@@ -1579,7 +1692,13 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Booking"
+              }
+            }
           }
         },
         "tags": [
@@ -1592,7 +1711,10 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Booking"
+            }
           }
         },
         "tags": [
@@ -1615,7 +1737,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Booking"
+            }
           }
         },
         "tags": [
@@ -1643,8 +1768,11 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Booking"
+            }
           }
         },
         "tags": [
@@ -1672,8 +1800,11 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Booking"
+            }
           }
         },
         "tags": [
@@ -1701,8 +1832,11 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Booking"
+            }
           }
         },
         "tags": [
@@ -1730,8 +1864,11 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Booking"
+            }
           }
         },
         "tags": [
@@ -1760,7 +1897,13 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/BookingHistory"
+              }
+            }
           }
         },
         "tags": [
@@ -1788,8 +1931,11 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Booking"
+            }
           }
         },
         "tags": [
@@ -1817,8 +1963,11 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Booking"
+            }
           }
         },
         "tags": [
@@ -1847,7 +1996,13 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CalendarSlot"
+              }
+            }
           }
         },
         "tags": [
@@ -1870,7 +2025,13 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CalendarSlot"
+              }
+            }
           }
         },
         "tags": [
@@ -1893,7 +2054,13 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CalendarSlot"
+              }
+            }
           }
         },
         "tags": [
@@ -1915,8 +2082,16 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "Unblocked count",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "unblocked": {
+                  "type": "integer"
+                }
+              }
+            }
           }
         },
         "tags": [
@@ -1938,8 +2113,16 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "Unheld count",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "unheld": {
+                  "type": "integer"
+                }
+              }
+            }
           }
         },
         "tags": [
@@ -1962,7 +2145,10 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/PropertyImage"
+            }
           }
         },
         "consumes": [
@@ -1989,7 +2175,7 @@
         "parameters": [],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
           }
         },
         "tags": [
@@ -2018,7 +2204,13 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Rate"
+              }
+            }
           }
         },
         "tags": [
@@ -2031,7 +2223,10 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Rate"
+            }
           }
         },
         "tags": [
@@ -2054,7 +2249,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Rate"
+            }
           }
         },
         "tags": [
@@ -2067,7 +2265,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Rate"
+            }
           }
         },
         "tags": [
@@ -2080,7 +2281,7 @@
         "parameters": [],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
           }
         },
         "tags": [
@@ -2109,7 +2310,13 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Review"
+              }
+            }
           }
         },
         "tags": [
@@ -2122,7 +2329,10 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Review"
+            }
           }
         },
         "tags": [
@@ -2144,8 +2354,11 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Review"
+            }
           }
         },
         "tags": [
@@ -2173,8 +2386,11 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Review"
+            }
           }
         },
         "tags": [
@@ -2203,7 +2419,13 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RoomType"
+              }
+            }
           }
         },
         "tags": [
@@ -2216,7 +2438,10 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/RoomType"
+            }
           }
         },
         "tags": [
@@ -2239,7 +2464,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/RoomType"
+            }
           }
         },
         "tags": [
@@ -2252,7 +2480,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/RoomType"
+            }
           }
         },
         "tags": [
@@ -2265,7 +2496,7 @@
         "parameters": [],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
           }
         },
         "tags": [
@@ -2294,7 +2525,13 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Room"
+              }
+            }
           }
         },
         "tags": [
@@ -2307,7 +2544,10 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Room"
+            }
           }
         },
         "tags": [
@@ -2329,8 +2569,14 @@
         "description": "",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Room"
+              }
+            }
           }
         },
         "tags": [
@@ -2353,7 +2599,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Room"
+            }
           }
         },
         "tags": [
@@ -2366,7 +2615,10 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/Room"
+            }
           }
         },
         "tags": [
@@ -2379,7 +2631,7 @@
         "parameters": [],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
           }
         },
         "tags": [
@@ -2408,7 +2660,10 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "schema": {
+              "$ref": "#/definitions/RoomImage"
+            }
           }
         },
         "consumes": [
@@ -10397,6 +10652,907 @@
             "ios",
             "android"
           ]
+        }
+      }
+    },
+    "Guest": {
+      "required": [
+        "first_name"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "first_name": {
+          "title": "First name",
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1
+        },
+        "last_name": {
+          "title": "Last name",
+          "type": "string",
+          "maxLength": 100,
+          "x-nullable": true
+        },
+        "email": {
+          "title": "Email",
+          "type": "string",
+          "format": "email",
+          "x-nullable": true
+        },
+        "phone": {
+          "title": "Phone",
+          "type": "string",
+          "maxLength": 32,
+          "x-nullable": true
+        },
+        "id_document": {
+          "title": "Id document",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "x-nullable": true
+          },
+          "default": {}
+        },
+        "preferences": {
+          "title": "Preferences",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "x-nullable": true
+          },
+          "default": {}
+        },
+        "is_vip": {
+          "title": "Is vip",
+          "type": "boolean",
+          "default": false
+        },
+        "is_blacklisted": {
+          "title": "Is blacklisted",
+          "type": "boolean",
+          "default": false
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "string",
+          "x-nullable": true
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        },
+        "updated_at": {
+          "title": "Updated at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        }
+      }
+    },
+    "Property": {
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "name": {
+          "title": "Name",
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1
+        },
+        "description_uz": {
+          "title": "Description uz",
+          "type": "string",
+          "x-nullable": true
+        },
+        "description_ru": {
+          "title": "Description ru",
+          "type": "string",
+          "x-nullable": true
+        },
+        "description_en": {
+          "title": "Description en",
+          "type": "string",
+          "x-nullable": true
+        },
+        "address": {
+          "title": "Address",
+          "type": "string",
+          "x-nullable": true
+        },
+        "city": {
+          "title": "City",
+          "type": "string",
+          "x-nullable": true
+        },
+        "country": {
+          "title": "Country",
+          "type": "string",
+          "default": "UZ",
+          "minLength": 1
+        },
+        "latitude": {
+          "title": "Latitude",
+          "type": "string",
+          "format": "decimal",
+          "x-nullable": true
+        },
+        "longitude": {
+          "title": "Longitude",
+          "type": "string",
+          "format": "decimal",
+          "x-nullable": true
+        },
+        "star_rating": {
+          "title": "Star rating",
+          "type": "integer",
+          "maximum": 5,
+          "minimum": 0,
+          "x-nullable": true
+        },
+        "amenities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "check_in_time": {
+          "title": "Check in time",
+          "type": "string",
+          "x-nullable": true
+        },
+        "check_out_time": {
+          "title": "Check out time",
+          "type": "string",
+          "x-nullable": true
+        },
+        "cancellation_policy": {
+          "title": "Cancellation policy",
+          "type": "string",
+          "x-nullable": true
+        },
+        "quiet_hours": {
+          "title": "Quiet hours",
+          "type": "boolean",
+          "default": true
+        },
+        "alcohol_allowed": {
+          "title": "Alcohol allowed",
+          "type": "boolean",
+          "default": true
+        },
+        "pets_allowed": {
+          "title": "Pets allowed",
+          "type": "boolean",
+          "default": false
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string",
+          "default": "USD",
+          "minLength": 1
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string",
+          "default": "Asia/Tashkent",
+          "minLength": 1
+        },
+        "photos": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "is_active": {
+          "title": "Is active",
+          "type": "boolean",
+          "readOnly": true
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        },
+        "updated_at": {
+          "title": "Updated at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        }
+      }
+    },
+    "Booking": {
+      "required": [
+        "room_id",
+        "check_in",
+        "check_out"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "property_id": {
+          "title": "Property id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "room_id": {
+          "title": "Room id",
+          "type": "integer"
+        },
+        "guest_id": {
+          "title": "Guest id",
+          "type": "integer",
+          "x-nullable": true
+        },
+        "booking_number": {
+          "title": "Booking number",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1
+        },
+        "check_in": {
+          "title": "Check in",
+          "type": "string",
+          "format": "date"
+        },
+        "check_out": {
+          "title": "Check out",
+          "type": "string",
+          "format": "date"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1
+        },
+        "source": {
+          "title": "Source",
+          "type": "string",
+          "enum": [
+            "direct",
+            "ota",
+            "b2b",
+            "walk_in"
+          ],
+          "default": "direct"
+        },
+        "meal_plan": {
+          "title": "Meal plan",
+          "type": "string",
+          "enum": [
+            "RO",
+            "BB",
+            "HB",
+            "FB",
+            "AI",
+            "UAI"
+          ],
+          "default": "RO"
+        },
+        "adult_count": {
+          "title": "Adult count",
+          "type": "integer",
+          "default": 1
+        },
+        "child_count": {
+          "title": "Child count",
+          "type": "integer",
+          "default": 0
+        },
+        "rate": {
+          "title": "Rate",
+          "type": "string",
+          "format": "decimal",
+          "x-nullable": true
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string",
+          "default": "USD",
+          "minLength": 1
+        },
+        "payment_status": {
+          "title": "Payment status",
+          "type": "string",
+          "enum": [
+            "pending",
+            "paid",
+            "partial",
+            "refunded"
+          ],
+          "default": "pending"
+        },
+        "total_cost": {
+          "title": "Total cost",
+          "type": "string",
+          "format": "decimal",
+          "x-nullable": true
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "string",
+          "x-nullable": true
+        },
+        "room_number": {
+          "title": "Room number",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1,
+          "x-nullable": true
+        },
+        "guest_first_name": {
+          "title": "Guest first name",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1,
+          "x-nullable": true
+        },
+        "guest_last_name": {
+          "title": "Guest last name",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1,
+          "x-nullable": true
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        },
+        "updated_at": {
+          "title": "Updated at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        }
+      }
+    },
+    "BookingHistory": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "booking_id": {
+          "title": "Booking id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "action": {
+          "title": "Action",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1
+        },
+        "previous_value": {
+          "title": "Previous value",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "x-nullable": true
+          },
+          "readOnly": true
+        },
+        "new_value": {
+          "title": "New value",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "x-nullable": true
+          },
+          "readOnly": true
+        },
+        "user_id": {
+          "title": "User id",
+          "type": "integer",
+          "readOnly": true,
+          "x-nullable": true
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        }
+      }
+    },
+    "CalendarSlot": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "room_id": {
+          "title": "Room id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "room_number": {
+          "title": "Room number",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1,
+          "x-nullable": true
+        },
+        "room_type_id": {
+          "title": "Room type id",
+          "type": "integer",
+          "readOnly": true,
+          "x-nullable": true
+        },
+        "date": {
+          "title": "Date",
+          "type": "string",
+          "format": "date",
+          "readOnly": true
+        },
+        "status": {
+          "title": "Status",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1
+        },
+        "hold_expires_at": {
+          "title": "Hold expires at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true,
+          "x-nullable": true
+        }
+      }
+    },
+    "PropertyImage": {
+      "required": [
+        "image_url"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "property_id": {
+          "title": "Property id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "image_url": {
+          "title": "Image url",
+          "type": "string",
+          "minLength": 1
+        },
+        "order": {
+          "title": "Order",
+          "type": "integer",
+          "default": 0
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        }
+      }
+    },
+    "Rate": {
+      "required": [
+        "room_type_id",
+        "date_from",
+        "date_to",
+        "rate"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "property_id": {
+          "title": "Property id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "room_type_id": {
+          "title": "Room type id",
+          "type": "integer"
+        },
+        "date_from": {
+          "title": "Date from",
+          "type": "string",
+          "format": "date"
+        },
+        "date_to": {
+          "title": "Date to",
+          "type": "string",
+          "format": "date"
+        },
+        "rate": {
+          "title": "Rate",
+          "type": "string",
+          "format": "decimal"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string",
+          "default": "USD",
+          "minLength": 1
+        },
+        "min_stay": {
+          "title": "Min stay",
+          "type": "integer",
+          "default": 1
+        },
+        "is_weekend_rate": {
+          "title": "Is weekend rate",
+          "type": "boolean",
+          "default": false
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        },
+        "updated_at": {
+          "title": "Updated at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        }
+      }
+    },
+    "Review": {
+      "required": [
+        "guest_name",
+        "rating"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "property_id": {
+          "title": "Property id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "booking_id": {
+          "title": "Booking id",
+          "type": "integer",
+          "x-nullable": true
+        },
+        "guest_name": {
+          "title": "Guest name",
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1
+        },
+        "rating": {
+          "title": "Rating",
+          "type": "string",
+          "format": "decimal"
+        },
+        "categories": {
+          "title": "Categories",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "x-nullable": true
+          },
+          "default": {}
+        },
+        "text": {
+          "title": "Text",
+          "type": "string",
+          "x-nullable": true
+        },
+        "hotel_response": {
+          "title": "Hotel response",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1,
+          "x-nullable": true
+        },
+        "response_date": {
+          "title": "Response date",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true,
+          "x-nullable": true
+        },
+        "is_complained": {
+          "title": "Is complained",
+          "type": "boolean",
+          "readOnly": true
+        },
+        "complaint_reason": {
+          "title": "Complaint reason",
+          "type": "string",
+          "readOnly": true,
+          "minLength": 1,
+          "x-nullable": true
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        },
+        "updated_at": {
+          "title": "Updated at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        }
+      }
+    },
+    "RoomType": {
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "property_id": {
+          "title": "Property id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "name": {
+          "title": "Name",
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1
+        },
+        "description": {
+          "title": "Description",
+          "type": "string",
+          "x-nullable": true
+        },
+        "base_rate": {
+          "title": "Base rate",
+          "type": "string",
+          "format": "decimal",
+          "x-nullable": true
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string",
+          "default": "USD",
+          "minLength": 1
+        },
+        "capacity": {
+          "title": "Capacity",
+          "type": "integer",
+          "default": 2
+        },
+        "amenities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "photos": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "is_active": {
+          "title": "Is active",
+          "type": "boolean",
+          "readOnly": true
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        },
+        "updated_at": {
+          "title": "Updated at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        }
+      }
+    },
+    "Room": {
+      "required": [
+        "room_number"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "property_id": {
+          "title": "Property id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "room_type_id": {
+          "title": "Room type id",
+          "type": "integer",
+          "x-nullable": true
+        },
+        "room_number": {
+          "title": "Room number",
+          "type": "string",
+          "maxLength": 20,
+          "minLength": 1
+        },
+        "floor": {
+          "title": "Floor",
+          "type": "integer",
+          "default": 1
+        },
+        "area": {
+          "title": "Area",
+          "type": "string",
+          "format": "decimal",
+          "x-nullable": true
+        },
+        "beds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "x-nullable": true
+            }
+          },
+          "default": []
+        },
+        "amenities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "photos": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "condition": {
+          "title": "Condition",
+          "type": "string",
+          "enum": [
+            "clean",
+            "dirty",
+            "inspection",
+            "maintenance"
+          ],
+          "default": "clean"
+        },
+        "availability": {
+          "title": "Availability",
+          "type": "string",
+          "enum": [
+            "available",
+            "occupied",
+            "blocked"
+          ],
+          "default": "available"
+        },
+        "capacity": {
+          "title": "Capacity",
+          "type": "integer",
+          "default": 2
+        },
+        "meal_plan": {
+          "title": "Meal plan",
+          "type": "string",
+          "enum": [
+            "RO",
+            "BB",
+            "HB",
+            "FB",
+            "AI",
+            "UAI"
+          ],
+          "default": "BB"
+        },
+        "is_active": {
+          "title": "Is active",
+          "type": "boolean",
+          "readOnly": true
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        },
+        "updated_at": {
+          "title": "Updated at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
+        }
+      }
+    },
+    "RoomImage": {
+      "required": [
+        "image_url"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "room_id": {
+          "title": "Room id",
+          "type": "integer",
+          "readOnly": true
+        },
+        "image_url": {
+          "title": "Image url",
+          "type": "string",
+          "minLength": 1
+        },
+        "order": {
+          "title": "Order",
+          "type": "integer",
+          "default": 0
+        },
+        "created_at": {
+          "title": "Created at",
+          "type": "string",
+          "format": "date-time",
+          "readOnly": true
         }
       }
     },

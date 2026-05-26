@@ -7,6 +7,8 @@ from uuid import uuid4
 from django.conf import settings
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -87,6 +89,19 @@ class PmsSendOTPRegisterView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "otp_login_send"
 
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["phone_number"],
+            properties={
+                "phone_number": openapi.Schema(type=openapi.TYPE_STRING, description="Phone number"),
+                "org_name": openapi.Schema(type=openapi.TYPE_STRING, description="Organization name"),
+                "first_name": openapi.Schema(type=openapi.TYPE_STRING, description="First name"),
+                "last_name": openapi.Schema(type=openapi.TYPE_STRING, description="Last name"),
+            },
+        ),
+        responses={200: openapi.Response("OTP sent successfully")},
+    )
     def post(self, request):
         serializer = PmsOtpRegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -123,6 +138,17 @@ class PmsVerifyOTPRegisterView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "otp_register_verify"
 
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["phone_number", "otp_code"],
+            properties={
+                "phone_number": openapi.Schema(type=openapi.TYPE_STRING, description="Phone number"),
+                "otp_code": openapi.Schema(type=openapi.TYPE_STRING, description="OTP code"),
+            },
+        ),
+        responses={201: openapi.Response("Registration successful")},
+    )
     def post(self, request):
         serializer = PmsOtpVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -194,6 +220,16 @@ class PmsSendOTPLoginView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "otp_login_send"
 
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["phone_number"],
+            properties={
+                "phone_number": openapi.Schema(type=openapi.TYPE_STRING, description="Phone number"),
+            },
+        ),
+        responses={200: openapi.Response("OTP sent successfully")},
+    )
     def post(self, request):
         serializer = PmsOtpLoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -233,6 +269,17 @@ class PmsVerifyOTPLoginView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "otp_login_verify"
 
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["phone_number", "otp_code"],
+            properties={
+                "phone_number": openapi.Schema(type=openapi.TYPE_STRING, description="Phone number"),
+                "otp_code": openapi.Schema(type=openapi.TYPE_STRING, description="OTP code"),
+            },
+        ),
+        responses={200: openapi.Response("Login successful")},
+    )
     def post(self, request):
         serializer = PmsOtpLoginVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
