@@ -10,6 +10,7 @@ from django.db import connection
 from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
+from shared.raw.tables import USER_TABLE
 from apps.platform.raw.tables import (
     ORGANIZATION_TABLE,
     PLATFORM_USER_TABLE,
@@ -242,9 +243,9 @@ def create_organization_member(
 def get_organization_member(org_id: int, user_id: int) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        SELECT m.*, u.email, u.first_name, u.last_name, u.phone
+        SELECT m.*, u.email, u.first_name, u.last_name, u.phone_number as phone
         FROM {_table(ORGANIZATION_MEMBER_TABLE)} m
-        JOIN {_table(PLATFORM_USER_TABLE)} u ON u.id = m.user_id
+        JOIN {USER_TABLE} u ON u.id = m.user_id
         WHERE m.organization_id = %s AND m.user_id = %s
         LIMIT 1
         """,
@@ -255,9 +256,9 @@ def get_organization_member(org_id: int, user_id: int) -> dict[str, Any] | None:
 def list_organization_members(org_id: int) -> list[dict[str, Any]]:
     return fetch_all(
         f"""
-        SELECT m.*, u.email, u.first_name, u.last_name, u.phone
+        SELECT m.*, u.email, u.first_name, u.last_name, u.phone_number as phone
         FROM {_table(ORGANIZATION_MEMBER_TABLE)} m
-        JOIN {_table(PLATFORM_USER_TABLE)} u ON u.id = m.user_id
+        JOIN {USER_TABLE} u ON u.id = m.user_id
         WHERE m.organization_id = %s
         ORDER BY m.role ASC, u.first_name ASC
         """,
