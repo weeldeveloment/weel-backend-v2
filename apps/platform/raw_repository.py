@@ -30,7 +30,7 @@ def create_organization(
     schema_name: str,
 ) -> dict[str, Any] | None:
     now = timezone.now()
-    return fetch_one(
+    result = fetch_one(
         f"""
         INSERT INTO {_table(ORGANIZATION_TABLE)}
             (id, name, slug, schema_name, is_active, created_at, updated_at)
@@ -39,6 +39,10 @@ def create_organization(
         """,
         [None, name, slug, schema_name, True, now, now],
     )
+    if result:
+        from core.middleware.tenant import invalidate_org_schema_cache
+        invalidate_org_schema_cache(result["id"])
+    return result
 
 
 def get_organization_by_slug(slug: str) -> dict[str, Any] | None:
@@ -93,7 +97,7 @@ def update_organization(org_id: int, **kwargs: Any) -> dict[str, Any] | None:
     values.append(timezone.now())
     values.append(org_id)
 
-    return fetch_one(
+    result = fetch_one(
         f"""
         UPDATE {_table(ORGANIZATION_TABLE)}
         SET {sets}, updated_at = %s
@@ -102,10 +106,14 @@ def update_organization(org_id: int, **kwargs: Any) -> dict[str, Any] | None:
         """,
         values,
     )
+    if result:
+        from core.middleware.tenant import invalidate_org_schema_cache
+        invalidate_org_schema_cache(org_id)
+    return result
 
 
 def deactivate_organization(org_id: int) -> bool:
-    return execute(
+    result = execute(
         f"""
         UPDATE {_table(ORGANIZATION_TABLE)}
         SET is_active = FALSE, updated_at = %s
@@ -113,6 +121,10 @@ def deactivate_organization(org_id: int) -> bool:
         """,
         [timezone.now(), org_id],
     ) > 0
+    if result:
+        from core.middleware.tenant import invalidate_org_schema_cache
+        invalidate_org_schema_cache(org_id)
+    return result
 
 
 # ─── Platform Users ──────────────────────────────────────────────────────────

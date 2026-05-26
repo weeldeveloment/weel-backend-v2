@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from typing import Any
 
 from django.utils.deprecation import MiddlewareMixin
@@ -9,6 +10,15 @@ from django.db import connection
 from apps.platform.raw_repository import get_organization_by_id
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=512)
+def _get_org_schema(organization_id: int) -> dict[str, Any] | None:
+    return get_organization_by_id(organization_id)
+
+
+def invalidate_org_schema_cache(organization_id: int) -> None:
+    _get_org_schema.cache_clear()
 
 
 class TenantMiddleware(MiddlewareMixin):
@@ -39,7 +49,7 @@ class TenantMiddleware(MiddlewareMixin):
             return None
 
         try:
-            org = get_organization_by_id(int(organization_id))
+            org = _get_org_schema(int(organization_id))
             if not org or not org.get("schema_name"):
                 return None
 

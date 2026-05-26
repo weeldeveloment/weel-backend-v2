@@ -198,17 +198,24 @@ class PmsVerifyOTPRegisterView(APIView):
 
         create_organization_member(
             organization_id=org["id"],
-            user_id=user["id"],
+            user_id=user.id,
             role="owner",
         )
 
-        tokens = _create_pms_tokens(user, organization_id=org["id"])
+        user_dict = {
+            "id": user.id,
+            "phone_number": user.phone_number,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        }
+
+        tokens = _create_pms_tokens(user_dict, organization_id=org["id"])
 
         return Response(
             PmsLoginResponseSerializer({
                 "access": tokens["access"],
                 "refresh": tokens["refresh"],
-                "user": PlatformUserSerializer(user).data,
+                "user": PlatformUserSerializer(user_dict).data,
                 "organization": OrganizationSerializer(org).data,
             }).data,
             status=status.HTTP_201_CREATED,
