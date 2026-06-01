@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.core.files.storage import default_storage
+from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -153,7 +154,11 @@ class PropertyListCreateView(PMSBaseView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        prop = create_property(organization_id=int(org_id), **serializer.validated_data)
+        try:
+            prop = create_property(organization_id=int(org_id), **serializer.validated_data)
+        except IntegrityError as e:
+            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
         if not prop:
             return Response({"detail": "Failed to create property."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -255,7 +260,13 @@ class RoomTypeListCreateView(PMSBaseView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        rt = create_room_type(property_id=property_id, **serializer.validated_data)
+        try:
+            rt = create_room_type(property_id=property_id, **serializer.validated_data)
+        except IntegrityError as e:
+            if "duplicate key" in str(e) and "name" in str(e):
+                return Response({"name": "A room type with this name already exists for this property."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
         if not rt:
             return Response({"detail": "Failed to create room type."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(RoomTypeSerializer(rt).data, status=status.HTTP_201_CREATED)
@@ -316,7 +327,13 @@ class RoomListCreateView(PMSBaseView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        room = create_room(property_id=property_id, **serializer.validated_data)
+        try:
+            room = create_room(property_id=property_id, **serializer.validated_data)
+        except IntegrityError as e:
+            if "duplicate key" in str(e) and "room_number" in str(e):
+                return Response({"room_number": "A room with this number already exists for this property."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
         if not room:
             return Response({"detail": "Failed to create room."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(RoomSerializer(room).data, status=status.HTTP_201_CREATED)
@@ -478,7 +495,11 @@ class GuestListCreateView(PMSBaseView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        guest = create_guest(**serializer.validated_data)
+        try:
+            guest = create_guest(**serializer.validated_data)
+        except IntegrityError as e:
+            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
         if not guest:
             return Response({"detail": "Failed to create guest."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(GuestSerializer(guest).data, status=status.HTTP_201_CREATED)
@@ -541,15 +562,19 @@ class BookingListCreateView(PMSBaseView):
                 )
                 guest_id = guest.get("id")
 
-        booking = create_booking(
-            property_id=property_id,
-            check_in=validated["check_in"],
-            check_out=validated["check_out"],
-            room_id=validated["room_id"],
-            guest_id=guest_id,
-            created_by=_get_user_id(request),
-            **{k: v for k, v in validated.items() if k not in ("check_in", "check_out", "room_id")},
-        )
+        try:
+            booking = create_booking(
+                property_id=property_id,
+                check_in=validated["check_in"],
+                check_out=validated["check_out"],
+                room_id=validated["room_id"],
+                guest_id=guest_id,
+                created_by=_get_user_id(request),
+                **{k: v for k, v in validated.items() if k not in ("check_in", "check_out", "room_id")},
+            )
+        except IntegrityError as e:
+            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
         if not booking:
             return Response({"detail": "Failed to create booking."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
@@ -656,7 +681,11 @@ class RateListCreateView(PMSBaseView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        rate = create_rate(property_id=property_id, **serializer.validated_data)
+        try:
+            rate = create_rate(property_id=property_id, **serializer.validated_data)
+        except IntegrityError as e:
+            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
         if not rate:
             return Response({"detail": "Failed to create rate."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(RateSerializer(rate).data, status=status.HTTP_201_CREATED)
@@ -707,7 +736,11 @@ class ReviewListCreateView(PMSBaseView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        review = create_review(property_id=property_id, **serializer.validated_data)
+        try:
+            review = create_review(property_id=property_id, **serializer.validated_data)
+        except IntegrityError as e:
+            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
         if not review:
             return Response({"detail": "Failed to create review."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
