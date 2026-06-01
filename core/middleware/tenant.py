@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
 from typing import Any
 
 from django.utils.deprecation import MiddlewareMixin
@@ -11,14 +10,28 @@ from apps.platform.raw_repository import get_organization_by_id
 
 logger = logging.getLogger(__name__)
 
+_org_schema_cache: dict[int, dict[str, Any] | None] = {}
 
-@lru_cache(maxsize=512)
+
 def _get_org_schema(organization_id: int) -> dict[str, Any] | None:
-    return get_organization_by_id(organization_id)
+    if organization_id in _org_schema_cache:
+        return _org_schema_cache[organization_id]
+    result = get_organization_by_id(organization_id)
+    _org_schema_cache[organization_id] = result
+    return result
 
 
 def invalidate_org_schema_cache(organization_id: int) -> None:
-    _get_org_schema.cache_clear()
+    _org_schema_cache.pop(organization_id, None)
+
+
+def _schema_exists(schema_name: str) -> bool:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = %s)",
+            [schema_name],
+        )
+        return cursor.fetchone()[0]
 
 
 class TenantMiddleware(MiddlewareMixin):
@@ -51,9 +64,15 @@ class TenantMiddleware(MiddlewareMixin):
         try:
             org = _get_org_schema(int(organization_id))
             if not org or not org.get("schema_name"):
+                logger.warning("No schema found for org_id=%s", organization_id)
                 return None
 
             schema_name = org["schema_name"]
+
+            if not _schema_exists(schema_name):
+                logger.error("Tenant schema '%s' does not exist for org_id=%s", schema_name, organization_id)
+                return None
+
             request.organization = org
             request.schema_name = schema_name
 

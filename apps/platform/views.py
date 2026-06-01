@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
@@ -19,6 +20,8 @@ from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 from apps.platform.raw_repository import (
     create_organization,
     create_organization_member,
+    create_tenant_schema,
+    delete_orphaned_pms_user,
     get_organization_by_id,
     get_organization_by_slug,
     get_platform_user_by_id,
@@ -28,6 +31,7 @@ from apps.platform.raw_repository import (
     update_member_role,
     update_organization,
     update_platform_user,
+    user_has_org_membership,
 )
 from apps.platform.serializers import (
     AddMemberSerializer,
@@ -50,7 +54,6 @@ from users.tasks import send_otp_sms_eskiz
 from users.raw_repository import (
     create_pms_user,
     get_active_user_by_phone,
-    exists_user_by_phone,
 )
 from users.tokens import create_pms_tokens
 
@@ -156,11 +159,16 @@ class PmsVerifyOTPRegisterView(APIView):
         phone_number = serializer.validated_data["phone_number"]
         registration_data = serializer.validated_data["registration_data"]
 
-        if exists_user_by_phone(phone_number, role="pms"):
-            return Response(
-                {"detail": "User with this phone number already exists."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        existing_user = get_active_user_by_phone(phone_number, role="pms")
+        if existing_user:
+            if user_has_org_membership(existing_user.id):
+                return Response(
+                    {"detail": "User with this phone number already exists."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            else:
+                delete_orphaned_pms_user(existing_user.id)
+                logger.info("Deleted orphaned PMS user %s for phone %s", existing_user.id, phone_number)
 
         org_name = registration_data.get("org_name", "").strip()
         if not org_name:
@@ -178,29 +186,26 @@ class PmsVerifyOTPRegisterView(APIView):
 
         schema_name = f"tenant_{uuid4().hex[:12]}"
 
-        user = create_pms_user(
-            phone_number=phone_number,
-            first_name=registration_data.get("first_name", ""),
-            last_name=registration_data.get("last_name", ""),
-        )
-        if not user:
-            return Response(
-                {"detail": "Failed to create user."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        with transaction.atomic():
+            create_tenant_schema(schema_name)
 
-        org = create_organization(name=org_name, slug=slug, schema_name=schema_name)
-        if not org:
-            return Response(
-                {"detail": "Failed to create organization."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            user = create_pms_user(
+                phone_number=phone_number,
+                first_name=registration_data.get("first_name", ""),
+                last_name=registration_data.get("last_name", ""),
             )
+            if not user:
+                raise RuntimeError("Failed to create PMS user")
 
-        create_organization_member(
-            organization_id=org["id"],
-            user_id=user.id,
-            role="owner",
-        )
+            org = create_organization(name=org_name, slug=slug, schema_name=schema_name)
+            if not org:
+                raise RuntimeError("Failed to create organization")
+
+            create_organization_member(
+                organization_id=org["id"],
+                user_id=user.id,
+                role="owner",
+            )
 
         user_dict = {
             "id": user.id,
@@ -295,9 +300,11 @@ class PmsVerifyOTPLoginView(APIView):
 
         orgs = get_user_organizations(user["id"])
         if not orgs:
+            delete_orphaned_pms_user(user["id"])
+            logger.info("Deleted orphaned PMS user %s during login attempt", user["id"])
             return Response(
-                {"detail": "No organization membership found for this user."},
-                status=status.HTTP_403_FORBIDDEN,
+                {"detail": "Your account is incomplete. Please register again."},
+                status=status.HTTP_410_GONE,
             )
 
         primary_org = orgs[0]

@@ -24,6 +24,227 @@ def _table(name: str) -> str:
     return name
 
 
+def create_tenant_schema(schema_name: str) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute("CREATE SCHEMA IF NOT EXISTS %s", [schema_name])
+        cursor.execute("SET search_path TO %s, public", [schema_name])
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_property (
+                id BIGSERIAL PRIMARY KEY,
+                name VARCHAR(200) NOT NULL,
+                description_uz TEXT,
+                description_ru TEXT,
+                description_en TEXT,
+                address TEXT,
+                city VARCHAR(100),
+                country VARCHAR(3) DEFAULT 'UZ',
+                latitude NUMERIC(17,14),
+                longitude NUMERIC(17,14),
+                star_rating INTEGER,
+                amenities TEXT[] DEFAULT '{}',
+                check_in_time TIME,
+                check_out_time TIME,
+                cancellation_policy VARCHAR(50),
+                quiet_hours BOOLEAN DEFAULT TRUE,
+                alcohol_allowed BOOLEAN DEFAULT TRUE,
+                pets_allowed BOOLEAN DEFAULT FALSE,
+                currency VARCHAR(3) DEFAULT 'USD',
+                timezone VARCHAR(50) DEFAULT 'Asia/Tashkent',
+                photos TEXT[] DEFAULT '{}',
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_property_image (
+                id BIGSERIAL PRIMARY KEY,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                image_url VARCHAR(500) NOT NULL,
+                "order" INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_room_type (
+                id BIGSERIAL PRIMARY KEY,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                name VARCHAR(100) NOT NULL,
+                description TEXT,
+                base_rate NUMERIC(10,2),
+                currency VARCHAR(3) DEFAULT 'USD',
+                capacity INTEGER DEFAULT 2,
+                amenities TEXT[] DEFAULT '{}',
+                photos TEXT[] DEFAULT '{}',
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_room (
+                id BIGSERIAL PRIMARY KEY,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                room_type_id BIGINT REFERENCES pms_room_type(id) ON DELETE SET NULL,
+                room_number VARCHAR(20) NOT NULL,
+                floor INTEGER DEFAULT 1,
+                area NUMERIC(8,2),
+                beds JSONB DEFAULT '[]',
+                amenities TEXT[] DEFAULT '{}',
+                photos TEXT[] DEFAULT '{}',
+                condition VARCHAR(20) DEFAULT 'clean',
+                availability VARCHAR(20) DEFAULT 'available',
+                capacity INTEGER DEFAULT 2,
+                meal_plan VARCHAR(3) DEFAULT 'BB',
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(property_id, room_number)
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_room_image (
+                id BIGSERIAL PRIMARY KEY,
+                room_id BIGINT NOT NULL REFERENCES pms_room(id) ON DELETE CASCADE,
+                image_url VARCHAR(500) NOT NULL,
+                "order" INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_calendar_slot (
+                id BIGSERIAL PRIMARY KEY,
+                room_id BIGINT NOT NULL REFERENCES pms_room(id) ON DELETE CASCADE,
+                date DATE NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'available',
+                hold_expires_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(room_id, date)
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_guest (
+                id BIGSERIAL PRIMARY KEY,
+                first_name VARCHAR(100) NOT NULL,
+                last_name VARCHAR(100),
+                email VARCHAR(254),
+                phone VARCHAR(32),
+                id_document JSONB DEFAULT '{}',
+                preferences JSONB DEFAULT '{}',
+                is_vip BOOLEAN DEFAULT FALSE,
+                is_blacklisted BOOLEAN DEFAULT FALSE,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_booking (
+                id BIGSERIAL PRIMARY KEY,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                room_id BIGINT NOT NULL REFERENCES pms_room(id) ON DELETE RESTRICT,
+                guest_id BIGINT REFERENCES pms_guest(id) ON DELETE SET NULL,
+                booking_number VARCHAR(20) NOT NULL UNIQUE,
+                check_in DATE NOT NULL,
+                check_out DATE NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'new',
+                source VARCHAR(20) NOT NULL DEFAULT 'direct',
+                meal_plan VARCHAR(3) NOT NULL DEFAULT 'RO',
+                adult_count INTEGER DEFAULT 1,
+                child_count INTEGER DEFAULT 0,
+                rate NUMERIC(10,2),
+                currency VARCHAR(3) DEFAULT 'USD',
+                payment_status VARCHAR(20) DEFAULT 'pending',
+                total_cost NUMERIC(10,2),
+                notes TEXT,
+                created_by BIGINT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_booking_history (
+                id BIGSERIAL PRIMARY KEY,
+                booking_id BIGINT NOT NULL REFERENCES pms_booking(id) ON DELETE CASCADE,
+                action VARCHAR(50) NOT NULL,
+                previous_value JSONB DEFAULT '{}',
+                new_value JSONB DEFAULT '{}',
+                user_id BIGINT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_rate (
+                id BIGSERIAL PRIMARY KEY,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                room_type_id BIGINT NOT NULL REFERENCES pms_room_type(id) ON DELETE CASCADE,
+                date_from DATE NOT NULL,
+                date_to DATE NOT NULL,
+                rate NUMERIC(10,2) NOT NULL,
+                currency VARCHAR(3) DEFAULT 'USD',
+                min_stay INTEGER DEFAULT 1,
+                is_weekend_rate BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_review (
+                id BIGSERIAL PRIMARY KEY,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                booking_id BIGINT REFERENCES pms_booking(id) ON DELETE SET NULL,
+                guest_name VARCHAR(200) NOT NULL,
+                rating NUMERIC(2,1) NOT NULL,
+                categories JSONB DEFAULT '{}',
+                text TEXT,
+                hotel_response TEXT,
+                response_date TIMESTAMPTZ,
+                is_complained BOOLEAN DEFAULT FALSE,
+                complaint_reason TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("SET search_path TO public")
+
+
+def delete_orphaned_pms_user(user_id: int) -> None:
+    execute(
+        f"DELETE FROM {USER_TABLE} WHERE id = %s AND role = 'pms'",
+        [user_id],
+    )
+
+
+def user_has_org_membership(user_id: int) -> bool:
+    row = fetch_one(
+        f"""
+        SELECT EXISTS (
+            SELECT 1
+            FROM public.{_table(ORGANIZATION_MEMBER_TABLE)}
+            WHERE user_id = %s
+        ) AS exists_flag
+        """,
+        [user_id],
+    )
+    return bool(row and row["exists_flag"])
+
+
 def create_organization(
     *,
     name: str,
@@ -33,7 +254,7 @@ def create_organization(
     now = timezone.now()
     result = fetch_one(
         f"""
-        INSERT INTO {_table(ORGANIZATION_TABLE)}
+        INSERT INTO public.{_table(ORGANIZATION_TABLE)}
             (name, slug, schema_name, is_active, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING *
@@ -41,7 +262,6 @@ def create_organization(
         [name, slug, schema_name, True, now, now],
     )
     if result:
-        from core.middleware.tenant import invalidate_org_schema_cache
         invalidate_org_schema_cache(result["id"])
     return result
 
@@ -49,7 +269,7 @@ def create_organization(
 def get_organization_by_slug(slug: str) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        SELECT * FROM {_table(ORGANIZATION_TABLE)}
+        SELECT * FROM public.{_table(ORGANIZATION_TABLE)}
         WHERE slug = %s AND is_active = TRUE
         LIMIT 1
         """,
@@ -60,7 +280,7 @@ def get_organization_by_slug(slug: str) -> dict[str, Any] | None:
 def get_organization_by_id(org_id: int) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        SELECT * FROM {_table(ORGANIZATION_TABLE)}
+        SELECT * FROM public.{_table(ORGANIZATION_TABLE)}
         WHERE id = %s AND is_active = TRUE
         LIMIT 1
         """,
@@ -71,7 +291,7 @@ def get_organization_by_id(org_id: int) -> dict[str, Any] | None:
 def get_organization_by_schema(schema_name: str) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        SELECT * FROM {_table(ORGANIZATION_TABLE)}
+        SELECT * FROM public.{_table(ORGANIZATION_TABLE)}
         WHERE schema_name = %s AND is_active = TRUE
         LIMIT 1
         """,
@@ -82,7 +302,7 @@ def get_organization_by_schema(schema_name: str) -> dict[str, Any] | None:
 def list_organizations() -> list[dict[str, Any]]:
     return fetch_all(
         f"""
-        SELECT * FROM {_table(ORGANIZATION_TABLE)}
+        SELECT * FROM public.{_table(ORGANIZATION_TABLE)}
         WHERE is_active = TRUE
         ORDER BY created_at DESC
         """
@@ -100,7 +320,7 @@ def update_organization(org_id: int, **kwargs: Any) -> dict[str, Any] | None:
 
     result = fetch_one(
         f"""
-        UPDATE {_table(ORGANIZATION_TABLE)}
+        UPDATE public.{_table(ORGANIZATION_TABLE)}
         SET {sets}, updated_at = %s
         WHERE id = %s
         RETURNING *
@@ -108,7 +328,6 @@ def update_organization(org_id: int, **kwargs: Any) -> dict[str, Any] | None:
         values,
     )
     if result:
-        from core.middleware.tenant import invalidate_org_schema_cache
         invalidate_org_schema_cache(org_id)
     return result
 
@@ -116,14 +335,13 @@ def update_organization(org_id: int, **kwargs: Any) -> dict[str, Any] | None:
 def deactivate_organization(org_id: int) -> bool:
     result = execute(
         f"""
-        UPDATE {_table(ORGANIZATION_TABLE)}
+        UPDATE public.{_table(ORGANIZATION_TABLE)}
         SET is_active = FALSE, updated_at = %s
         WHERE id = %s
         """,
         [timezone.now(), org_id],
     ) > 0
     if result:
-        from core.middleware.tenant import invalidate_org_schema_cache
         invalidate_org_schema_cache(org_id)
     return result
 
@@ -156,7 +374,7 @@ def create_platform_user(
     now = timezone.now()
     return fetch_one(
         f"""
-        INSERT INTO {_table(PLATFORM_USER_TABLE)}
+        INSERT INTO public.{_table(PLATFORM_USER_TABLE)}
             (email, phone, password_hash, first_name, last_name, is_active, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
@@ -168,7 +386,7 @@ def create_platform_user(
 def get_platform_user_by_email(email: str) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        SELECT * FROM {_table(PLATFORM_USER_TABLE)}
+        SELECT * FROM public.{_table(PLATFORM_USER_TABLE)}
         WHERE email = %s AND is_active = TRUE
         LIMIT 1
         """,
@@ -179,7 +397,7 @@ def get_platform_user_by_email(email: str) -> dict[str, Any] | None:
 def get_platform_user_by_id(user_id: int) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        SELECT * FROM {_table(PLATFORM_USER_TABLE)}
+        SELECT * FROM public.{_table(PLATFORM_USER_TABLE)}
         WHERE id = %s AND is_active = TRUE
         LIMIT 1
         """,
@@ -210,7 +428,7 @@ def update_platform_user(user_id: int, **kwargs: Any) -> dict[str, Any] | None:
 
     return fetch_one(
         f"""
-        UPDATE {_table(PLATFORM_USER_TABLE)}
+        UPDATE public.{_table(PLATFORM_USER_TABLE)}
         SET {sets}, updated_at = %s
         WHERE id = %s
         RETURNING *
@@ -231,7 +449,7 @@ def create_organization_member(
     now = timezone.now()
     return fetch_one(
         f"""
-        INSERT INTO {_table(ORGANIZATION_MEMBER_TABLE)}
+        INSERT INTO public.{_table(ORGANIZATION_MEMBER_TABLE)}
             (organization_id, user_id, role, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s)
         RETURNING *
@@ -244,8 +462,8 @@ def get_organization_member(org_id: int, user_id: int) -> dict[str, Any] | None:
     return fetch_one(
         f"""
         SELECT m.*, u.email, u.first_name, u.last_name, u.phone_number as phone
-        FROM {_table(ORGANIZATION_MEMBER_TABLE)} m
-        JOIN {USER_TABLE} u ON u.id = m.user_id
+        FROM public.{_table(ORGANIZATION_MEMBER_TABLE)} m
+        JOIN public.{USER_TABLE} u ON u.id = m.user_id
         WHERE m.organization_id = %s AND m.user_id = %s
         LIMIT 1
         """,
@@ -257,8 +475,8 @@ def list_organization_members(org_id: int) -> list[dict[str, Any]]:
     return fetch_all(
         f"""
         SELECT m.*, u.email, u.first_name, u.last_name, u.phone_number as phone
-        FROM {_table(ORGANIZATION_MEMBER_TABLE)} m
-        JOIN {USER_TABLE} u ON u.id = m.user_id
+        FROM public.{_table(ORGANIZATION_MEMBER_TABLE)} m
+        JOIN public.{USER_TABLE} u ON u.id = m.user_id
         WHERE m.organization_id = %s
         ORDER BY m.role ASC, u.first_name ASC
         """,
@@ -270,8 +488,8 @@ def get_user_organizations(user_id: int) -> list[dict[str, Any]]:
     return fetch_all(
         f"""
         SELECT o.*, m.role as member_role
-        FROM {_table(ORGANIZATION_MEMBER_TABLE)} m
-        JOIN {_table(ORGANIZATION_TABLE)} o ON o.id = m.organization_id
+        FROM public.{_table(ORGANIZATION_MEMBER_TABLE)} m
+        JOIN public.{_table(ORGANIZATION_TABLE)} o ON o.id = m.organization_id
         WHERE m.user_id = %s AND o.is_active = TRUE
         ORDER BY o.name ASC
         """,
@@ -282,7 +500,7 @@ def get_user_organizations(user_id: int) -> list[dict[str, Any]]:
 def remove_organization_member(org_id: int, user_id: int) -> bool:
     return execute(
         f"""
-        DELETE FROM {_table(ORGANIZATION_MEMBER_TABLE)}
+        DELETE FROM public.{_table(ORGANIZATION_MEMBER_TABLE)}
         WHERE organization_id = %s AND user_id = %s
         """,
         [org_id, user_id],
@@ -292,7 +510,7 @@ def remove_organization_member(org_id: int, user_id: int) -> bool:
 def update_member_role(org_id: int, user_id: int, role: str) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        UPDATE {_table(ORGANIZATION_MEMBER_TABLE)}
+        UPDATE public.{_table(ORGANIZATION_MEMBER_TABLE)}
         SET role = %s, updated_at = %s
         WHERE organization_id = %s AND user_id = %s
         RETURNING *
