@@ -203,6 +203,7 @@ def _insert_user(
     row = fetch_one(
         f"""
         INSERT INTO {USER_TABLE} (
+            guid,
             role,
             email,
             phone_number,
@@ -213,10 +214,10 @@ def _insert_user(
             is_verified,
             created_at,
             updated_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s)
         {returning_clause}
         """,
-        [role, email, phone_number, first_name, last_name, username, is_active, now, now],
+        [uuid4(), role, email, phone_number, first_name, last_name, username, is_active, now, now],
     )
     
     # If RETURNING not supported, fetch the inserted row
