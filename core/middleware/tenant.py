@@ -32,6 +32,39 @@ def _schema_exists(schema_name: str) -> bool:
         return cursor.fetchone()[0]
 
 
+def _extract_org_id_from_jwt(request) -> int | None:
+    auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+
+    try:
+        token = auth_header.split(" ", 1)[1].strip()
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+
+        import base64
+        import json
+
+        payload_b64 = parts[1]
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+        payload = json.loads(payload_bytes)
+
+        user_type = payload.get("user_type")
+        if user_type != "pms":
+            return None
+
+        org_id = payload.get("organization_id")
+        if org_id:
+            return int(org_id)
+        return None
+    except Exception:
+        return None
+
+
 class TenantMiddleware(MiddlewareMixin):
     """
     Resolves the tenant schema from the JWT token and sets PostgreSQL search_path.
@@ -46,20 +79,7 @@ class TenantMiddleware(MiddlewareMixin):
     PUBLIC_SCHEMA = "public"
 
     def process_request(self, request):
-        user = getattr(request, "user", None)
-        if not user:
-            return None
-
-        if isinstance(user, dict):
-            user_type = user.get("user_type")
-            organization_id = user.get("organization_id")
-        else:
-            user_type = getattr(user, "user_type", None)
-            organization_id = getattr(user, "organization_id", None)
-
-        if user_type != "pms":
-            return None
-
+        organization_id = _extract_org_id_from_jwt(request)
         if not organization_id:
             return None
 
