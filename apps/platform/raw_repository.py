@@ -34,11 +34,11 @@ def create_organization(
     result = fetch_one(
         f"""
         INSERT INTO {_table(ORGANIZATION_TABLE)}
-            (id, name, slug, schema_name, is_active, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (name, slug, schema_name, is_active, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [None, name, slug, schema_name, True, now, now],
+        [name, slug, schema_name, True, now, now],
     )
     if result:
         from core.middleware.tenant import invalidate_org_schema_cache
@@ -157,11 +157,11 @@ def create_platform_user(
     return fetch_one(
         f"""
         INSERT INTO {_table(PLATFORM_USER_TABLE)}
-            (id, email, phone, password_hash, first_name, last_name, is_active, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (email, phone, password_hash, first_name, last_name, is_active, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [None, email, phone, _hash_password(password), first_name, last_name, True, now, now],
+        [email, phone, _hash_password(password), first_name, last_name, True, now, now],
     )
 
 
@@ -232,11 +232,11 @@ def create_organization_member(
     return fetch_one(
         f"""
         INSERT INTO {_table(ORGANIZATION_MEMBER_TABLE)}
-            (id, organization_id, user_id, role, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+            (organization_id, user_id, role, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [None, organization_id, user_id, role, now, now],
+        [organization_id, user_id, role, now, now],
     )
 
 
