@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -41,11 +42,13 @@ def create_property(*, organization_id: int, name: str, **kwargs: Any) -> dict[s
         "description_uz": str, "description_ru": str, "description_en": str,
         "address": str, "city": str, "country": str,
         "latitude": lambda v: v, "longitude": lambda v: v,
-        "star_rating": int, "amenities": lambda v: v,
+        "star_rating": int,
+        "amenities": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
         "check_in_time": lambda v: v, "check_out_time": lambda v: v,
         "cancellation_policy": str, "quiet_hours": bool,
         "alcohol_allowed": bool, "pets_allowed": bool,
-        "currency": str, "timezone": str, "photos": lambda v: v,
+        "currency": str, "timezone": str,
+        "photos": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
         "is_active": bool,
     }
 
@@ -91,8 +94,16 @@ def update_property(property_id: int, organization_id: int | None = None, **kwar
     if not kwargs:
         return get_property(property_id, organization_id)
 
-    sets = ", ".join(f"{k} = %s" for k in kwargs)
-    values = list(kwargs.values())
+    json_fields = {"amenities", "photos"}
+    sanitized = {}
+    for k, v in kwargs.items():
+        if k in json_fields and isinstance(v, (list, dict)):
+            sanitized[k] = json.dumps(v)
+        else:
+            sanitized[k] = v
+
+    sets = ", ".join(f"{k} = %s" for k in sanitized)
+    values = list(sanitized.values())
     values.append(timezone.now())
     values.append(property_id)
 
@@ -151,7 +162,9 @@ def create_room_type(*, property_id: int, name: str, **kwargs: Any) -> dict[str,
 
     field_map = {
         "description": str, "base_rate": lambda v: v, "currency": str,
-        "capacity": int, "amenities": lambda v: v, "photos": lambda v: v,
+        "capacity": int,
+        "amenities": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
+        "photos": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
         "is_active": bool,
     }
 
@@ -192,8 +205,16 @@ def update_room_type(room_type_id: int, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return None
 
-    sets = ", ".join(f"{k} = %s" for k in kwargs)
-    values = list(kwargs.values())
+    json_fields = {"amenities", "photos"}
+    sanitized = {}
+    for k, v in kwargs.items():
+        if k in json_fields and isinstance(v, (list, dict)):
+            sanitized[k] = json.dumps(v)
+        else:
+            sanitized[k] = v
+
+    sets = ", ".join(f"{k} = %s" for k in sanitized)
+    values = list(sanitized.values())
     values.append(timezone.now())
     values.append(room_type_id)
 
@@ -220,8 +241,11 @@ def create_room(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
 
     field_map = {
         "room_type_id": int, "room_number": str, "floor": int,
-        "area": lambda v: v, "beds": lambda v: v, "amenities": lambda v: v,
-        "photos": lambda v: v, "condition": str, "availability": str,
+        "area": lambda v: v,
+        "beds": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
+        "amenities": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
+        "photos": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
+        "condition": str, "availability": str,
         "capacity": int, "meal_plan": str, "is_active": bool,
     }
 
@@ -272,8 +296,16 @@ def update_room(room_id: int, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return None
 
-    sets = ", ".join(f"{k} = %s" for k in kwargs)
-    values = list(kwargs.values())
+    json_fields = {"beds", "amenities", "photos"}
+    sanitized = {}
+    for k, v in kwargs.items():
+        if k in json_fields and isinstance(v, (list, dict)):
+            sanitized[k] = json.dumps(v)
+        else:
+            sanitized[k] = v
+
+    sets = ", ".join(f"{k} = %s" for k in sanitized)
+    values = list(sanitized.values())
     values.append(timezone.now())
     values.append(room_id)
 
@@ -457,7 +489,8 @@ def create_guest(*, first_name: str, **kwargs: Any) -> dict[str, Any] | None:
 
     field_map = {
         "last_name": str, "email": str, "phone": str,
-        "id_document": lambda v: v, "preferences": lambda v: v,
+        "id_document": lambda v: json.dumps(v) if isinstance(v, dict) else v,
+        "preferences": lambda v: json.dumps(v) if isinstance(v, dict) else v,
         "is_vip": bool, "is_blacklisted": bool, "notes": str,
     }
 
@@ -501,8 +534,16 @@ def update_guest(guest_id: int, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return None
 
-    sets = ", ".join(f"{k} = %s" for k in kwargs)
-    values = list(kwargs.values())
+    json_fields = {"id_document", "preferences"}
+    sanitized = {}
+    for k, v in kwargs.items():
+        if k in json_fields and isinstance(v, (list, dict)):
+            sanitized[k] = json.dumps(v)
+        else:
+            sanitized[k] = v
+
+    sets = ", ".join(f"{k} = %s" for k in sanitized)
+    values = list(sanitized.values())
     values.append(timezone.now())
     values.append(guest_id)
 
@@ -880,6 +921,8 @@ def _add_booking_history(
     new_value: dict | None = None,
     user_id: int | None = None,
 ) -> dict[str, Any] | None:
+    pv = json.dumps(previous_value or {}) if previous_value else "{}"
+    nv = json.dumps(new_value or {}) if new_value else "{}"
     return fetch_one(
         f"""
         INSERT INTO {_t(PMS_BOOKING_HISTORY_TABLE)}
@@ -887,7 +930,7 @@ def _add_booking_history(
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [None, booking_id, action, previous_value or {}, new_value or {}, user_id, timezone.now(), timezone.now()],
+        [None, booking_id, action, pv, nv, user_id, timezone.now(), timezone.now()],
     )
 
 
@@ -978,6 +1021,9 @@ def get_effective_rate(
 
 def create_review(*, property_id: int, guest_name: str, rating: Decimal, text: str, **kwargs: Any) -> dict[str, Any] | None:
     now = timezone.now()
+    categories = kwargs.get("categories", {})
+    if isinstance(categories, dict):
+        categories = json.dumps(categories)
     return fetch_one(
         f"""
         INSERT INTO {_t(PMS_REVIEW_TABLE)}
@@ -987,7 +1033,7 @@ def create_review(*, property_id: int, guest_name: str, rating: Decimal, text: s
         """,
         [
             None, property_id, guest_name, rating, text,
-            kwargs.get("categories", {}), kwargs.get("is_complained", False),
+            categories, kwargs.get("is_complained", False),
             now, now,
         ],
     )
