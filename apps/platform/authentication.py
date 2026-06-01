@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 PMS_USER_TYPE = "pms"
 
 
+class PmsUser:
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    @property
+    def is_authenticated(self):
+        return True
+
+
 class PmsJWTAuthentication(JWTAuthentication):
     def authenticate(self, request: Request):
         header = self.get_header(request)
@@ -42,15 +52,15 @@ class PmsJWTAuthentication(JWTAuthentication):
             if user is None:
                 raise exceptions.AuthenticationFailed("User not found")
 
-            return {
-                "id": user.id,
-                "phone_number": user.phone_number,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "guid": str(user.guid),
-                "user_type": PMS_USER_TYPE,
-                "organization_id": validated_token.get("organization_id"),
-            }
+            return PmsUser(
+                id=user.id,
+                phone_number=user.phone_number,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                guid=str(user.guid),
+                user_type=PMS_USER_TYPE,
+                organization_id=validated_token.get("organization_id"),
+            )
         except exceptions.AuthenticationFailed:
             raise
         except Exception as e:

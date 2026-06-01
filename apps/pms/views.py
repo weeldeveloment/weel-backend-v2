@@ -121,6 +121,10 @@ def _require_org(request):
         if org_id:
             return org_id
 
+    org_id = getattr(user, "organization_id", None)
+    if org_id:
+        return org_id
+
     return getattr(request, "META", {}).get("HTTP_X_ORGANIZATION_ID")
 
 
