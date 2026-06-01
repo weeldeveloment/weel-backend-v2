@@ -22,6 +22,10 @@ class PmsUser:
     def is_authenticated(self):
         return True
 
+    @property
+    def pk(self):
+        return getattr(self, "id", None)
+
 
 class PmsJWTAuthentication(JWTAuthentication):
     def authenticate(self, request: Request):

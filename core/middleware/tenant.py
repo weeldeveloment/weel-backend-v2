@@ -50,12 +50,16 @@ class TenantMiddleware(MiddlewareMixin):
         if not user:
             return None
 
-        user_dict = user if isinstance(user, dict) else {}
-        user_type = user_dict.get("user_type")
+        if isinstance(user, dict):
+            user_type = user.get("user_type")
+            organization_id = user.get("organization_id")
+        else:
+            user_type = getattr(user, "user_type", None)
+            organization_id = getattr(user, "organization_id", None)
+
         if user_type != "pms":
             return None
 
-        organization_id = user_dict.get("organization_id")
         if not organization_id:
             return None
 
