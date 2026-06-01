@@ -25,9 +25,12 @@ def _table(name: str) -> str:
 
 
 def create_tenant_schema(schema_name: str) -> None:
+    from psycopg2.extensions import quote_ident
+
     with connection.cursor() as cursor:
-        cursor.execute("CREATE SCHEMA IF NOT EXISTS %s", [schema_name])
-        cursor.execute("SET search_path TO %s, public", [schema_name])
+        safe_name = quote_ident(schema_name, cursor.cursor)
+        cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {safe_name}")
+        cursor.execute(f"SET search_path TO {safe_name}, public")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS pms_property (
