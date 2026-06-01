@@ -32,10 +32,10 @@ def _t(name: str) -> str:
 # ─── Properties ──────────────────────────────────────────────────────────────
 
 
-def create_property(*, name: str, **kwargs: Any) -> dict[str, Any] | None:
+def create_property(*, organization_id: int, name: str, **kwargs: Any) -> dict[str, Any] | None:
     now = timezone.now()
-    cols = ["name", "created_at", "updated_at"]
-    vals = [name, now, now]
+    cols = ["organization_id", "name", "created_at", "updated_at"]
+    vals = [organization_id, name, now, now]
 
     field_map = {
         "description_uz": str, "description_ru": str, "description_en": str,
@@ -63,37 +63,57 @@ def create_property(*, name: str, **kwargs: Any) -> dict[str, Any] | None:
     )
 
 
-def list_properties(*, is_active: bool = True) -> list[dict[str, Any]]:
+def list_properties(*, organization_id: int, is_active: bool = True) -> list[dict[str, Any]]:
     if is_active:
         return fetch_all(
-            f"SELECT * FROM {_t(PMS_PROPERTY_TABLE)} WHERE is_active = TRUE ORDER BY name ASC"
+            f"SELECT * FROM {_t(PMS_PROPERTY_TABLE)} WHERE organization_id = %s AND is_active = TRUE ORDER BY name ASC",
+            [organization_id],
         )
-    return fetch_all(f"SELECT * FROM {_t(PMS_PROPERTY_TABLE)} ORDER BY name ASC")
+    return fetch_all(
+        f"SELECT * FROM {_t(PMS_PROPERTY_TABLE)} WHERE organization_id = %s ORDER BY name ASC",
+        [organization_id],
+    )
 
 
-def get_property(property_id: int) -> dict[str, Any] | None:
+def get_property(property_id: int, organization_id: int | None = None) -> dict[str, Any] | None:
+    if organization_id:
+        return fetch_one(
+            f"SELECT * FROM {_t(PMS_PROPERTY_TABLE)} WHERE id = %s AND organization_id = %s",
+            [property_id, organization_id],
+        )
     return fetch_one(
         f"SELECT * FROM {_t(PMS_PROPERTY_TABLE)} WHERE id = %s",
         [property_id],
     )
 
 
-def update_property(property_id: int, **kwargs: Any) -> dict[str, Any] | None:
+def update_property(property_id: int, organization_id: int | None = None, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
-        return get_property(property_id)
+        return get_property(property_id, organization_id)
 
     sets = ", ".join(f"{k} = %s" for k in kwargs)
     values = list(kwargs.values())
     values.append(timezone.now())
     values.append(property_id)
 
+    if organization_id:
+        values.append(organization_id)
+        where = "WHERE id = %s AND organization_id = %s"
+    else:
+        where = "WHERE id = %s"
+
     return fetch_one(
-        f"UPDATE {_t(PMS_PROPERTY_TABLE)} SET {sets}, updated_at = %s WHERE id = %s RETURNING *",
+        f"UPDATE {_t(PMS_PROPERTY_TABLE)} SET {sets}, updated_at = %s {where} RETURNING *",
         values,
     )
 
 
-def delete_property(property_id: int) -> bool:
+def delete_property(property_id: int, organization_id: int | None = None) -> bool:
+    if organization_id:
+        return execute(
+            f"UPDATE {_t(PMS_PROPERTY_TABLE)} SET is_active = FALSE, updated_at = %s WHERE id = %s AND organization_id = %s",
+            [timezone.now(), property_id, organization_id],
+        ) > 0
     return execute(
         f"UPDATE {_t(PMS_PROPERTY_TABLE)} SET is_active = FALSE, updated_at = %s WHERE id = %s",
         [timezone.now(), property_id],

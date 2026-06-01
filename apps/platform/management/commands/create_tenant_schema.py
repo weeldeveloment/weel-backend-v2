@@ -21,6 +21,7 @@ class Command(BaseCommand):
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pms_property (
                     id BIGSERIAL PRIMARY KEY,
+                    organization_id INTEGER,
                     name VARCHAR(200) NOT NULL,
                     description_uz TEXT,
                     description_ru TEXT,

@@ -78,6 +78,7 @@ class PaymentStatus:
 @dataclass(slots=True)
 class Property(HardDeleteBaseModel):
     id: int | None = None
+    organization_id: int | None = None
     name: str | None = None
     description_uz: str | None = None
     description_ru: str | None = None

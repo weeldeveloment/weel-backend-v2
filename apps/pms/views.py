@@ -109,16 +109,19 @@ def _get_user_id(request) -> int | None:
 
 
 def _require_org(request):
-    org = getattr(request, "organization", None) or getattr(request, "META", {}).get("HTTP_X_ORGANIZATION_ID")
-    if not org:
-        user = getattr(request, "user", None)
-        if isinstance(user, dict):
-            org_id = user.get("organization_id")
-            if org_id:
-                return org_id
-    if isinstance(org, dict):
-        return org.get("id")
-    return org
+    org = getattr(request, "organization", None)
+    if org:
+        if isinstance(org, dict):
+            return org.get("id")
+        return org
+
+    user = getattr(request, "user", None)
+    if isinstance(user, dict):
+        org_id = user.get("organization_id")
+        if org_id:
+            return org_id
+
+    return getattr(request, "META", {}).get("HTTP_X_ORGANIZATION_ID")
 
 
 class PropertyListCreateView(PMSBaseView):
@@ -126,16 +129,27 @@ class PropertyListCreateView(PMSBaseView):
 
     @swagger_auto_schema(responses={200: PropertySerializer(many=True)})
     def get(self, request):
-        props = list_properties()
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        props = list_properties(organization_id=int(org_id))
         return Response(PropertySerializer(props, many=True).data)
 
-    @swagger_auto_schema(responses={201: PropertySerializer()}, operation_description="Create a new property")
+    @swagger_auto_schema(
+        responses={201: PropertySerializer()},
+        operation_description="Create a new property",
+        request_body=PropertySerializer,
+    )
     def post(self, request):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+
         serializer = PropertySerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        prop = create_property(**serializer.validated_data)
+        prop = create_property(organization_id=int(org_id), **serializer.validated_data)
         if not prop:
             return Response({"detail": "Failed to create property."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -147,25 +161,35 @@ class PropertyRetrieveUpdateDestroyView(PMSBaseView):
 
     @swagger_auto_schema(responses={200: PropertySerializer()})
     def get(self, request, property_id):
-        prop = get_property(property_id)
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        prop = get_property(property_id, organization_id=int(org_id))
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(PropertySerializer(prop).data)
 
     @swagger_auto_schema(responses={200: PropertySerializer()})
     def patch(self, request, property_id):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+
         serializer = PropertySerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        prop = update_property(property_id, **serializer.validated_data)
+        prop = update_property(property_id, organization_id=int(org_id), **serializer.validated_data)
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(PropertySerializer(prop).data)
 
     @swagger_auto_schema(responses={204: "Deleted"})
     def delete(self, request, property_id):
-        if not delete_property(property_id):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not delete_property(property_id, organization_id=int(org_id)):
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -175,7 +199,10 @@ class PropertyImageCreateView(PMSBaseView):
 
     @swagger_auto_schema(responses={201: PropertyImageSerializer()})
     def post(self, request, property_id):
-        prop = get_property(property_id)
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        prop = get_property(property_id, organization_id=int(org_id))
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -202,7 +229,10 @@ class PropertyImageDeleteView(PMSBaseView):
 class RoomTypeListCreateView(PMSBaseView):
     @swagger_auto_schema(responses={200: RoomTypeSerializer(many=True)})
     def get(self, request, property_id):
-        prop = get_property(property_id)
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        prop = get_property(property_id, organization_id=int(org_id))
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         types = list_room_types(property_id)
@@ -210,7 +240,10 @@ class RoomTypeListCreateView(PMSBaseView):
 
     @swagger_auto_schema(responses={201: RoomTypeSerializer()})
     def post(self, request, property_id):
-        prop = get_property(property_id)
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        prop = get_property(property_id, organization_id=int(org_id))
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -255,7 +288,10 @@ class RoomListCreateView(PMSBaseView):
 
     @swagger_auto_schema(responses={200: RoomSerializer(many=True)})
     def get(self, request, property_id):
-        prop = get_property(property_id)
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        prop = get_property(property_id, organization_id=int(org_id))
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -265,7 +301,10 @@ class RoomListCreateView(PMSBaseView):
 
     @swagger_auto_schema(responses={201: RoomSerializer()})
     def post(self, request, property_id):
-        prop = get_property(property_id)
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        prop = get_property(property_id, organization_id=int(org_id))
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
 
