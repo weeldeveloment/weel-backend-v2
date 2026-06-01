@@ -23,6 +23,24 @@ from apps.pms.raw.tables import (
     PMS_REVIEW_TABLE,
 )
 
+def _to_pg_array(v: Any) -> str:
+    """Convert a Python list to a PostgreSQL text[] literal: {"a","b"}"""
+    if not isinstance(v, list):
+        return v
+    escaped = []
+    for x in v:
+        s = str(x).replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34))
+        escaped.append(f'"{s}"')
+    return "{" + ",".join(escaped) + "}"
+
+
+def _to_pg_json(v: Any) -> Any:
+    """Convert a Python list/dict to a JSON string for JSONB columns."""
+    if isinstance(v, (list, dict)):
+        return json.dumps(v)
+    return v
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,12 +61,12 @@ def create_property(*, organization_id: int, name: str, **kwargs: Any) -> dict[s
         "address": str, "city": str, "country": str,
         "latitude": lambda v: v, "longitude": lambda v: v,
         "star_rating": int,
-        "amenities": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
+        "amenities": _to_pg_array,
         "check_in_time": lambda v: v, "check_out_time": lambda v: v,
         "cancellation_policy": str, "quiet_hours": bool,
         "alcohol_allowed": bool, "pets_allowed": bool,
         "currency": str, "timezone": str,
-        "photos": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
+        "photos": _to_pg_array,
         "is_active": bool,
     }
 
@@ -94,11 +112,11 @@ def update_property(property_id: int, organization_id: int | None = None, **kwar
     if not kwargs:
         return get_property(property_id, organization_id)
 
-    json_fields = {"amenities", "photos"}
+    pg_array_fields = {"amenities", "photos"}
     sanitized = {}
     for k, v in kwargs.items():
-        if k in json_fields and isinstance(v, (list, dict)):
-            sanitized[k] = json.dumps(v)
+        if k in pg_array_fields and isinstance(v, list):
+            sanitized[k] = _to_pg_array(v)
         else:
             sanitized[k] = v
 
@@ -163,8 +181,8 @@ def create_room_type(*, property_id: int, name: str, **kwargs: Any) -> dict[str,
     field_map = {
         "description": str, "base_rate": lambda v: v, "currency": str,
         "capacity": int,
-        "amenities": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
-        "photos": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
+        "amenities": _to_pg_array,
+        "photos": _to_pg_array,
         "is_active": bool,
     }
 
@@ -205,11 +223,11 @@ def update_room_type(room_type_id: int, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return None
 
-    json_fields = {"amenities", "photos"}
+    pg_array_fields = {"amenities", "photos"}
     sanitized = {}
     for k, v in kwargs.items():
-        if k in json_fields and isinstance(v, (list, dict)):
-            sanitized[k] = json.dumps(v)
+        if k in pg_array_fields and isinstance(v, list):
+            sanitized[k] = _to_pg_array(v)
         else:
             sanitized[k] = v
 
@@ -242,9 +260,9 @@ def create_room(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
     field_map = {
         "room_type_id": int, "room_number": str, "floor": int,
         "area": lambda v: v,
-        "beds": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
-        "amenities": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
-        "photos": lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v,
+        "beds": _to_pg_json,
+        "amenities": _to_pg_array,
+        "photos": _to_pg_array,
         "condition": str, "availability": str,
         "capacity": int, "meal_plan": str, "is_active": bool,
     }
@@ -296,11 +314,14 @@ def update_room(room_id: int, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return None
 
-    json_fields = {"beds", "amenities", "photos"}
+    pg_array_fields = {"amenities", "photos"}
+    pg_json_fields = {"beds"}
     sanitized = {}
     for k, v in kwargs.items():
-        if k in json_fields and isinstance(v, (list, dict)):
-            sanitized[k] = json.dumps(v)
+        if k in pg_array_fields and isinstance(v, list):
+            sanitized[k] = _to_pg_array(v)
+        elif k in pg_json_fields and isinstance(v, (list, dict)):
+            sanitized[k] = _to_pg_json(v)
         else:
             sanitized[k] = v
 
@@ -489,8 +510,8 @@ def create_guest(*, first_name: str, **kwargs: Any) -> dict[str, Any] | None:
 
     field_map = {
         "last_name": str, "email": str, "phone": str,
-        "id_document": lambda v: json.dumps(v) if isinstance(v, dict) else v,
-        "preferences": lambda v: json.dumps(v) if isinstance(v, dict) else v,
+        "id_document": _to_pg_json,
+        "preferences": _to_pg_json,
         "is_vip": bool, "is_blacklisted": bool, "notes": str,
     }
 
@@ -534,11 +555,11 @@ def update_guest(guest_id: int, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return None
 
-    json_fields = {"id_document", "preferences"}
+    pg_json_fields = {"id_document", "preferences"}
     sanitized = {}
     for k, v in kwargs.items():
-        if k in json_fields and isinstance(v, (list, dict)):
-            sanitized[k] = json.dumps(v)
+        if k in pg_json_fields and isinstance(v, (list, dict)):
+            sanitized[k] = _to_pg_json(v)
         else:
             sanitized[k] = v
 
@@ -921,8 +942,8 @@ def _add_booking_history(
     new_value: dict | None = None,
     user_id: int | None = None,
 ) -> dict[str, Any] | None:
-    pv = json.dumps(previous_value or {}) if previous_value else "{}"
-    nv = json.dumps(new_value or {}) if new_value else "{}"
+    pv = _to_pg_json(previous_value) if previous_value else "{}"
+    nv = _to_pg_json(new_value) if new_value else "{}"
     return fetch_one(
         f"""
         INSERT INTO {_t(PMS_BOOKING_HISTORY_TABLE)}
@@ -1023,7 +1044,7 @@ def create_review(*, property_id: int, guest_name: str, rating: Decimal, text: s
     now = timezone.now()
     categories = kwargs.get("categories", {})
     if isinstance(categories, dict):
-        categories = json.dumps(categories)
+        categories = _to_pg_json(categories)
     return fetch_one(
         f"""
         INSERT INTO {_t(PMS_REVIEW_TABLE)}
