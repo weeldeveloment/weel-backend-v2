@@ -384,6 +384,26 @@ class OTPRedisService:
         except json.JSONDecodeError:
             return None
 
+    @classmethod
+    def get_otp(cls, phone_number: str, purpose: SmsPurpose):
+        otp_key = cls.get_otp_key(phone_number, purpose)
+        otp_data_str = cache.get(otp_key)
+
+        if not otp_data_str:
+            return None
+
+        try:
+            otp_data = json.loads(otp_data_str)
+            return otp_data.get("otp_code")
+        except (json.JSONDecodeError, KeyError):
+            return None
+
+    @classmethod
+    def consume_otp(cls, phone_number: str, purpose: SmsPurpose):
+        cls.invalidate_otp(phone_number, purpose)
+        registration_key = cls.get_registration_key(phone_number, purpose)
+        cache.delete(registration_key)
+
     @staticmethod
     def get_resend_key(phone_number: str, purpose: SmsPurpose):
         return f"otp_resend:{purpose.value}:{phone_number}"
