@@ -1,7 +1,24 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from rest_framework import serializers
+
+
+class JSONStringField(serializers.Field):
+    """Handles JSON strings stored in DB columns, converting them to Python objects for output."""
+    def to_representation(self, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                return value
+        return value
+
+    def to_internal_value(self, data):
+        return data
 
 
 class PropertyImageSerializer(serializers.Serializer):
@@ -70,7 +87,7 @@ class RoomSerializer(serializers.Serializer):
     room_number = serializers.CharField(max_length=20)
     floor = serializers.IntegerField(required=False, default=1)
     area = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True)
-    beds = serializers.ListField(child=serializers.DictField(), required=False, default=list)
+    beds = JSONStringField(required=False, default=list)
     amenities = serializers.ListField(child=serializers.CharField(), required=False, default=list)
     photos = serializers.ListField(child=serializers.CharField(), required=False, default=list)
     condition = serializers.ChoiceField(
@@ -99,7 +116,7 @@ class RoomMassUpdateItemSerializer(serializers.Serializer):
     room_number = serializers.CharField(max_length=20, required=False)
     floor = serializers.IntegerField(required=False)
     area = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True)
-    beds = serializers.ListField(child=serializers.DictField(), required=False)
+    beds = JSONStringField(required=False)
     amenities = serializers.ListField(child=serializers.CharField(), required=False)
     condition = serializers.ChoiceField(choices=["clean", "dirty", "inspection", "maintenance"], required=False)
     availability = serializers.ChoiceField(choices=["available", "occupied", "blocked"], required=False)
@@ -136,8 +153,8 @@ class GuestSerializer(serializers.Serializer):
     last_name = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
     phone = serializers.CharField(max_length=32, required=False, allow_blank=True, allow_null=True)
-    id_document = serializers.DictField(required=False, default=dict)
-    preferences = serializers.DictField(required=False, default=dict)
+    id_document = JSONStringField(required=False, default=dict)
+    preferences = JSONStringField(required=False, default=dict)
     is_vip = serializers.BooleanField(required=False, default=False)
     is_blacklisted = serializers.BooleanField(required=False, default=False)
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -191,8 +208,8 @@ class BookingHistorySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     booking_id = serializers.IntegerField(read_only=True)
     action = serializers.CharField(read_only=True)
-    previous_value = serializers.DictField(read_only=True)
-    new_value = serializers.DictField(read_only=True)
+    previous_value = JSONStringField(read_only=True)
+    new_value = JSONStringField(read_only=True)
     user_id = serializers.IntegerField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
 
@@ -222,7 +239,7 @@ class ReviewSerializer(serializers.Serializer):
     booking_id = serializers.IntegerField(required=False, allow_null=True)
     guest_name = serializers.CharField(max_length=200)
     rating = serializers.DecimalField(max_digits=2, decimal_places=1, min_value=1, max_value=5)
-    categories = serializers.DictField(required=False, default=dict)
+    categories = JSONStringField(required=False, default=dict)
     text = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     hotel_response = serializers.CharField(read_only=True, allow_null=True)
     response_date = serializers.DateTimeField(read_only=True, allow_null=True)
