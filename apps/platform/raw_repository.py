@@ -17,6 +17,12 @@ from apps.platform.raw.tables import (
     ORGANIZATION_MEMBER_TABLE,
 )
 
+_org_schema_cache: dict[int, dict[str, Any] | None] = {}
+
+
+def invalidate_org_schema_cache(organization_id: int) -> None:
+    _org_schema_cache.pop(organization_id, None)
+
 
 def _table(name: str) -> str:
     if table_exists(name):

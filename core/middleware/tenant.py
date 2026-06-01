@@ -6,11 +6,9 @@ from typing import Any
 from django.utils.deprecation import MiddlewareMixin
 from django.db import connection
 
-from apps.platform.raw_repository import get_organization_by_id
+from apps.platform.raw_repository import get_organization_by_id, _org_schema_cache
 
 logger = logging.getLogger(__name__)
-
-_org_schema_cache: dict[int, dict[str, Any] | None] = {}
 
 
 def _get_org_schema(organization_id: int) -> dict[str, Any] | None:
