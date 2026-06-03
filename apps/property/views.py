@@ -76,6 +76,7 @@ from .apartment_serializers import (
     ApartmentUpdateSerializer,
 )
 from .cottage_repository import (
+    COTTAGE_SELECT,
     admin_append_cottage_images,
     admin_create_cottage,
     admin_delete_cottage,
@@ -1451,6 +1452,29 @@ class UnifiedRecommendationsListView(APIView):
                 "favorite_guids": _favorite_guids_from_request(request),
             }
 
+            # Guaranteed cottages — always included in recommendations
+            _GUARANTEED_COTTAGE_GUIDS = (
+                "336d214d-8065-4b84-a3b1-a7a6e03f4ed1",  # Milliy Dacha
+                "278e8df8-55a8-48b0-8636-ec7c55118b29",  # Steklo House Dacha
+                "addb2627-c506-418b-ade9-a7bc82005027",  # Nano Park
+                "a4929c41-7a61-4112-80d0-d5189aff2ac6",  # Manzara Dacha
+                "b5eb8c02-33f7-44fd-a6fa-763b3c54699a",  # Salih House Dacha
+            )
+
+            def _fetch_guaranteed():
+                gcot_rows = fetch_all(
+                    f"""
+                    {COTTAGE_SELECT}
+                    WHERE CAST(c.guid AS TEXT) IN %s
+                      AND COALESCE(c.is_verified, FALSE) = TRUE
+                      AND COALESCE(c.is_archived, FALSE) = FALSE
+                    """,
+                    [_GUARANTEED_COTTAGE_GUIDS],
+                )
+                return CottageListSerializer(
+                    gcot_rows, many=True, context=ctx
+                ).data
+
             if property_type in {"apartment", "apartments"}:
                 rows = _list_apartment_rows(
                     source_params,
@@ -1459,7 +1483,11 @@ class UnifiedRecommendationsListView(APIView):
                     default_ordering=ordering,
                     default_limit=15,
                 )
-                return ApartmentListSerializer(rows, many=True, context=ctx).data
+                result = ApartmentListSerializer(rows, many=True, context=ctx).data
+                guaranteed = _fetch_guaranteed()
+                existing = {str(item.get("guid") or "") for item in result}
+                result = [g for g in guaranteed if str(g.get("guid", "")) not in existing] + result
+                return result
 
             if property_type in {"cottage", "cottages"}:
                 rows = _list_cottage_rows(
@@ -1469,7 +1497,11 @@ class UnifiedRecommendationsListView(APIView):
                     default_ordering=ordering,
                     default_limit=15,
                 )
-                return CottageListSerializer(rows, many=True, context=ctx).data
+                result = CottageListSerializer(rows, many=True, context=ctx).data
+                guaranteed = _fetch_guaranteed()
+                existing = {str(item.get("guid") or "") for item in result}
+                result = [g for g in guaranteed if str(g.get("guid", "")) not in existing] + result
+                return result
 
             apt_rows = _list_apartment_rows(
                 source_params,
@@ -1486,10 +1518,14 @@ class UnifiedRecommendationsListView(APIView):
                 default_limit=15,
             )
             combined = (
-                ApartmentListSerializer(apt_rows, many=True, context=ctx).data,
-                CottageListSerializer(cot_rows, many=True, context=ctx).data,
+                ApartmentListSerializer(apt_rows, many=True, context=ctx).data
+                + CottageListSerializer(cot_rows, many=True, context=ctx).data
             )
-            return combined[:15]
+            result = combined[:15]
+            guaranteed = _fetch_guaranteed()
+            existing = {str(item.get("guid") or "") for item in result}
+            result = [g for g in guaranteed if str(g.get("guid", "")) not in existing] + result
+            return result
 
         data = _get_or_set_cached_payload(
             request,
