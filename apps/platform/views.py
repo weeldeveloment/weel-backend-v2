@@ -98,24 +98,26 @@ def _get_request_organization_id(request) -> int | None:
     else:
         org_id = getattr(user, "organization_id", None)
 
-    if org_id is not None:
-        try:
-            return int(org_id)
-        except (TypeError, ValueError):
-            pass
-
-    user_id = _get_request_user_id(request)
-    if user_id is None:
-        return None
-
-    organizations = get_user_organizations(user_id)
-    if not organizations:
-        return None
-
     try:
-        return int(organizations[0]["id"])
-    except (TypeError, ValueError, KeyError):
+        return int(org_id)
+    except (TypeError, ValueError):
         return None
+
+
+def _get_primary_organization(
+    orgs: list[dict[str, Any]],
+    organization_id: int | None,
+) -> dict[str, Any] | None:
+    if organization_id is None:
+        return None
+
+    for organization in orgs:
+        try:
+            if int(organization.get("id")) == int(organization_id):
+                return organization
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return None
 
 
 def _create_pms_tokens(user: dict[str, Any], organization_id: int) -> dict[str, str]:
@@ -391,9 +393,11 @@ class PmsMeView(APIView):
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
         orgs = get_user_organizations(user_id)
+        primary_org = _get_primary_organization(orgs, _get_request_organization_id(request))
 
         return Response({
             "user": PlatformUserSerializer(user_data).data,
+            "organization": OrganizationSerializer(primary_org).data if primary_org else None,
             "organizations": [OrganizationSerializer(o).data for o in orgs],
         })
 
@@ -419,9 +423,11 @@ class PmsMeView(APIView):
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
         orgs = get_user_organizations(int(user_id))
+        primary_org = _get_primary_organization(orgs, _get_request_organization_id(request))
 
         return Response({
             "user": PlatformUserSerializer(updated_user).data,
+            "organization": OrganizationSerializer(primary_org).data if primary_org else None,
             "organizations": [OrganizationSerializer(o).data for o in orgs],
         })
 
@@ -557,11 +563,6 @@ class PmsTokenRefreshView(APIView):
             user = get_user_by_id(int(user_id), role="pms", active_only=True)
             if not user:
                 return Response({"detail": "User not found."}, status=status.HTTP_401_UNAUTHORIZED)
-
-            if not organization_id:
-                organizations = get_user_organizations(int(user_id))
-                if organizations:
-                    organization_id = organizations[0]["id"]
 
             if not organization_id:
                 return Response(
