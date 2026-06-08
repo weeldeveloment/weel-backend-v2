@@ -25,13 +25,11 @@ from apps.platform.raw_repository import (
     delete_orphaned_pms_user,
     get_organization_by_id,
     get_organization_by_slug,
-    get_platform_user_by_id,
     get_user_organizations,
     list_organization_members,
     remove_organization_member,
     update_member_role,
     update_organization,
-    update_platform_user,
     user_has_org_membership,
 )
 from apps.platform.serializers import (
@@ -55,6 +53,8 @@ from users.tasks import send_otp_sms_eskiz
 from users.raw_repository import (
     create_pms_user,
     get_active_user_by_phone,
+    get_user_by_id,
+    update_user_profile,
 )
 from users.tokens import create_pms_tokens
 
@@ -63,14 +63,70 @@ logger = logging.getLogger(__name__)
 PLATFORM_USER_TYPE = "pms"
 
 
+def _user_claims(user: Any) -> dict[str, Any]:
+    if isinstance(user, dict):
+        return user
+
+    return {
+        "id": getattr(user, "id", None),
+        "phone_number": getattr(user, "phone_number", ""),
+        "first_name": getattr(user, "first_name", None),
+        "last_name": getattr(user, "last_name", None),
+    }
+
+
+def _get_request_user_id(request) -> int | None:
+    user = request.user
+    if isinstance(user, dict):
+        user_id = user.get("id")
+    else:
+        user_id = getattr(user, "id", None)
+
+    if user_id is None:
+        return None
+
+    try:
+        return int(user_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_request_organization_id(request) -> int | None:
+    user = request.user
+    if isinstance(user, dict):
+        org_id = user.get("organization_id")
+    else:
+        org_id = getattr(user, "organization_id", None)
+
+    if org_id is not None:
+        try:
+            return int(org_id)
+        except (TypeError, ValueError):
+            pass
+
+    user_id = _get_request_user_id(request)
+    if user_id is None:
+        return None
+
+    organizations = get_user_organizations(user_id)
+    if not organizations:
+        return None
+
+    try:
+        return int(organizations[0]["id"])
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
 def _create_pms_tokens(user: dict[str, Any], organization_id: int) -> dict[str, str]:
+    user_data = _user_claims(user)
     refresh = RefreshToken()
     access = AccessToken()
 
     claims = {
-        "sub": str(user["id"]),
+        "sub": str(user_data["id"]),
         "user_type": PLATFORM_USER_TYPE,
-        "phone_number": user.get("phone_number", ""),
+        "phone_number": user_data.get("phone_number", ""),
         "organization_id": organization_id,
         "iss": getattr(settings, "JWT_ISSUER", "weel"),
     }
@@ -326,16 +382,11 @@ class PmsMeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
-        if isinstance(user, dict):
-            user_id = user.get("id")
-        else:
-            user_id = getattr(user, "id", None)
-
+        user_id = _get_request_user_id(request)
         if not user_id:
             return Response({"detail": "Not authenticated."}, status=status.HTTP_401_UNAUTHORIZED)
 
-        user_data = get_platform_user_by_id(user_id)
+        user_data = get_user_by_id(user_id, role="pms", active_only=True)
         if not user_data:
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -351,12 +402,7 @@ class PmsMeView(APIView):
         tags=["platform"],
     )
     def patch(self, request):
-        user = request.user
-        if isinstance(user, dict):
-            user_id = user.get("id")
-        else:
-            user_id = getattr(user, "id", None)
-
+        user_id = _get_request_user_id(request)
         if not user_id:
             return Response({"detail": "Not authenticated."}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -364,7 +410,11 @@ class PmsMeView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        updated_user = update_platform_user(int(user_id), **serializer.validated_data)
+        updated_user = update_user_profile(
+            int(user_id),
+            role="pms",
+            **serializer.validated_data,
+        )
         if not updated_user:
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -381,7 +431,7 @@ class PmsOrganizationView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        org_id = request.user.get("organization_id") if isinstance(request.user, dict) else None
+        org_id = _get_request_organization_id(request)
         if not org_id:
             return Response({"detail": "No organization in token."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -392,7 +442,7 @@ class PmsOrganizationView(APIView):
         return Response(OrganizationSerializer(org).data)
 
     def patch(self, request):
-        org_id = request.user.get("organization_id") if isinstance(request.user, dict) else None
+        org_id = _get_request_organization_id(request)
         if not org_id:
             return Response({"detail": "No organization in token."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -412,7 +462,7 @@ class PmsMembersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        org_id = request.user.get("organization_id") if isinstance(request.user, dict) else None
+        org_id = _get_request_organization_id(request)
         if not org_id:
             return Response({"detail": "No organization in token."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -420,7 +470,7 @@ class PmsMembersView(APIView):
         return Response(OrganizationMemberSerializer(members, many=True).data)
 
     def post(self, request):
-        org_id = request.user.get("organization_id") if isinstance(request.user, dict) else None
+        org_id = _get_request_organization_id(request)
         if not org_id:
             return Response({"detail": "No organization in token."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -461,7 +511,7 @@ class PmsMemberDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, member_id):
-        org_id = request.user.get("organization_id") if isinstance(request.user, dict) else None
+        org_id = _get_request_organization_id(request)
         if not org_id:
             return Response({"detail": "No organization in token."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -476,7 +526,7 @@ class PmsMemberDetailView(APIView):
         return Response(OrganizationMemberSerializer(member).data)
 
     def delete(self, request, member_id):
-        org_id = request.user.get("organization_id") if isinstance(request.user, dict) else None
+        org_id = _get_request_organization_id(request)
         if not org_id:
             return Response({"detail": "No organization in token."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -504,9 +554,20 @@ class PmsTokenRefreshView(APIView):
             user_id = token.get("sub")
             organization_id = token.get("organization_id")
 
-            user = get_platform_user_by_id(int(user_id))
+            user = get_user_by_id(int(user_id), role="pms", active_only=True)
             if not user:
                 return Response({"detail": "User not found."}, status=status.HTTP_401_UNAUTHORIZED)
+
+            if not organization_id:
+                organizations = get_user_organizations(int(user_id))
+                if organizations:
+                    organization_id = organizations[0]["id"]
+
+            if not organization_id:
+                return Response(
+                    {"detail": "No organization available for refresh token."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             new_tokens = _create_pms_tokens(user, organization_id=int(organization_id))
             return Response(new_tokens)
