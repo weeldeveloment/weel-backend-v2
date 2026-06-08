@@ -601,7 +601,10 @@ class BookingAcceptView(PMSBaseView):
 class BookingCancelView(PMSBaseView):
     @swagger_auto_schema(responses={200: BookingSerializer()})
     def post(self, request, property_id, booking_id):
-        booking = cancel_booking(booking_id, _get_user_id(request))
+        try:
+            booking = cancel_booking(booking_id, _get_user_id(request))
+        except IntegrityError as e:
+            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
         if not booking:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(BookingSerializer(booking).data)
