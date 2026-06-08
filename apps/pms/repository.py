@@ -947,11 +947,11 @@ def _add_booking_history(
     return fetch_one(
         f"""
         INSERT INTO {_t(PMS_BOOKING_HISTORY_TABLE)}
-            (id, booking_id, action, previous_value, new_value, user_id, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (booking_id, action, previous_value, new_value, user_id, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [None, booking_id, action, pv, nv, user_id, timezone.now(), timezone.now()],
+        [booking_id, action, pv, nv, user_id, timezone.now(), timezone.now()],
     )
 
 
