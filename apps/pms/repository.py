@@ -775,7 +775,7 @@ def cancel_booking(booking_id: int, user_id: int | None = None) -> dict[str, Any
             if hasattr(end, "date"):
                 end = end.date()
             while d < end:
-                fetch_one(
+                execute(
                     f"""
                     UPDATE {_t(PMS_CALENDAR_SLOT_TABLE)}
                     SET status = 'available', updated_at = %s
