@@ -17,6 +17,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 
+from apps.platform.authentication import PmsJWTAuthentication
 from apps.platform.raw_repository import (
     create_organization,
     create_organization_member,
@@ -321,6 +322,9 @@ class PmsVerifyOTPLoginView(APIView):
 
 
 class PmsMeView(APIView):
+    authentication_classes = [PmsJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         user = request.user
         if isinstance(user, dict):
@@ -342,8 +346,40 @@ class PmsMeView(APIView):
             "organizations": [OrganizationSerializer(o).data for o in orgs],
         })
 
+    @swagger_auto_schema(
+        request_body=PlatformUserUpdateSerializer,
+        tags=["platform"],
+    )
+    def patch(self, request):
+        user = request.user
+        if isinstance(user, dict):
+            user_id = user.get("id")
+        else:
+            user_id = getattr(user, "id", None)
+
+        if not user_id:
+            return Response({"detail": "Not authenticated."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        serializer = PlatformUserUpdateSerializer(data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_user = update_platform_user(int(user_id), **serializer.validated_data)
+        if not updated_user:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        orgs = get_user_organizations(int(user_id))
+
+        return Response({
+            "user": PlatformUserSerializer(updated_user).data,
+            "organizations": [OrganizationSerializer(o).data for o in orgs],
+        })
+
 
 class PmsOrganizationView(APIView):
+    authentication_classes = [PmsJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         org_id = request.user.get("organization_id") if isinstance(request.user, dict) else None
         if not org_id:
@@ -372,6 +408,9 @@ class PmsOrganizationView(APIView):
 
 
 class PmsMembersView(APIView):
+    authentication_classes = [PmsJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         org_id = request.user.get("organization_id") if isinstance(request.user, dict) else None
         if not org_id:
@@ -418,6 +457,9 @@ class PmsMembersView(APIView):
 
 
 class PmsMemberDetailView(APIView):
+    authentication_classes = [PmsJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def patch(self, request, member_id):
         org_id = request.user.get("organization_id") if isinstance(request.user, dict) else None
         if not org_id:
