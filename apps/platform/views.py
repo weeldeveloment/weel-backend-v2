@@ -287,6 +287,7 @@ class PmsVerifyOTPRegisterView(APIView):
 
 
 class PmsSendOTPLoginView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "otp_login_send"
@@ -336,6 +337,7 @@ class PmsSendOTPLoginView(APIView):
 
 
 class PmsVerifyOTPLoginView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "otp_login_verify"
