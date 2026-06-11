@@ -132,6 +132,7 @@ def rotate_tokens(refresh_token: str) -> dict:
             TokenMetadata.TOKEN_SUBJECT,
             TokenMetadata.TOKEN_ISSUER,
             TokenMetadata.TOKEN_USER_TYPE,
+            TokenMetadata.TOKEN_TYPE_CLAIM,
         ]
 
         for claim in claims_to_copy:
@@ -144,8 +145,10 @@ def rotate_tokens(refresh_token: str) -> dict:
 
         token.blacklist()
         return {"refresh": str(new_refresh), "access": str(new_access)}
+    except TokenError:
+        raise
     except Exception as e:
-        raise ValueError("Invalid or expired refresh token")
+        raise InvalidToken("Invalid or expired refresh token")
 
 
 def decode_token(token: str):

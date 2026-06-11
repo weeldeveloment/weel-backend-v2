@@ -562,6 +562,9 @@ class PmsTokenRefreshView(APIView):
             user_id = token.get("sub")
             organization_id = token.get("organization_id")
 
+            if not user_id:
+                return Response({"detail": "Invalid token: missing user."}, status=status.HTTP_401_UNAUTHORIZED)
+
             user = get_user_by_id(int(user_id), role="pms", active_only=True)
             if not user:
                 return Response({"detail": "User not found."}, status=status.HTTP_401_UNAUTHORIZED)
@@ -573,6 +576,12 @@ class PmsTokenRefreshView(APIView):
                 )
 
             new_tokens = _create_pms_tokens(user, organization_id=int(organization_id))
+
+            try:
+                token.blacklist()
+            except Exception:
+                pass
+
             return Response(new_tokens)
         except Exception:
             return Response({"detail": "Invalid or expired refresh token."}, status=status.HTTP_401_UNAUTHORIZED)
