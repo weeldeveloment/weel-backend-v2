@@ -51,6 +51,9 @@ class StorySerializer(serializers.Serializer):
     property_type_guid = serializers.SerializerMethodField("get_property_type_guid")
     img = serializers.SerializerMethodField("get_img")
     media = serializers.SerializerMethodField("get_media")
+    is_platform_news = serializers.SerializerMethodField("get_is_platform_news")
+    title = serializers.SerializerMethodField("get_news_title")
+    body = serializers.SerializerMethodField("get_news_body")
 
     def get_property_id(self, obj):
         return str(obj.get("property_guid")) if obj.get("property_guid") else None
@@ -68,6 +71,15 @@ class StorySerializer(serializers.Serializer):
     def get_media(self, obj):
         media_items = obj.get("media") or []
         return StoryMediaSerializer(media_items, many=True, context=self.context).data
+
+    def get_is_platform_news(self, obj):
+        return bool(obj.get("is_platform_news", False))
+
+    def get_news_title(self, obj):
+        return obj.get("news_title") if obj.get("is_platform_news") else None
+
+    def get_news_body(self, obj):
+        return obj.get("news_body") if obj.get("is_platform_news") else None
 
 
 class StoryPropertySerializer(serializers.Serializer):
@@ -227,6 +239,9 @@ class AdminStorySerializer(serializers.Serializer):
     uploaded_at = serializers.DateTimeField(allow_null=True)
     views = serializers.IntegerField()
     media = serializers.SerializerMethodField("get_media")
+    is_platform_news = serializers.SerializerMethodField("get_is_platform_news")
+    title = serializers.SerializerMethodField("get_news_title")
+    body = serializers.SerializerMethodField("get_news_body")
 
     def get_property_id(self, obj):
         return str(obj.get("property_guid")) if obj.get("property_guid") else None
@@ -245,6 +260,205 @@ class AdminStorySerializer(serializers.Serializer):
         media_items = obj.get("media") or []
         return AdminStoryMediaSerializer(media_items, many=True, context=self.context).data
 
+    def get_is_platform_news(self, obj):
+        return bool(obj.get("is_platform_news", False))
+
+    def get_news_title(self, obj):
+        return obj.get("news_title") if obj.get("is_platform_news") else None
+
+    def get_news_body(self, obj):
+        return obj.get("news_body") if obj.get("is_platform_news") else None
+
 
 class AdminStoryModerateSerializer(serializers.Serializer):
     is_verified = serializers.BooleanField(required=True)
+
+
+class AdminNewsSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    title = serializers.SerializerMethodField("get_title")
+    body = serializers.SerializerMethodField("get_body")
+    is_verified = serializers.BooleanField()
+    verified_by_user_id = serializers.IntegerField(allow_null=True)
+    verified_at = serializers.DateTimeField(allow_null=True)
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+    uploaded_at = serializers.DateTimeField(allow_null=True)
+    views = serializers.IntegerField()
+    media = serializers.SerializerMethodField("get_media")
+
+    def get_title(self, obj):
+        return obj.get("news_title") or obj.get("title")
+
+    def get_body(self, obj):
+        return obj.get("news_body") or obj.get("body")
+
+    def get_media(self, obj):
+        media_items = obj.get("media") or []
+        return AdminStoryMediaSerializer(media_items, many=True, context=self.context).data
+
+
+class AdminNewsCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(required=True, max_length=500)
+    body = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    media_type = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    media_file = serializers.FileField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        media_type = attrs.get("media_type")
+        media_file = attrs.get("media_file")
+
+        if media_file and not media_type:
+            raise serializers.ValidationError(
+                {"media_type": _("media_type is required when media_file is provided")}
+            )
+
+        if not media_file:
+            return attrs
+
+        extension = media_file.name.split(".")[-1].lower()
+        if media_type == "image":
+            if extension not in settings.ALLOWED_PHOTO_EXTENSION:
+                raise serializers.ValidationError(
+                    {
+                        "media_file": _(
+                            "Invalid image format, allowed are: jpg, jpeg, png, heif, heic"
+                        )
+                    }
+                )
+            if media_file.size > settings.MAX_IMAGE_SIZE:
+                raise serializers.ValidationError(
+                    {"media_file": _("Image file too large, maximum size is 20MB")}
+                )
+        elif media_type == "video":
+            if extension not in settings.ALLOWED_VIDEO_EXTENSION:
+                raise serializers.ValidationError(
+                    {
+                        "media_file": _(
+                            "Invalid video format, allowed are: mp4, mov, avi, mkv"
+                        )
+                    }
+                )
+            if media_file.size > settings.MAX_VIDEO_SIZE:
+                raise serializers.ValidationError(
+                    {"media_file": _("Video file too large, maximum size is 100MB")}
+                )
+        else:
+            raise serializers.ValidationError({"media_type": _("Unsupported media type")})
+
+        return attrs
+
+    def create(self, validated_data):
+        from .raw_repository import add_news_media, create_platform_news, get_platform_news_by_guid
+
+        news = create_platform_news(
+            title=validated_data["title"],
+            body=validated_data.get("body") or "",
+            admin_user_id=self.context["request"].user.id,
+        )
+
+        media_file = validated_data.get("media_file")
+        if media_file:
+            media_type = validated_data["media_type"]
+            extension = media_file.name.split(".")[-1].lower()
+            filename = f"stories/{uuid.uuid4().hex}.{extension}"
+            media_path = default_storage.save(filename, media_file)
+
+            add_news_media(
+                story_id=int(news["id"]),
+                media_path=media_path,
+                media_type=media_type,
+            )
+
+        result = get_platform_news_by_guid(news["guid"])
+        if not result:
+            raise serializers.ValidationError({"detail": _("News not found after creation")})
+        return result
+
+    def to_representation(self, instance):
+        return AdminNewsSerializer(instance, context=self.context).data
+
+
+class AdminNewsUpdateSerializer(serializers.Serializer):
+    title = serializers.CharField(required=False, max_length=500)
+    body = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    media_type = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    media_file = serializers.FileField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        media_type = attrs.get("media_type")
+        media_file = attrs.get("media_file")
+
+        if media_file and not media_type:
+            raise serializers.ValidationError(
+                {"media_type": _("media_type is required when media_file is provided")}
+            )
+
+        if media_file:
+            extension = media_file.name.split(".")[-1].lower()
+            if media_type == "image":
+                if extension not in settings.ALLOWED_PHOTO_EXTENSION:
+                    raise serializers.ValidationError(
+                        {
+                            "media_file": _(
+                                "Invalid image format, allowed are: jpg, jpeg, png, heif, heic"
+                            )
+                        }
+                    )
+                if media_file.size > settings.MAX_IMAGE_SIZE:
+                    raise serializers.ValidationError(
+                        {"media_file": _("Image file too large, maximum size is 20MB")}
+                    )
+            elif media_type == "video":
+                if extension not in settings.ALLOWED_VIDEO_EXTENSION:
+                    raise serializers.ValidationError(
+                        {
+                            "media_file": _(
+                                "Invalid video format, allowed are: mp4, mov, avi, mkv"
+                            )
+                        }
+                    )
+                if media_file.size > settings.MAX_VIDEO_SIZE:
+                    raise serializers.ValidationError(
+                        {"media_file": _("Video file too large, maximum size is 100MB")}
+                    )
+            else:
+                raise serializers.ValidationError({"media_type": _("Unsupported media type")})
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        from .raw_repository import add_news_media, update_platform_news
+
+        news_guid = instance["guid"]
+
+        news = update_platform_news(
+            news_guid,
+            title=validated_data.get("title"),
+            body=validated_data.get("body"),
+        )
+        if not news:
+            raise serializers.ValidationError({"detail": _("News not found")})
+
+        media_file = validated_data.get("media_file")
+        if media_file:
+            media_type = validated_data["media_type"]
+            extension = media_file.name.split(".")[-1].lower()
+            filename = f"stories/{uuid.uuid4().hex}.{extension}"
+            media_path = default_storage.save(filename, media_file)
+
+            add_news_media(
+                story_id=int(news["id"]),
+                media_path=media_path,
+                media_type=media_type,
+            )
+
+        from .raw_repository import get_platform_news_by_guid
+
+        result = get_platform_news_by_guid(news_guid)
+        if not result:
+            raise serializers.ValidationError({"detail": _("News not found after update")})
+        return result
+
+    def to_representation(self, instance):
+        return AdminNewsSerializer(instance, context=self.context).data

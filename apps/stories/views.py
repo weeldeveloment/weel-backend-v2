@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from django.core.cache import cache
 from django.utils.translation import gettext_lazy as _
 
@@ -11,20 +13,35 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.generics import ListAPIView
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from admin_auth.authentication import AdminJWTAuthentication
+from admin_auth.permissions import IsAdminUser
 from shared.permissions import IsPartner
 from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
 
 from .raw_repository import (
+    delete_platform_news_by_guid,
     delete_story_for_partner,
     delete_story_media,
+    get_platform_news_by_guid,
     get_story_by_guid,
     get_story_media_by_guid,
     list_active_stories,
+    list_platform_news_for_admin,
+    count_platform_news_for_admin,
     parse_property_kind,
 )
-from .serializers import StoryCreateSerializer, StoryDetailSerializer, StorySerializer
+from .serializers import (
+    AdminNewsCreateSerializer,
+    AdminNewsSerializer,
+    AdminNewsUpdateSerializer,
+    StoryCreateSerializer,
+    StoryDetailSerializer,
+    StorySerializer,
+)
 
 
 def _is_partner(user) -> bool:
@@ -263,30 +280,201 @@ class PublicStoryListView(ListAPIView):
     @swagger_auto_schema(
         tags=["Stories"],
         operation_summary="Public stories list",
-        operation_description="Request without parameters returns 404. property_type must be sent.",
+        operation_description="List public stories. If property_type is provided, filters by type + includes platform news.",
         manual_parameters=[
             openapi.Parameter(
                 "property_type",
                 openapi.IN_QUERY,
-                description="Property type (apartment/cottage)",
+                description="Property type (apartment/cottage). Optional.",
                 type=openapi.TYPE_STRING,
-                required=True,
+                required=False,
             ),
         ],
         responses={
             status.HTTP_200_OK: StorySerializer(many=True),
-            status.HTTP_404_NOT_FOUND: "Parameters not provided",
         },
     )
     def get(self, request, *args, **kwargs):
         property_type_raw = request.query_params.get("property_type")
-        if not property_type_raw:
-            raise NotFound(_("Parametrlar kerak. property_type yuboring."))
 
-        property_kind = parse_property_kind(property_type_raw)
-        stories = list_active_stories(
-            public_only=True,
-            property_kind=property_kind,
-        )
+        if property_type_raw:
+            property_kind = parse_property_kind(property_type_raw)
+            stories = list_active_stories(
+                public_only=True,
+                property_kind=property_kind,
+                include_news=True,
+            )
+        else:
+            stories = list_active_stories(
+                public_only=True,
+                include_news=True,
+            )
+
         serializer = self.get_serializer(stories, many=True, context={"request": request})
         return Response(serializer.data)
+
+
+# ── Admin Platform News CRUD ─────────────────────────────────────────
+
+
+class AdminNewsPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class AdminNewsListView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+    pagination_class = AdminNewsPagination
+
+    @swagger_auto_schema(
+        tags=["Admin - News"],
+        operation_summary="List all platform news",
+        operation_description="List all platform news with search and ordering. Admin only.",
+        manual_parameters=[
+            openapi.Parameter("search", openapi.IN_QUERY, description="Search by title, body, or GUID", type=openapi.TYPE_STRING, required=False),
+            openapi.Parameter("ordering", openapi.IN_QUERY, description="Order by field (e.g. -created_at, views)", type=openapi.TYPE_STRING, required=False),
+            openapi.Parameter("page", openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER, required=False),
+            openapi.Parameter("page_size", openapi.IN_QUERY, description="Items per page", type=openapi.TYPE_INTEGER, required=False),
+        ],
+        responses={status.HTTP_200_OK: AdminNewsSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        search = request.query_params.get("search")
+        ordering = request.query_params.get("ordering")
+
+        total = count_platform_news_for_admin(search=search)
+        news_list = list_platform_news_for_admin(
+            search=search,
+            ordering=ordering,
+            limit=max(total, 1),
+            offset=0,
+        )
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(news_list, request, view=self)
+        serializer = AdminNewsSerializer(page, many=True, context={"request": request})
+        return paginator.get_paginated_response(serializer.data)
+
+
+class AdminNewsCreateView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @swagger_auto_schema(
+        tags=["Admin - News"],
+        operation_summary="Create platform news",
+        operation_description="Create a new platform news article. Admin only.",
+        request_body=AdminNewsCreateSerializer,
+        responses={
+            status.HTTP_201_CREATED: AdminNewsSerializer,
+            status.HTTP_400_BAD_REQUEST: "Bad request",
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = AdminNewsCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        news = serializer.save()
+        return Response(
+            AdminNewsSerializer(news, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminNewsDetailView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin - News"],
+        operation_summary="Get platform news by GUID",
+        operation_description="Retrieve a single platform news article. Admin only.",
+        responses={
+            status.HTTP_200_OK: AdminNewsSerializer,
+            status.HTTP_404_NOT_FOUND: "News not found",
+        },
+    )
+    def get(self, request, news_guid, *args, **kwargs):
+        try:
+            news_guid = uuid.UUID(str(news_guid))
+        except ValueError:
+            return Response(
+                {"detail": _("Invalid news GUID")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        news = get_platform_news_by_guid(news_guid)
+        if not news:
+            raise NotFound(_("News not found"))
+        return Response(
+            AdminNewsSerializer(news, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdminNewsUpdateView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @swagger_auto_schema(
+        tags=["Admin - News"],
+        operation_summary="Update platform news",
+        operation_description="Update a platform news article. Admin only.",
+        request_body=AdminNewsUpdateSerializer,
+        responses={
+            status.HTTP_200_OK: AdminNewsSerializer,
+            status.HTTP_400_BAD_REQUEST: "Bad request",
+            status.HTTP_404_NOT_FOUND: "News not found",
+        },
+    )
+    def patch(self, request, news_guid, *args, **kwargs):
+        try:
+            news_guid = uuid.UUID(str(news_guid))
+        except ValueError:
+            return Response(
+                {"detail": _("Invalid news GUID")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        news = get_platform_news_by_guid(news_guid)
+        if not news:
+            raise NotFound(_("News not found"))
+
+        serializer = AdminNewsUpdateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        updated = serializer.update(news, serializer.validated_data)
+        return Response(
+            AdminNewsSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdminNewsDeleteView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin - News"],
+        operation_summary="Delete platform news",
+        operation_description="Delete a platform news article. Admin only.",
+        responses={
+            status.HTTP_204_NO_CONTENT: None,
+            status.HTTP_404_NOT_FOUND: "News not found",
+        },
+    )
+    def delete(self, request, news_guid, *args, **kwargs):
+        try:
+            news_guid = uuid.UUID(str(news_guid))
+        except ValueError:
+            return Response(
+                {"detail": _("Invalid news GUID")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        deleted = delete_platform_news_by_guid(news_guid)
+        if not deleted:
+            raise NotFound(_("News not found"))
+        return Response(status=status.HTTP_204_NO_CONTENT)

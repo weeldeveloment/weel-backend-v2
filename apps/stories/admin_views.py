@@ -150,7 +150,8 @@ class AdminStoryModerateView(APIView):
                     {"detail": _("Story not found")},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-            if not story_row.get("property_is_verified"):
+            is_news = bool(story_row.get("is_platform_news", False))
+            if not is_news and not story_row.get("property_is_verified"):
                 return Response(
                     {"detail": _("Property is not verified. Cannot approve story.")},
                     status=status.HTTP_400_BAD_REQUEST,

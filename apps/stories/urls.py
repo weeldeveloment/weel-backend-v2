@@ -2,7 +2,16 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .admin_views import AdminStoryDeleteView, AdminStoryListView, AdminStoryModerateView
-from .views import StoryViewSet, PartnerStoryListView, PublicStoryListView
+from .views import (
+    AdminNewsCreateView,
+    AdminNewsDeleteView,
+    AdminNewsDetailView,
+    AdminNewsListView,
+    AdminNewsUpdateView,
+    StoryViewSet,
+    PartnerStoryListView,
+    PublicStoryListView,
+)
 
 router = DefaultRouter()
 router.register(r"stories", StoryViewSet, basename="stories"),
@@ -44,5 +53,31 @@ urlpatterns = [
         "admin/stories/<uuid:story_guid>/delete/",
         AdminStoryDeleteView.as_view(),
         name="admin-story-delete",
+    ),
+    # Admin platform news endpoints
+    path(
+        "admin/news/",
+        AdminNewsListView.as_view(),
+        name="admin-news-list",
+    ),
+    path(
+        "admin/news/create/",
+        AdminNewsCreateView.as_view(),
+        name="admin-news-create",
+    ),
+    path(
+        "admin/news/<uuid:news_guid>/",
+        AdminNewsDetailView.as_view(),
+        name="admin-news-detail",
+    ),
+    path(
+        "admin/news/<uuid:news_guid>/update/",
+        AdminNewsUpdateView.as_view(),
+        name="admin-news-update",
+    ),
+    path(
+        "admin/news/<uuid:news_guid>/delete/",
+        AdminNewsDeleteView.as_view(),
+        name="admin-news-delete",
     ),
 ]
