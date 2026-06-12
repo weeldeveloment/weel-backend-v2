@@ -227,6 +227,16 @@ class RawStoryMedia(RowEntity):
 
 
 @dataclass(slots=True)
+class RawBanner(RowEntity):
+    id: int
+    guid: UUID
+    html_source: str
+    image: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(slots=True)
 class RawNotification(RowEntity):
     id: int
     legacy_client_notification_id: int | None

@@ -462,3 +462,105 @@ class AdminNewsUpdateSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
         return AdminNewsSerializer(instance, context=self.context).data
+
+
+class AdminBannerSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    html_source = serializers.CharField()
+    image = serializers.SerializerMethodField("get_image")
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+    def get_image(self, obj):
+        request = self.context.get("request")
+        media_path = obj.get("image") if isinstance(obj, dict) else getattr(obj, "image", None)
+        return _build_media_url(request, media_path)
+
+
+class AdminBannerCreateSerializer(serializers.Serializer):
+    html_source = serializers.CharField(required=True)
+    image = serializers.FileField(required=True)
+
+    def validate_image(self, value):
+        extension = value.name.split(".")[-1].lower()
+        if extension not in settings.ALLOWED_PHOTO_EXTENSION:
+            raise serializers.ValidationError(
+                _("Invalid image format, allowed are: jpg, jpeg, png, heif, heic")
+            )
+        if value.size > settings.MAX_IMAGE_SIZE:
+            raise serializers.ValidationError(
+                _("Image file too large, maximum size is 20MB")
+            )
+        return value
+
+    def create(self, validated_data):
+        from .raw_repository import create_banner, get_banner_by_guid
+
+        image_file = validated_data["image"]
+        extension = image_file.name.split(".")[-1].lower()
+        filename = f"banners/{uuid.uuid4().hex}.{extension}"
+        media_path = default_storage.save(filename, image_file)
+
+        banner = create_banner(
+            html_source=validated_data["html_source"],
+            image=media_path,
+        )
+
+        result = get_banner_by_guid(banner["guid"])
+        if not result:
+            raise serializers.ValidationError({"detail": _("Banner not found after creation")})
+        return result
+
+    def to_representation(self, instance):
+        return AdminBannerSerializer(instance, context=self.context).data
+
+
+class AdminBannerUpdateSerializer(serializers.Serializer):
+    html_source = serializers.CharField(required=False)
+    image = serializers.FileField(required=False)
+
+    def validate_image(self, value):
+        extension = value.name.split(".")[-1].lower()
+        if extension not in settings.ALLOWED_PHOTO_EXTENSION:
+            raise serializers.ValidationError(
+                _("Invalid image format, allowed are: jpg, jpeg, png, heif, heic")
+            )
+        if value.size > settings.MAX_IMAGE_SIZE:
+            raise serializers.ValidationError(
+                _("Image file too large, maximum size is 20MB")
+            )
+        return value
+
+    def update(self, instance, validated_data):
+        from .raw_repository import get_banner_by_guid, update_banner
+
+        banner_guid = instance["guid"]
+        html_source = validated_data.get("html_source")
+        image = validated_data.get("image")
+
+        image_path = instance.get("image")
+        if image:
+            if image_path:
+                try:
+                    default_storage.delete(image_path)
+                except Exception:
+                    pass
+            extension = image.name.split(".")[-1].lower()
+            filename = f"banners/{uuid.uuid4().hex}.{extension}"
+            image_path = default_storage.save(filename, image)
+
+        banner = update_banner(
+            banner_guid,
+            html_source=html_source,
+            image=image_path,
+        )
+        if not banner:
+            raise serializers.ValidationError({"detail": _("Banner not found")})
+
+        result = get_banner_by_guid(banner_guid)
+        if not result:
+            raise serializers.ValidationError({"detail": _("Banner not found after update")})
+        return result
+
+    def to_representation(self, instance):
+        return AdminBannerSerializer(instance, context=self.context).data

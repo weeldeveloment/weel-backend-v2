@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from django.core.cache import cache
+from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
 
 from drf_yasg import openapi
@@ -23,18 +24,25 @@ from shared.permissions import IsPartner
 from users.authentication import ClientJWTAuthentication, PartnerJWTAuthentication
 
 from .raw_repository import (
+    count_banners,
+    count_platform_news_for_admin,
+    delete_banner_by_guid,
     delete_platform_news_by_guid,
     delete_story_for_partner,
     delete_story_media,
+    get_banner_by_guid,
     get_platform_news_by_guid,
     get_story_by_guid,
     get_story_media_by_guid,
     list_active_stories,
+    list_banners,
     list_platform_news_for_admin,
-    count_platform_news_for_admin,
     parse_property_kind,
 )
 from .serializers import (
+    AdminBannerCreateSerializer,
+    AdminBannerSerializer,
+    AdminBannerUpdateSerializer,
     AdminNewsCreateSerializer,
     AdminNewsSerializer,
     AdminNewsUpdateSerializer,
@@ -477,4 +485,172 @@ class AdminNewsDeleteView(APIView):
         deleted = delete_platform_news_by_guid(news_guid)
         if not deleted:
             raise NotFound(_("News not found"))
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Admin Banner CRUD ────────────────────────────────────────────────
+
+
+class AdminBannerPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class AdminBannerListView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+    pagination_class = AdminBannerPagination
+
+    @swagger_auto_schema(
+        tags=["Admin - Banners"],
+        operation_summary="List all banners",
+        manual_parameters=[
+            openapi.Parameter("search", openapi.IN_QUERY, description="Search by html_source or GUID", type=openapi.TYPE_STRING, required=False),
+            openapi.Parameter("ordering", openapi.IN_QUERY, description="Order by field (e.g. -created_at)", type=openapi.TYPE_STRING, required=False),
+            openapi.Parameter("page", openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER, required=False),
+            openapi.Parameter("page_size", openapi.IN_QUERY, description="Items per page", type=openapi.TYPE_INTEGER, required=False),
+        ],
+        responses={status.HTTP_200_OK: AdminBannerSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        search = request.query_params.get("search")
+        ordering = request.query_params.get("ordering")
+
+        total = count_banners(search=search)
+        banner_list = list_banners(
+            search=search,
+            ordering=ordering,
+            limit=max(total, 1),
+            offset=0,
+        )
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(banner_list, request, view=self)
+        serializer = AdminBannerSerializer(page, many=True, context={"request": request})
+        return paginator.get_paginated_response(serializer.data)
+
+
+class AdminBannerCreateView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @swagger_auto_schema(
+        tags=["Admin - Banners"],
+        operation_summary="Create a banner",
+        request_body=AdminBannerCreateSerializer,
+        responses={
+            status.HTTP_201_CREATED: AdminBannerSerializer,
+            status.HTTP_400_BAD_REQUEST: "Bad request",
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = AdminBannerCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        banner = serializer.save()
+        return Response(
+            AdminBannerSerializer(banner, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminBannerDetailView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin - Banners"],
+        operation_summary="Get banner by GUID",
+        responses={
+            status.HTTP_200_OK: AdminBannerSerializer,
+            status.HTTP_404_NOT_FOUND: "Banner not found",
+        },
+    )
+    def get(self, request, banner_guid, *args, **kwargs):
+        try:
+            banner_guid = uuid.UUID(str(banner_guid))
+        except ValueError:
+            return Response(
+                {"detail": _("Invalid banner GUID")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        banner = get_banner_by_guid(banner_guid)
+        if not banner:
+            raise NotFound(_("Banner not found"))
+        return Response(
+            AdminBannerSerializer(banner, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdminBannerUpdateView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @swagger_auto_schema(
+        tags=["Admin - Banners"],
+        operation_summary="Update a banner",
+        request_body=AdminBannerUpdateSerializer,
+        responses={
+            status.HTTP_200_OK: AdminBannerSerializer,
+            status.HTTP_400_BAD_REQUEST: "Bad request",
+            status.HTTP_404_NOT_FOUND: "Banner not found",
+        },
+    )
+    def patch(self, request, banner_guid, *args, **kwargs):
+        try:
+            banner_guid = uuid.UUID(str(banner_guid))
+        except ValueError:
+            return Response(
+                {"detail": _("Invalid banner GUID")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        banner = get_banner_by_guid(banner_guid)
+        if not banner:
+            raise NotFound(_("Banner not found"))
+
+        serializer = AdminBannerUpdateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        updated = serializer.update(banner, serializer.validated_data)
+        return Response(
+            AdminBannerSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdminBannerDeleteView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin - Banners"],
+        operation_summary="Delete a banner",
+        responses={
+            status.HTTP_204_NO_CONTENT: None,
+            status.HTTP_404_NOT_FOUND: "Banner not found",
+        },
+    )
+    def delete(self, request, banner_guid, *args, **kwargs):
+        try:
+            banner_guid = uuid.UUID(str(banner_guid))
+        except ValueError:
+            return Response(
+                {"detail": _("Invalid banner GUID")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        banner = get_banner_by_guid(banner_guid)
+        if not banner:
+            raise NotFound(_("Banner not found"))
+        image_path = banner.get("image")
+        if image_path:
+            try:
+                default_storage.delete(image_path)
+            except Exception:
+                pass
+        delete_banner_by_guid(banner_guid)
         return Response(status=status.HTTP_204_NO_CONTENT)

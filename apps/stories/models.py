@@ -42,3 +42,11 @@ class StoryView(HardDeleteBaseModel):
     story_id: int | None = None
     client_id: int | None = None
     _meta = SimpleNamespace(db_table="story_view")
+
+
+@dataclass(slots=True)
+class Banner(BaseModel):
+    id: int | None = None
+    html_source: str = ""
+    image: str = ""
+    _meta = SimpleNamespace(db_table="banners")

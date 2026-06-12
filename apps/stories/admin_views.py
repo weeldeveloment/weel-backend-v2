@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
 
 from drf_yasg import openapi
@@ -199,11 +200,20 @@ class AdminStoryDeleteView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        deleted = delete_story_by_guid(story_guid)
-        if not deleted:
+        story = get_story_by_guid(story_guid, active_only=False)
+        if not story:
             return Response(
                 {"detail": _("Story not found")},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        for media_item in (story.get("media") or []):
+            media_path = media_item.get("media")
+            if media_path:
+                try:
+                    default_storage.delete(media_path)
+                except Exception:
+                    pass
+
+        delete_story_by_guid(story_guid)
         return Response(status=status.HTTP_204_NO_CONTENT)

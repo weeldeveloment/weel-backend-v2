@@ -508,6 +508,151 @@ def add_news_media(*, story_id: int, media_path: str, media_type: str) -> dict[s
     return create_story_media(story_id=story_id, media_path=media_path, media_type=media_type)
 
 
+# ── Banner helpers ──────────────────────────────────────────────────
+
+
+def create_banner(*, html_source: str, image: str) -> dict[str, Any]:
+    now = timezone.now()
+    banner_guid = uuid.uuid4()
+    row = fetch_one(
+        f"""
+        INSERT INTO {get_table_name("banners")} (
+            guid, html_source, image, created_at, updated_at
+        ) VALUES (%s, %s, %s, %s, %s)
+        {"RETURNING *" if return_star() else ""}
+        """,
+        [banner_guid, html_source, image, now, now],
+    )
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {get_table_name('banners')} WHERE guid = %s ORDER BY id DESC LIMIT 1",
+            [banner_guid],
+        )
+    if row is None:
+        raise RuntimeError("Failed to create banner")
+    return row
+
+
+def get_banner_by_guid(banner_guid: uuid.UUID | str) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        SELECT * FROM {get_table_name("banners")}
+        WHERE guid = %s
+        LIMIT 1
+        """,
+        [banner_guid],
+    )
+
+
+def count_banners(*, search: str | None = None) -> int:
+    params: list[Any] = []
+    search_sql = ""
+    if search:
+        term = f"%{search.strip()}%"
+        search_sql = (
+            " AND ("
+            f"{case_insensitive_like_sql('html_source', '%s')} "
+            f"OR {case_insensitive_like_sql('guid::text', '%s')}"
+            ")"
+        )
+        params.extend([term, term])
+
+    row = fetch_one(
+        f"""
+        SELECT COUNT(*) AS total
+        FROM {get_table_name("banners")}
+        WHERE TRUE{search_sql}
+        """,
+        params,
+    )
+    return int(row["total"]) if row else 0
+
+
+def list_banners(
+    *,
+    search: str | None = None,
+    ordering: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    params: list[Any] = []
+    search_sql = ""
+    if search:
+        term = f"%{search.strip()}%"
+        search_sql = (
+            " AND ("
+            f"{case_insensitive_like_sql('html_source', '%s')} "
+            f"OR {case_insensitive_like_sql('guid::text', '%s')}"
+            ")"
+        )
+        params.extend([term, term])
+
+    order_field = "created_at"
+    order_direction = "DESC"
+    if ordering:
+        direction = "DESC" if ordering.startswith("-") else "ASC"
+        field_raw = ordering.lstrip("-+").strip()
+        allowed = {"created_at", "updated_at"}
+        if field_raw in allowed:
+            order_field = field_raw
+            order_direction = direction
+
+    params.extend([limit, offset])
+
+    return fetch_all(
+        f"""
+        SELECT * FROM {get_table_name("banners")}
+        WHERE TRUE{search_sql}
+        ORDER BY {order_field} {order_direction}, id {order_direction}
+        LIMIT %s OFFSET %s
+        """,
+        params,
+    )
+
+
+def update_banner(
+    banner_guid: uuid.UUID | str,
+    *,
+    html_source: str | None = None,
+    image: str | None = None,
+) -> dict[str, Any] | None:
+    set_parts: list[str] = ["updated_at = %s"]
+    params: list[Any] = [timezone.now()]
+    if html_source is not None:
+        set_parts.append("html_source = %s")
+        params.append(html_source)
+    if image is not None:
+        set_parts.append("image = %s")
+        params.append(image)
+    params.append(banner_guid)
+
+    row = fetch_one(
+        f"""
+        UPDATE {get_table_name("banners")}
+        SET {', '.join(set_parts)}
+        WHERE guid = %s
+        {"RETURNING *" if return_star() else ""}
+        """,
+        params,
+    )
+    if row is None and not return_star():
+        row = fetch_one(
+            f"SELECT * FROM {get_table_name('banners')} WHERE guid = %s LIMIT 1",
+            [banner_guid],
+        )
+    return row
+
+
+def delete_banner_by_guid(banner_guid: uuid.UUID | str) -> int:
+    return execute(
+        f"""
+        DELETE FROM {get_table_name("banners")}
+        WHERE guid = %s
+        """,
+        [banner_guid],
+    )
+
+
 # ── Admin moderation helpers ──────────────────────────────────────────
 
 
