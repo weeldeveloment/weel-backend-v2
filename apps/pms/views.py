@@ -84,6 +84,7 @@ from apps.pms.serializers import (
     PropertyImageSerializer,
     PropertySerializer,
     RateSerializer,
+    ResizeBookingSerializer,
     ReviewComplainSerializer,
     ReviewRespondSerializer,
     ReviewSerializer,
@@ -587,6 +588,29 @@ class BookingRetrieveView(PMSBaseView):
         if not booking:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(BookingSerializer(booking).data)
+
+    @swagger_auto_schema(
+        request_body=ResizeBookingSerializer,
+        responses={200: BookingSerializer()},
+    )
+    def patch(self, request, property_id, booking_id):
+        booking = get_booking(booking_id, property_id)
+        if not booking:
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ResizeBookingSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        updated = update_booking(
+            booking_id,
+            check_in=serializer.validated_data["check_in"],
+            check_out=serializer.validated_data["check_out"],
+        )
+        if not updated:
+            return Response({"detail": "Failed to update booking."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(BookingSerializer(updated).data)
 
 
 class BookingAcceptView(PMSBaseView):

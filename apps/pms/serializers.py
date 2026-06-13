@@ -263,5 +263,15 @@ class MoveBookingSerializer(serializers.Serializer):
     new_check_out = serializers.DateField(required=False, allow_null=True)
 
 
+class ResizeBookingSerializer(serializers.Serializer):
+    check_in = serializers.DateField()
+    check_out = serializers.DateField()
+
+    def validate(self, data):
+        if data["check_out"] <= data["check_in"]:
+            raise serializers.ValidationError({"check_out": "Check-out must be after check-in."})
+        return data
+
+
 class MealPlanChangeSerializer(serializers.Serializer):
     meal_plan = serializers.ChoiceField(choices=["RO", "BB", "HB", "FB", "AI", "UAI"])
