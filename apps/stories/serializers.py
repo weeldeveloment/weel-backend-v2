@@ -564,3 +564,16 @@ class AdminBannerUpdateSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
         return AdminBannerSerializer(instance, context=self.context).data
+
+
+class PublicBannerSerializer(serializers.Serializer):
+    guid = serializers.UUIDField()
+    html_source = serializers.CharField()
+    image = serializers.SerializerMethodField("get_image")
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+    def get_image(self, obj):
+        request = self.context.get("request")
+        media_path = obj.get("image") if isinstance(obj, dict) else getattr(obj, "image", None)
+        return _build_media_url(request, media_path)

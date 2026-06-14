@@ -46,6 +46,7 @@ from .serializers import (
     AdminNewsCreateSerializer,
     AdminNewsSerializer,
     AdminNewsUpdateSerializer,
+    PublicBannerSerializer,
     StoryCreateSerializer,
     StoryDetailSerializer,
     StorySerializer,
@@ -654,3 +655,50 @@ class AdminBannerDeleteView(APIView):
                 pass
         delete_banner_by_guid(banner_guid)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Public Banner Endpoints ──────────────────────────────────────────
+
+
+class PublicBannerListView(APIView):
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        tags=["Banners"],
+        operation_summary="List public banners",
+        responses={status.HTTP_200_OK: PublicBannerSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        banners = list_banners(limit=100, offset=0)
+        serializer = PublicBannerSerializer(banners, many=True, context={"request": request})
+        return Response(serializer.data)
+
+
+class PublicBannerDetailView(APIView):
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        tags=["Banners"],
+        operation_summary="Get banner by GUID",
+        responses={
+            status.HTTP_200_OK: PublicBannerSerializer,
+            status.HTTP_404_NOT_FOUND: "Banner not found",
+        },
+    )
+    def get(self, request, banner_guid, *args, **kwargs):
+        try:
+            banner_guid = uuid.UUID(str(banner_guid))
+        except ValueError:
+            return Response(
+                {"detail": _("Invalid banner GUID")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        banner = get_banner_by_guid(banner_guid)
+        if not banner:
+            raise NotFound(_("Banner not found"))
+        return Response(
+            PublicBannerSerializer(banner, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )

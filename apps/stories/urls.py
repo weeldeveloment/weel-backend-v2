@@ -13,6 +13,8 @@ from .views import (
     AdminNewsDetailView,
     AdminNewsListView,
     AdminNewsUpdateView,
+    PublicBannerDetailView,
+    PublicBannerListView,
     StoryViewSet,
     PartnerStoryListView,
     PublicStoryListView,
@@ -42,6 +44,16 @@ urlpatterns = [
         "public/stories/",
         PublicStoryListView.as_view(),
         name="public-story-list",
+    ),
+    path(
+        "public/banners/",
+        PublicBannerListView.as_view(),
+        name="public-banner-list",
+    ),
+    path(
+        "public/banners/<uuid:banner_guid>/",
+        PublicBannerDetailView.as_view(),
+        name="public-banner-detail",
     ),
     # Admin moderation endpoints
     path(
