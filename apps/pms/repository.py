@@ -158,8 +158,8 @@ def get_property_images(property_id: int) -> list[dict[str, Any]]:
 
 def add_property_image(property_id: int, image_url: str, order: int = 0) -> dict[str, Any] | None:
     return fetch_one(
-        f"INSERT INTO {_t(PMS_PROPERTY_IMAGE_TABLE)} (id, property_id, image_url, \"order\", created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
-        [None, property_id, image_url, order, timezone.now(), timezone.now()],
+        f"INSERT INTO {_t(PMS_PROPERTY_IMAGE_TABLE)} (property_id, image_url, \"order\", created_at, updated_at) VALUES (%s, %s, %s, %s, %s) RETURNING *",
+        [property_id, image_url, order, timezone.now(), timezone.now()],
     )
 
 
@@ -364,8 +364,8 @@ def get_room_images(room_id: int) -> list[dict[str, Any]]:
 
 def add_room_image(room_id: int, image_url: str, order: int = 0) -> dict[str, Any] | None:
     return fetch_one(
-        f"INSERT INTO {_t(PMS_ROOM_IMAGE_TABLE)} (id, room_id, image_url, \"order\", created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
-        [None, room_id, image_url, order, timezone.now(), timezone.now()],
+        f"INSERT INTO {_t(PMS_ROOM_IMAGE_TABLE)} (room_id, image_url, \"order\", created_at, updated_at) VALUES (%s, %s, %s, %s, %s) RETURNING *",
+        [room_id, image_url, order, timezone.now(), timezone.now()],
     )
 
 
@@ -413,8 +413,8 @@ def get_or_create_calendar_slot(room_id: int, slot_date: date, status: str = "av
         return existing
 
     return fetch_one(
-        f"INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (id, room_id, date, status, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
-        [None, room_id, slot_date, status, timezone.now(), timezone.now()],
+        f"INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, created_at, updated_at) VALUES (%s, %s, %s, %s, %s) RETURNING *",
+        [room_id, slot_date, status, timezone.now(), timezone.now()],
     )
 
 
@@ -657,11 +657,11 @@ def create_booking(
         while d < check_out:
             fetch_one(
                 f"""
-                INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (id, room_id, date, status, created_at, updated_at)
-                VALUES (%s, %s, %s, 'occupied', %s, %s)
+                INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, created_at, updated_at)
+                VALUES (%s, %s, 'occupied', %s, %s)
                 ON CONFLICT (room_id, date) DO UPDATE SET status = 'occupied', updated_at = %s
                 """,
-                [None, room_id, d, now, now, now],
+                [room_id, d, now, now, now],
             )
             d += timedelta(days=1)
 
@@ -895,11 +895,11 @@ def move_booking(
             while d < actual_check_out:
                 execute(
                     f"""
-                    INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (id, room_id, date, status, created_at, updated_at)
-                    VALUES (%s, %s, %s, 'occupied', %s, %s)
+                    INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, created_at, updated_at)
+                    VALUES (%s, %s, 'occupied', %s, %s)
                     ON CONFLICT (room_id, date) DO UPDATE SET status = 'occupied', updated_at = %s
                     """,
-                    [None, new_room_id, d, timezone.now(), timezone.now(), timezone.now()],
+                    [new_room_id, d, timezone.now(), timezone.now(), timezone.now()],
                 )
                 d += timedelta(days=1)
 
