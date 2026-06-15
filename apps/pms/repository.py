@@ -878,7 +878,7 @@ def move_booking(
         if old_room_id and old_check_in and old_check_out:
             d = old_check_in
             while d < old_check_out:
-                fetch_one(
+                execute(
                     f"""
                     UPDATE {_t(PMS_CALENDAR_SLOT_TABLE)}
                     SET status = 'available', updated_at = %s
@@ -893,7 +893,7 @@ def move_booking(
         if actual_check_in and actual_check_out:
             d = actual_check_in
             while d < actual_check_out:
-                fetch_one(
+                execute(
                     f"""
                     INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (id, room_id, date, status, created_at, updated_at)
                     VALUES (%s, %s, %s, 'occupied', %s, %s)
