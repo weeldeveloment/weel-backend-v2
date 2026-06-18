@@ -460,11 +460,11 @@ def create_organization_member(
     return fetch_one(
         f"""
         INSERT INTO public.{_table(ORGANIZATION_MEMBER_TABLE)}
-            (organization_id, user_id, role, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s)
+            (guid, organization_id, user_id, role, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [organization_id, user_id, role, now, now],
+        [uuid4(), organization_id, user_id, role, now, now],
     )
 
 
