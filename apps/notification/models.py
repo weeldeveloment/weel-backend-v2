@@ -23,6 +23,7 @@ class NotificationType(ChoiceEnum):
     BOOKING_COMPLETED = "booking_completed"
     BOOKING_NO_SHOW = "booking_no_show"
     PROMO = "promo"
+    LEAVE_REVIEW = "leave_review"
 
 
 NotificationStatus.choices = build_choices(NotificationStatus)
