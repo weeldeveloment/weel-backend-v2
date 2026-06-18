@@ -265,11 +265,11 @@ def create_organization(
     result = fetch_one(
         f"""
         INSERT INTO public.{_table(ORGANIZATION_TABLE)}
-            (name, slug, schema_name, is_active, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+            (guid, name, slug, schema_name, is_active, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [name, slug, schema_name, True, now, now],
+        [uuid4(), name, slug, schema_name, True, now, now],
     )
     if result:
         invalidate_org_schema_cache(result["id"])
