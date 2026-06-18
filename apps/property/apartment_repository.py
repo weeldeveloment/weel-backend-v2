@@ -16,13 +16,16 @@ from shared.raw.tables import BOOKING_TABLE
 
 APARTMENT_TYPE_GUID = UUID("11111111-1111-1111-1111-111111111111")
 COTTAGE_TYPE_GUID = UUID("22222222-2222-2222-2222-222222222222")
+HOTEL_TYPE_GUID = UUID("33333333-3333-3333-3333-333333333333")
 
 PROPERTY_KIND_APARTMENT = "apartment"
 PROPERTY_KIND_COTTAGE = "cottage"
+PROPERTY_KIND_HOTEL = "hotel"
 logger = logging.getLogger(__name__)
 TYPE_GUID_TO_KIND = {
     str(APARTMENT_TYPE_GUID): PROPERTY_KIND_APARTMENT,
     str(COTTAGE_TYPE_GUID): PROPERTY_KIND_COTTAGE,
+    str(HOTEL_TYPE_GUID): PROPERTY_KIND_HOTEL,
 }
 
 
@@ -63,6 +66,8 @@ def parse_property_kind(value: str | UUID | None) -> str | None:
         return PROPERTY_KIND_APARTMENT
     if raw in {"cottage", "cottages"}:
         return PROPERTY_KIND_COTTAGE
+    if raw in {"hotel", "hotels"}:
+        return PROPERTY_KIND_HOTEL
     return TYPE_GUID_TO_KIND.get(raw)
 
 
@@ -80,6 +85,13 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
             "title_en": "Apartment",
             "title_ru": "Квартира",
             "title_uz": "Kvartira",
+            "icon": "property/icons/building-skyscraper2.svg",
+        },
+        {
+            "guid": str(HOTEL_TYPE_GUID),
+            "title_en": "Hotel",
+            "title_ru": "Отель",
+            "title_uz": "Mehmonxona",
             "icon": "property/icons/building-skyscraper2.svg",
         },
     ]

@@ -5,6 +5,7 @@ from .views import (
     PropertyFilterByLinkView,
     ApartmentPropertyListCreateView,
     CottagePropertyListCreateView,
+    HotelPropertyListView,
     RegionPropertyListView,
     PropertyImageCreateView,
     PropertyServiceListView,
@@ -106,6 +107,11 @@ urlpatterns = [
         "cottages/",
         CottagePropertyListCreateView.as_view(),
         name="cottage-property-list-create",
+    ),
+    path(
+        "hotels/",
+        HotelPropertyListView.as_view(),
+        name="hotel-property-list",
     ),
     path(
         "cottages/<uuid:property_id>/",

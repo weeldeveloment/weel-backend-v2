@@ -35,6 +35,7 @@ from users.raw_repository import fetch_users_by_ids, get_user_by_id
 from .apartment_repository import (
     APARTMENT_TYPE_GUID,
     COTTAGE_TYPE_GUID,
+    PROPERTY_KIND_HOTEL,
     PROPERTY_KIND_APARTMENT,
     PROPERTY_KIND_COTTAGE,
     admin_append_apartment_images,
@@ -103,6 +104,8 @@ from .cottage_serializers import (
     CottagePartnerListSerializer,
     CottageUpdateSerializer,
 )
+from .hotel_repository import list_hotels
+from .hotel_serializers import HotelListSerializer
 from .serializers import (
     DistrictListSerializer,
     LocationDistrictListSerializer,
@@ -178,8 +181,8 @@ PROPERTY_LIST_QUERY_PARAMS = [
         "property_type",
         openapi.IN_QUERY,
         type=openapi.TYPE_STRING,
-        enum=["apartment", "cottage"],
-        description="Filter by property kind. Defaults to apartment for the generic /properties/ endpoint.",
+        enum=["apartment", "cottage", "hotel"],
+        description="Filter by property kind. Omit in the generic /properties/ endpoint to return all supported kinds.",
     ),
     openapi.Parameter("corporate", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN),
     openapi.Parameter("min_price", openapi.IN_QUERY, type=openapi.TYPE_NUMBER),
@@ -1033,6 +1036,19 @@ def _list_cottage_rows(
     return prepare_property_rows(rows, **pp)
 
 
+def _list_hotel_rows(
+    source,
+    *,
+    default_limit=None,
+):
+    pp = _extract_prepare_params(
+        source, default_ordering="-created_at", default_limit=default_limit
+    )
+    limit = pp.pop("limit", None)
+    rows = list_hotels(limit=limit)
+    return rows
+
+
 def _serialize_partner_user(user) -> dict | None:
     if user is None:
         return None
@@ -1082,7 +1098,7 @@ class PropertyTypeListView(APIView):
     @swagger_auto_schema(
         operation_id="listPropertyTypes",
         operation_summary="List property types",
-        operation_description="Returns the two property types (Cottage and Apartment) with localized titles, icon URLs, and `kind` field (\"apartment\"|\"cottage\"). Results are cached for 10 minutes.",
+        operation_description="Returns the public property types with localized titles, icon URLs, and `kind` field. Results are cached for 10 minutes.",
         tags=["Property / Meta"],
         manual_parameters=[
             openapi.Parameter(
@@ -1696,6 +1712,43 @@ class CottagePropertyListCreateView(APIView):
         serializer = CottageListSerializer(rows, many=True, context=ctx)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+
+class HotelPropertyListView(APIView):
+    pagination_class = CottagePagination
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id="listHotels",
+        operation_summary="List hotels",
+        operation_description="Returns active public hotels from PMS. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated.",
+        tags=["Property / Public"],
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        responses={
+            200: HotelListSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        _track_client_search(request)
+        query_params = request.query_params.copy()
+        query_params.pop("limit", None)
+        rows = _list_hotel_rows(
+            query_params,
+            default_limit=None,
+        )
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        paginator = self.pagination_class()
+        paginated_data = paginator.paginate_queryset(rows, request)
+        if paginated_data is not None:
+            serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = HotelListSerializer(rows, many=True, context=ctx)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
     @swagger_auto_schema(
         operation_id="createCottage",
         operation_summary="Create a cottage",
@@ -1789,7 +1842,14 @@ class PropertyListCreateView(APIView):
             )
             return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
 
-        # Default: return both apartments and cottages (mixed list)
+        if requested_kind == PROPERTY_KIND_HOTEL:
+            rows = _list_hotel_rows(
+                request.query_params,
+                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            )
+            return Response(HotelListSerializer(rows, many=True, context=ctx).data)
+
+        # Default: return apartments, cottages, and hotels (mixed list)
         apt_rows = _list_apartment_rows(
             request.query_params,
             public_only=True,
@@ -1800,9 +1860,14 @@ class PropertyListCreateView(APIView):
             public_only=True,
             default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
         )
+        hotel_rows = _list_hotel_rows(
+            request.query_params,
+            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+        )
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
             + CottageListSerializer(cot_rows, many=True, context=ctx).data
+            + HotelListSerializer(hotel_rows, many=True, context=ctx).data
         )
         return Response(data, status=status.HTTP_200_OK)
 
