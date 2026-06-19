@@ -72,6 +72,10 @@ app.conf.beat_schedule = {
         "task": "notification.tasks.send_booking_reminders",
         "schedule": crontab(hour=10, minute=0),  # every 10 hours
     },
+    "send_review_reminders": {
+        "task": "notification.tasks.send_review_reminders",
+        "schedule": crontab(hour=11, minute=30),  # daily at 11:30
+    },
     "send_pending_booking_payment_reminders": {
         "task": "booking.tasks.send_pending_booking_payment_reminders",
         "schedule": crontab(minute="*/5"),  # every 5 min — 24m / 6m / 1m left to pay
