@@ -34,14 +34,16 @@ from drf_yasg import openapi
 
 from core import settings
 
+schema_info = openapi.Info(
+    "Weel API",
+    "v1",
+    "API documentation for the Weel backend",
+    contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
+    license=openapi.License(name="Proprietary"),
+)
+
 schema_view = get_schema_view(
-    openapi.Info(
-        "Weel API",
-        "v1",
-        "API documentation for the Weel backend",
-        contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
-        license=openapi.License(name="Proprietary"),
-    ),
+    schema_info,
     # public=True shows endpoints even when they require authentication;
     # otherwise drf_yasg hides them from the schema for anonymous users.
     public=True,

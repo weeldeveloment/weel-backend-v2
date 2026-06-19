@@ -357,6 +357,7 @@ SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS = int(
 )
 PROMETHEUS_ENABLED = env_bool("PROMETHEUS_ENABLED", default=DEBUG)
 SWAGGER_SETTINGS = {
+    "DEFAULT_INFO": "core.urls.schema_info",
     # Do not require Django session login for docs; everything is viewable anonymously.
     "USE_SESSION_AUTH": False,
     "LOGIN_URL": None,
