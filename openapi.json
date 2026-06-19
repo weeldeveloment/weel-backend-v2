@@ -5084,6 +5084,240 @@
                     "Property / Public"
                 ]
             },
+            "post": {
+                "operationId": "createCottage",
+                "summary": "Create a cottage",
+                "description": "Partner-only. Creates a new cottage listing. The property is created with verification_status=waiting.",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "description": "Partner cottage create. Send flat `price_*` amounts plus either (A) omit all month fields — server uses current and next calendar month, or (B) set `month_from`, `month_to`, `next_month_from`, `next_month_to` (full month ranges, YYYY-MM-DD). Do not use a nested `price` array (legacy; still accepted by the API if month fields are not used).",
+                            "required": [
+                                "title"
+                            ],
+                            "type": "object",
+                            "properties": {
+                                "title": {
+                                    "type": "string"
+                                },
+                                "currency": {
+                                    "type": "string",
+                                    "enum": [
+                                        "USD",
+                                        "UZS"
+                                    ],
+                                    "default": "UZS"
+                                },
+                                "weekend_only_sunday_inclusive": {
+                                    "type": "boolean",
+                                    "default": false
+                                },
+                                "price_per_person": {
+                                    "description": "Per-person price (both months unless you vary via legacy `price` list only).",
+                                    "type": "number",
+                                    "format": "double",
+                                    "nullable": true
+                                },
+                                "price_on_working_days": {
+                                    "description": "Working-day rate.",
+                                    "type": "number",
+                                    "format": "double",
+                                    "nullable": true
+                                },
+                                "price_on_weekends": {
+                                    "description": "Weekend rate.",
+                                    "type": "number",
+                                    "format": "double",
+                                    "nullable": true
+                                },
+                                "month_from": {
+                                    "description": "First pricing month: interval start (YYYY-MM-DD). Use with month_to, next_month_from, next_month_to.",
+                                    "type": "string",
+                                    "format": "date",
+                                    "nullable": true
+                                },
+                                "month_to": {
+                                    "description": "First pricing month: interval end (YYYY-MM-DD). Should be the last day of that month.",
+                                    "type": "string",
+                                    "format": "date",
+                                    "nullable": true
+                                },
+                                "next_month_from": {
+                                    "description": "Second pricing month: interval start.",
+                                    "type": "string",
+                                    "format": "date",
+                                    "nullable": true
+                                },
+                                "next_month_to": {
+                                    "description": "Second pricing month: interval end.",
+                                    "type": "string",
+                                    "format": "date",
+                                    "nullable": true
+                                },
+                                "latitude": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "longitude": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "country": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "city": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "region_id": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "district_id": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "prefecture_id": {
+                                    "type": "string",
+                                    "format": "uuid",
+                                    "nullable": true
+                                },
+                                "description_en": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "description_ru": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "description_uz": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "check_in": {
+                                    "type": "string",
+                                    "format": "time",
+                                    "nullable": true
+                                },
+                                "check_out": {
+                                    "type": "string",
+                                    "format": "time",
+                                    "nullable": true
+                                },
+                                "is_allowed_alcohol": {
+                                    "type": "boolean",
+                                    "default": false
+                                },
+                                "is_allowed_corporate": {
+                                    "type": "boolean",
+                                    "default": false
+                                },
+                                "is_allowed_pets": {
+                                    "type": "boolean",
+                                    "default": false
+                                },
+                                "is_quiet_hours": {
+                                    "type": "boolean",
+                                    "default": false
+                                },
+                                "services": {
+                                    "description": "Service UUIDs (same as legacy `property_services`).",
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "format": "uuid"
+                                    }
+                                },
+                                "guests": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "rooms": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "beds": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "bathrooms": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "img": {
+                                    "description": "Image paths or URLs; a single string is also accepted by the API.",
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "nullable": true
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "string"
+                                },
+                                "property_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "status_code": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "string",
+                                    "nullable": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "Property / Partner"
+                ]
+            },
             "parameters": []
         },
         "/property/cottages/{property_id}/": {
@@ -6397,240 +6631,6 @@
                     "Property / Public"
                 ]
             },
-            "post": {
-                "operationId": "createCottage",
-                "summary": "Create a cottage",
-                "description": "Partner-only. Creates a new cottage listing. The property is created with verification_status=waiting.",
-                "parameters": [
-                    {
-                        "name": "data",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "description": "Partner cottage create. Send flat `price_*` amounts plus either (A) omit all month fields — server uses current and next calendar month, or (B) set `month_from`, `month_to`, `next_month_from`, `next_month_to` (full month ranges, YYYY-MM-DD). Do not use a nested `price` array (legacy; still accepted by the API if month fields are not used).",
-                            "required": [
-                                "title"
-                            ],
-                            "type": "object",
-                            "properties": {
-                                "title": {
-                                    "type": "string"
-                                },
-                                "currency": {
-                                    "type": "string",
-                                    "enum": [
-                                        "USD",
-                                        "UZS"
-                                    ],
-                                    "default": "UZS"
-                                },
-                                "weekend_only_sunday_inclusive": {
-                                    "type": "boolean",
-                                    "default": false
-                                },
-                                "price_per_person": {
-                                    "description": "Per-person price (both months unless you vary via legacy `price` list only).",
-                                    "type": "number",
-                                    "format": "double",
-                                    "nullable": true
-                                },
-                                "price_on_working_days": {
-                                    "description": "Working-day rate.",
-                                    "type": "number",
-                                    "format": "double",
-                                    "nullable": true
-                                },
-                                "price_on_weekends": {
-                                    "description": "Weekend rate.",
-                                    "type": "number",
-                                    "format": "double",
-                                    "nullable": true
-                                },
-                                "month_from": {
-                                    "description": "First pricing month: interval start (YYYY-MM-DD). Use with month_to, next_month_from, next_month_to.",
-                                    "type": "string",
-                                    "format": "date",
-                                    "nullable": true
-                                },
-                                "month_to": {
-                                    "description": "First pricing month: interval end (YYYY-MM-DD). Should be the last day of that month.",
-                                    "type": "string",
-                                    "format": "date",
-                                    "nullable": true
-                                },
-                                "next_month_from": {
-                                    "description": "Second pricing month: interval start.",
-                                    "type": "string",
-                                    "format": "date",
-                                    "nullable": true
-                                },
-                                "next_month_to": {
-                                    "description": "Second pricing month: interval end.",
-                                    "type": "string",
-                                    "format": "date",
-                                    "nullable": true
-                                },
-                                "latitude": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "longitude": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "country": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "city": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "region_id": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "district_id": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "prefecture_id": {
-                                    "type": "string",
-                                    "format": "uuid",
-                                    "nullable": true
-                                },
-                                "description_en": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "description_ru": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "description_uz": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "check_in": {
-                                    "type": "string",
-                                    "format": "time",
-                                    "nullable": true
-                                },
-                                "check_out": {
-                                    "type": "string",
-                                    "format": "time",
-                                    "nullable": true
-                                },
-                                "is_allowed_alcohol": {
-                                    "type": "boolean",
-                                    "default": false
-                                },
-                                "is_allowed_corporate": {
-                                    "type": "boolean",
-                                    "default": false
-                                },
-                                "is_allowed_pets": {
-                                    "type": "boolean",
-                                    "default": false
-                                },
-                                "is_quiet_hours": {
-                                    "type": "boolean",
-                                    "default": false
-                                },
-                                "services": {
-                                    "description": "Service UUIDs (same as legacy `property_services`).",
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string",
-                                        "format": "uuid"
-                                    }
-                                },
-                                "guests": {
-                                    "type": "integer",
-                                    "nullable": true
-                                },
-                                "rooms": {
-                                    "type": "integer",
-                                    "nullable": true
-                                },
-                                "beds": {
-                                    "type": "integer",
-                                    "nullable": true
-                                },
-                                "bathrooms": {
-                                    "type": "integer",
-                                    "nullable": true
-                                },
-                                "img": {
-                                    "description": "Image paths or URLs; a single string is also accepted by the API.",
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    },
-                                    "nullable": true
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "detail": {
-                                    "type": "string"
-                                },
-                                "property_id": {
-                                    "type": "string",
-                                    "format": "uuid"
-                                },
-                                "status_code": {
-                                    "type": "integer"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "detail": {
-                                    "type": "string",
-                                    "nullable": true
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "detail": {
-                                    "type": "string"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "detail": {
-                                    "type": "string"
-                                }
-                            }
-                        }
-                    }
-                },
-                "tags": [
-                    "Property / Partner"
-                ]
-            },
             "parameters": []
         },
         "/property/location/": {
@@ -7607,8 +7607,9 @@
         },
         "/property/properties/": {
             "get": {
-                "operationId": "property_properties_list",
-                "description": "",
+                "operationId": "listProperties",
+                "summary": "List properties",
+                "description": "Returns verified public apartments, cottages, and hotels. Use `property_type` or `kind` to filter to one property kind.",
                 "parameters": [
                     {
                         "name": "search",
@@ -7804,20 +7805,79 @@
                     }
                 },
                 "tags": [
-                    "property"
+                    "Property / Public"
                 ]
             },
             "post": {
-                "operationId": "property_properties_create",
-                "description": "",
-                "parameters": [],
+                "operationId": "createProperty",
+                "summary": "Create a property",
+                "description": "Partner-only compatibility endpoint. Creates an apartment by default, or a cottage when the URL forces cottage mode.",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ApartmentCreate"
+                        }
+                    }
+                ],
                 "responses": {
                     "201": {
-                        "description": ""
+                        "description": "",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "string"
+                                },
+                                "property_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "status_code": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "string",
+                                    "nullable": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "string"
+                                }
+                            }
+                        }
                     }
                 },
                 "tags": [
-                    "property"
+                    "Property / Partner"
                 ]
             },
             "parameters": []

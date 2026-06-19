@@ -1712,43 +1712,6 @@ class CottagePropertyListCreateView(APIView):
         serializer = CottageListSerializer(rows, many=True, context=ctx)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-
-class HotelPropertyListView(APIView):
-    pagination_class = CottagePagination
-    permission_classes = [AllowAny]
-
-    @swagger_auto_schema(
-        operation_id="listHotels",
-        operation_summary="List hotels",
-        operation_description="Returns active public hotels from PMS. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated.",
-        tags=["Property / Public"],
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
-        responses={
-            200: HotelListSerializer(many=True),
-            500: _ERROR_DETAIL_SCHEMA,
-        },
-    )
-    def get(self, request, *args, **kwargs):
-        _track_client_search(request)
-        query_params = request.query_params.copy()
-        query_params.pop("limit", None)
-        rows = _list_hotel_rows(
-            query_params,
-            default_limit=None,
-        )
-        ctx = {
-            "request": request,
-            "favorite_guids": _favorite_guids_from_request(request),
-        }
-        paginator = self.pagination_class()
-        paginated_data = paginator.paginate_queryset(rows, request)
-        if paginated_data is not None:
-            serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
-            return paginator.get_paginated_response(serializer.data)
-
-        serializer = HotelListSerializer(rows, many=True, context=ctx)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
     @swagger_auto_schema(
         operation_id="createCottage",
         operation_summary="Create a cottage",
@@ -1792,6 +1755,43 @@ class HotelPropertyListView(APIView):
         )
 
 
+class HotelPropertyListView(APIView):
+    pagination_class = CottagePagination
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id="listHotels",
+        operation_summary="List hotels",
+        operation_description="Returns active public hotels from PMS. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated.",
+        tags=["Property / Public"],
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        responses={
+            200: HotelListSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        _track_client_search(request)
+        query_params = request.query_params.copy()
+        query_params.pop("limit", None)
+        rows = _list_hotel_rows(
+            query_params,
+            default_limit=None,
+        )
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        paginator = self.pagination_class()
+        paginated_data = paginator.paginate_queryset(rows, request)
+        if paginated_data is not None:
+            serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = HotelListSerializer(rows, many=True, context=ctx)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 # ---------------------------------------------------------------------------
 # Kept for URL compat: generic PropertyListCreateView delegates to kind-specific
 # ---------------------------------------------------------------------------
@@ -1812,6 +1812,10 @@ class PropertyListCreateView(APIView):
         return [AllowAny()]
 
     @swagger_auto_schema(
+        operation_id="listProperties",
+        operation_summary="List properties",
+        operation_description="Returns verified public apartments, cottages, and hotels. Use `property_type` or `kind` to filter to one property kind.",
+        tags=["Property / Public"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
         responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
     )
@@ -1871,6 +1875,28 @@ class PropertyListCreateView(APIView):
         )
         return Response(data, status=status.HTTP_200_OK)
 
+    @swagger_auto_schema(
+        operation_id="createProperty",
+        operation_summary="Create a property",
+        operation_description="Partner-only compatibility endpoint. Creates an apartment by default, or a cottage when the URL forces cottage mode.",
+        tags=["Property / Partner"],
+        request_body=ApartmentCreateSerializer,
+        responses={
+            201: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                    "property_id": openapi.Schema(
+                        type=openapi.TYPE_STRING, format="uuid"
+                    ),
+                    "status_code": openapi.Schema(type=openapi.TYPE_INTEGER),
+                },
+            ),
+            400: _ERROR_VALIDATION_SCHEMA,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+        },
+    )
     def post(self, request, *args, **kwargs):
         if self.forced_property_type == PROPERTY_KIND_COTTAGE:
             serializer = CottageCreateSerializer(data=request.data)
