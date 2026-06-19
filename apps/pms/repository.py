@@ -58,10 +58,12 @@ def create_property(*, organization_id: int, name: str, **kwargs: Any) -> dict[s
 
     field_map = {
         "description_uz": str, "description_ru": str, "description_en": str,
-        "address": str, "city": str, "country": str,
+        "address": str, "full_address": str, "city": str, "country": str,
         "latitude": lambda v: v, "longitude": lambda v: v,
-        "star_rating": int,
+        "star_rating": int, "weel_classification": str,
+        "themes": _to_pg_array,
         "amenities": _to_pg_array,
+        "legal_info": _to_pg_json,
         "check_in_time": lambda v: v, "check_out_time": lambda v: v,
         "cancellation_policy": str, "quiet_hours": bool,
         "alcohol_allowed": bool, "pets_allowed": bool,
@@ -112,11 +114,14 @@ def update_property(property_id: int, organization_id: int | None = None, **kwar
     if not kwargs:
         return get_property(property_id, organization_id)
 
-    pg_array_fields = {"amenities", "photos"}
+    pg_array_fields = {"amenities", "photos", "themes"}
+    pg_json_fields = {"legal_info"}
     sanitized = {}
     for k, v in kwargs.items():
         if k in pg_array_fields and isinstance(v, list):
             sanitized[k] = _to_pg_array(v)
+        elif k in pg_json_fields and isinstance(v, (list, dict)):
+            sanitized[k] = _to_pg_json(v)
         else:
             sanitized[k] = v
 
@@ -179,6 +184,7 @@ def create_room_type(*, property_id: int, name: str, **kwargs: Any) -> dict[str,
     vals = [property_id, name, now, now]
 
     field_map = {
+        "preset": str, "custom_name": str,
         "description": str, "base_rate": lambda v: v, "currency": str,
         "capacity": int,
         "amenities": _to_pg_array,
@@ -258,8 +264,8 @@ def create_room(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
     vals = [property_id, now, now]
 
     field_map = {
-        "room_type_id": int, "room_number": str, "floor": int,
-        "area": lambda v: v,
+        "room_type_id": int, "room_number": str, "display_name": str,
+        "floor": int, "area": lambda v: v, "bedroom_count": int,
         "beds": _to_pg_json,
         "amenities": _to_pg_array,
         "photos": _to_pg_array,
@@ -629,6 +635,9 @@ def create_booking(
         "guest_id": int, "status": str, "source": str, "meal_plan": str,
         "adult_count": int, "child_count": int, "rate": lambda v: v,
         "currency": str, "payment_status": str, "total_cost": lambda v: v,
+        "hold_amount": lambda v: v,
+        "confirmed_at": lambda v: v, "confirmation_deadline": lambda v: v,
+        "b2b_company_id": int, "voucher_number": str,
         "notes": str, "created_by": int,
     }
 
