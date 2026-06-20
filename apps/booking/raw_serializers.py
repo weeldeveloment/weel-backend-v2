@@ -9,6 +9,10 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from payment.exchange_rate import exchange_rate
+from property.apartment_repository import admin_get_apartment
+from property.apartment_serializers import ApartmentDetailSerializer
+from property.cottage_repository import admin_get_cottage
+from property.cottage_serializers import CottageDetailSerializer
 from shared.raw.compat import get_table_name
 from shared.raw.db import fetch_one
 
@@ -79,6 +83,30 @@ def _resolve_property_average_rating(obj) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 1.0
+
+
+def _resolve_full_property_payload(
+    obj: dict, *, context: dict | None = None
+) -> dict | None:
+    apartment_id = obj.get("property_apartment_id")
+    cottage_id = obj.get("property_cottage_id")
+    property_guid = obj.get("property_guid")
+    if not property_guid:
+        return None
+
+    property_row = None
+    serializer_class = None
+    if apartment_id is not None:
+        property_row = admin_get_apartment(str(property_guid))
+        serializer_class = ApartmentDetailSerializer
+    elif cottage_id is not None:
+        property_row = admin_get_cottage(str(property_guid))
+        serializer_class = CottageDetailSerializer
+
+    if not property_row or serializer_class is None:
+        return None
+    serializer = serializer_class(property_row, context=context or {})
+    return serializer.data
 
 
 def _to_decimal(value) -> Decimal | None:
@@ -261,7 +289,7 @@ class RawPartnerBookingSerializer(serializers.Serializer):
 
 class RawClientBookingListSerializer(serializers.Serializer):
     guid = serializers.UUIDField(read_only=True)
-    property = RawPropertyBookingSerializer(read_only=True)
+    property = serializers.SerializerMethodField("get_property")
     partner = RawPartnerBookingSerializer(read_only=True)
     status = serializers.CharField(read_only=True)
     check_in = serializers.DateField(read_only=True)
@@ -272,9 +300,11 @@ class RawClientBookingListSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
         payload = dict(instance)
-        payload["property"] = instance
         payload["partner"] = instance
         return super().to_representation(payload)
+
+    def get_property(self, obj):
+        return _resolve_full_property_payload(obj, context=self.context)
 
 
 class RawPropertyLocationBookingSerializer(serializers.Serializer):
@@ -287,15 +317,17 @@ class RawPropertyLocationBookingSerializer(serializers.Serializer):
 class RawClientBookingDetailSerializer(serializers.Serializer):
     guid = serializers.UUIDField(read_only=True)
     partner = RawPartnerBookingSerializer(read_only=True)
-    property = RawPropertyLocationBookingSerializer(read_only=True)
+    property = serializers.SerializerMethodField("get_property")
     check_in = serializers.DateField(read_only=True)
     check_out = serializers.DateField(read_only=True)
 
     def to_representation(self, instance):
         payload = dict(instance)
         payload["partner"] = instance
-        payload["property"] = instance
         return super().to_representation(payload)
+
+    def get_property(self, obj):
+        return _resolve_full_property_payload(obj, context=self.context)
 
 
 class RawPropertyBookingHistorySerializer(serializers.Serializer):
@@ -311,14 +343,16 @@ class RawPropertyBookingHistorySerializer(serializers.Serializer):
 class RawClientBookingHistoryListSerializer(serializers.Serializer):
     guid = serializers.UUIDField(read_only=True)
     property_type = serializers.CharField(source="property_type_title", read_only=True)
-    property = RawPropertyBookingHistorySerializer(read_only=True)
+    property = serializers.SerializerMethodField("get_property")
     status = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 
     def to_representation(self, instance):
         payload = dict(instance)
-        payload["property"] = instance
         return super().to_representation(payload)
+
+    def get_property(self, obj):
+        return _resolve_full_property_payload(obj, context=self.context)
 
 
 class RawPropertyBookingHistoryDetailSerializer(RawPropertyBookingHistorySerializer):
@@ -338,7 +372,7 @@ class RawClientBookingHistoryDetailSerializer(serializers.Serializer):
     guid = serializers.UUIDField(read_only=True)
     check_in = serializers.DateField(read_only=True)
     check_out = serializers.DateField(read_only=True)
-    property = RawPropertyBookingHistoryDetailSerializer(read_only=True)
+    property = serializers.SerializerMethodField("get_property")
     booking_price = serializers.SerializerMethodField("get_booking_price")
     booking_number = serializers.CharField(read_only=True)
 
@@ -355,8 +389,10 @@ class RawClientBookingHistoryDetailSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
         payload = dict(instance)
-        payload["property"] = instance
         return super().to_representation(payload)
+
+    def get_property(self, obj):
+        return _resolve_full_property_payload(obj, context=self.context)
 
 
 class RawPartnerBookingListSerializer(serializers.Serializer):

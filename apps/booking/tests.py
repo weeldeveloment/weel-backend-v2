@@ -9,6 +9,9 @@ from django.test import SimpleTestCase, override_settings
 from django.urls import resolve
 from django.utils import timezone
 
+from rest_framework.test import APIRequestFactory
+from rest_framework.request import Request
+
 from booking.guest_rules import (
     extra_guest_count,
     extra_guest_fee_total,
@@ -20,6 +23,10 @@ from booking.helpers import (
     get_cancellation_error_message,
 )
 from booking.raw_serializers import (
+    RawClientBookingDetailSerializer,
+    RawClientBookingHistoryDetailSerializer,
+    RawClientBookingHistoryListSerializer,
+    RawClientBookingListSerializer,
     RawClientBookingCreateSerializer,
     RawPartnerBookingListSerializer,
     _resolve_property_average_rating,
@@ -280,6 +287,154 @@ class BookingSerializersTests(SimpleTestCase):
         row_over = {**row, "property_guests": 2}
         self.assertTrue(RawPartnerBookingListSerializer(row_over).data["guests_over_listing_standard"])
 
+    @patch("booking.raw_serializers.admin_get_apartment")
+    @patch("property.apartment_serializers.default_storage.url", return_value="/media/apartment.jpg")
+    def test_client_booking_serializers_expand_apartment_property_payload(
+        self, _mock_storage_url, mock_admin_get_apartment
+    ):
+        property_guid = "22222222-2222-2222-2222-222222222222"
+        booking_guid = "11111111-1111-1111-1111-111111111111"
+        mock_admin_get_apartment.return_value = {
+            "guid": property_guid,
+            "title": "Detail apartment",
+            "img": "apartment.jpg",
+            "created_at": timezone.now(),
+            "currency": "UZS",
+            "price": Decimal("100000"),
+            "property_kind": "apartment",
+            "comment_count": 3,
+            "review_count": 3,
+            "average_rating": 4.5,
+            "description_en": "English text",
+            "description_ru": "Russian text",
+            "description_uz": "Uzbek text",
+            "latitude": "41.3",
+            "longitude": "69.2",
+            "country": "UZ",
+            "city": "Tashkent",
+            "apartment_number": "12",
+            "home_number": "5",
+            "entrance_number": "2",
+            "floor_number": "3",
+            "pass_code": "1234",
+            "check_in": None,
+            "check_out": None,
+            "is_allowed_alcohol": False,
+            "is_allowed_corporate": True,
+            "is_allowed_pets": False,
+            "is_quiet_hours": False,
+            "services": ["wifi"],
+            "guests": 4,
+            "rooms": 2,
+            "beds": 3,
+            "bathrooms": 1,
+        }
+        row = {
+            "guid": booking_guid,
+            "property_guid": property_guid,
+            "property_apartment_id": 10,
+            "property_cottage_id": None,
+            "property_type_title": "Apartment",
+            "partner_username": "owner",
+            "partner_first_name": "Ali",
+            "partner_last_name": "Valiyev",
+            "partner_phone_number": "+998901234567",
+            "status": "confirmed",
+            "check_in": date.today() + timedelta(days=1),
+            "check_out": date.today() + timedelta(days=2),
+            "created_at": timezone.now(),
+            "booking_price_guid": None,
+            "booking_subtotal": "100000.00",
+            "booking_hold_amount": "50000.00",
+            "booking_charge_amount": "50000.00",
+            "booking_service_fee": "20000.00",
+            "booking_service_fee_percentage": 20,
+            "booking_number": "0001234",
+        }
+        request = APIRequestFactory().get("/api/booking/client/")
+        serializers_to_check = [
+            RawClientBookingListSerializer,
+            RawClientBookingDetailSerializer,
+            RawClientBookingHistoryListSerializer,
+            RawClientBookingHistoryDetailSerializer,
+        ]
+
+        for serializer_class in serializers_to_check:
+            data = serializer_class(row, context={"request": request}).data
+            self.assertEqual(data["property"]["title"], "Detail apartment")
+            self.assertEqual(data["property"]["description_en"], "English text")
+            self.assertEqual(data["property"]["img"], ["http://testserver/media/apartment.jpg"])
+            self.assertEqual(data["property"]["property_room"]["guests"], 4)
+
+    @patch("booking.raw_serializers.admin_get_cottage")
+    @patch("property.cottage_serializers.default_storage.url", return_value="/media/cottage.jpg")
+    def test_client_booking_serializers_expand_cottage_property_payload(
+        self, _mock_storage_url, mock_admin_get_cottage
+    ):
+        property_guid = "33333333-3333-3333-3333-333333333333"
+        row = {
+            "guid": "11111111-1111-1111-1111-111111111111",
+            "property_guid": property_guid,
+            "property_apartment_id": None,
+            "property_cottage_id": 11,
+            "property_type_title": "Cottages",
+            "partner_username": "owner",
+            "partner_first_name": "Ali",
+            "partner_last_name": "Valiyev",
+            "partner_phone_number": "+998901234567",
+            "status": "completed",
+            "check_in": date.today() + timedelta(days=1),
+            "check_out": date.today() + timedelta(days=3),
+            "created_at": timezone.now(),
+            "booking_price_guid": None,
+            "booking_subtotal": "300000.00",
+            "booking_hold_amount": "120000.00",
+            "booking_charge_amount": "180000.00",
+            "booking_service_fee": "60000.00",
+            "booking_service_fee_percentage": 20,
+            "booking_number": "0001234",
+        }
+        mock_admin_get_cottage.return_value = {
+            "guid": property_guid,
+            "title": "Detail cottage",
+            "img": "cottage.jpg",
+            "created_at": timezone.now(),
+            "currency": "UZS",
+            "price_per_person": Decimal("50000"),
+            "price_on_working_days": Decimal("100000"),
+            "price_on_weekends": Decimal("150000"),
+            "description": "Resolved description",
+            "description_en": "English cottage",
+            "description_ru": "Russian cottage",
+            "description_uz": "Uzbek cottage",
+            "comment_count": 2,
+            "average_rating": 4.8,
+            "property_services": [],
+            "services": ["pool"],
+            "latitude": "41.3",
+            "longitude": "69.2",
+            "country": "UZ",
+            "city": "Tashkent",
+            "check_in": None,
+            "check_out": None,
+            "is_allowed_alcohol": False,
+            "is_allowed_corporate": True,
+            "is_allowed_pets": False,
+            "is_quiet_hours": False,
+            "guests": 8,
+            "rooms": 3,
+            "beds": 5,
+            "bathrooms": 2,
+            "price": [],
+        }
+        request = Request(APIRequestFactory().get("/api/booking/client/?lang=en"))
+        data = RawClientBookingHistoryDetailSerializer(row, context={"request": request}).data
+
+        self.assertEqual(data["property"]["title"], "Detail cottage")
+        self.assertEqual(data["property"]["description"], "English cottage")
+        self.assertEqual(data["property"]["img"], ["http://testserver/media/cottage.jpg"])
+        self.assertEqual(str(data["property"]["price_on_weekends"]), "150000.00")
+
 
 class BookingUrlsTests(SimpleTestCase):
     def test_client_booking_list_url_resolves(self):
@@ -312,4 +467,3 @@ class GuestRulesTests(SimpleTestCase):
         row = {"guests": 6}
         self.assertEqual(extra_guest_count(4, row), 0)
         self.assertEqual(extra_guest_fee_total(4, row), Decimal("0"))
-
