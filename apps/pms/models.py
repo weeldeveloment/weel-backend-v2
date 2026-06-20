@@ -9,6 +9,62 @@ from uuid import UUID, uuid4
 from shared.models import BaseModel, HardDeleteBaseModel
 
 
+class PropertyTheme:
+    BEACH = "beach"
+    SKI = "ski"
+    CITY = "city"
+    COUNTRYSIDE = "countryside"
+    LAKEFRONT = "lakefront"
+    MOUNTAIN = "mountain"
+    BOUTIQUE = "boutique"
+    BUSINESS = "business"
+    HISTORIC = "historic"
+    NATURE = "nature"
+    SPA = "spa"
+    FAMILY = "family"
+
+    CHOICES = [BEACH, SKI, CITY, COUNTRYSIDE, LAKEFRONT, MOUNTAIN, BOUTIQUE, BUSINESS, HISTORIC, NATURE, SPA, FAMILY]
+
+
+class WeelClassification:
+    STANDARD = "standard"
+    ESSENTIAL = "essential"
+    COMFORT = "comfort"
+    COMFORT_PLUS = "comfort_plus"
+    BUSINESS = "business"
+    PREMIUM = "premium"
+    SIGNATURE = "signature"
+
+    CHOICES = [STANDARD, ESSENTIAL, COMFORT, COMFORT_PLUS, BUSINESS, PREMIUM, SIGNATURE]
+
+
+class RoomTypePreset:
+    STANDARD = "standard"
+    SUPERIOR = "superior"
+    DELUXE = "deluxe"
+    SUITE = "suite"
+    STUDIO = "studio"
+    APARTMENT = "apartment"
+    FAMILY = "family"
+    DORMITORY = "dormitory"
+    CUSTOM = "custom"
+
+    CHOICES = [STANDARD, SUPERIOR, DELUXE, SUITE, STUDIO, APARTMENT, FAMILY, DORMITORY, CUSTOM]
+
+
+class BedType:
+    SINGLE = "single"
+    TWIN = "twin"
+    DOUBLE = "double"
+    KING = "king"
+    SOFA_BED = "sofa_bed"
+    BUNK_BED = "bunk_bed"
+    KIDS_BED = "kids_bed"
+    EXTRA_BED = "extra_bed"
+
+    CHOICES = [SINGLE, TWIN, DOUBLE, KING, SOFA_BED, BUNK_BED, KIDS_BED, EXTRA_BED]
+
+
 class BookingStatus:
     NEW = "new"
     CONFIRMED = "confirmed"
@@ -84,12 +140,16 @@ class Property(HardDeleteBaseModel):
     description_ru: str | None = None
     description_en: str | None = None
     address: str | None = None
+    full_address: str | None = None
     city: str | None = None
     country: str | None = "UZ"
     latitude: Decimal | None = None
     longitude: Decimal | None = None
     star_rating: int | None = None
+    weel_classification: str | None = None
+    themes: list = field(default_factory=list)
     amenities: list = field(default_factory=list)
+    legal_info: dict = field(default_factory=dict)
     check_in_time: time | None = None
     check_out_time: time | None = None
     cancellation_policy: str | None = None
@@ -116,6 +176,8 @@ class PropertyImage(HardDeleteBaseModel):
 class RoomType(HardDeleteBaseModel):
     id: int | None = None
     property_id: int | None = None
+    preset: str | None = None
+    custom_name: str | None = None
     name: str | None = None
     description: str | None = None
     base_rate: Decimal | None = None
@@ -133,8 +195,10 @@ class Room(HardDeleteBaseModel):
     property_id: int | None = None
     room_type_id: int | None = None
     room_number: str | None = None
+    display_name: str | None = None
     floor: int = 1
     area: Decimal | None = None
+    bedroom_count: int = 1
     beds: list = field(default_factory=list)
     amenities: list = field(default_factory=list)
     photos: list = field(default_factory=list)
@@ -198,6 +262,11 @@ class Booking(HardDeleteBaseModel):
     currency: str = "USD"
     payment_status: str = PaymentStatus.PENDING
     total_cost: Decimal | None = None
+    hold_amount: Decimal | None = None
+    confirmed_at: datetime | None = None
+    confirmation_deadline: datetime | None = None
+    b2b_company_id: int | None = None
+    voucher_number: str | None = None
     notes: str | None = None
     created_by: int | None = None
     _meta = SimpleNamespace(db_table="pms_booking")

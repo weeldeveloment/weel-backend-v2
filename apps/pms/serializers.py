@@ -37,12 +37,24 @@ class PropertySerializer(serializers.Serializer):
     description_ru = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     description_en = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    full_address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     country = serializers.CharField(required=False, default="UZ")
     latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
     star_rating = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=5)
+    weel_classification = serializers.ChoiceField(
+        choices=["standard", "essential", "comfort", "comfort_plus", "business", "premium", "signature"],
+        required=False,
+        allow_null=True,
+    )
+    themes = serializers.ListField(
+        child=serializers.ChoiceField(choices=["beach", "ski", "city", "countryside", "lakefront", "mountain", "boutique", "business", "historic", "nature", "spa", "family"]),
+        required=False,
+        default=list,
+    )
     amenities = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    legal_info = JSONStringField(required=False, default=dict)
     check_in_time = serializers.TimeField(required=False, allow_null=True)
     check_out_time = serializers.TimeField(required=False, allow_null=True)
     cancellation_policy = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -60,6 +72,12 @@ class PropertySerializer(serializers.Serializer):
 class RoomTypeSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     property_id = serializers.IntegerField(read_only=True)
+    preset = serializers.ChoiceField(
+        choices=["standard", "superior", "deluxe", "suite", "studio", "apartment", "family", "dormitory", "custom"],
+        required=False,
+        allow_null=True,
+    )
+    custom_name = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     name = serializers.CharField(max_length=100)
     description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     base_rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
@@ -85,8 +103,10 @@ class RoomSerializer(serializers.Serializer):
     property_id = serializers.IntegerField(read_only=True)
     room_type_id = serializers.IntegerField(required=False, allow_null=True)
     room_number = serializers.CharField(max_length=20)
+    display_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     floor = serializers.IntegerField(required=False, default=1)
     area = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True)
+    bedroom_count = serializers.IntegerField(required=False, default=1)
     beds = JSONStringField(required=False, default=list)
     amenities = serializers.ListField(child=serializers.CharField(), required=False, default=list)
     photos = serializers.ListField(child=serializers.CharField(), required=False, default=list)
@@ -114,8 +134,10 @@ class RoomSerializer(serializers.Serializer):
 class RoomMassUpdateItemSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     room_number = serializers.CharField(max_length=20, required=False)
+    display_name = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True)
     floor = serializers.IntegerField(required=False)
     area = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True)
+    bedroom_count = serializers.IntegerField(required=False)
     beds = JSONStringField(required=False)
     amenities = serializers.ListField(child=serializers.CharField(), required=False)
     condition = serializers.ChoiceField(choices=["clean", "dirty", "inspection", "maintenance"], required=False)
@@ -191,6 +213,11 @@ class BookingSerializer(serializers.Serializer):
         default="pending",
     )
     total_cost = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    hold_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True, allow_null=True)
+    confirmed_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    confirmation_deadline = serializers.DateTimeField(read_only=True, allow_null=True)
+    b2b_company_id = serializers.IntegerField(required=False, allow_null=True)
+    voucher_number = serializers.CharField(read_only=True, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     room_number = serializers.CharField(read_only=True, allow_null=True)
     guest_first_name = serializers.CharField(read_only=True, allow_null=True)

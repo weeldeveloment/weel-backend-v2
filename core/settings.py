@@ -151,6 +151,9 @@ LOCAL_APPS: list[str] = [
     "apps.recommendation",
     "apps.platform",
     "apps.pms",
+    "apps.b2b",
+    "apps.documents",
+    "apps.hotels",
 ]
 
 THIRD_PART_APPS = [
