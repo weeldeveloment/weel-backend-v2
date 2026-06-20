@@ -451,6 +451,24 @@ class AdminSerializerTestingFlagTests(SimpleTestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertTrue(serializer.validated_data["values"]["is_testing"])
 
+    def test_hotel_admin_update_maps_public_flag_names_and_ignores_tenant_schema_column(self):
+        serializer = HotelAdminUpdateSerializer(
+            data={
+                "title": "Admin hotel",
+                "tenant_schema": "tenant_c40d93034f48",
+                "is_allowed_alcohol": False,
+                "is_allowed_pets": True,
+                "is_quiet_hours": True,
+            },
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        values = serializer.validated_data["values"]
+        self.assertEqual(values["tenant_schema"], "tenant_c40d93034f48")
+        self.assertEqual(values["alcohol_allowed"], False)
+        self.assertEqual(values["pets_allowed"], True)
+        self.assertEqual(values["quiet_hours"], True)
+
 
 class PublicTestingModeViewTests(SimpleTestCase):
     def setUp(self):
@@ -484,29 +502,23 @@ class PublicTestingModeViewTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(mock_list_rows.call_args.kwargs["testing_only"])
 
-    @patch("property.views._favorite_guids_from_request", return_value=set())
     @patch("property.views._track_client_search")
-    @patch("property.views._list_hotel_rows", return_value=[])
     def test_hotel_public_list_passes_testing_only_true(
         self,
-        mock_list_rows,
         _mock_track,
-        _mock_favorites,
     ):
         request = self.factory.get("/api/property/hotels/", HTTP_X_TESTING_MODE="true")
         response = HotelPropertyListView.as_view()(request)
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(mock_list_rows.call_args.kwargs["testing_only"])
+        self.assertEqual(response.data, [])
 
     @patch("property.views._favorite_guids_from_request", return_value=set())
-    @patch("property.views._list_hotel_rows", return_value=[])
     @patch("property.views._list_cottage_rows", return_value=[])
     @patch("property.views._list_apartment_rows", return_value=[])
-    def test_mixed_public_list_passes_testing_only_to_all_kinds(
+    def test_mixed_public_list_skips_hotels(
         self,
         mock_apartments,
         mock_cottages,
-        mock_hotels,
         _mock_favorites,
     ):
         request = self.factory.get("/api/property/properties/", HTTP_X_TESTING_MODE="true")
@@ -514,7 +526,7 @@ class PublicTestingModeViewTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(mock_apartments.call_args.kwargs["testing_only"])
         self.assertTrue(mock_cottages.call_args.kwargs["testing_only"])
-        self.assertTrue(mock_hotels.call_args.kwargs["testing_only"])
+        self.assertEqual(response.data, [])
 
     @patch("property.views._favorite_guids_from_request", return_value=set())
     @patch("property.views._list_apartment_rows")
@@ -567,48 +579,17 @@ class PublicTestingModeViewTests(SimpleTestCase):
         self.assertIsNone(mock_list_rows.call_args.kwargs["default_limit"])
 
     @patch("property.views._favorite_guids_from_request", return_value=set())
-    @patch("property.views._list_hotel_rows")
-    def test_properties_endpoint_paginates_single_kind_hotels(
+    def test_properties_endpoint_returns_empty_for_single_kind_hotels(
         self,
-        mock_list_rows,
         _mock_favorites,
     ):
-        now = timezone.now()
-        mock_list_rows.return_value = [
-            {
-                "guid": f"tenant:{idx}",
-                "title": f"Hotel {idx}",
-                "img": [],
-                "price": None,
-                "currency": "UZS",
-                "latitude": "41.3",
-                "longitude": "69.2",
-                "country": "UZ",
-                "city": "Tashkent",
-                "services": [],
-                "guests": None,
-                "rooms": None,
-                "beds": None,
-                "bathrooms": None,
-                "average_rating": 4.5,
-                "comment_count": 0,
-                "is_allowed_corporate": False,
-                "created_at": now,
-            }
-            for idx in range(4)
-        ]
-
         request = self.factory.get(
             "/api/property/properties/?property_type=hotel&page=2&limit=2"
         )
         response = PropertyListCreateView.as_view()(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 4)
-        self.assertEqual(len(response.data["results"]), 2)
-        self.assertEqual(response.data["results"][0]["title"], "Hotel 2")
-        self.assertEqual(response.data["results"][1]["title"], "Hotel 3")
-        self.assertIsNone(mock_list_rows.call_args.kwargs["default_limit"])
+        self.assertEqual(response.data, [])
 
     @patch("property.views._favorite_guids_from_request", return_value=set())
     @patch("property.views._list_cottage_rows", return_value=[])

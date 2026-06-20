@@ -1825,26 +1825,7 @@ class HotelPropertyListView(APIView):
     )
     def get(self, request, *args, **kwargs):
         _track_client_search(request)
-        testing_only = _is_testing_mode_request(request)
-        query_params = request.query_params.copy()
-        query_params.pop("limit", None)
-        rows = _list_hotel_rows(
-            query_params,
-            default_limit=None,
-            testing_only=testing_only,
-        )
-        ctx = {
-            "request": request,
-            "favorite_guids": _favorite_guids_from_request(request),
-        }
-        paginator = self.pagination_class()
-        paginated_data = paginator.paginate_queryset(rows, request)
-        if paginated_data is not None:
-            serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
-            return paginator.get_paginated_response(serializer.data)
-
-        serializer = HotelListSerializer(rows, many=True, context=ctx)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response([], status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------
@@ -1916,17 +1897,7 @@ class PropertyListCreateView(APIView):
             return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
 
         if requested_kind == PROPERTY_KIND_HOTEL:
-            rows = _list_hotel_rows(
-                request.query_params,
-                default_limit=None,
-                testing_only=testing_only,
-            )
-            paginator = self.pagination_class()
-            paginated_data = paginator.paginate_queryset(rows, request)
-            if paginated_data is not None:
-                serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
-                return paginator.get_paginated_response(serializer.data)
-            return Response(HotelListSerializer(rows, many=True, context=ctx).data)
+            return Response([], status=status.HTTP_200_OK)
 
         # Default: return apartments, cottages, and hotels (mixed list)
         apt_rows = _list_apartment_rows(
@@ -1941,15 +1912,9 @@ class PropertyListCreateView(APIView):
             default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
             testing_only=testing_only,
         )
-        hotel_rows = _list_hotel_rows(
-            request.query_params,
-            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
-            testing_only=testing_only,
-        )
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
             + CottageListSerializer(cot_rows, many=True, context=ctx).data
-            + HotelListSerializer(hotel_rows, many=True, context=ctx).data
         )
         return Response(data, status=status.HTTP_200_OK)
 

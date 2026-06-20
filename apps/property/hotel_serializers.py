@@ -225,6 +225,9 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
     check_in_time = serializers.TimeField(required=False, allow_null=True)
     check_out_time = serializers.TimeField(required=False, allow_null=True)
     cancellation_policy = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    is_quiet_hours = serializers.BooleanField(required=False)
+    is_allowed_alcohol = serializers.BooleanField(required=False)
+    is_allowed_pets = serializers.BooleanField(required=False)
     quiet_hours = serializers.BooleanField(required=False)
     alcohol_allowed = serializers.BooleanField(required=False)
     pets_allowed = serializers.BooleanField(required=False)
@@ -277,6 +280,13 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
         ):
             if key in attrs:
                 prepared[key] = attrs.get(key)
+
+        if "is_quiet_hours" in attrs:
+            prepared["quiet_hours"] = attrs.get("is_quiet_hours")
+        if "is_allowed_alcohol" in attrs:
+            prepared["alcohol_allowed"] = attrs.get("is_allowed_alcohol")
+        if "is_allowed_pets" in attrs:
+            prepared["pets_allowed"] = attrs.get("is_allowed_pets")
 
         if "amenities" in attrs:
             prepared["amenities"] = [str(value).strip() for value in attrs.get("amenities") or [] if str(value).strip()]

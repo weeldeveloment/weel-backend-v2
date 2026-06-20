@@ -384,12 +384,38 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
     if not decoded:
         return None
     schema_name, hotel_id = decoded
-    if not values:
+    allowed_columns = {
+        "organization_id",
+        "name",
+        "description_uz",
+        "description_ru",
+        "description_en",
+        "address",
+        "city",
+        "country",
+        "latitude",
+        "longitude",
+        "star_rating",
+        "amenities",
+        "check_in_time",
+        "check_out_time",
+        "cancellation_policy",
+        "quiet_hours",
+        "alcohol_allowed",
+        "pets_allowed",
+        "currency",
+        "timezone",
+        "photos",
+        "is_active",
+        "is_testing",
+    }
+    filtered_values = {key: value for key, value in values.items() if key in allowed_columns}
+    if not filtered_values:
         return get_admin_hotel(hotel_guid)
 
     set_parts = []
     params: list[Any] = []
-    for key, value in values.items():
+    for key, value in filtered_values.items():
         set_parts.append(f"{key} = %s")
         params.append(value)
     set_parts.append("updated_at = %s")
