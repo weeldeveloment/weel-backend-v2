@@ -24,6 +24,11 @@ from .views import (
     AdminCottagePatchView,
     AdminApartmentListCreateView,
     AdminApartmentPatchView,
+    AdminHotelImageCreateView,
+    AdminHotelImageDeleteView,
+    AdminHotelListCreateView,
+    AdminHotelOrganizationListView,
+    AdminHotelPatchView,
     AdminRegionListView,
     AdminDistrictListView,
     AdminPrefectureListView,
@@ -189,6 +194,21 @@ urlpatterns = [
         name="admin-apartment-patch",
     ),
     path(
+        "admin/hotel-organizations/",
+        AdminHotelOrganizationListView.as_view(),
+        name="admin-hotel-organization-list",
+    ),
+    path(
+        "admin/hotels/",
+        AdminHotelListCreateView.as_view(),
+        name="admin-hotel-create",
+    ),
+    path(
+        "admin/hotels/<path:hotel_id>/",
+        AdminHotelPatchView.as_view(),
+        name="admin-hotel-patch",
+    ),
+    path(
         "admin/cottages/<uuid:property_id>/images/",
         AdminPropertyImageCreateView.as_view(),
         name="admin-cottage-image-create",
@@ -207,6 +227,16 @@ urlpatterns = [
         "admin/apartments/<uuid:property_id>/images/<path:image_id>/",
         AdminPropertyImageDeleteView.as_view(),
         name="admin-apartment-image-delete",
+    ),
+    path(
+        "admin/hotels/<path:property_id>/images/",
+        AdminHotelImageCreateView.as_view(),
+        name="admin-hotel-image-create",
+    ),
+    path(
+        "admin/hotels/<path:property_id>/images/<path:image_id>/",
+        AdminHotelImageDeleteView.as_view(),
+        name="admin-hotel-image-delete",
     ),
     path(
         "admin/regions/",

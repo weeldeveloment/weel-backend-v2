@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urlencode, urlparse
 from uuid import uuid4
@@ -104,8 +104,23 @@ from .cottage_serializers import (
     CottagePartnerListSerializer,
     CottageUpdateSerializer,
 )
-from .hotel_repository import list_hotels
-from .hotel_serializers import HotelListSerializer
+from apps.platform.raw_repository import get_organization_by_id, list_organizations
+from .hotel_repository import (
+    admin_append_hotel_images,
+    admin_remove_hotel_image,
+    create_admin_hotel,
+    delete_admin_hotel,
+    get_admin_hotel,
+    list_admin_hotels,
+    list_hotel_organizations,
+    list_hotels,
+    update_admin_hotel,
+)
+from .hotel_serializers import (
+    HotelAdminListSerializer,
+    HotelAdminUpdateSerializer,
+    HotelListSerializer,
+)
 from .serializers import (
     DistrictListSerializer,
     LocationDistrictListSerializer,
@@ -967,6 +982,16 @@ def _extract_list_params(source):
         "max_price": _parse_decimal(_source_get(source, "max_price")),
         "limit": limit,
     }
+
+
+def _parse_date(value) -> date | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
 
 
 def _extract_prepare_params(
@@ -2712,6 +2737,126 @@ class AdminPropertyImageDeleteView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class AdminHotelImageCreateView(APIView):
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_id="adminCreateHotelImage",
+        operation_summary="Upload hotel image(s) (admin)",
+        operation_description="Admin-only. Uploads image file(s) and appends them to the hotel's gallery.",
+        tags=["Admin / Property"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                description="Tenant-aware hotel guid.",
+            ),
+            openapi.Parameter(
+                "image",
+                openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=True,
+                description="Image file to upload (JPEG/PNG/WebP).",
+            ),
+        ],
+        responses={201: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
+    )
+    def post(self, request, property_id, *args, **kwargs):
+        hotel_row = get_admin_hotel(str(property_id))
+        if not hotel_row:
+            raise NotFound(_("Hotel not found"))
+
+        uploaded_files = request.FILES.getlist("images")
+        if not uploaded_files:
+            single = request.FILES.get("image")
+            if single is not None:
+                uploaded_files = [single]
+        if not uploaded_files:
+            raise ValidationError({"images": [_("This field is required.")]})
+
+        for file in uploaded_files:
+            _validate_image_upload(file)
+
+        saved_paths = [
+            default_storage.save(f"property/images/{uuid4()}_{file.name}", file)
+            for file in uploaded_files
+        ]
+        updated = admin_append_hotel_images(
+            hotel_guid=str(property_id),
+            image_paths=saved_paths,
+        )
+        if not updated:
+            raise NotFound(_("Hotel not found"))
+
+        updated_img = updated.get("img") or []
+        if not isinstance(updated_img, list):
+            updated_img = [updated_img] if updated_img else []
+        return Response(
+            [
+                {
+                    "guid": uuid4(),
+                    "order": idx + 1,
+                    "is_pending": False,
+                    "image_url": _build_media_url(request, path),
+                }
+                for idx, path in enumerate(updated_img)
+            ],
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminHotelImageDeleteView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_id="adminDeleteHotelImage",
+        operation_summary="Delete a specific hotel image (admin)",
+        operation_description="Admin-only. Removes a specific image from the hotel's gallery.",
+        tags=["Admin / Property"],
+        manual_parameters=[
+            openapi.Parameter(
+                "property_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                description="Tenant-aware hotel guid.",
+            ),
+            openapi.Parameter(
+                "image_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                description="Image URL or stored path of the image to delete.",
+            ),
+        ],
+        responses={204: None},
+    )
+    def delete(self, request, property_id, image_id, *args, **kwargs):
+        hotel_row = get_admin_hotel(str(property_id))
+        if not hotel_row:
+            raise NotFound(_("Hotel not found"))
+
+        old_path = _resolve_image_path(request, hotel_row, image_id)
+        if not old_path:
+            raise NotFound(_("Hotel image not found"))
+
+        updated = admin_remove_hotel_image(
+            hotel_guid=str(property_id),
+            image_path=old_path,
+        )
+        if not updated:
+            raise NotFound(_("Hotel image not found"))
+
+        try:
+            default_storage.delete(old_path)
+        except Exception:
+            pass
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 # ---------------------------------------------------------------------------
 # Reviews  (shared — reviews reference both kinds)
 # ---------------------------------------------------------------------------
@@ -3347,16 +3492,16 @@ class AdminAllPropertiesListView(APIView):
                     "property_type",
                     openapi.IN_QUERY,
                     type=openapi.TYPE_STRING,
-                    enum=["apartment", "cottage", "apartments", "cottages"],
+                    enum=["apartment", "cottage", "hotel", "apartments", "cottages", "hotels"],
                     required=False,
-                    description="Optional. Omit to return apartments and cottages together.",
+                    description="Optional. Omit to return apartments, cottages, and hotels together.",
                 ),
             ]
         ),
         responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
         operation_summary="List all properties (admin)",
         operation_description=(
-            "Returns every apartment and cottage in the database, including unverified and archived. "
+            "Returns every apartment, cottage, and hotel in the database, including unverified and archived. "
             "Supports the same filters as public list (search, region, price, sort, limit, etc.)."
         ),
     )
@@ -3382,15 +3527,36 @@ class AdminAllPropertiesListView(APIView):
             return Response(
                 CottageAdminListSerializer(rows, many=True, context=ctx).data
             )
+        if requested_kind == PROPERTY_KIND_HOTEL:
+            rows = list_admin_hotels(
+                search=request.query_params.get("search"),
+                organization_id=_parse_int(request.query_params.get("organization_id")),
+                tenant_schema=request.query_params.get("tenant_schema"),
+                is_active=_parse_bool(request.query_params.get("is_active")),
+                created_from=_parse_date(request.query_params.get("created_from")),
+                created_to=_parse_date(request.query_params.get("created_to")),
+            )
+            return Response(
+                HotelAdminListSerializer(rows, many=True, context=ctx).data
+            )
         apt_rows = _attach_partner_users(
             _list_apartment_rows(request.query_params, **list_kwargs)
         )
         cot_rows = _attach_partner_users(
             _list_cottage_rows(request.query_params, **list_kwargs)
         )
+        hotel_rows = list_admin_hotels(
+            search=request.query_params.get("search"),
+            organization_id=_parse_int(request.query_params.get("organization_id")),
+            tenant_schema=request.query_params.get("tenant_schema"),
+            is_active=_parse_bool(request.query_params.get("is_active")),
+            created_from=_parse_date(request.query_params.get("created_from")),
+            created_to=_parse_date(request.query_params.get("created_to")),
+        )
         data = (
             ApartmentAdminListSerializer(apt_rows, many=True, context=ctx).data
             + CottageAdminListSerializer(cot_rows, many=True, context=ctx).data
+            + HotelAdminListSerializer(hotel_rows, many=True, context=ctx).data
         )
         return Response(data, status=status.HTTP_200_OK)
 
@@ -3480,6 +3646,121 @@ class AdminCottageListCreateView(APIView):
             CottageAdminListSerializer(created, context=ctx).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class AdminHotelOrganizationListView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="List hotel organizations (admin)",
+        operation_description="Returns PMS tenant organizations available for hotel administration.",
+        responses={200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
+    )
+    def get(self, request, *args, **kwargs):
+        return Response(list_hotel_organizations(), status=status.HTTP_200_OK)
+
+
+class AdminHotelListCreateView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Create hotel (admin)",
+        operation_description="Admin-only hotel creation endpoint targeting a PMS tenant schema.",
+        request_body=HotelAdminUpdateSerializer,
+        responses={201: HotelAdminListSerializer},
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = HotelAdminUpdateSerializer(
+            data=request.data,
+            partial=False,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        prepared = serializer.validated_data.get("values") or {}
+        tenant_schema = str(prepared.pop("tenant_schema", "") or "").strip()
+        if not tenant_schema:
+            raise ValidationError({"tenant_schema": _("This field is required.")})
+        title = str(prepared.get("name") or "").strip()
+        if not title:
+            raise ValidationError({"title": _("This field is required.")})
+        organization = get_organization_by_id(_parse_int(prepared.get("organization_id")) or 0)
+        if organization is None:
+            for candidate in list_organizations():
+                if str(candidate.get("schema_name") or "") == tenant_schema:
+                    organization = candidate
+                    break
+        if organization is None:
+            raise ValidationError({"organization_id": _("Organization not found.")})
+        prepared["organization_id"] = organization.get("id")
+        created = create_admin_hotel(schema_name=tenant_schema, values=prepared)
+        if not created:
+            raise APIException(_("Failed to create hotel"))
+        return Response(
+            HotelAdminListSerializer(created, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminHotelPatchView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Retrieve hotel (admin)",
+        operation_description="Returns the full admin view of a hotel by its tenant-aware guid.",
+        responses={200: HotelAdminListSerializer},
+    )
+    def get(self, request, hotel_id, *args, **kwargs):
+        row = get_admin_hotel(str(hotel_id))
+        if not row:
+            raise NotFound(_("Hotel not found"))
+        return Response(
+            HotelAdminListSerializer(row, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Patch hotel (admin)",
+        operation_description="Admin-only partial update for hotel records stored in PMS tenant schemas.",
+        request_body=HotelAdminUpdateSerializer,
+        responses={200: HotelAdminListSerializer},
+    )
+    def patch(self, request, hotel_id, *args, **kwargs):
+        current = get_admin_hotel(str(hotel_id))
+        if not current:
+            raise NotFound(_("Hotel not found"))
+        serializer = HotelAdminUpdateSerializer(
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        prepared = serializer.validated_data.get("values") or {}
+        updated = update_admin_hotel(hotel_guid=str(hotel_id), values=prepared)
+        if not updated:
+            raise NotFound(_("Hotel not found"))
+        return Response(
+            HotelAdminListSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="Delete hotel (admin)",
+        operation_description="Admin-only soft delete for hotel records in PMS tenant schemas.",
+        responses={204: None},
+    )
+    def delete(self, request, hotel_id, *args, **kwargs):
+        deleted = delete_admin_hotel(hotel_guid=str(hotel_id))
+        if not deleted:
+            raise NotFound(_("Hotel not found"))
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdminRegionListView(APIView):
