@@ -264,6 +264,11 @@ class RawClientBookingListSerializer(serializers.Serializer):
     property = RawPropertyBookingSerializer(read_only=True)
     partner = RawPartnerBookingSerializer(read_only=True)
     status = serializers.CharField(read_only=True)
+    check_in = serializers.DateField(read_only=True)
+    check_out = serializers.DateField(read_only=True)
+    confirmed_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    cancelled_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    completed_at = serializers.DateTimeField(read_only=True, allow_null=True)
 
     def to_representation(self, instance):
         payload = dict(instance)
