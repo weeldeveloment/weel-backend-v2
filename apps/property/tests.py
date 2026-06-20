@@ -507,10 +507,11 @@ class PublicTestingModeViewTests(SimpleTestCase):
         self,
         _mock_track,
     ):
-        request = self.factory.get("/api/property/hotels/", HTTP_X_TESTING_MODE="true")
+        request = self.factory.get("/api/property/hotels/?page=2&limit=10", HTTP_X_TESTING_MODE="true")
         response = HotelPropertyListView.as_view()(request)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [])
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
 
     @patch("property.views._favorite_guids_from_request", return_value=set())
     @patch("property.views._list_cottage_rows", return_value=[])
@@ -589,7 +590,40 @@ class PublicTestingModeViewTests(SimpleTestCase):
         response = PropertyListCreateView.as_view()(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [])
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
+
+    @patch("property.views._favorite_guids_from_request", return_value=set())
+    @patch("property.views._list_apartment_rows", return_value=[])
+    def test_properties_endpoint_returns_empty_page_for_out_of_range_apartments(
+        self,
+        _mock_list_rows,
+        _mock_favorites,
+    ):
+        request = self.factory.get(
+            "/api/property/properties/?property_type=apartment&page=2&limit=10"
+        )
+        response = PropertyListCreateView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
+
+    @patch("property.views._favorite_guids_from_request", return_value=set())
+    @patch("property.views._list_cottage_rows", return_value=[])
+    def test_properties_endpoint_returns_empty_page_for_out_of_range_cottages(
+        self,
+        _mock_list_rows,
+        _mock_favorites,
+    ):
+        request = self.factory.get(
+            "/api/property/properties/?property_type=cottage&page=2&limit=10"
+        )
+        response = PropertyListCreateView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
 
     @patch("property.views._favorite_guids_from_request", return_value=set())
     @patch("property.views._list_cottage_rows", return_value=[])

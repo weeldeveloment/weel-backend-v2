@@ -170,7 +170,17 @@ class _OptionalLimitPagePagination(PageNumberPagination):
         qp = request.query_params
         if self.page_query_param not in qp and self.page_size_query_param not in qp:
             return None
-        return super().paginate_queryset(queryset, request, view)
+        try:
+            return super().paginate_queryset(queryset, request, view)
+        except NotFound:
+            self.request = request
+            page_size = self.get_page_size(request)
+            if not page_size:
+                return None
+            paginator = self.django_paginator_class(queryset, page_size)
+            self.page = paginator.page(1)
+            self.display_page_controls = paginator.num_pages > 1
+            return []
 
 
 class CottagePagination(_OptionalLimitPagePagination):
@@ -1825,6 +1835,15 @@ class HotelPropertyListView(APIView):
     )
     def get(self, request, *args, **kwargs):
         _track_client_search(request)
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        paginator = self.pagination_class()
+        paginated_data = paginator.paginate_queryset([], request)
+        if paginated_data is not None:
+            serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
+            return paginator.get_paginated_response(serializer.data)
         return Response([], status=status.HTTP_200_OK)
 
 
@@ -1862,6 +1881,8 @@ class PropertyListCreateView(APIView):
             "request": request,
             "favorite_guids": _favorite_guids_from_request(request),
         }
+        query_params = request.query_params.copy()
+        query_params.pop("limit", None)
         kind_value = (
             request.query_params.get("property_type")
             or request.query_params.get("kind")
@@ -1870,7 +1891,7 @@ class PropertyListCreateView(APIView):
 
         if requested_kind == PROPERTY_KIND_COTTAGE:
             rows = _list_cottage_rows(
-                request.query_params,
+                query_params,
                 public_only=True,
                 default_limit=None,
                 testing_only=testing_only,
@@ -1884,7 +1905,7 @@ class PropertyListCreateView(APIView):
 
         if requested_kind == PROPERTY_KIND_APARTMENT:
             rows = _list_apartment_rows(
-                request.query_params,
+                query_params,
                 public_only=True,
                 default_limit=None,
                 testing_only=testing_only,
@@ -1897,6 +1918,11 @@ class PropertyListCreateView(APIView):
             return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
 
         if requested_kind == PROPERTY_KIND_HOTEL:
+            paginator = self.pagination_class()
+            paginated_data = paginator.paginate_queryset([], request)
+            if paginated_data is not None:
+                serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
+                return paginator.get_paginated_response(serializer.data)
             return Response([], status=status.HTTP_200_OK)
 
         # Default: return apartments, cottages, and hotels (mixed list)
