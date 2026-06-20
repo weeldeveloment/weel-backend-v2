@@ -1855,6 +1855,7 @@ class HotelPropertyListView(APIView):
 class PropertyListCreateView(APIView):
     authentication_classes = [PartnerJWTAuthentication]
     forced_property_type: str | None = None
+    pagination_class = ApartmentPagination
 
     def get_authenticators(self):
         if self.request.method == "GET":
@@ -1890,26 +1891,41 @@ class PropertyListCreateView(APIView):
             rows = _list_cottage_rows(
                 request.query_params,
                 public_only=True,
-                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+                default_limit=None,
                 testing_only=testing_only,
             )
+            paginator = self.pagination_class()
+            paginated_data = paginator.paginate_queryset(rows, request)
+            if paginated_data is not None:
+                serializer = CottageListSerializer(paginated_data, many=True, context=ctx)
+                return paginator.get_paginated_response(serializer.data)
             return Response(CottageListSerializer(rows, many=True, context=ctx).data)
 
         if requested_kind == PROPERTY_KIND_APARTMENT:
             rows = _list_apartment_rows(
                 request.query_params,
                 public_only=True,
-                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+                default_limit=None,
                 testing_only=testing_only,
             )
+            paginator = self.pagination_class()
+            paginated_data = paginator.paginate_queryset(rows, request)
+            if paginated_data is not None:
+                serializer = ApartmentListSerializer(paginated_data, many=True, context=ctx)
+                return paginator.get_paginated_response(serializer.data)
             return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
 
         if requested_kind == PROPERTY_KIND_HOTEL:
             rows = _list_hotel_rows(
                 request.query_params,
-                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+                default_limit=None,
                 testing_only=testing_only,
             )
+            paginator = self.pagination_class()
+            paginated_data = paginator.paginate_queryset(rows, request)
+            if paginated_data is not None:
+                serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
+                return paginator.get_paginated_response(serializer.data)
             return Response(HotelListSerializer(rows, many=True, context=ctx).data)
 
         # Default: return apartments, cottages, and hotels (mixed list)
