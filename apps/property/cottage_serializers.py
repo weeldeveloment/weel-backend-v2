@@ -443,6 +443,7 @@ class CottageAdminPropertyDetailSerializer(serializers.Serializer):
 class CottageAdminListSerializer(CottagePartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
+    is_testing = serializers.BooleanField(read_only=True)
     description = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
     property_detail = CottageAdminPropertyDetailSerializer(
         source="*", read_only=True
@@ -462,6 +463,7 @@ class CottageAdminListSerializer(CottagePartnerListSerializer):
         data = super().to_representation(row)
         data["is_verified"] = bool(row.get("is_verified"))
         data["is_archived"] = bool(row.get("is_archived"))
+        data["is_testing"] = bool(row.get("is_testing", False))
         data["partner_user"] = row.get("partner_user")
         data["price_per_person"] = raw_price_per_person
         data["price_on_working_days"] = raw_price_on_working_days
@@ -1074,6 +1076,7 @@ class CottageAdminUpdateSerializer(CottageUpdateSerializer):
     )
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
+    is_testing = serializers.BooleanField(required=False)
     services = serializers.ListField(required=False, allow_empty=True)
     img = serializers.ListField(
         child=serializers.CharField(), required=False, allow_empty=True
@@ -1089,6 +1092,7 @@ class CottageAdminUpdateSerializer(CottageUpdateSerializer):
         "verification_status",
         "is_archived",
         "is_recommended",
+        "is_testing",
         "partner_user",
         "verified_by_user_id",
         "comment_count",

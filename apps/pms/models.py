@@ -160,6 +160,7 @@ class Property(HardDeleteBaseModel):
     timezone: str = "Asia/Tashkent"
     photos: list = field(default_factory=list)
     is_active: bool = True
+    is_testing: bool = False
     _meta = SimpleNamespace(db_table="pms_property")
 
 

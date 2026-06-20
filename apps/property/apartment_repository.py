@@ -319,6 +319,7 @@ APARTMENT_SELECT = f"""
         a.verification_status,
         a.is_archived,
         a.is_recommended,
+        COALESCE(a.is_testing, FALSE) AS is_testing,
         a.comment_count,
         a.price,
         a.currency,
@@ -393,6 +394,7 @@ def list_apartments(
     corporate: bool | None = None,
     min_price: Decimal | None = None,
     max_price: Decimal | None = None,
+    testing_only: bool | None = None,
     limit: int | None = None,
     offset: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -430,6 +432,9 @@ def list_apartments(
     if max_price is not None:
         where.append("COALESCE(a.price, 0) <= %s")
         params.append(max_price)
+    if testing_only is not None:
+        where.append("COALESCE(a.is_testing, FALSE) = %s")
+        params.append(bool(testing_only))
 
     return fetch_all(
         f"""
@@ -480,6 +485,7 @@ def create_apartment(
             guid, created_at, updated_at,
             title, title_sort,
             is_verified, verification_status, is_archived, is_recommended,
+            is_testing,
             comment_count,
             price, currency, img, partner_user_id,
             services,
@@ -494,6 +500,7 @@ def create_apartment(
             %s, %s, %s,
             %s, %s,
             FALSE, %s, FALSE, FALSE,
+            %s,
             %s,
             %s, %s, %s, %s,
             %s::uuid[],
@@ -511,6 +518,7 @@ def create_apartment(
             uuid4(), now, now,
             values.get("title"), values.get("title_sort"),
             VerificationStatus.WAITING.value,
+            bool(values.get("is_testing", False)),
             int(values.get("comment_count", 0)),
             values.get("price"), values.get("currency"), values.get("img"),
             partner_user_id,
@@ -621,6 +629,7 @@ _APARTMENT_ADMIN_UPDATE_ALLOWED: set[str] = set(_APARTMENT_UPDATE_ALLOWED) | {
     "verification_status",
     "is_archived",
     "is_recommended",
+    "is_testing",
     "partner_user_id",
     "verified_by_user_id",
     "comment_count",

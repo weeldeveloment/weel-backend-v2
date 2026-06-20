@@ -228,6 +228,13 @@ PROPERTY_LIST_QUERY_PARAMS = [
     openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
 ]
 
+TESTING_MODE_HEADER_PARAM = openapi.Parameter(
+    "X-Testing-Mode",
+    openapi.IN_HEADER,
+    type=openapi.TYPE_BOOLEAN,
+    description="When `true`, return only testing properties. When omitted or false, testing properties are excluded.",
+)
+
 LOCATION_QUERY_PARAMS = [
     openapi.Parameter("region_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
     openapi.Parameter("district_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
@@ -889,9 +896,14 @@ def _favorite_guids_from_request(request) -> set[str]:
 
 
 def _public_cache_key(request, prefix: str) -> str:
-    query = urlencode(sorted(request.query_params.items()), doseq=True)
+    params = getattr(request, "query_params", None) or getattr(request, "GET", {})
+    query = urlencode(sorted(params.items()), doseq=True)
     lang = _preferred_language(request)
-    return f"{prefix}:lang={lang}:query={query}"
+    return f"{prefix}:lang={lang}:testing={int(_is_testing_mode_request(request))}:query={query}"
+
+
+def _is_testing_mode_request(request) -> bool:
+    return bool(_parse_bool(request.headers.get("X-Testing-Mode")))
 
 
 def _get_or_set_cached_payload(request, cache_key: str, timeout: int, loader):
@@ -1022,6 +1034,7 @@ def _list_apartment_rows(
     default_ordering="-created_at",
     default_limit=None,
     include_all_records=False,
+    testing_only: bool | None = None,
 ):
     lp = _extract_list_params(source)
     rows = list_apartments(
@@ -1029,6 +1042,7 @@ def _list_apartment_rows(
         include_all_records=include_all_records,
         partner_user_id=partner_user_id,
         recommended_only=recommended_only,
+        testing_only=testing_only,
         **lp,
     )
     pp = _extract_prepare_params(
@@ -1046,6 +1060,7 @@ def _list_cottage_rows(
     default_ordering="-created_at",
     default_limit=None,
     include_all_records=False,
+    testing_only: bool | None = None,
 ):
     lp = _extract_list_params(source)
     rows = list_cottages(
@@ -1053,6 +1068,7 @@ def _list_cottage_rows(
         include_all_records=include_all_records,
         partner_user_id=partner_user_id,
         recommended_only=recommended_only,
+        testing_only=testing_only,
         **lp,
     )
     pp = _extract_prepare_params(
@@ -1065,12 +1081,13 @@ def _list_hotel_rows(
     source,
     *,
     default_limit=None,
+    testing_only: bool | None = None,
 ):
     pp = _extract_prepare_params(
         source, default_ordering="-created_at", default_limit=default_limit
     )
     limit = pp.pop("limit", None)
-    rows = list_hotels(limit=limit)
+    rows = list_hotels(limit=limit, testing_only=testing_only)
     return rows
 
 
@@ -1472,13 +1489,14 @@ class UnifiedRecommendationsListView(APIView):
         operation_summary="List recommended properties",
         operation_description="Returns featured, best-reviewed, or most-booked properties. Supports filtering by kind (apartment, cottage, or both). Results are cached for 60 seconds.",
         tags=["Property / Public"],
-        manual_parameters=RECOMMENDATIONS_QUERY_PARAMS,
+        manual_parameters=RECOMMENDATIONS_QUERY_PARAMS + [TESTING_MODE_HEADER_PARAM],
         responses={
             200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
             500: _ERROR_DETAIL_SCHEMA,
         },
     )
     def get(self, request, *args, **kwargs):
+        testing_only = _is_testing_mode_request(request)
         def _load():
             property_type = (
                 str(request.query_params.get("kind") or "property").strip().lower()
@@ -1520,6 +1538,8 @@ class UnifiedRecommendationsListView(APIView):
             )
 
             def _fetch_guaranteed():
+                if testing_only:
+                    return []
                 gcot_rows = fetch_all(
                     f"""
                     {COTTAGE_SELECT}
@@ -1540,6 +1560,7 @@ class UnifiedRecommendationsListView(APIView):
                     recommended_only=False,
                     default_ordering=ordering,
                     default_limit=15,
+                    testing_only=testing_only,
                 )
                 result = ApartmentListSerializer(rows, many=True, context=ctx).data
                 guaranteed = _fetch_guaranteed()
@@ -1554,6 +1575,7 @@ class UnifiedRecommendationsListView(APIView):
                     recommended_only=False,
                     default_ordering=ordering,
                     default_limit=15,
+                    testing_only=testing_only,
                 )
                 result = CottageListSerializer(rows, many=True, context=ctx).data
                 guaranteed = _fetch_guaranteed()
@@ -1567,6 +1589,7 @@ class UnifiedRecommendationsListView(APIView):
                 recommended_only=False,
                 default_ordering=ordering,
                 default_limit=15,
+                testing_only=testing_only,
             )
             cot_rows = _list_cottage_rows(
                 source_params,
@@ -1574,6 +1597,7 @@ class UnifiedRecommendationsListView(APIView):
                 recommended_only=False,
                 default_ordering=ordering,
                 default_limit=15,
+                testing_only=testing_only,
             )
             combined = (
                 ApartmentListSerializer(apt_rows, many=True, context=ctx).data
@@ -1611,9 +1635,9 @@ class ApartmentPropertyListCreateView(APIView):
     @swagger_auto_schema(
         operation_id="listApartments",
         operation_summary="List apartments",
-        operation_description="Returns verified public apartments. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated (default page size 20, max `limit` 100). Supports search, filtering, and sorting.",
+        operation_description="Returns verified public apartments. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated (default page size 20, max `limit` 100). Supports search, filtering, and sorting. `X-Testing-Mode: true` returns only testing apartments; otherwise testing apartments are excluded.",
         tags=["Property / Public"],
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [TESTING_MODE_HEADER_PARAM],
         responses={
             200: ApartmentListSerializer(many=True),
             500: _ERROR_DETAIL_SCHEMA,
@@ -1621,6 +1645,7 @@ class ApartmentPropertyListCreateView(APIView):
     )
     def get(self, request, *args, **kwargs):
         _track_client_search(request)
+        testing_only = _is_testing_mode_request(request)
         query_params = request.query_params.copy()
         query_params.pop("limit", None)
 
@@ -1628,6 +1653,7 @@ class ApartmentPropertyListCreateView(APIView):
             query_params,
             public_only=True,
             default_limit=None,
+            testing_only=testing_only,
         )
         ctx = {
             "request": request,
@@ -1705,9 +1731,9 @@ class CottagePropertyListCreateView(APIView):
     @swagger_auto_schema(
         operation_id="listCottages",
         operation_summary="List cottages",
-        operation_description="Returns verified public cottages. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated (default page size 20, max `limit` 100). Supports search, filtering, and sorting.",
+        operation_description="Returns verified public cottages. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated (default page size 20, max `limit` 100). Supports search, filtering, and sorting. `X-Testing-Mode: true` returns only testing cottages; otherwise testing cottages are excluded.",
         tags=["Property / Public"],
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [TESTING_MODE_HEADER_PARAM],
         responses={
             200: CottageListSerializer(many=True),
             500: _ERROR_DETAIL_SCHEMA,
@@ -1715,6 +1741,7 @@ class CottagePropertyListCreateView(APIView):
     )
     def get(self, request, *args, **kwargs):
         _track_client_search(request)
+        testing_only = _is_testing_mode_request(request)
         query_params = request.query_params.copy()
         query_params.pop("limit", None)
 
@@ -1722,6 +1749,7 @@ class CottagePropertyListCreateView(APIView):
             query_params,
             public_only=True,
             default_limit=None,
+            testing_only=testing_only,
         )
         ctx = {
             "request": request,
@@ -1787,9 +1815,9 @@ class HotelPropertyListView(APIView):
     @swagger_auto_schema(
         operation_id="listHotels",
         operation_summary="List hotels",
-        operation_description="Returns active public hotels from PMS. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated.",
+        operation_description="Returns active public hotels from PMS. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated. `X-Testing-Mode: true` returns only testing hotels; otherwise testing hotels are excluded.",
         tags=["Property / Public"],
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [TESTING_MODE_HEADER_PARAM],
         responses={
             200: HotelListSerializer(many=True),
             500: _ERROR_DETAIL_SCHEMA,
@@ -1797,11 +1825,13 @@ class HotelPropertyListView(APIView):
     )
     def get(self, request, *args, **kwargs):
         _track_client_search(request)
+        testing_only = _is_testing_mode_request(request)
         query_params = request.query_params.copy()
         query_params.pop("limit", None)
         rows = _list_hotel_rows(
             query_params,
             default_limit=None,
+            testing_only=testing_only,
         )
         ctx = {
             "request": request,
@@ -1839,12 +1869,13 @@ class PropertyListCreateView(APIView):
     @swagger_auto_schema(
         operation_id="listProperties",
         operation_summary="List properties",
-        operation_description="Returns verified public apartments, cottages, and hotels. Use `property_type` or `kind` to filter to one property kind.",
+        operation_description="Returns verified public apartments, cottages, and hotels. Use `property_type` or `kind` to filter to one property kind. `X-Testing-Mode: true` returns only testing properties; otherwise testing properties are excluded.",
         tags=["Property / Public"],
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [TESTING_MODE_HEADER_PARAM],
         responses={200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA},
     )
     def get(self, request, *args, **kwargs):
+        testing_only = _is_testing_mode_request(request)
         ctx = {
             "request": request,
             "favorite_guids": _favorite_guids_from_request(request),
@@ -1860,6 +1891,7 @@ class PropertyListCreateView(APIView):
                 request.query_params,
                 public_only=True,
                 default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+                testing_only=testing_only,
             )
             return Response(CottageListSerializer(rows, many=True, context=ctx).data)
 
@@ -1868,6 +1900,7 @@ class PropertyListCreateView(APIView):
                 request.query_params,
                 public_only=True,
                 default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+                testing_only=testing_only,
             )
             return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
 
@@ -1875,6 +1908,7 @@ class PropertyListCreateView(APIView):
             rows = _list_hotel_rows(
                 request.query_params,
                 default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+                testing_only=testing_only,
             )
             return Response(HotelListSerializer(rows, many=True, context=ctx).data)
 
@@ -1883,15 +1917,18 @@ class PropertyListCreateView(APIView):
             request.query_params,
             public_only=True,
             default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            testing_only=testing_only,
         )
         cot_rows = _list_cottage_rows(
             request.query_params,
             public_only=True,
             default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            testing_only=testing_only,
         )
         hotel_rows = _list_hotel_rows(
             request.query_params,
             default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            testing_only=testing_only,
         )
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
@@ -2008,9 +2045,9 @@ class RegionPropertyListView(APIView):
     @swagger_auto_schema(
         operation_id="listPropertiesByRegion",
         operation_summary="List properties by region",
-        operation_description="Returns apartments and cottages filtered by a specific region. Supports the same query filters as the public list.",
+        operation_description="Returns apartments and cottages filtered by a specific region. Supports the same query filters as the public list. `X-Testing-Mode: true` returns only testing properties; otherwise testing properties are excluded.",
         tags=["Property / Public"],
-        manual_parameters=PROPERTY_LIST_QUERY_PARAMS,
+        manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [TESTING_MODE_HEADER_PARAM],
         responses={
             200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
             500: _ERROR_DETAIL_SCHEMA,
@@ -2020,6 +2057,7 @@ class RegionPropertyListView(APIView):
         region_id = _parse_int(self.kwargs.get("region_id"))
         if region_id is None:
             return Response([], status=status.HTTP_200_OK)
+        testing_only = _is_testing_mode_request(request)
         mutable = request.query_params.copy()
         mutable["region_id"] = str(region_id)
         ctx = {
@@ -2027,10 +2065,16 @@ class RegionPropertyListView(APIView):
             "favorite_guids": _favorite_guids_from_request(request),
         }
         apt_rows = _list_apartment_rows(
-            mutable, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT
+            mutable,
+            public_only=True,
+            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            testing_only=testing_only,
         )
         cot_rows = _list_cottage_rows(
-            mutable, public_only=True, default_limit=_DEFAULT_PUBLIC_LIST_LIMIT
+            mutable,
+            public_only=True,
+            default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+            testing_only=testing_only,
         )
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data

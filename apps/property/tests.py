@@ -12,8 +12,20 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
 from property.apartment_repository import APARTMENT_TYPE_GUID, COTTAGE_TYPE_GUID, list_property_types, parse_property_kind
-from property.apartment_serializers import ApartmentCreateSerializer, ApartmentListSerializer, ApartmentDetailSerializer, _parse_int_maybe
+from property.apartment_serializers import ApartmentAdminUpdateSerializer, ApartmentCreateSerializer, ApartmentListSerializer, ApartmentDetailSerializer, _parse_int_maybe
 from property.cottage_serializers import CottageCreateSerializer, CottageListSerializer, CottageDetailSerializer
+from property.cottage_serializers import CottageAdminUpdateSerializer
+from property.hotel_serializers import HotelAdminUpdateSerializer
+from property.views import (
+    ApartmentPropertyListCreateView,
+    CottagePropertyListCreateView,
+    HotelPropertyListView,
+    PropertyListCreateView,
+    RegionPropertyListView,
+    UnifiedRecommendationsListView,
+    _is_testing_mode_request,
+    _public_cache_key,
+)
 
 
 class PropertyRepositoryHelpersTests(SimpleTestCase):
@@ -28,9 +40,28 @@ class PropertyRepositoryHelpersTests(SimpleTestCase):
 
     def test_list_property_types_returns_two_types(self):
         rows = list_property_types()
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(str(rows[0]["guid"]), str(APARTMENT_TYPE_GUID))
-        self.assertEqual(str(rows[1]["guid"]), str(COTTAGE_TYPE_GUID))
+        self.assertEqual(len(rows), 3)
+        self.assertIn(str(APARTMENT_TYPE_GUID), {str(row["guid"]) for row in rows})
+        self.assertIn(str(COTTAGE_TYPE_GUID), {str(row["guid"]) for row in rows})
+
+    @patch("property.hotel_repository.list_hotel_organizations")
+    @patch("property.hotel_repository._fetch_hotel_rows_for_schema")
+    def test_list_hotels_filters_testing_rows(self, mock_fetch_rows, mock_orgs):
+        from property.hotel_repository import list_hotels
+
+        mock_orgs.return_value = [{"id": 1, "name": "Org", "slug": "org", "schema_name": "tenant1"}]
+        mock_fetch_rows.return_value = [
+            {"id": 1, "tenant_schema": "tenant1", "is_testing": True, "name": "Test Hotel"},
+            {"id": 2, "tenant_schema": "tenant1", "is_testing": False, "name": "Live Hotel"},
+        ]
+
+        testing_rows = list_hotels(testing_only=True)
+        live_rows = list_hotels(testing_only=False)
+
+        self.assertEqual(len(testing_rows), 1)
+        self.assertTrue(testing_rows[0]["is_testing"])
+        self.assertEqual(len(live_rows), 1)
+        self.assertFalse(live_rows[0]["is_testing"])
 
 
 class ApartmentSerializerTests(SimpleTestCase):
@@ -149,7 +180,7 @@ class DetailSerializerTests(SimpleTestCase):
         self.assertEqual(data["description_uz"], "O'zbekcha matn")
         self.assertEqual(data["comment_count"], 3)
         self.assertEqual(data["img"], ["http://testserver/media/test.jpg"])
-        self.assertNotIn("property_room", data)
+        self.assertIn("property_room", data)
 
     @patch("property.apartment_serializers.default_storage.url", return_value="/media/test.jpg")
     def test_apartment_detail_defaults_uzbek_description(self, _mock_url):
@@ -283,7 +314,10 @@ class UtilTests(SimpleTestCase):
         serializer = ApartmentCreateSerializer(
             data={
                 "title": "Test apartment",
-                "services": ["guid1", "guid2"],
+                "services": [
+                    "11111111-1111-1111-1111-111111111111",
+                    "22222222-2222-2222-2222-222222222222",
+                ],
                 "apartment_number": "12",
                 "home_number": "10",
                 "entrance_number": "2",
@@ -305,7 +339,13 @@ class UtilTests(SimpleTestCase):
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
         values = serializer.validated_data["values"]
-        self.assertEqual(values["services"], ["guid1", "guid2"])
+        self.assertEqual(
+            values["services"],
+            [
+                "11111111-1111-1111-1111-111111111111",
+                "22222222-2222-2222-2222-222222222222",
+            ],
+        )
 
     def test_apartment_create_serializer_accepts_detail_fields(self):
         serializer = ApartmentCreateSerializer(
@@ -341,7 +381,10 @@ class UtilTests(SimpleTestCase):
         serializer = CottageCreateSerializer(
             data={
                 "title": "Test cottage",
-                "services": ["service1", "service2"],
+                "services": [
+                    "11111111-1111-1111-1111-111111111111",
+                    "22222222-2222-2222-2222-222222222222",
+                ],
                 "latitude": "41.3",
                 "longitude": "69.2",
                 "country": "Uzbekistan",
@@ -351,7 +394,172 @@ class UtilTests(SimpleTestCase):
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
         normalized = serializer.validated_data["normalized_values"]
-        self.assertEqual(normalized["services"], ["service1", "service2"])
+        self.assertEqual(
+            [str(value) for value in normalized["services"]],
+            [
+                "11111111-1111-1111-1111-111111111111",
+                "22222222-2222-2222-2222-222222222222",
+            ],
+        )
+
+    def test_testing_mode_header_parser(self):
+        request = APIRequestFactory().get("/api/property/apartments/", HTTP_X_TESTING_MODE="true")
+        self.assertTrue(_is_testing_mode_request(request))
+        request = APIRequestFactory().get("/api/property/apartments/", HTTP_X_TESTING_MODE="false")
+        self.assertFalse(_is_testing_mode_request(request))
+
+    def test_public_cache_key_varies_by_testing_mode(self):
+        normal_request = APIRequestFactory().get("/api/property/properties/?search=test")
+        testing_request = APIRequestFactory().get(
+            "/api/property/properties/?search=test",
+            HTTP_X_TESTING_MODE="true",
+        )
+        self.assertNotEqual(
+            _public_cache_key(normal_request, "property:list"),
+            _public_cache_key(testing_request, "property:list"),
+        )
+
+
+class AdminSerializerTestingFlagTests(SimpleTestCase):
+    def test_apartment_admin_update_accepts_is_testing(self):
+        serializer = ApartmentAdminUpdateSerializer(
+            data={"title": "Admin apartment", "is_testing": True},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertTrue(serializer.validated_data["values"]["is_testing"])
+
+    def test_cottage_admin_update_accepts_is_testing(self):
+        serializer = CottageAdminUpdateSerializer(
+            data={
+                "title": "Admin cottage",
+                "latitude": "41.3",
+                "longitude": "69.2",
+                "is_testing": True,
+            },
+            partial=True,
+            context={"is_admin": True, "is_update": True},
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertTrue(serializer.validated_data["normalized_values"]["is_testing"])
+
+    def test_hotel_admin_update_accepts_is_testing(self):
+        serializer = HotelAdminUpdateSerializer(
+            data={"title": "Admin hotel", "is_testing": True},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertTrue(serializer.validated_data["values"]["is_testing"])
+
+
+class PublicTestingModeViewTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    @patch("property.views._favorite_guids_from_request", return_value=set())
+    @patch("property.views._track_client_search")
+    @patch("property.views._list_apartment_rows", return_value=[])
+    def test_apartment_public_list_passes_testing_only_true(
+        self,
+        mock_list_rows,
+        _mock_track,
+        _mock_favorites,
+    ):
+        request = self.factory.get("/api/property/apartments/", HTTP_X_TESTING_MODE="true")
+        response = ApartmentPropertyListCreateView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_list_rows.call_args.kwargs["testing_only"])
+
+    @patch("property.views._favorite_guids_from_request", return_value=set())
+    @patch("property.views._track_client_search")
+    @patch("property.views._list_cottage_rows", return_value=[])
+    def test_cottage_public_list_defaults_testing_only_false(
+        self,
+        mock_list_rows,
+        _mock_track,
+        _mock_favorites,
+    ):
+        request = self.factory.get("/api/property/cottages/")
+        response = CottagePropertyListCreateView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(mock_list_rows.call_args.kwargs["testing_only"])
+
+    @patch("property.views._favorite_guids_from_request", return_value=set())
+    @patch("property.views._track_client_search")
+    @patch("property.views._list_hotel_rows", return_value=[])
+    def test_hotel_public_list_passes_testing_only_true(
+        self,
+        mock_list_rows,
+        _mock_track,
+        _mock_favorites,
+    ):
+        request = self.factory.get("/api/property/hotels/", HTTP_X_TESTING_MODE="true")
+        response = HotelPropertyListView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_list_rows.call_args.kwargs["testing_only"])
+
+    @patch("property.views._favorite_guids_from_request", return_value=set())
+    @patch("property.views._list_hotel_rows", return_value=[])
+    @patch("property.views._list_cottage_rows", return_value=[])
+    @patch("property.views._list_apartment_rows", return_value=[])
+    def test_mixed_public_list_passes_testing_only_to_all_kinds(
+        self,
+        mock_apartments,
+        mock_cottages,
+        mock_hotels,
+        _mock_favorites,
+    ):
+        request = self.factory.get("/api/property/properties/", HTTP_X_TESTING_MODE="true")
+        response = PropertyListCreateView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_apartments.call_args.kwargs["testing_only"])
+        self.assertTrue(mock_cottages.call_args.kwargs["testing_only"])
+        self.assertTrue(mock_hotels.call_args.kwargs["testing_only"])
+
+    @patch("property.views._favorite_guids_from_request", return_value=set())
+    @patch("property.views._list_cottage_rows", return_value=[])
+    @patch("property.views._list_apartment_rows", return_value=[])
+    def test_region_public_list_passes_testing_only_true(
+        self,
+        mock_apartments,
+        mock_cottages,
+        _mock_favorites,
+    ):
+        region_guid = "00000000-0000-0000-0000-000000000007"
+        request = self.factory.get(
+            f"/api/property/regions/{region_guid}/properties/",
+            HTTP_X_TESTING_MODE="true",
+        )
+        response = RegionPropertyListView.as_view()(request, region_id=region_guid)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_apartments.call_args.kwargs["testing_only"])
+        self.assertTrue(mock_cottages.call_args.kwargs["testing_only"])
+
+    @patch("property.views._get_or_set_cached_payload", side_effect=lambda request, cache_key, timeout, loader: loader())
+    @patch("property.views.CottageListSerializer")
+    @patch("property.views.ApartmentListSerializer")
+    @patch("property.views._favorite_guids_from_request", return_value=set())
+    @patch("property.views.fetch_all")
+    @patch("property.views._list_cottage_rows", return_value=[])
+    @patch("property.views._list_apartment_rows", return_value=[])
+    def test_recommendations_skip_guaranteed_rows_in_testing_mode(
+        self,
+        mock_apartments,
+        mock_cottages,
+        mock_fetch_all,
+        _mock_favorites,
+        mock_apartment_serializer,
+        mock_cottage_serializer,
+        _mock_cache,
+    ):
+        mock_apartment_serializer.return_value.data = []
+        mock_cottage_serializer.return_value.data = []
+        request = self.factory.get("/api/property/recommendations/", HTTP_X_TESTING_MODE="true")
+        response = UnifiedRecommendationsListView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        mock_fetch_all.assert_not_called()
+        self.assertTrue(mock_apartments.call_args.kwargs["testing_only"])
+        self.assertTrue(mock_cottages.call_args.kwargs["testing_only"])
 
 
 class PropertyUrlsTests(SimpleTestCase):
@@ -376,7 +584,7 @@ class PropertyUrlsTests(SimpleTestCase):
         self.assertEqual(match.func.view_class.__name__, "PartnerAllPropertyListView")
 
     def test_admin_all_properties_url_resolves(self):
-        match = resolve("/api/property/admin/properties/all/")
+        match = resolve("/api/property/admin/all/")
         self.assertEqual(match.func.view_class.__name__, "AdminAllPropertiesListView")
 
     def test_admin_cottage_detail_url_resolves(self):
@@ -401,7 +609,7 @@ class PropertyUrlsTests(SimpleTestCase):
 
     def test_cottage_detail_url_resolves(self):
         match = resolve("/api/property/cottages/00000000-0000-0000-0000-000000000001/")
-        self.assertEqual(match.func.view_class.__name__, "PropertyRetrieveUpdateDestroyView")
+        self.assertEqual(match.func.view_class.__name__, "CottagePropertyRetrieveUpdateDestroyView")
 
 
 class AdminDeleteCottageTests(SimpleTestCase):

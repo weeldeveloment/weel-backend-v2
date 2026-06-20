@@ -272,6 +272,7 @@ class ApartmentAdminPropertyDetailSerializer(serializers.Serializer):
 class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
+    is_testing = serializers.BooleanField(read_only=True)
     property_detail = ApartmentAdminPropertyDetailSerializer(source="*", read_only=True)
     partner_user = ApartmentPartnerUserSerializer(allow_null=True, read_only=True)
 
@@ -286,6 +287,7 @@ class ApartmentAdminListSerializer(ApartmentPartnerListSerializer):
         data = super().to_representation(row)
         data["is_verified"] = bool(row.get("is_verified"))
         data["is_archived"] = bool(row.get("is_archived"))
+        data["is_testing"] = bool(row.get("is_testing", False))
         data["partner_user"] = row.get("partner_user")
         data["price"] = raw_price
         data["property_detail"] = {
@@ -864,6 +866,7 @@ class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
     verification_status = serializers.CharField(required=False, allow_blank=True)
     is_archived = serializers.BooleanField(required=False)
     is_recommended = serializers.BooleanField(required=False)
+    is_testing = serializers.BooleanField(required=False)
     partner_user_id = serializers.IntegerField(required=False, allow_null=True)
     verified_by_user_id = serializers.IntegerField(required=False, allow_null=True)
     comment_count = serializers.IntegerField(
@@ -879,6 +882,7 @@ class ApartmentAdminUpdateSerializer(ApartmentUpdateSerializer):
         "verification_status",
         "is_archived",
         "is_recommended",
+        "is_testing",
         "partner_user_id",
         "verified_by_user_id",
         "comment_count",

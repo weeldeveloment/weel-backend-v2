@@ -96,6 +96,7 @@ COTTAGE_SELECT = f"""
         c.verification_status,
         c.is_archived,
         c.is_recommended,
+        COALESCE(c.is_testing, FALSE) AS is_testing,
         c.weekend_only_sunday_inclusive,
         c.comment_count,
         COALESCE(current_price.price_per_person, c.price_per_person) AS price_per_person,
@@ -199,6 +200,7 @@ def list_cottages(
     corporate: bool | None = None,
     min_price: Decimal | None = None,
     max_price: Decimal | None = None,
+    testing_only: bool | None = None,
     limit: int | None = None,
     offset: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -242,6 +244,9 @@ def list_cottages(
             "(COALESCE(current_price.price_on_working_days, c.price_on_working_days, 0) <= %s OR COALESCE(current_price.price_on_weekends, c.price_on_weekends, 0) <= %s)"
         )
         params.extend([max_price, max_price])
+    if testing_only is not None:
+        where.append("COALESCE(c.is_testing, FALSE) = %s")
+        params.append(bool(testing_only))
 
     return fetch_all(
         f"""
@@ -328,6 +333,7 @@ def create_cottage(
             guid, created_at, updated_at,
             title, title_sort,
             is_verified, verification_status, is_archived, is_recommended,
+            is_testing,
             weekend_only_sunday_inclusive, comment_count,
             price_per_person, price_on_working_days, price_on_weekends,
             currency, img, partner_user_id,
@@ -341,6 +347,7 @@ def create_cottage(
             %s, %s, %s,
             %s, %s,
             FALSE, %s, FALSE, FALSE,
+            %s,
             %s, %s,
             %s, %s, %s,
             %s, %s, %s,
@@ -357,6 +364,7 @@ def create_cottage(
             uuid4(), now, now,
             values["title"], values["title_sort"],
             VerificationStatus.WAITING.value,
+            bool(values.get("is_testing", False)),
             bool(values.get("weekend_only_sunday_inclusive", False)),
             int(values.get("comment_count", 0)),
             values.get("price_per_person"), values.get("price_on_working_days"),
@@ -520,6 +528,7 @@ _COTTAGE_ADMIN_UPDATE_ALLOWED: set[str] = set(_COTTAGE_UPDATE_ALLOWED) | {
     "verification_status",
     "is_archived",
     "is_recommended",
+    "is_testing",
     "partner_user_id",
     "verified_by_user_id",
     "comment_count",

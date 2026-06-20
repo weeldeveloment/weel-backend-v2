@@ -169,6 +169,7 @@ class HotelAdminPropertyDetailSerializer(serializers.Serializer):
 
 class HotelAdminListSerializer(HotelListSerializer):
     is_active = serializers.BooleanField(read_only=True)
+    is_testing = serializers.BooleanField(read_only=True)
     organization = HotelAdminOrganizationSerializer(read_only=True)
     property_detail = HotelAdminPropertyDetailSerializer(source="*", read_only=True)
     tenant_schema = serializers.CharField(allow_blank=True, allow_null=True)
@@ -177,6 +178,7 @@ class HotelAdminListSerializer(HotelListSerializer):
         row = dict(instance)
         data = super().to_representation(row)
         data["is_active"] = bool(row.get("is_active", True))
+        data["is_testing"] = bool(row.get("is_testing", False))
         data["tenant_schema"] = row.get("tenant_schema")
         data["organization"] = {
             "id": row.get("organization_id"),
@@ -229,6 +231,7 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
     currency = serializers.ChoiceField(choices=["USD", "UZS"], required=False)
     timezone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     is_active = serializers.BooleanField(required=False)
+    is_testing = serializers.BooleanField(required=False)
     img = serializers.ListField(
         child=serializers.CharField(),
         required=False,
@@ -270,6 +273,7 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
             "currency",
             "timezone",
             "is_active",
+            "is_testing",
         ):
             if key in attrs:
                 prepared[key] = attrs.get(key)

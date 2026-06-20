@@ -47,6 +47,7 @@ class Command(BaseCommand):
                     timezone VARCHAR(50) DEFAULT 'Asia/Tashkent',
                     photos TEXT[] DEFAULT '{}',
                     is_active BOOLEAN DEFAULT TRUE,
+                    is_testing BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );

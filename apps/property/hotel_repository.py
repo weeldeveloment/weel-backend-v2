@@ -136,6 +136,7 @@ def _fetch_hotel_rows_for_schema(
                     p.timezone,
                     COALESCE(p.photos, ARRAY[]::text[]) AS photos,
                     COALESCE(p.is_active, TRUE) AS is_active,
+                    COALESCE(p.is_testing, FALSE) AS is_testing,
                     p.created_at,
                     p.updated_at,
                     %s AS tenant_schema
@@ -215,7 +216,7 @@ def list_hotel_organizations() -> list[dict[str, Any]]:
     return organizations
 
 
-def list_hotels(*, limit: int | None = None) -> list[dict[str, Any]]:
+def list_hotels(*, limit: int | None = None, testing_only: bool | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
     for organization in list_hotel_organizations():
@@ -226,6 +227,7 @@ def list_hotels(*, limit: int | None = None) -> list[dict[str, Any]]:
         rows.extend(
             _serialize_hotel_row(row, organization)
             for row in tenant_rows
+            if testing_only is None or bool(row.get("is_testing", False)) is bool(testing_only)
         )
 
     _sort_rows(rows)
@@ -330,10 +332,11 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     timezone,
                     photos,
                     is_active,
+                    is_testing,
                     created_at,
                     updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING id
                 """,
@@ -360,6 +363,7 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     values.get("timezone") or "Asia/Tashkent",
                     values.get("photos") or [],
                     values.get("is_active", True),
+                    values.get("is_testing", False),
                     now,
                     now,
                 ],

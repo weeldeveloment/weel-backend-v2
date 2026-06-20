@@ -45,6 +45,7 @@ class Property(HardDeleteBaseModel, VerifiedByMixin):
     verification_status: str = VerificationStatus.WAITING.value
     is_archived: bool = False
     is_recommended: bool = False
+    is_testing: bool = False
     currency: str | None = None
     img: str | None = None
     price: Decimal | None = None
@@ -88,4 +89,3 @@ class PropertyImage(HardDeleteBaseModel):
     id: int | None = None
     property_id: int | None = None
     _meta = SimpleNamespace(db_table="property_image")
-
