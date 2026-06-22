@@ -203,10 +203,10 @@ class BookingSerializer(serializers.Serializer):
         required=False,
         default="RO",
     )
-    adult_count = serializers.IntegerField(required=False, default=1)
-    child_count = serializers.IntegerField(required=False, default=0)
+    adult_count = serializers.IntegerField(required=False, default=1, min_value=1)
+    child_count = serializers.IntegerField(required=False, default=0, min_value=0)
     rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
-    currency = serializers.CharField(required=False, default="USD")
+    currency = serializers.CharField(required=False, default="USD", max_length=3)
     payment_status = serializers.ChoiceField(
         choices=["pending", "paid", "partial", "refunded"],
         required=False,
@@ -216,7 +216,7 @@ class BookingSerializer(serializers.Serializer):
     hold_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True, allow_null=True)
     confirmed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     confirmation_deadline = serializers.DateTimeField(read_only=True, allow_null=True)
-    b2b_company_id = serializers.IntegerField(required=False, allow_null=True)
+    b2b_company_id = serializers.IntegerField(read_only=True, allow_null=True)
     voucher_number = serializers.CharField(read_only=True, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     room_number = serializers.CharField(read_only=True, allow_null=True)
@@ -226,7 +226,9 @@ class BookingSerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
 
     def validate(self, data):
-        if data["check_out"] <= data["check_in"]:
+        check_in = data.get("check_in")
+        check_out = data.get("check_out")
+        if check_in and check_out and check_out <= check_in:
             raise serializers.ValidationError({"check_out": "Check-out must be after check-in."})
         return data
 

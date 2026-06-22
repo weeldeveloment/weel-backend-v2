@@ -664,7 +664,7 @@ def create_booking(
 
         d = check_in
         while d < check_out:
-            fetch_one(
+            execute(
                 f"""
                 INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, created_at, updated_at)
                 VALUES (%s, %s, 'occupied', %s, %s)
@@ -746,6 +746,79 @@ def update_booking(booking_id: int, **kwargs: Any) -> dict[str, Any] | None:
         f"UPDATE {_t(PMS_BOOKING_TABLE)} SET {sets}, updated_at = %s WHERE id = %s RETURNING *",
         values,
     )
+
+
+def update_booking_with_guest(
+    booking_id: int,
+    *,
+    guest_first_name: str | None = None,
+    guest_last_name: str | None = None,
+    user_id: int | None = None,
+    **kwargs: Any,
+) -> dict[str, Any] | None:
+    booking = get_booking(booking_id)
+    if not booking:
+        return None
+
+    guest_id = booking.get("guest_id")
+    has_guest_update = guest_first_name is not None or guest_last_name is not None
+    if has_guest_update:
+        first_name = (guest_first_name or "").strip() or "Guest"
+        last_name = (guest_last_name or "").strip() or None
+        if guest_id:
+            update_guest(guest_id, first_name=first_name, last_name=last_name)
+        else:
+            guest = create_guest(first_name=first_name, last_name=last_name)
+            if guest:
+                kwargs["guest_id"] = guest["id"]
+
+    allowed_fields = {
+        "room_id",
+        "guest_id",
+        "check_in",
+        "check_out",
+        "source",
+        "meal_plan",
+        "adult_count",
+        "child_count",
+        "rate",
+        "currency",
+        "payment_status",
+        "total_cost",
+        "b2b_company_id",
+        "notes",
+    }
+    updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
+
+    if updates:
+        update_booking(booking_id, **updates)
+
+    if has_guest_update or updates:
+        _add_booking_history(
+            booking_id=booking_id,
+            action="updated",
+            previous_value={
+                k: str(booking.get(k)) if booking.get(k) is not None else None
+                for k in updates
+            },
+            new_value={
+                **{
+                    k: str(v) if v is not None else None
+                    for k, v in updates.items()
+                },
+                **(
+                    {
+                        "guest_first_name": guest_first_name,
+                        "guest_last_name": guest_last_name,
+                    }
+                    if has_guest_update
+                    else {}
+                ),
+            },
+            user_id=user_id,
+        )
+
+    return get_booking(booking_id, booking.get("property_id"))
 
 
 def accept_booking(booking_id: int, user_id: int | None = None) -> dict[str, Any] | None:

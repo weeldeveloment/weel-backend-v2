@@ -67,6 +67,7 @@ from apps.pms.repository import (
     unblock_dates,
     unhold_dates,
     update_booking,
+    update_booking_with_guest,
     update_guest,
     update_property,
     update_rate,
@@ -590,7 +591,7 @@ class BookingRetrieveView(PMSBaseView):
         return Response(BookingSerializer(booking).data)
 
     @swagger_auto_schema(
-        request_body=ResizeBookingSerializer,
+        request_body=BookingSerializer,
         responses={200: BookingSerializer()},
     )
     def patch(self, request, property_id, booking_id):
@@ -598,14 +599,24 @@ class BookingRetrieveView(PMSBaseView):
         if not booking:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ResizeBookingSerializer(data=request.data)
+        serializer = BookingSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        updated = update_booking(
+        validated = serializer.validated_data
+        room_id = validated.get("room_id")
+        if room_id is not None and not get_room(room_id, property_id):
+            return Response(
+                {"room_id": "Room not found for this property."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated = update_booking_with_guest(
             booking_id,
-            check_in=serializer.validated_data["check_in"],
-            check_out=serializer.validated_data["check_out"],
+            guest_first_name=request.data.get("guest_first_name"),
+            guest_last_name=request.data.get("guest_last_name"),
+            user_id=_get_user_id(request),
+            **validated,
         )
         if not updated:
             return Response({"detail": "Failed to update booking."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
