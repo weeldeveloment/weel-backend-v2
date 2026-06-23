@@ -1835,16 +1835,22 @@ class HotelPropertyListView(APIView):
     )
     def get(self, request, *args, **kwargs):
         _track_client_search(request)
+        testing_only = _is_testing_mode_request(request)
         ctx = {
             "request": request,
             "favorite_guids": _favorite_guids_from_request(request),
         }
+        rows = _list_hotel_rows(
+            request.query_params,
+            default_limit=None,
+            testing_only=testing_only,
+        )
         paginator = self.pagination_class()
-        paginated_data = paginator.paginate_queryset([], request)
+        paginated_data = paginator.paginate_queryset(rows, request)
         if paginated_data is not None:
             serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
             return paginator.get_paginated_response(serializer.data)
-        return Response([], status=status.HTTP_200_OK)
+        return Response(HotelListSerializer(rows, many=True, context=ctx).data)
 
 
 # ---------------------------------------------------------------------------
@@ -1918,12 +1924,17 @@ class PropertyListCreateView(APIView):
             return Response(ApartmentListSerializer(rows, many=True, context=ctx).data)
 
         if requested_kind == PROPERTY_KIND_HOTEL:
+            rows = _list_hotel_rows(
+                query_params,
+                default_limit=None,
+                testing_only=testing_only,
+            )
             paginator = self.pagination_class()
-            paginated_data = paginator.paginate_queryset([], request)
+            paginated_data = paginator.paginate_queryset(rows, request)
             if paginated_data is not None:
                 serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
                 return paginator.get_paginated_response(serializer.data)
-            return Response([], status=status.HTTP_200_OK)
+            return Response(HotelListSerializer(rows, many=True, context=ctx).data)
 
         # Default: return apartments, cottages, and hotels (mixed list)
         apt_rows = _list_apartment_rows(

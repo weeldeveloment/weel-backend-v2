@@ -127,7 +127,7 @@ class RoomSerializer(serializers.Serializer):
         required=False,
         default="BB",
     )
-    is_active = serializers.BooleanField(read_only=True)
+    is_active = serializers.BooleanField(required=False)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
