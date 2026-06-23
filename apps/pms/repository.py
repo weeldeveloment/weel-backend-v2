@@ -310,7 +310,7 @@ def get_room(room_id: int, property_id: int | None = None) -> dict[str, Any] | N
             f"""
             SELECT r.*,
                    CASE WHEN rt.id IS NOT NULL
-                        THEN JSONB_BUILD_OBJECT('id', rt.id, 'name', rt.name, 'preset', rt.preset)
+                        THEN JSONB_BUILD_OBJECT('id', rt.id, 'name', rt.name)
                         ELSE NULL
                    END AS room_type
             FROM {_t(PMS_ROOM_TABLE)} r
@@ -323,7 +323,7 @@ def get_room(room_id: int, property_id: int | None = None) -> dict[str, Any] | N
         f"""
         SELECT r.*,
                CASE WHEN rt.id IS NOT NULL
-                    THEN JSONB_BUILD_OBJECT('id', rt.id, 'name', rt.name, 'preset', rt.preset)
+                    THEN JSONB_BUILD_OBJECT('id', rt.id, 'name', rt.name)
                     ELSE NULL
                END AS room_type
         FROM {_t(PMS_ROOM_TABLE)} r
