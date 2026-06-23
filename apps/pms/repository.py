@@ -307,11 +307,29 @@ def list_rooms(property_id: int, *, room_type_id: int | None = None, is_active: 
 def get_room(room_id: int, property_id: int | None = None) -> dict[str, Any] | None:
     if property_id:
         return fetch_one(
-            f"SELECT * FROM {_t(PMS_ROOM_TABLE)} WHERE id = %s AND property_id = %s",
+            f"""
+            SELECT r.*,
+                   CASE WHEN rt.id IS NOT NULL
+                        THEN JSONB_BUILD_OBJECT('id', rt.id, 'name', rt.name, 'preset', rt.preset)
+                        ELSE NULL
+                   END AS room_type
+            FROM {_t(PMS_ROOM_TABLE)} r
+            LEFT JOIN {_t(PMS_ROOM_TYPE_TABLE)} rt ON r.room_type_id = rt.id
+            WHERE r.id = %s AND r.property_id = %s
+            """,
             [room_id, property_id],
         )
     return fetch_one(
-        f"SELECT * FROM {_t(PMS_ROOM_TABLE)} WHERE id = %s",
+        f"""
+        SELECT r.*,
+               CASE WHEN rt.id IS NOT NULL
+                    THEN JSONB_BUILD_OBJECT('id', rt.id, 'name', rt.name, 'preset', rt.preset)
+                    ELSE NULL
+               END AS room_type
+        FROM {_t(PMS_ROOM_TABLE)} r
+        LEFT JOIN {_t(PMS_ROOM_TYPE_TABLE)} rt ON r.room_type_id = rt.id
+        WHERE r.id = %s
+        """,
         [room_id],
     )
 
