@@ -1,4 +1,5 @@
 from django.urls import path
+from apps.b2b.auth_views import B2BLoginSendOTPView, B2BLoginVerifyView
 from apps.b2b.views import (
     B2BCompanyView,
     B2BDepartmentListCreateView,
@@ -15,6 +16,8 @@ from apps.b2b.views import (
 )
 
 urlpatterns = [
+    path("auth/login/", B2BLoginSendOTPView.as_view(), name="b2b-login"),
+    path("auth/login/verify/", B2BLoginVerifyView.as_view(), name="b2b-login-verify"),
     path("company/", B2BCompanyView.as_view(), name="b2b-company"),
     path("departments/", B2BDepartmentListCreateView.as_view(), name="b2b-departments"),
     path("employees/", B2BEmployeeListCreateView.as_view(), name="b2b-employees"),
