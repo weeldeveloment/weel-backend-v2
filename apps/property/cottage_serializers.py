@@ -460,6 +460,7 @@ class CottageAdminListSerializer(CottagePartnerListSerializer):
         raw_price_per_person = _to_decimal(row.get("price_per_person"))
         raw_price_on_working_days = _to_decimal(row.get("price_on_working_days"))
         raw_price_on_weekends = _to_decimal(row.get("price_on_weekends"))
+        raw_price = _parse_jsonb_price(row.get("price"), None)
         data = super().to_representation(row)
         data["is_verified"] = bool(row.get("is_verified"))
         data["is_archived"] = bool(row.get("is_archived"))
@@ -468,6 +469,7 @@ class CottageAdminListSerializer(CottagePartnerListSerializer):
         data["price_per_person"] = raw_price_per_person
         data["price_on_working_days"] = raw_price_on_working_days
         data["price_on_weekends"] = raw_price_on_weekends
+        data["price"] = raw_price
         lang = _preferred_language(self.context.get("request"))
         desc_value = row.get(f"description_{lang}")
         if not desc_value:

@@ -11,4 +11,5 @@ urlpatterns = [
     path("chat/", include(("chat.urls", "chat"), "chat")),
     path("admin-auth/", include(("apps.admin_auth.urls", "admin_auth"), "admin_auth")),
     path("property/", include(("recommendation.urls", "recommendation"), "recommendation")),
+    path("payment/", include(("payment.urls", "payment"), "payment")),
 ]
