@@ -4,6 +4,7 @@ from apps.b2b.views import (
     B2BDepartmentListCreateView,
     B2BEmployeeListCreateView,
     B2BEmployeeRetrieveUpdateView,
+    B2BStatisticsView,
     BusinessTripListCreateView,
     BusinessTripRetrieveUpdateView,
     TripEmployeeListCreateView,
@@ -25,4 +26,5 @@ urlpatterns = [
     path("travel-policy/", TravelPolicyView.as_view(), name="b2b-travel-policy"),
     path("budget-requests/", BudgetRequestListCreateView.as_view(), name="b2b-budget-requests"),
     path("budget-requests/<int:request_id>/review/", BudgetRequestReviewView.as_view(), name="b2b-budget-request-review"),
+    path("statistics/", B2BStatisticsView.as_view(), name="b2b-statistics"),
 ]
