@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
 from django.core.cache import cache
@@ -966,3 +967,238 @@ class AdminBookingListView(ListAPIView):
             context={"request": request, "usd_to_uzs_rate": usd_to_uzs_rate},
         )
         return paginator.get_paginated_response(serializer.data)
+
+
+# ---------------------------------------------------------------------------
+# Hotel booking endpoints — accept encoded hotel GUIDs, use PMS tables
+# ---------------------------------------------------------------------------
+
+
+def _decode_hotel_guid_or_404(hotel_guid: str) -> tuple[str, int]:
+    from property.hotel_repository import decode_hotel_guid
+    decoded = decode_hotel_guid(str(hotel_guid))
+    if not decoded:
+        raise NotFound(_("Hotel not found"))
+    return decoded
+
+
+class HotelRoomListView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id="listHotelRooms",
+        operation_summary="List available hotel rooms",
+        operation_description="Returns available rooms for a hotel by encoded GUID. Query params: check_in, check_out, guests.",
+        tags=["Hotel / Booking"],
+        manual_parameters=[
+            openapi.Parameter("hotel_guid", openapi.IN_PATH, type=openapi.TYPE_STRING),
+            openapi.Parameter("check_in", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("check_out", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("guests", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=1),
+        ],
+        responses={200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
+    )
+    def get(self, request, hotel_guid):
+        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+
+        check_in_str = request.query_params.get("check_in")
+        check_out_str = request.query_params.get("check_out")
+        guests = int(request.query_params.get("guests", 1))
+
+        if not check_in_str or not check_out_str:
+            raise ValidationError({"detail": _("check_in and check_out are required.")})
+        try:
+            ci = date.fromisoformat(check_in_str)
+            co = date.fromisoformat(check_out_str)
+        except ValueError:
+            raise ValidationError({"detail": _("Invalid date format. Use YYYY-MM-DD.")})
+        if co <= ci:
+            raise ValidationError({"detail": _("check_out must be after check_in.")})
+
+        from apps.hotels.repository import get_available_rooms
+        rooms = get_available_rooms(hotel_id, check_in=ci, check_out=co, guests=guests)
+        return Response(rooms, status=status.HTTP_200_OK)
+
+
+class HotelRoomPriceView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id="getHotelRoomPrice",
+        operation_summary="Get room price quote",
+        operation_description="Returns server-side price quote for a hotel room: nights, total, hold_amount, remaining_on_arrival.",
+        tags=["Hotel / Booking"],
+        manual_parameters=[
+            openapi.Parameter("hotel_guid", openapi.IN_PATH, type=openapi.TYPE_STRING),
+            openapi.Parameter("room_id", openapi.IN_PATH, type=openapi.TYPE_INTEGER),
+            openapi.Parameter("check_in", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("check_out", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date", required=True),
+        ],
+        responses={200: openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "nights": openapi.Schema(type=openapi.TYPE_INTEGER),
+                "total": openapi.Schema(type=openapi.TYPE_NUMBER),
+                "hold_amount": openapi.Schema(type=openapi.TYPE_NUMBER),
+                "remaining_on_arrival": openapi.Schema(type=openapi.TYPE_NUMBER),
+            },
+        )},
+    )
+    def get(self, request, hotel_guid, room_id):
+        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+
+        check_in_str = request.query_params.get("check_in")
+        check_out_str = request.query_params.get("check_out")
+        if not check_in_str or not check_out_str:
+            raise ValidationError({"detail": _("check_in and check_out are required.")})
+        try:
+            ci = date.fromisoformat(check_in_str)
+            co = date.fromisoformat(check_out_str)
+        except ValueError:
+            raise ValidationError({"detail": _("Invalid date format. Use YYYY-MM-DD.")})
+
+        from apps.hotels.repository import calculate_stay_price
+        pricing = calculate_stay_price(room_id, check_in=ci, check_out=co)
+        if not pricing:
+            raise NotFound(_("Room not found or invalid dates."))
+        return Response({
+            "nights": pricing["nights"],
+            "total": str(pricing["total_price"]),
+            "hold_amount": str(pricing["hold_amount"]),
+            "remaining_on_arrival": str(pricing["remaining_on_arrival"]),
+        })
+
+
+class HotelCalendarView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id="getHotelCalendar",
+        operation_summary="Get hotel room calendar",
+        operation_description="Returns per-room availability for a hotel date range.",
+        tags=["Hotel / Booking"],
+        manual_parameters=[
+            openapi.Parameter("hotel_guid", openapi.IN_PATH, type=openapi.TYPE_STRING),
+            openapi.Parameter("from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("to_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date", required=True),
+        ],
+        responses={200: openapi.Schema(
+            type=openapi.TYPE_ARRAY,
+            items=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "room_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "room_name": openapi.Schema(type=openapi.TYPE_STRING),
+                    "date": openapi.Schema(type=openapi.TYPE_STRING, format="date"),
+                    "status": openapi.Schema(type=openapi.TYPE_STRING),
+                },
+            ),
+        )},
+    )
+    def get(self, request, hotel_guid):
+        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+
+        from_date_str = request.query_params.get("from_date")
+        to_date_str = request.query_params.get("to_date")
+        if not from_date_str or not to_date_str:
+            raise ValidationError({"detail": _("from_date and to_date are required.")})
+        try:
+            fd = date.fromisoformat(from_date_str)
+            td = date.fromisoformat(to_date_str)
+        except ValueError:
+            raise ValidationError({"detail": _("Invalid date format. Use YYYY-MM-DD.")})
+
+        from apps.hotels.repository import get_hotel_calendar
+        calendar = get_hotel_calendar(hotel_id, from_date=fd, to_date=td)
+        return Response(calendar, status=status.HTTP_200_OK)
+
+
+class ClientHotelBookingCreateView(APIView):
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [IsClient]
+
+    @swagger_auto_schema(
+        operation_id="createHotelBooking",
+        operation_summary="Create a hotel booking",
+        operation_description="Client-only. Creates a pending hotel booking. Uses `guests` instead of adults/children.",
+        tags=["Hotel / Booking"],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["hotel_guid", "room_id", "check_in", "check_out", "guests"],
+            properties={
+                "hotel_guid": openapi.Schema(type=openapi.TYPE_STRING, description="Encoded hotel GUID."),
+                "room_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                "check_in": openapi.Schema(type=openapi.TYPE_STRING, format="date"),
+                "check_out": openapi.Schema(type=openapi.TYPE_STRING, format="date"),
+                "guests": openapi.Schema(type=openapi.TYPE_INTEGER),
+                "card_id": openapi.Schema(type=openapi.TYPE_STRING, description="Saved card ID."),
+            },
+        ),
+        responses={
+            201: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "booking_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "booking_number": openapi.Schema(type=openapi.TYPE_STRING),
+                    "status": openapi.Schema(type=openapi.TYPE_STRING),
+                    "total_price": openapi.Schema(type=openapi.TYPE_STRING),
+                    "hold_amount": openapi.Schema(type=openapi.TYPE_STRING),
+                },
+            ),
+            400: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                "detail": openapi.Schema(type=openapi.TYPE_STRING),
+            }),
+            404: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                "detail": openapi.Schema(type=openapi.TYPE_STRING),
+            }),
+        },
+    )
+    def post(self, request):
+        hotel_guid = request.data.get("hotel_guid")
+        room_id = request.data.get("room_id")
+        check_in_str = request.data.get("check_in")
+        check_out_str = request.data.get("check_out")
+        guests = request.data.get("guests")
+        card_id = request.data.get("card_id")
+
+        if not all([hotel_guid, room_id, check_in_str, check_out_str, guests]):
+            raise ValidationError({"detail": _("hotel_guid, room_id, check_in, check_out, guests are required.")})
+
+        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+
+        try:
+            ci = date.fromisoformat(str(check_in_str))
+            co = date.fromisoformat(str(check_out_str))
+        except ValueError:
+            raise ValidationError({"detail": _("Invalid date format. Use YYYY-MM-DD.")})
+        if co <= ci:
+            raise ValidationError({"detail": _("check_out must be after check_in.")})
+        if not isinstance(guests, int) or guests < 1:
+            raise ValidationError({"detail": _("guests must be a positive integer.")})
+
+        from apps.hotels.repository import create_hotel_booking
+        booking = create_hotel_booking(
+            property_id=hotel_id,
+            room_id=int(room_id),
+            client_user_id=int(request.user.id),
+            check_in=ci,
+            check_out=co,
+            guests=int(guests),
+            card_id=str(card_id) if card_id else None,
+        )
+        if not booking:
+            raise ValidationError(_("Booking could not be created. Check room availability."))
+
+        return Response(
+            {
+                "booking_id": booking["id"],
+                "booking_number": booking["booking_number"],
+                "status": booking["status"],
+                "total_price": str(booking["total_price"]),
+                "hold_amount": str(booking["hold_amount"]),
+                "check_in": str(booking["check_in"]),
+                "check_out": str(booking["check_out"]),
+                "guests": booking["guests"],
+            },
+            status=status.HTTP_201_CREATED,
+        )
