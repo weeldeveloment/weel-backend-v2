@@ -40,6 +40,7 @@ from .apartment_repository import (
     PROPERTY_KIND_COTTAGE,
     admin_append_apartment_images,
     admin_create_apartment,
+    admin_delete_apartment,
     admin_get_apartment,
     admin_remove_apartment_image,
     admin_update_apartment,
@@ -683,6 +684,22 @@ def _parse_int(value) -> int | None:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _parse_partner_user_id(value) -> int | None:
+    if value in (None, "", "null", "None", "undefined"):
+        return None
+
+    parsed = _parse_int(value)
+    if parsed is None:
+        raise ValidationError({"partner_user_id": _("Enter a valid integer.")})
+
+    partner = get_user_by_id(parsed, role="partner", active_only=True)
+    if partner is None:
+        raise ValidationError(
+            {"partner_user_id": _("No active partner account found for this id.")}
+        )
+    return int(partner.id)
 
 
 def _parse_region_id_or_guid(value) -> int | None:
@@ -3868,7 +3885,7 @@ class AdminApartmentListCreateView(APIView):
             raise ValidationError({"title": _("This field is required.")})
         prepared.setdefault("title", title)
         prepared.setdefault("title_sort", title.lower())
-        partner_user_id = _parse_int(request.data.get("partner_user_id"))
+        partner_user_id = _parse_partner_user_id(request.data.get("partner_user_id"))
         created = admin_create_apartment(
             values=prepared,
             admin_user_id=getattr(request.user, "id", None),
@@ -3909,7 +3926,7 @@ class AdminCottageListCreateView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         normalized = serializer.validated_data.get("normalized_values") or {}
-        partner_user_id = _parse_int(request.data.get("partner_user_id"))
+        partner_user_id = _parse_partner_user_id(request.data.get("partner_user_id"))
         created = admin_create_cottage(
             values=normalized,
             admin_user_id=getattr(request.user, "id", None),
@@ -4247,6 +4264,28 @@ class AdminApartmentPatchView(APIView):
             ApartmentAdminListSerializer(updated, context=ctx).data,
             status=status.HTTP_200_OK,
         )
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_id="deleteAdminApartment",
+        operation_summary="Delete apartment (admin)",
+        operation_description="Admin-only hard delete of an apartment by its guid.",
+        responses={
+            204: None,
+            401: _ERROR_DETAIL_SCHEMA,
+            403: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def delete(self, request, apartment_id, *args, **kwargs):
+        try:
+            deleted = admin_delete_apartment(apartment_guid=str(apartment_id))
+        except Exception as exc:
+            logger.exception("admin_apartment_delete failed apartment_guid=%s", apartment_id)
+            raise APIException(_("Failed to delete apartment")) from exc
+        if not deleted:
+            raise NotFound(_("Apartment not found"))
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdminCottagePatchView(APIView):
