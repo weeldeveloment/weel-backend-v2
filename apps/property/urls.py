@@ -122,6 +122,16 @@ urlpatterns = [
         name="hotel-property-list",
     ),
     path(
+        "hotels/<path:hotel_guid>/reviews/",
+        HotelPropertyReviewListCreateView.as_view(),
+        name="hotel-property-review-list-create",
+    ),
+    path(
+        "hotels/<path:hotel_guid>/",
+        HotelPropertyDetailView.as_view(),
+        name="hotel-property-detail",
+    ),
+    path(
         "cottages/<uuid:property_id>/",
         CottagePropertyRetrieveUpdateDestroyView.as_view(),
         name="cottage-property-retrieve-update-destroy",
@@ -165,16 +175,6 @@ urlpatterns = [
         "properties/filter-by-link/",
         PropertyFilterByLinkView.as_view(),
         name="property-filter-by-link",
-    ),
-    path(
-        "properties/<path:hotel_guid>/reviews/",
-        HotelPropertyReviewListCreateView.as_view(),
-        name="hotel-property-review-list-create",
-    ),
-    path(
-        "properties/<path:hotel_guid>/",
-        HotelPropertyDetailView.as_view(),
-        name="hotel-property-detail",
     ),
     path(
         "partner/properties/",
