@@ -45,6 +45,9 @@ from .views import (
     CategoryPropertyRecommendationView,
     CategoryLatestPropertyListView,
     PropertyListCreateView,
+    HotelPropertyDetailView,
+    HotelPropertyReviewListCreateView,
+    HotelPropertyFavoriteToggleView,
 )
 
 
@@ -129,6 +132,11 @@ urlpatterns = [
         name="property-favorite-toggle",
     ),
     path(
+        "<path:hotel_guid>/favorite/",
+        HotelPropertyFavoriteToggleView.as_view(),
+        name="hotel-property-favorite-toggle",
+    ),
+    path(
         "cottages/<uuid:property_id>/images/",
         PropertyImageCreateView.as_view(),
         name="cottage-property-image-create",
@@ -157,6 +165,16 @@ urlpatterns = [
         "properties/filter-by-link/",
         PropertyFilterByLinkView.as_view(),
         name="property-filter-by-link",
+    ),
+    path(
+        "properties/<path:hotel_guid>/reviews/",
+        HotelPropertyReviewListCreateView.as_view(),
+        name="hotel-property-review-list-create",
+    ),
+    path(
+        "properties/<path:hotel_guid>/",
+        HotelPropertyDetailView.as_view(),
+        name="hotel-property-detail",
     ),
     path(
         "partner/properties/",

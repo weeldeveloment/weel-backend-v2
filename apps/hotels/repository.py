@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from shared.raw.db import fetch_all, fetch_one
+from shared.raw.db import execute, fetch_all, fetch_one
 
 
 def search_hotels(
@@ -232,3 +232,119 @@ def get_hotel_reviews(
         """,
         [property_id, limit, offset],
     )
+
+
+def has_eligible_hotel_booking_for_review(
+    *,
+    client_user_id: int,
+    property_id: int,
+) -> bool:
+    row = fetch_one(
+        """
+        SELECT 1 FROM pms_booking b
+        WHERE b.property_id = %s
+          AND b.client_user_id = %s
+          AND b.status IN ('confirmed', 'completed')
+          AND b.completed_at IS NOT NULL
+        LIMIT 1
+        """,
+        [property_id, client_user_id],
+    )
+    return row is not None
+
+
+def create_hotel_review(
+    *,
+    property_id: int,
+    client_user_id: int,
+    guest_name: str,
+    rating: int,
+    text: str = "",
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        """
+        INSERT INTO pms_review (property_id, client_user_id, guest_name, rating, text, created_at)
+        VALUES (%s, %s, %s, %s, %s, NOW())
+        RETURNING id, guest_name, rating, text, response, created_at
+        """,
+        [property_id, client_user_id, guest_name, rating, text],
+    )
+    return row
+
+
+def get_hotel_calendar(
+    property_id: int,
+    *,
+    from_date: date,
+    to_date: date,
+) -> list[dict[str, Any]]:
+    return fetch_all(
+        """
+        SELECT r.id AS room_id, r.display_name AS room_name,
+               d.date::date AS date,
+               CASE WHEN b.id IS NOT NULL THEN 'booked' ELSE 'available' END AS status
+        FROM pms_room r
+        CROSS JOIN LATERAL (
+            SELECT generate_series(%s::date, %s::date, '1 day'::interval)::date AS date
+        ) d
+        LEFT JOIN pms_booking b
+            ON b.room_id = r.id
+            AND b.status NOT IN ('cancelled', 'completed')
+            AND b.check_in < d.date + 1
+            AND b.check_out > d.date
+        WHERE r.property_id = %s AND r.is_active = TRUE
+        ORDER BY r.id, d.date
+        """,
+        [from_date, to_date, property_id],
+    )
+
+
+def create_hotel_booking(
+    *,
+    property_id: int,
+    room_id: int,
+    client_user_id: int,
+    check_in: date,
+    check_out: date,
+    guests: int,
+    card_id: str | None = None,
+) -> dict[str, Any] | None:
+    nights = (check_out - check_in).days
+    if nights <= 0:
+        return None
+
+    room = fetch_one(
+        "SELECT price_per_night FROM pms_room WHERE id = %s AND is_active = TRUE",
+        [room_id],
+    )
+    if not room:
+        return None
+
+    total_price = Decimal(str(room["price_per_night"])) * nights
+    hold_amount = (total_price * Decimal("0.30")).quantize(Decimal("0.01"))
+    remaining_amount = total_price - hold_amount
+
+    row = fetch_one(
+        """
+        INSERT INTO pms_booking (
+            property_id, room_id, client_user_id,
+            check_in, check_out, guests, card_id,
+            total_price, hold_amount, remaining_on_arrival,
+            status, created_at, booking_number
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s,
+            'pending', NOW(),
+            'H' || TO_CHAR(NOW(), 'YYMMDD') || LPAD(FLOOR(RANDOM() * 99999)::int::text, 5, '0')
+        )
+        RETURNING id, property_id, room_id, check_in, check_out, guests,
+                  total_price, hold_amount, remaining_on_arrival,
+                  status, booking_number, created_at
+        """,
+        [
+            property_id, room_id, client_user_id,
+            check_in, check_out, guests, card_id,
+            total_price, hold_amount, remaining_amount,
+        ],
+    )
+    return row

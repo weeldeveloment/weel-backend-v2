@@ -480,3 +480,55 @@ def admin_remove_hotel_image(*, hotel_guid: str, image_path: str) -> dict[str, A
     if len(next_images) == len(existing):
         return None
     return update_admin_hotel(hotel_guid=hotel_guid, values={"photos": next_images})
+
+
+# ---------------------------------------------------------------------------
+# Public hotel retrieval — used by public property views
+# ---------------------------------------------------------------------------
+
+
+def get_hotel_for_public(hotel_guid: str) -> dict[str, Any] | None:
+    """Fetch a single active hotel by encoded GUID. Returns property-shape row."""
+    decoded = decode_hotel_guid(hotel_guid)
+    if not decoded:
+        return None
+    schema_name, hotel_id = decoded
+    organization = get_organization_by_schema(schema_name)
+    if not organization:
+        return None
+    rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hotel_id)
+    if not rows:
+        return None
+    return _serialize_hotel_row(rows[0], organization)
+
+
+def list_hotel_favorites(
+    favorite_guids: set[str],
+) -> list[dict[str, Any]]:
+    """Fetch full hotel rows for a set of encoded hotel GUIDs."""
+    by_schema: dict[str, list[int]] = {}
+    for guid in favorite_guids:
+        decoded = decode_hotel_guid(guid)
+        if not decoded:
+            continue
+        schema_name, hotel_id = decoded
+        by_schema.setdefault(schema_name, []).append(hotel_id)
+
+    results: list[dict[str, Any]] = []
+    org_cache: dict[str, dict[str, Any] | None] = {}
+
+    for schema_name, hotel_ids in by_schema.items():
+        org = org_cache.get(schema_name)
+        if org is None:
+            org = get_organization_by_schema(schema_name)
+            org_cache[schema_name] = org
+        if not org:
+            continue
+        for hid in hotel_ids:
+            try:
+                rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hid)
+                if rows:
+                    results.append(_serialize_hotel_row(rows[0], org))
+            except Exception:
+                continue
+    return results

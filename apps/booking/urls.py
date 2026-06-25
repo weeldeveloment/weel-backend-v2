@@ -17,6 +17,10 @@ from .views import (
     ClientBookingHistoryDetailView,
     ClientBookingHistoryListView,
     AdminBookingListView,
+    HotelRoomListView,
+    HotelRoomPriceView,
+    HotelCalendarView,
+    ClientHotelBookingCreateView,
 )
 
 urlpatterns = [
@@ -99,5 +103,26 @@ urlpatterns = [
         "admin/bookings/",
         AdminBookingListView.as_view(),
         name="admin-booking-list",
+    ),
+    # Hotel booking endpoints
+    path(
+        "hotels/<path:hotel_guid>/rooms/",
+        HotelRoomListView.as_view(),
+        name="hotel-room-list",
+    ),
+    path(
+        "hotels/<path:hotel_guid>/rooms/<int:room_id>/price/",
+        HotelRoomPriceView.as_view(),
+        name="hotel-room-price",
+    ),
+    path(
+        "hotels/<path:hotel_guid>/calendar/",
+        HotelCalendarView.as_view(),
+        name="hotel-calendar",
+    ),
+    path(
+        "client/hotel/",
+        ClientHotelBookingCreateView.as_view(),
+        name="client-hotel-booking-create",
     ),
 ]
