@@ -44,6 +44,7 @@ from apps.platform.serializers import (
     PmsOtpLoginVerifySerializer,
     PmsLoginResponseSerializer,
     PmsSwitchOrgSerializer,
+    PlatformUserUpdateSerializer,
     UpdateMemberRoleSerializer,
 )
 from users.models.logs import SmsPurpose
