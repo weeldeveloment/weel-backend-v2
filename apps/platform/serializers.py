@@ -78,6 +78,7 @@ class PmsOtpLoginSerializer(serializers.Serializer):
 class PmsOtpLoginVerifySerializer(serializers.Serializer):
     phone_number = serializers.CharField(max_length=32)
     otp_code = serializers.CharField(max_length=10)
+    organization_id = serializers.IntegerField(required=False)
 
     def validate(self, data):
         from users.services import OTPRedisService
@@ -104,6 +105,17 @@ class PmsOtpLoginVerifySerializer(serializers.Serializer):
             "last_name": user.last_name,
             "guid": str(user.guid),
         }
+
+        org_id = data.get("organization_id")
+        if org_id is not None:
+            from apps.platform.raw_repository import get_organization_by_id, get_organization_member
+            org = get_organization_by_id(org_id)
+            if not org:
+                raise serializers.ValidationError({"organization_id": "Organization not found."})
+            member = get_organization_member(org_id, user.id)
+            if not member:
+                raise serializers.ValidationError({"organization_id": "You are not a member of this organization."})
+
         return data
 
 
@@ -112,6 +124,18 @@ class PmsLoginResponseSerializer(serializers.Serializer):
     refresh = serializers.CharField()
     user = PlatformUserSerializer()
     organization = OrganizationSerializer()
+    organizations = OrganizationSerializer(many=True, required=False)
+
+
+class PmsSwitchOrgSerializer(serializers.Serializer):
+    organization_id = serializers.IntegerField()
+
+    def validate_organization_id(self, value):
+        from apps.platform.raw_repository import get_organization_by_id
+        org = get_organization_by_id(value)
+        if not org:
+            raise serializers.ValidationError("Organization not found.")
+        return value
 
 
 class OrganizationMemberSerializer(serializers.Serializer):
