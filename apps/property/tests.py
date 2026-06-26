@@ -16,6 +16,7 @@ from property.apartment_serializers import ApartmentAdminUpdateSerializer, Apart
 from property.cottage_serializers import CottageCreateSerializer, CottageListSerializer, CottageDetailSerializer
 from property.cottage_serializers import CottageAdminUpdateSerializer
 from property.hotel_serializers import HotelAdminUpdateSerializer
+from property.hotel_repository import create_admin_hotel
 from property.views import (
     ApartmentPropertyListCreateView,
     CottagePropertyListCreateView,
@@ -62,6 +63,56 @@ class PropertyRepositoryHelpersTests(SimpleTestCase):
         self.assertTrue(testing_rows[0]["is_testing"])
         self.assertEqual(len(live_rows), 1)
         self.assertFalse(live_rows[0]["is_testing"])
+
+    @patch("property.hotel_repository.get_admin_hotel", return_value={"guid": "tenant1:10"})
+    @patch("property.hotel_repository._run_in_schema")
+    @patch("property.hotel_repository.get_organization_by_schema")
+    def test_create_admin_hotel_uses_schema_organization_id(
+        self,
+        mock_get_org,
+        mock_run_in_schema,
+        mock_get_admin_hotel,
+    ):
+        captured: dict[str, object] = {}
+
+        def run_in_schema(schema_name, callback):
+            self.assertEqual(schema_name, "tenant1")
+
+            class CursorStub:
+                def execute(self, _sql, params):
+                    captured["params"] = params
+
+                def fetchone(self):
+                    return [10]
+
+            class CursorContext:
+                def __enter__(self_inner):
+                    return CursorStub()
+
+                def __exit__(self_inner, exc_type, exc, tb):
+                    return False
+
+            class ConnectionStub:
+                def cursor(self_inner):
+                    return CursorContext()
+
+            with patch("property.hotel_repository.connection", ConnectionStub()):
+                return callback()
+
+        mock_get_org.return_value = {"id": 5, "schema_name": "tenant1"}
+        mock_run_in_schema.side_effect = run_in_schema
+
+        result = create_admin_hotel(
+            schema_name="tenant1",
+            values={
+                "name": "Hotel A",
+                "organization_id": 999,
+            },
+        )
+
+        self.assertEqual(result, {"guid": "tenant1:10"})
+        self.assertEqual(captured["params"][0], 5)
+        mock_get_admin_hotel.assert_called_once_with("tenant1:10")
 
 
 class ApartmentSerializerTests(SimpleTestCase):

@@ -303,6 +303,12 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
     safe_schema = _safe_schema_name(schema_name)
     if not safe_schema:
         return None
+    organization = get_organization_by_schema(safe_schema)
+    if not organization:
+        return None
+    organization_id = organization.get("id")
+    if not organization_id:
+        return None
 
     def _insert() -> dict[str, Any] | None:
         with connection.cursor() as cursor:
@@ -341,7 +347,7 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                 RETURNING id
                 """,
                 [
-                    values.get("organization_id"),
+                    int(organization_id),
                     values.get("name"),
                     values.get("description_uz"),
                     values.get("description_ru"),
@@ -384,8 +390,10 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
     if not decoded:
         return None
     schema_name, hotel_id = decoded
+    organization = get_organization_by_schema(schema_name)
+    if not organization:
+        return None
     allowed_columns = {
-        "organization_id",
         "name",
         "description_uz",
         "description_ru",
@@ -410,6 +418,7 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         "is_testing",
     }
     filtered_values = {key: value for key, value in values.items() if key in allowed_columns}
+    filtered_values["organization_id"] = organization["id"]
     if not filtered_values:
         return get_admin_hotel(hotel_guid)
 
