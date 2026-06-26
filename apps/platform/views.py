@@ -44,6 +44,7 @@ from apps.platform.serializers import (
     PmsOtpLoginVerifySerializer,
     PmsLoginResponseSerializer,
     PmsSwitchOrgSerializer,
+    PlatformUserSerializer,
     PlatformUserUpdateSerializer,
     UpdateMemberRoleSerializer,
 )
