@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import random
+from datetime import timedelta
 from typing import Any
 
 from django.db import IntegrityError
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -22,8 +24,10 @@ from apps.b2b.repository import (
     create_trip,
     create_voucher,
     get_company,
+    get_department_spending,
     get_employee,
     get_or_create_travel_policy,
+    get_spending_overview,
     get_trip,
     get_voucher,
     list_budget_requests,
@@ -361,3 +365,64 @@ class TripVoucherView(APIView):
         if not voucher:
             return Response({"detail": "Failed to create voucher."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(TravelVoucherSerializer(voucher).data, status=status.HTTP_201_CREATED)
+
+
+_VALID_PERIODS = {"1h", "1d", "14d", "1m", "3m", "1y", "all"}
+
+_PERIOD_DELTAS: dict[str, timedelta] = {
+    "1h": timedelta(hours=1),
+    "1d": timedelta(days=1),
+    "14d": timedelta(days=14),
+    "1m": timedelta(days=30),
+    "3m": timedelta(days=90),
+    "1y": timedelta(days=365),
+}
+
+
+class B2BStatisticsView(APIView):
+    """
+    GET /b2b/statistics/?period=1h|1d|14d|1m|3m|1y|all
+
+    Returns:
+    - `periods`: spending summary for every time window
+    - `by_department`: spending per department for the selected period (defaults to `all`)
+
+    Each period entry:
+      total_budget   – sum of trip budgets created in that window
+      total_trips    – number of trips created in that window
+      approved_spend – sum of approved budget-request amounts in that window
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        period = request.query_params.get("period", "all")
+        if period not in _VALID_PERIODS:
+            return Response(
+                {"detail": f"Invalid period. Choose from: 1h, 1d, 14d, 1m, 3m, 1y, all"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        since = (timezone.now() - _PERIOD_DELTAS[period]) if period != "all" else None
+
+        periods_data = get_spending_overview(company_id)
+        departments = get_department_spending(company_id, since=since)
+
+        return Response({
+            "period": period,
+            "periods": periods_data,
+            "by_department": [
+                {
+                    "department_id": d["department_id"],
+                    "department_name": d["department_name"],
+                    "total_trips": d["total_trips"] or 0,
+                    "total_employees": d["total_employees"] or 0,
+                    "approved_spend": str(d["approved_spend"] or "0"),
+                }
+                for d in departments
+            ],
+        })

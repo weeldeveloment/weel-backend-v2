@@ -172,9 +172,9 @@ INSTALLED_APPS = GLOBAL_APPS + LOCAL_APPS + THIRD_PART_APPS
 
 MIDDLEWARE = [
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -295,6 +295,7 @@ REST_FRAMEWORK = {
         "rest_framework.renderers.JSONRenderer",
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": (
+        "apps.b2b.authentication.B2BJWTAuthentication",
         "users.authentication.PartnerJWTAuthentication",
         "users.authentication.ClientJWTAuthentication",
     ),
@@ -601,6 +602,7 @@ TEST_USER_PHONE_NUMBER = (os.getenv("TEST_USER_PHONE_NUMBER") or "").strip() or 
 TEST_PARTNER_PHONE_NUMBER = (
     (os.getenv("TEST_PARTNER_PHONE_NUMBER") or "").strip() or None
 )
+TEST_B2B_PHONE_NUMBER = (os.getenv("TEST_B2B_PHONE_NUMBER") or "").strip() or None
 
 # Plum
 PLUM_AUTH_TOKEN = os.getenv("PLUM_AUTH_TOKEN")

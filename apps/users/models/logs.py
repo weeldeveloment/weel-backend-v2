@@ -11,6 +11,7 @@ class SmsPurpose(ChoiceEnum):
     PARTNER_PROPERTY_REMINDER = "PR_RMD"
     PMS_LOGIN = "PM_LGN"
     PMS_REGISTER = "PM_RGR"
+    B2B_LOGIN = "B2_LGN"
 
 
 SmsPurpose.choices = build_choices(SmsPurpose)

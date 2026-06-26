@@ -419,6 +419,8 @@ class OTPRedisService:
             configured_phone = getattr(settings, "TEST_USER_PHONE_NUMBER", None)
         elif purpose == SmsPurpose.PARTNER_LOGIN:
             configured_phone = getattr(settings, "TEST_PARTNER_PHONE_NUMBER", None)
+        elif purpose == SmsPurpose.B2B_LOGIN:
+            configured_phone = getattr(settings, "TEST_B2B_PHONE_NUMBER", None)
         else:
             return False
 

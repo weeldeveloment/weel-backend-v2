@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -378,3 +378,109 @@ def create_voucher(*, trip_id: int, voucher_number: str, pdf_url: str | None = N
 
 def get_voucher(trip_id: int) -> dict[str, Any] | None:
     return fetch_one(f"SELECT * FROM {B2B_TRAVEL_VOUCHER_TABLE} WHERE trip_id = %s", [trip_id])
+
+
+# ─── Statistics ───────────────────────────────────────────────────────────────
+
+_PERIOD_DELTAS: dict[str, timedelta] = {
+    "1h": timedelta(hours=1),
+    "1d": timedelta(days=1),
+    "14d": timedelta(days=14),
+    "1m": timedelta(days=30),
+    "3m": timedelta(days=90),
+    "1y": timedelta(days=365),
+}
+
+
+def _spending_for_period(company_id: int, since: datetime | None) -> dict[str, Any]:
+    if since:
+        row = fetch_one(
+            f"""
+            SELECT
+                COALESCE(SUM(t.budget), 0) AS total_budget,
+                COUNT(t.id) AS total_trips,
+                COALESCE((
+                    SELECT SUM(br.amount)
+                    FROM {B2B_BUDGET_REQUEST_TABLE} br
+                    JOIN {B2B_BUSINESS_TRIP_TABLE} bt ON bt.id = br.trip_id
+                    WHERE bt.company_id = %s AND br.status = 'approved' AND br.created_at >= %s
+                ), 0) AS approved_spend
+            FROM {B2B_BUSINESS_TRIP_TABLE} t
+            WHERE t.company_id = %s AND t.created_at >= %s
+            """,
+            [company_id, since, company_id, since],
+        ) or {}
+    else:
+        row = fetch_one(
+            f"""
+            SELECT
+                COALESCE(SUM(t.budget), 0) AS total_budget,
+                COUNT(t.id) AS total_trips,
+                COALESCE((
+                    SELECT SUM(br.amount)
+                    FROM {B2B_BUDGET_REQUEST_TABLE} br
+                    JOIN {B2B_BUSINESS_TRIP_TABLE} bt ON bt.id = br.trip_id
+                    WHERE bt.company_id = %s AND br.status = 'approved'
+                ), 0) AS approved_spend
+            FROM {B2B_BUSINESS_TRIP_TABLE} t
+            WHERE t.company_id = %s
+            """,
+            [company_id, company_id],
+        ) or {}
+    return {
+        "total_budget": str(row.get("total_budget") or "0"),
+        "total_trips": row.get("total_trips") or 0,
+        "approved_spend": str(row.get("approved_spend") or "0"),
+    }
+
+
+def get_spending_overview(company_id: int) -> dict[str, Any]:
+    now = timezone.now()
+    result: dict[str, Any] = {}
+    for key, delta in _PERIOD_DELTAS.items():
+        result[key] = _spending_for_period(company_id, now - delta)
+    result["all"] = _spending_for_period(company_id, None)
+    return result
+
+
+def get_department_spending(company_id: int, since: datetime | None = None) -> list[dict[str, Any]]:
+    if since:
+        return fetch_all(
+            f"""
+            SELECT
+                d.id AS department_id,
+                d.name AS department_name,
+                COUNT(DISTINCT te.trip_id) AS total_trips,
+                COUNT(DISTINCT te.employee_id) AS total_employees,
+                COALESCE(SUM(br.amount), 0) AS approved_spend
+            FROM {B2B_DEPARTMENT_TABLE} d
+            LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.department_id = d.id
+            LEFT JOIN {B2B_TRIP_EMPLOYEE_TABLE} te ON te.employee_id = e.id
+                AND te.created_at >= %s
+            LEFT JOIN {B2B_BUDGET_REQUEST_TABLE} br ON br.employee_id = e.id
+                AND br.status = 'approved' AND br.created_at >= %s
+            WHERE d.company_id = %s
+            GROUP BY d.id, d.name
+            ORDER BY approved_spend DESC
+            """,
+            [since, since, company_id],
+        )
+    return fetch_all(
+        f"""
+        SELECT
+            d.id AS department_id,
+            d.name AS department_name,
+            COUNT(DISTINCT te.trip_id) AS total_trips,
+            COUNT(DISTINCT te.employee_id) AS total_employees,
+            COALESCE(SUM(br.amount), 0) AS approved_spend
+        FROM {B2B_DEPARTMENT_TABLE} d
+        LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.department_id = d.id
+        LEFT JOIN {B2B_TRIP_EMPLOYEE_TABLE} te ON te.employee_id = e.id
+        LEFT JOIN {B2B_BUDGET_REQUEST_TABLE} br ON br.employee_id = e.id
+            AND br.status = 'approved'
+        WHERE d.company_id = %s
+        GROUP BY d.id, d.name
+        ORDER BY approved_spend DESC
+        """,
+        [company_id],
+    )
