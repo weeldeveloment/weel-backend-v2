@@ -43,9 +43,33 @@ def _to_pg_json(v: Any) -> Any:
 
 logger = logging.getLogger(__name__)
 
+_PROPERTY_COLUMN_CACHE: dict[str, bool] = {}
+
 
 def _t(name: str) -> str:
     return name
+
+
+def _property_has_column(column_name: str) -> bool:
+    cached = _PROPERTY_COLUMN_CACHE.get(column_name)
+    if cached is not None:
+        return cached
+
+    row = fetch_one(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = %s
+              AND column_name = %s
+        ) AS exists
+        """,
+        [PMS_PROPERTY_TABLE, column_name],
+    )
+    exists = bool(row and row["exists"])
+    _PROPERTY_COLUMN_CACHE[column_name] = exists
+    return exists
 
 
 # ─── Properties ──────────────────────────────────────────────────────────────
@@ -74,6 +98,8 @@ def create_property(*, organization_id: int, name: str, **kwargs: Any) -> dict[s
 
     for key, caster in field_map.items():
         if key in kwargs and kwargs[key] is not None:
+            if not _property_has_column(key):
+                continue
             cols.append(key)
             vals.append(caster(kwargs[key]))
 
@@ -118,12 +144,17 @@ def update_property(property_id: int, organization_id: int | None = None, **kwar
     pg_json_fields = {"legal_info"}
     sanitized = {}
     for k, v in kwargs.items():
+        if not _property_has_column(k):
+            continue
         if k in pg_array_fields and isinstance(v, list):
             sanitized[k] = _to_pg_array(v)
         elif k in pg_json_fields and isinstance(v, (list, dict)):
             sanitized[k] = _to_pg_json(v)
         else:
             sanitized[k] = v
+
+    if not sanitized:
+        return get_property(property_id, organization_id)
 
     sets = ", ".join(f"{k} = %s" for k in sanitized)
     values = list(sanitized.values())

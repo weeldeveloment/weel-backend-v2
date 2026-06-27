@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.db import connection
+from django.db.utils import IntegrityError
 
 
 class Command(BaseCommand):
@@ -41,6 +42,18 @@ class Command(BaseCommand):
                     self.stdout.write(f"  ✓ {table}.{col}")
                 except Exception as e:
                     self.stdout.write(self.style.WARNING(f"  ✗ {table}.{col}: {e}"))
+
+            try:
+                cursor.execute("SELECT COUNT(*) FROM pms_property WHERE organization_id IS NULL")
+                null_count = int(cursor.fetchone()[0] or 0)
+                if null_count > 0:
+                    raise IntegrityError(
+                        f"Cannot enforce NOT NULL on pms_property.organization_id; found {null_count} NULL rows."
+                    )
+                cursor.execute("ALTER TABLE pms_property ALTER COLUMN organization_id SET NOT NULL")
+                self.stdout.write("  ✓ pms_property.organization_id NOT NULL")
+            except Exception as e:
+                self.stdout.write(self.style.WARNING(f"  ✗ pms_property.organization_id NOT NULL: {e}"))
 
             cursor.execute("SET search_path TO public;")
 
