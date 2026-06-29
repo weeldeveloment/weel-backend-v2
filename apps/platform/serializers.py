@@ -161,3 +161,26 @@ class UpdateMemberRoleSerializer(serializers.Serializer):
     role = serializers.ChoiceField(
         choices=["owner", "admin", "manager", "receptionist", "housekeeping"],
     )
+
+
+class PmsOtpSendResponseSerializer(serializers.Serializer):
+    detail = serializers.CharField()
+    phone_number = serializers.CharField()
+    expires_in = serializers.CharField()
+
+
+class PmsMeResponseSerializer(serializers.Serializer):
+    user = PlatformUserSerializer()
+    organization = OrganizationSerializer(allow_null=True, required=False, default=None)
+    organizations = OrganizationSerializer(many=True)
+
+
+class PmsSwitchOrgResponseSerializer(serializers.Serializer):
+    access = serializers.CharField()
+    refresh = serializers.CharField()
+    organization = OrganizationSerializer()
+
+
+class PmsTokenRefreshResponseSerializer(serializers.Serializer):
+    access = serializers.CharField()
+    refresh = serializers.CharField()

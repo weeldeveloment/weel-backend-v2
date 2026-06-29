@@ -17,6 +17,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
 from apps.platform.authentication import PmsJWTAuthentication
+from apps.platform.raw_repository import get_organization_by_id, get_organization_member
 
 from apps.pms.repository import (
     accept_booking,
@@ -113,22 +114,36 @@ def _get_user_id(request) -> int | None:
 
 def _require_org(request):
     org = getattr(request, "organization", None)
+    org_id = None
     if org:
         if isinstance(org, dict):
-            return org.get("id")
-        return org
+            org_id = org.get("id")
+        else:
+            org_id = org
 
     user = getattr(request, "user", None)
-    if isinstance(user, dict):
-        org_id = user.get("organization_id")
-        if org_id:
-            return org_id
+    if org_id is None:
+        if isinstance(user, dict):
+            org_id = user.get("organization_id")
+        else:
+            org_id = getattr(user, "organization_id", None)
 
-    org_id = getattr(user, "organization_id", None)
-    if org_id:
-        return org_id
+    user_id = _get_user_id(request)
+    try:
+        parsed_org_id = int(org_id) if org_id is not None else None
+    except (TypeError, ValueError):
+        return None
 
-    return getattr(request, "META", {}).get("HTTP_X_ORGANIZATION_ID")
+    if not parsed_org_id or not user_id:
+        return None
+
+    if not get_organization_by_id(parsed_org_id):
+        return None
+
+    if not get_organization_member(parsed_org_id, int(user_id)):
+        return None
+
+    return parsed_org_id
 
 
 class PropertyListCreateView(PMSBaseView):

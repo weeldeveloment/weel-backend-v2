@@ -38,12 +38,16 @@ from apps.platform.serializers import (
     OrganizationMemberSerializer,
     OrganizationSerializer,
     OrganizationUpdateSerializer,
+    PmsMeResponseSerializer,
     PmsOtpRegisterSerializer,
+    PmsOtpSendResponseSerializer,
     PmsOtpVerifySerializer,
     PmsOtpLoginSerializer,
     PmsOtpLoginVerifySerializer,
     PmsLoginResponseSerializer,
+    PmsSwitchOrgResponseSerializer,
     PmsSwitchOrgSerializer,
+    PmsTokenRefreshResponseSerializer,
     PlatformUserSerializer,
     PlatformUserUpdateSerializer,
     UpdateMemberRoleSerializer,
@@ -163,7 +167,7 @@ class PmsSendOTPRegisterView(APIView):
                 "last_name": openapi.Schema(type=openapi.TYPE_STRING, description="Last name"),
             },
         ),
-        responses={200: openapi.Response("OTP sent successfully")},
+        responses={200: PmsOtpSendResponseSerializer()},
     )
     def post(self, request):
         serializer = PmsOtpRegisterSerializer(data=request.data)
@@ -210,7 +214,7 @@ class PmsVerifyOTPRegisterView(APIView):
                 "otp_code": openapi.Schema(type=openapi.TYPE_STRING, description="OTP code"),
             },
         ),
-        responses={201: openapi.Response("Registration successful")},
+        responses={201: PmsLoginResponseSerializer()},
     )
     def post(self, request):
         serializer = PmsOtpVerifySerializer(data=request.data)
@@ -301,7 +305,7 @@ class PmsSendOTPLoginView(APIView):
                 "phone_number": openapi.Schema(type=openapi.TYPE_STRING, description="Phone number"),
             },
         ),
-        responses={200: openapi.Response("OTP sent successfully")},
+        responses={200: PmsOtpSendResponseSerializer()},
     )
     def post(self, request):
         serializer = PmsOtpLoginSerializer(data=request.data)
@@ -353,7 +357,7 @@ class PmsVerifyOTPLoginView(APIView):
                 "organization_id": openapi.Schema(type=openapi.TYPE_INTEGER, description="Optional: select which organization to log into"),
             },
         ),
-        responses={200: openapi.Response("Login successful")},
+        responses={200: PmsLoginResponseSerializer()},
     )
     def post(self, request):
         serializer = PmsOtpLoginVerifySerializer(data=request.data)
@@ -400,7 +404,7 @@ class PmsSwitchOrganizationView(APIView):
 
     @swagger_auto_schema(
         request_body=PmsSwitchOrgSerializer,
-        responses={200: openapi.Response("Switched organization")},
+        responses={200: PmsSwitchOrgResponseSerializer()},
     )
     def post(self, request):
         serializer = PmsSwitchOrgSerializer(data=request.data)
@@ -443,6 +447,7 @@ class PmsMeView(APIView):
     authentication_classes = [PmsJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(responses={200: PmsMeResponseSerializer()})
     def get(self, request):
         user_id = _get_request_user_id(request)
         if not user_id:
@@ -463,6 +468,7 @@ class PmsMeView(APIView):
 
     @swagger_auto_schema(
         request_body=PlatformUserUpdateSerializer,
+        responses={200: PmsMeResponseSerializer()},
         tags=["platform"],
     )
     def patch(self, request):
@@ -496,6 +502,7 @@ class PmsOrganizationView(APIView):
     authentication_classes = [PmsJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(responses={200: OrganizationSerializer()})
     def get(self, request):
         org_id = _get_request_organization_id(request)
         if not org_id:
@@ -507,6 +514,10 @@ class PmsOrganizationView(APIView):
 
         return Response(OrganizationSerializer(org).data)
 
+    @swagger_auto_schema(
+        request_body=OrganizationUpdateSerializer,
+        responses={200: OrganizationSerializer()},
+    )
     def patch(self, request):
         org_id = _get_request_organization_id(request)
         if not org_id:
@@ -527,6 +538,7 @@ class PmsMembersView(APIView):
     authentication_classes = [PmsJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(responses={200: OrganizationMemberSerializer(many=True)})
     def get(self, request):
         org_id = _get_request_organization_id(request)
         if not org_id:
@@ -535,6 +547,10 @@ class PmsMembersView(APIView):
         members = list_organization_members(int(org_id))
         return Response(OrganizationMemberSerializer(members, many=True).data)
 
+    @swagger_auto_schema(
+        request_body=AddMemberSerializer,
+        responses={201: OrganizationMemberSerializer()},
+    )
     def post(self, request):
         org_id = _get_request_organization_id(request)
         if not org_id:
@@ -576,6 +592,10 @@ class PmsMemberDetailView(APIView):
     authentication_classes = [PmsJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        request_body=UpdateMemberRoleSerializer,
+        responses={200: OrganizationMemberSerializer()},
+    )
     def patch(self, request, member_id):
         org_id = _get_request_organization_id(request)
         if not org_id:
@@ -591,6 +611,7 @@ class PmsMemberDetailView(APIView):
 
         return Response(OrganizationMemberSerializer(member).data)
 
+    @swagger_auto_schema(responses={204: "Member deleted"})
     def delete(self, request, member_id):
         org_id = _get_request_organization_id(request)
         if not org_id:
@@ -605,6 +626,16 @@ class PmsMemberDetailView(APIView):
 class PmsTokenRefreshView(APIView):
     permission_classes = [AllowAny]
 
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["refresh"],
+            properties={
+                "refresh": openapi.Schema(type=openapi.TYPE_STRING, description="Refresh token"),
+            },
+        ),
+        responses={200: PmsTokenRefreshResponseSerializer()},
+    )
     def post(self, request):
         refresh_token = request.data.get("refresh")
         if not refresh_token:
