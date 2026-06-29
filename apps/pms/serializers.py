@@ -40,8 +40,8 @@ class PropertySerializer(serializers.Serializer):
     full_address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     country = serializers.CharField(required=False, default="UZ")
-    latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
-    longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    latitude = serializers.DecimalField(max_digits=17, decimal_places=14, required=False, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=17, decimal_places=14, required=False, allow_null=True)
     star_rating = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=5)
     weel_classification = serializers.ChoiceField(
         choices=["standard", "essential", "comfort", "comfort_plus", "business", "premium", "signature"],
