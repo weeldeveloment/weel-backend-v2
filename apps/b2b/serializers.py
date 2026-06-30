@@ -133,3 +133,66 @@ class TravelVoucherSerializer(serializers.Serializer):
     pdf_url = serializers.CharField(read_only=True, allow_null=True)
     generated_at = serializers.DateTimeField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+
+
+class RecentTripEmployeeSerializer(serializers.Serializer):
+    """Serializer for the "last N employees on a business trip" endpoint."""
+    trip_employee_id = serializers.IntegerField(read_only=True)
+    trip_id = serializers.IntegerField(read_only=True)
+    employee_id = serializers.IntegerField(read_only=True)
+    full_name = serializers.CharField(read_only=True, allow_null=True)
+    position = serializers.CharField(read_only=True, allow_null=True)
+    email = serializers.CharField(read_only=True, allow_null=True)
+    phone = serializers.CharField(read_only=True, allow_null=True)
+    department_id = serializers.IntegerField(read_only=True, allow_null=True)
+    department_name = serializers.CharField(read_only=True, allow_null=True)
+    trip_name = serializers.CharField(read_only=True, allow_null=True)
+    destination_city = serializers.CharField(read_only=True, allow_null=True)
+    trip_start_date = serializers.DateField(read_only=True, allow_null=True)
+    trip_end_date = serializers.DateField(read_only=True, allow_null=True)
+    check_in = serializers.DateField(read_only=True, allow_null=True)
+    check_out = serializers.DateField(read_only=True, allow_null=True)
+    trip_status = serializers.CharField(read_only=True)
+    trip_employee_status = serializers.CharField(read_only=True)
+    assigned_at = serializers.DateTimeField(read_only=True)
+
+
+class DepartmentMonthlySpendingSerializer(serializers.Serializer):
+    department_id = serializers.IntegerField(read_only=True)
+    department_name = serializers.CharField(read_only=True)
+    month_trips = serializers.IntegerField(read_only=True)
+    total_employees = serializers.IntegerField(read_only=True)
+    month_spend = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+
+
+class GlobalTravelLimitSerializer(serializers.Serializer):
+    """Serializer for the company-wide (global) travel limit.
+
+    Backed by the existing ``b2b_travel_policy`` row — only the two budget
+    columns are exposed here; the property/star/preference lists are managed
+    by the generic ``/travel-policy/`` endpoint.
+    """
+    budget_per_trip = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    monthly_budget = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+
+
+class TravelPolicyRuleSerializer(serializers.Serializer):
+    """Serializer for the per-department / per-employee travel limit rule."""
+    id = serializers.IntegerField(read_only=True)
+    policy_id = serializers.IntegerField(read_only=True)
+    applies_to = serializers.ChoiceField(choices=["all", "department", "employee"])
+    target_id = serializers.IntegerField(required=False, allow_null=True)
+    target_name = serializers.CharField(read_only=True, allow_null=True)
+    budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
+class TravelPolicyRuleCreateSerializer(serializers.Serializer):
+    applies_to = serializers.ChoiceField(choices=["all", "department", "employee"])
+    target_id = serializers.IntegerField(required=False, allow_null=True)
+    budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+
+
+class TravelPolicyRuleUpdateSerializer(serializers.Serializer):
+    budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
