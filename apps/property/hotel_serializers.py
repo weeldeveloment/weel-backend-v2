@@ -42,6 +42,8 @@ def _build_media_url(request, media_path: Any) -> list[str]:
         if item.startswith("http://") or item.startswith("https://"):
             urls.append(item)
             continue
+        if item.startswith("blob:"):
+            continue
         try:
             url = default_storage.url(item)
         except Exception:

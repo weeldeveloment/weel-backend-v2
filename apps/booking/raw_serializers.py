@@ -23,6 +23,8 @@ from .mixins import DateRangeValidationMixin
 def _build_media_url(request, media_path: str | None) -> str | None:
     if not media_path:
         return None
+    if isinstance(media_path, str) and (media_path.startswith("blob:") or media_path.startswith("http://") or media_path.startswith("https://")):
+        return media_path if media_path.startswith("http") else None
     try:
         url = default_storage.url(media_path)
     except Exception:

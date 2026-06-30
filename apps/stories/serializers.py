@@ -27,6 +27,10 @@ def _build_media_url(request, media_path: str | list[str] | None) -> str | None:
         value = next((item for item in media_path if item), None)
         if not value:
             return None
+    if isinstance(value, str) and (value.startswith("http://") or value.startswith("https://")):
+        return value
+    if isinstance(value, str) and value.startswith("blob:"):
+        return None
     url = default_storage.url(value)
     if not request:
         return url

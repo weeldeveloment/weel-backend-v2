@@ -18,6 +18,7 @@ from drf_yasg import openapi
 
 from apps.platform.authentication import PmsJWTAuthentication
 from apps.platform.raw_repository import get_organization_by_id, get_organization_member
+from apps.shared.permissions import HasOrganization
 
 from apps.pms.repository import (
     accept_booking,
@@ -102,7 +103,7 @@ logger = logging.getLogger(__name__)
 
 class PMSBaseView(APIView):
     authentication_classes = [PmsJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasOrganization]
 
 
 def _get_user_id(request) -> int | None:
