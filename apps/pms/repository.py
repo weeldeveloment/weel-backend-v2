@@ -94,6 +94,8 @@ def create_property(*, organization_id: int, name: str, **kwargs: Any) -> dict[s
         "currency": str, "timezone": str,
         "photos": _to_pg_array,
         "is_active": bool,
+        "is_verified": bool,
+        "verification_status": str,
     }
 
     for key, caster in field_map.items():

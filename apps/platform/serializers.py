@@ -18,6 +18,10 @@ class OrganizationCreateSerializer(serializers.Serializer):
     slug = serializers.SlugField(max_length=100)
 
 
+class AuthenticatedOrgCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=200)
+
+
 class OrganizationUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=200, required=False)
     slug = serializers.SlugField(max_length=100, required=False)

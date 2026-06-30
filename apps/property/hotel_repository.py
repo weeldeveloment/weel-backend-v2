@@ -99,6 +99,7 @@ def _fetch_hotel_rows_for_schema(
     *,
     hotel_id: int | None = None,
     include_inactive: bool = False,
+    include_unverified: bool = False,
 ) -> list[dict[str, Any]]:
     def _query() -> list[dict[str, Any]]:
         with connection.cursor() as cursor:
@@ -109,6 +110,8 @@ def _fetch_hotel_rows_for_schema(
                 params.append(hotel_id)
             if not include_inactive:
                 where.append("COALESCE(p.is_active, TRUE) = TRUE")
+            if not include_unverified:
+                where.append("COALESCE(p.is_verified, FALSE) = TRUE")
             where_sql = f"WHERE {' AND '.join(where)}" if where else ""
             cursor.execute(
                 f"""
@@ -137,6 +140,8 @@ def _fetch_hotel_rows_for_schema(
                     COALESCE(p.photos, ARRAY[]::text[]) AS photos,
                     COALESCE(p.is_active, TRUE) AS is_active,
                     COALESCE(p.is_testing, FALSE) AS is_testing,
+                    COALESCE(p.is_verified, FALSE) AS is_verified,
+                    COALESCE(p.verification_status, 'waiting') AS verification_status,
                     p.created_at,
                     p.updated_at,
                     %s AS tenant_schema
@@ -216,12 +221,17 @@ def list_hotel_organizations() -> list[dict[str, Any]]:
     return organizations
 
 
-def list_hotels(*, limit: int | None = None, testing_only: bool | None = None) -> list[dict[str, Any]]:
+def list_hotels(
+    *,
+    limit: int | None = None,
+    testing_only: bool | None = None,
+    include_unverified: bool = False,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
     for organization in list_hotel_organizations():
         try:
-            tenant_rows = _fetch_hotel_rows_for_schema(organization["schema_name"])
+            tenant_rows = _fetch_hotel_rows_for_schema(organization["schema_name"], include_unverified=include_unverified)
         except Exception:
             continue
         rows.extend(
@@ -258,6 +268,7 @@ def list_admin_hotels(
             tenant_rows = _fetch_hotel_rows_for_schema(
                 organization["schema_name"],
                 include_inactive=True,
+                include_unverified=True,
             )
         except Exception:
             continue
@@ -293,7 +304,23 @@ def get_admin_hotel(hotel_guid: str) -> dict[str, Any] | None:
         schema_name,
         hotel_id=hotel_id,
         include_inactive=True,
+        include_unverified=True,
     )
+    if not rows:
+        return None
+    return _serialize_hotel_row(rows[0], organization)
+
+
+def get_hotel_for_public(hotel_guid: str) -> dict[str, Any] | None:
+    """Fetch a single active AND verified hotel by encoded GUID."""
+    decoded = decode_hotel_guid(hotel_guid)
+    if not decoded:
+        return None
+    schema_name, hotel_id = decoded
+    organization = get_organization_by_schema(schema_name)
+    if not organization:
+        return None
+    rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hotel_id)
     if not rows:
         return None
     return _serialize_hotel_row(rows[0], organization)
@@ -339,10 +366,12 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     photos,
                     is_active,
                     is_testing,
+                    is_verified,
+                    verification_status,
                     created_at,
                     updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING id
                 """,
@@ -370,6 +399,8 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     values.get("photos") or [],
                     values.get("is_active", True),
                     values.get("is_testing", False),
+                    values.get("is_verified", False),
+                    values.get("verification_status", "waiting"),
                     now,
                     now,
                 ],
@@ -416,6 +447,8 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         "photos",
         "is_active",
         "is_testing",
+        "is_verified",
+        "verification_status",
     }
     filtered_values = {key: value for key, value in values.items() if key in allowed_columns}
     filtered_values["organization_id"] = organization["id"]
@@ -489,26 +522,6 @@ def admin_remove_hotel_image(*, hotel_guid: str, image_path: str) -> dict[str, A
     if len(next_images) == len(existing):
         return None
     return update_admin_hotel(hotel_guid=hotel_guid, values={"photos": next_images})
-
-
-# ---------------------------------------------------------------------------
-# Public hotel retrieval — used by public property views
-# ---------------------------------------------------------------------------
-
-
-def get_hotel_for_public(hotel_guid: str) -> dict[str, Any] | None:
-    """Fetch a single active hotel by encoded GUID. Returns property-shape row."""
-    decoded = decode_hotel_guid(hotel_guid)
-    if not decoded:
-        return None
-    schema_name, hotel_id = decoded
-    organization = get_organization_by_schema(schema_name)
-    if not organization:
-        return None
-    rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hotel_id)
-    if not rows:
-        return None
-    return _serialize_hotel_row(rows[0], organization)
 
 
 def list_hotel_favorites(

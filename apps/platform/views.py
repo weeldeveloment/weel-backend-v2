@@ -34,6 +34,7 @@ from apps.platform.raw_repository import (
 )
 from apps.platform.serializers import (
     AddMemberSerializer,
+    AuthenticatedOrgCreateSerializer,
     OrganizationCreateSerializer,
     OrganizationMemberSerializer,
     OrganizationSerializer,
@@ -513,6 +514,63 @@ class PmsOrganizationView(APIView):
             return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(OrganizationSerializer(org).data)
+
+    @swagger_auto_schema(
+        request_body=AuthenticatedOrgCreateSerializer,
+        responses={201: OrganizationSerializer()},
+    )
+    def post(self, request):
+        serializer = AuthenticatedOrgCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        org_name = serializer.validated_data["name"].strip()
+
+        slug_base = org_name.lower().replace(" ", "-").replace("_", "-")
+        slug = slug_base
+        counter = 1
+        while get_organization_by_slug(slug):
+            slug = f"{slug_base}-{counter}"
+            counter += 1
+
+        schema_name = f"tenant_{uuid4().hex[:12]}"
+
+        user_id = _get_request_user_id(request)
+        if not user_id:
+            return Response({"detail": "Not authenticated."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        user_data = get_user_by_id(int(user_id), role="pms", active_only=True)
+        if not user_data:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            create_tenant_schema(schema_name)
+            org = create_organization(name=org_name, slug=slug, schema_name=schema_name)
+            if not org:
+                raise RuntimeError("Failed to create organization")
+            create_organization_member(
+                organization_id=org["id"],
+                user_id=int(user_id),
+                role="owner",
+            )
+
+        user_dict = {
+            "id": user_data.id,
+            "phone_number": user_data.phone_number,
+            "first_name": user_data.first_name,
+            "last_name": user_data.last_name,
+        }
+
+        tokens = _create_pms_tokens(user_dict, organization_id=org["id"])
+
+        return Response({
+            "id": org["id"],
+            "name": org["name"],
+            "slug": org["slug"],
+            "schema_name": org["schema_name"],
+            "is_active": org["is_active"],
+            "access": tokens["access"],
+            "refresh": tokens["refresh"],
+        }, status=status.HTTP_201_CREATED)
 
     @swagger_auto_schema(
         request_body=OrganizationUpdateSerializer,
