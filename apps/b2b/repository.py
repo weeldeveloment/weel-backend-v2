@@ -329,6 +329,72 @@ def list_policy_rules(company_id: int) -> list[dict[str, Any]]:
     )
 
 
+def list_policy_rules_by_type(company_id: int, applies_to: str) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"""
+        SELECT r.* FROM {B2B_TRAVEL_POLICY_RULE_TABLE} r
+        JOIN {B2B_TRAVEL_POLICY_TABLE} p ON p.id = r.policy_id
+        WHERE p.company_id = %s AND r.applies_to = %s
+        ORDER BY r.id ASC
+        """,
+        [company_id, applies_to],
+    )
+
+
+def get_policy_rule(rule_id: int, company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        SELECT r.* FROM {B2B_TRAVEL_POLICY_RULE_TABLE} r
+        JOIN {B2B_TRAVEL_POLICY_TABLE} p ON p.id = r.policy_id
+        WHERE r.id = %s AND p.company_id = %s
+        """,
+        [rule_id, company_id],
+    )
+
+
+def create_policy_rule(
+    *,
+    company_id: int,
+    applies_to: str,
+    target_id: int | None,
+    budget_limit: Decimal | None,
+) -> dict[str, Any] | None:
+    policy = get_or_create_travel_policy(company_id)
+    if not policy:
+        return None
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_TRAVEL_POLICY_RULE_TABLE}
+            (policy_id, applies_to, target_id, budget_limit, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [policy["id"], applies_to, target_id, budget_limit, now, now],
+    )
+
+
+def update_policy_rule(rule_id: int, **kwargs: Any) -> dict[str, Any] | None:
+    if not kwargs:
+        return fetch_one(
+            f"SELECT * FROM {B2B_TRAVEL_POLICY_RULE_TABLE} WHERE id = %s",
+            [rule_id],
+        )
+    sets = ", ".join(f"{k} = %s" for k in kwargs)
+    values = list(kwargs.values()) + [timezone.now(), rule_id]
+    return fetch_one(
+        f"UPDATE {B2B_TRAVEL_POLICY_RULE_TABLE} SET {sets}, updated_at = %s WHERE id = %s RETURNING *",
+        values,
+    )
+
+
+def delete_policy_rule(rule_id: int) -> int:
+    return execute(
+        f"DELETE FROM {B2B_TRAVEL_POLICY_RULE_TABLE} WHERE id = %s",
+        [rule_id],
+    )
+
+
 # ─── Budget Requests ──────────────────────────────────────────────────────────
 
 def create_budget_request(*, trip_id: int, employee_id: int, requested_by: int, amount: Decimal, reason: str) -> dict[str, Any] | None:
@@ -483,4 +549,88 @@ def get_department_spending(company_id: int, since: datetime | None = None) -> l
         ORDER BY approved_spend DESC
         """,
         [company_id],
+    )
+
+
+# ─── Recent trip employees ──────────────────────────────────────────────────
+
+def list_recent_trip_employees(company_id: int, limit: int = 5) -> list[dict[str, Any]]:
+    """Return the most recent trip-employee assignments across the company.
+
+    Ordered by ``te.created_at`` DESC so the caller gets the latest ones first.
+    Joined with the trip table to expose trip name/dates/destination and with
+    the employee table to expose employee info.
+    """
+    return fetch_all(
+        f"""
+        SELECT
+            te.id              AS trip_employee_id,
+            te.trip_id         AS trip_id,
+            te.employee_id     AS employee_id,
+            te.check_in        AS check_in,
+            te.check_out       AS check_out,
+            te.status          AS trip_employee_status,
+            te.created_at      AS assigned_at,
+            t.name             AS trip_name,
+            t.destination_city AS destination_city,
+            t.start_date       AS trip_start_date,
+            t.end_date         AS trip_end_date,
+            t.status           AS trip_status,
+            e.full_name        AS full_name,
+            e.position         AS position,
+            e.email            AS email,
+            e.phone            AS phone,
+            d.name             AS department_name,
+            d.id               AS department_id
+        FROM {B2B_TRIP_EMPLOYEE_TABLE} te
+        JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = te.trip_id
+        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = te.employee_id
+        LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
+        WHERE t.company_id = %s
+        ORDER BY te.created_at DESC
+        LIMIT %s
+        """,
+        [company_id, limit],
+    )
+
+
+# ─── Department monthly spending ────────────────────────────────────────────
+
+def get_department_monthly_spending(
+    company_id: int, year: int, month: int
+) -> list[dict[str, Any]]:
+    """For every department of *company_id* return the totals for the given
+    calendar month.
+
+    ``month_spend`` = sum of approved budget-request amounts whose
+    ``reviewed_at`` (or, when NULL, ``created_at``) falls inside the month.
+
+    ``month_trips`` = count of distinct trips whose ``start_date`` falls inside
+    the month for any employee of that department.
+    """
+    return fetch_all(
+        f"""
+        SELECT
+            d.id   AS department_id,
+            d.name AS department_name,
+            COUNT(DISTINCT te.trip_id) FILTER (
+                WHERE EXTRACT(YEAR FROM t.start_date) = %s
+                  AND EXTRACT(MONTH FROM t.start_date) = %s
+            ) AS month_trips,
+            COUNT(DISTINCT te.employee_id) AS total_employees,
+            COALESCE(SUM(br.amount) FILTER (
+                WHERE br.status = 'approved'
+                  AND EXTRACT(YEAR FROM COALESCE(br.reviewed_at, br.created_at)) = %s
+                  AND EXTRACT(MONTH FROM COALESCE(br.reviewed_at, br.created_at)) = %s
+            ), 0) AS month_spend
+        FROM {B2B_DEPARTMENT_TABLE} d
+        LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.department_id = d.id
+        LEFT JOIN {B2B_TRIP_EMPLOYEE_TABLE} te ON te.employee_id = e.id
+        LEFT JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = te.trip_id
+        LEFT JOIN {B2B_BUDGET_REQUEST_TABLE} br ON br.employee_id = e.id
+        WHERE d.company_id = %s
+        GROUP BY d.id, d.name
+        ORDER BY d.name ASC
+        """,
+        [year, month, year, month, company_id],
     )
