@@ -222,6 +222,16 @@ urlpatterns = [
         name="admin-hotel-create",
     ),
     path(
+        "admin/hotels/<path:property_id>/images/<path:image_id>/",
+        AdminHotelImageDeleteView.as_view(),
+        name="admin-hotel-image-delete",
+    ),
+    path(
+        "admin/hotels/<path:property_id>/images/",
+        AdminHotelImageCreateView.as_view(),
+        name="admin-hotel-image-create",
+    ),
+    path(
         "admin/hotels/<path:hotel_id>/",
         AdminHotelPatchView.as_view(),
         name="admin-hotel-patch",
@@ -245,16 +255,6 @@ urlpatterns = [
         "admin/apartments/<uuid:property_id>/images/<path:image_id>/",
         AdminPropertyImageDeleteView.as_view(),
         name="admin-apartment-image-delete",
-    ),
-    path(
-        "admin/hotels/<path:property_id>/images/",
-        AdminHotelImageCreateView.as_view(),
-        name="admin-hotel-image-create",
-    ),
-    path(
-        "admin/hotels/<path:property_id>/images/<path:image_id>/",
-        AdminHotelImageDeleteView.as_view(),
-        name="admin-hotel-image-delete",
     ),
     path(
         "admin/regions/",
