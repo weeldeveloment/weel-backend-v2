@@ -35,6 +35,7 @@ from apps.b2b.repository import (
     get_spending_overview,
     get_trip,
     get_voucher,
+    list_active_trip_employees,
     list_budget_requests,
     list_departments,
     list_employees,
@@ -50,6 +51,7 @@ from apps.b2b.repository import (
     update_trip,
 )
 from apps.b2b.serializers import (
+    ActiveTripEmployeeSerializer,
     B2BCompanySerializer,
     B2BDepartmentSerializer,
     B2BEmployeeSerializer,
@@ -483,6 +485,72 @@ class RecentTripEmployeesView(APIView):
             limit = 5
         rows = list_recent_trip_employees(company_id, limit=limit)
         return Response(RecentTripEmployeeSerializer(rows, many=True).data)
+
+
+# ─── Active / upcoming trip employees (yolda / borgan) ─────────────────────
+
+_VALID_ACTIVE_TRIP_TYPES = {"yolda", "borgan", "all"}
+
+
+class ActiveTripEmployeesView(APIView):
+    """GET /api/b2b/trips/active-employees/?type=yolda|borgan|all
+
+    Returns employees that are currently on a business trip or about to go
+    on one. Scoped to the authenticated company.
+
+    Query params:
+        type: ``"yolda"``  – today is between the trip's ``start_date`` and
+                              ``end_date`` (currently travelling).
+               ``"borgan"`` – trip starts in the future (upcoming trip).
+               ``"all"``    – both groups combined (default).
+
+    Trip must be in ``active`` or ``pending`` status and the trip-employee
+    assignment must not be ``cancelled`` or ``checked_out``.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Komandirovkada yoki ketayotgan xodimlar",
+        operation_description=(
+            "Faol (``active`` yoki ``pending``) tripga biriktirilgan va "
+            "``cancelled``/``checked_out`` bo'lmagan xodimlarni qaytaradi. "
+            "`type=yolda` bugun ``start_date`` va ``end_date`` orasida "
+            "bo'lganlarni, `type=borgan` esa ``start_date`` kelajakda "
+            "bo'lganlarni qaytaradi. `type=all` (default) ikkalasini birlashtiradi."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "type",
+                openapi.IN_QUERY,
+                description="Filtr turi: yolda | borgan | all (default: all)",
+                type=openapi.TYPE_STRING,
+                enum=["yolda", "borgan", "all"],
+                default="all",
+            ),
+        ],
+        responses={
+            200: ActiveTripEmployeeSerializer(many=True),
+            400: openapi.Response(description="Company context required."),
+        },
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        type_ = request.query_params.get("type", "all")
+        if type_ not in _VALID_ACTIVE_TRIP_TYPES:
+            return Response(
+                {"detail": f"Invalid type. Choose from: yolda, borgan, all."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rows = list_active_trip_employees(company_id, type_=type_)
+        return Response({
+            "type": type_,
+            "count": len(rows),
+            "results": ActiveTripEmployeeSerializer(rows, many=True).data,
+        })
 
 
 # ─── Department monthly spending ───────────────────────────────────────────

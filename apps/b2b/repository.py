@@ -594,6 +594,68 @@ def list_recent_trip_employees(company_id: int, limit: int = 5) -> list[dict[str
     )
 
 
+# ─── Active trip employees (yolda / borgan) ─────────────────────────────────
+
+_VALID_ACTIVE_TRIP_TYPES = {"yolda", "borgan", "all"}
+
+
+def list_active_trip_employees(company_id: int, type_: str = "all") -> list[dict[str, Any]]:
+    """Return trip-employee rows for trips that are currently in progress or
+    scheduled to start in the future.
+
+    Args:
+        company_id: scope to a single company.
+        type_: ``"yolda"``  – trip is active and today falls between
+                              ``start_date`` and ``end_date``.
+               ``"borgan"`` – trip hasn't started yet (``start_date`` is in
+                              the future).
+               ``"all"``    – union of both.
+    """
+    if type_ not in _VALID_ACTIVE_TRIP_TYPES:
+        type_ = "all"
+
+    if type_ == "yolda":
+        date_filter = "AND CURRENT_DATE BETWEEN t.start_date AND t.end_date"
+    elif type_ == "borgan":
+        date_filter = "AND t.start_date > CURRENT_DATE"
+    else:
+        date_filter = "AND t.end_date >= CURRENT_DATE"
+
+    return fetch_all(
+        f"""
+        SELECT
+            te.id              AS trip_employee_id,
+            te.trip_id         AS trip_id,
+            te.employee_id     AS employee_id,
+            te.check_in        AS check_in,
+            te.check_out       AS check_out,
+            te.status          AS trip_employee_status,
+            te.created_at      AS assigned_at,
+            t.name             AS trip_name,
+            t.destination_city AS destination_city,
+            t.start_date       AS trip_start_date,
+            t.end_date         AS trip_end_date,
+            t.status           AS trip_status,
+            e.full_name        AS full_name,
+            e.position         AS position,
+            e.email            AS email,
+            e.phone            AS phone,
+            d.name             AS department_name,
+            d.id               AS department_id
+        FROM {B2B_TRIP_EMPLOYEE_TABLE} te
+        JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = te.trip_id
+        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = te.employee_id
+        LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
+        WHERE t.company_id = %s
+          AND t.status IN ('active', 'pending')
+          AND te.status NOT IN ('cancelled', 'checked_out')
+          {date_filter}
+        ORDER BY t.start_date ASC, e.full_name ASC
+        """,
+        [company_id],
+    )
+
+
 # ─── Department monthly spending ────────────────────────────────────────────
 
 def get_department_monthly_spending(

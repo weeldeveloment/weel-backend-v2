@@ -135,6 +135,33 @@ class TravelVoucherSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
 
 
+class ActiveTripEmployeeSerializer(serializers.Serializer):
+    """Serializer for the "xodimlar yolda yoki borgan" endpoint.
+
+    Each row represents a single ``b2b_trip_employee`` assignment together
+    with the joined employee, trip and department context that the frontend
+    needs to render a single card / row.
+    """
+    trip_employee_id = serializers.IntegerField(read_only=True)
+    trip_id = serializers.IntegerField(read_only=True)
+    employee_id = serializers.IntegerField(read_only=True)
+    full_name = serializers.CharField(read_only=True, allow_null=True)
+    position = serializers.CharField(read_only=True, allow_null=True)
+    email = serializers.CharField(read_only=True, allow_null=True)
+    phone = serializers.CharField(read_only=True, allow_null=True)
+    department_id = serializers.IntegerField(read_only=True, allow_null=True)
+    department_name = serializers.CharField(read_only=True, allow_null=True)
+    trip_name = serializers.CharField(read_only=True, allow_null=True)
+    destination_city = serializers.CharField(read_only=True, allow_null=True)
+    trip_start_date = serializers.DateField(read_only=True, allow_null=True)
+    trip_end_date = serializers.DateField(read_only=True, allow_null=True)
+    check_in = serializers.DateField(read_only=True, allow_null=True)
+    check_out = serializers.DateField(read_only=True, allow_null=True)
+    trip_status = serializers.CharField(read_only=True)
+    trip_employee_status = serializers.CharField(read_only=True)
+    assigned_at = serializers.DateTimeField(read_only=True)
+
+
 class RecentTripEmployeeSerializer(serializers.Serializer):
     """Serializer for the "last N employees on a business trip" endpoint."""
     trip_employee_id = serializers.IntegerField(read_only=True)
