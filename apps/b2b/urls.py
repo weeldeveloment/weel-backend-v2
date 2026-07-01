@@ -1,6 +1,7 @@
 from django.urls import path
 from apps.b2b.auth_views import B2BLoginSendOTPView, B2BLoginVerifyView
 from apps.b2b.views import (
+    ActiveTripEmployeesView,
     B2BCompanyView,
     B2BDepartmentListCreateView,
     B2BEmployeeListCreateView,
@@ -34,6 +35,7 @@ urlpatterns = [
     path("trips/<int:trip_id>/", BusinessTripRetrieveUpdateView.as_view(), name="b2b-trip-detail"),
     path("trips/<int:trip_id>/employees/", TripEmployeeListCreateView.as_view(), name="b2b-trip-employees"),
     path("trips/<int:trip_id>/voucher/", TripVoucherView.as_view(), name="b2b-trip-voucher"),
+    path("trips/active-employees/", ActiveTripEmployeesView.as_view(), name="b2b-active-trip-employees"),
     path("recent-trips/employees/", RecentTripEmployeesView.as_view(), name="b2b-recent-trip-employees"),
     path("travel-policy/", TravelPolicyView.as_view(), name="b2b-travel-policy"),
     path("travel-policy/limits/global/", GlobalTravelLimitView.as_view(), name="b2b-travel-policy-limit-global"),
