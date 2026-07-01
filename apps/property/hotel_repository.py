@@ -491,12 +491,8 @@ def delete_admin_hotel(*, hotel_guid: str) -> bool:
     def _delete() -> bool:
         with connection.cursor() as cursor:
             cursor.execute(
-                """
-                UPDATE pms_property
-                SET is_active = FALSE, updated_at = %s
-                WHERE id = %s
-                """,
-                [timezone.now(), hotel_id],
+                "DELETE FROM pms_property WHERE id = %s",
+                [hotel_id],
             )
             return cursor.rowcount > 0
 
