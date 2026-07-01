@@ -290,6 +290,7 @@ class RawDistrictSerializer(serializers.Serializer):
 
 
 class CottageListSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
     guid = serializers.UUIDField()
     title = serializers.CharField()
     img = serializers.ListField(child=serializers.CharField(), allow_empty=True)

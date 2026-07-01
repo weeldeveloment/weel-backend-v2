@@ -171,6 +171,7 @@ def _parse_int_maybe(value: Any) -> int | None:
 
 
 class ApartmentListSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
     guid = serializers.UUIDField()
     title = serializers.CharField()
     img = serializers.ListField(child=serializers.CharField(), allow_empty=True)

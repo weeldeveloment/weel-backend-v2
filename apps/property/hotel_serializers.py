@@ -84,6 +84,7 @@ def _favorite_guid_set(context: dict[str, Any] | None) -> set[str]:
 
 
 class HotelListSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
     guid = serializers.CharField()
     title = serializers.CharField()
     img = serializers.ListField(child=serializers.CharField(), allow_empty=True)
