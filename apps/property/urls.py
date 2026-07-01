@@ -221,8 +221,8 @@ urlpatterns = [
         AdminHotelListCreateView.as_view(),
         name="admin-hotel-create",
     ),
-    path(
-        "admin/hotels/<path:property_id>/images/<path:image_id>/",
+    re_path(
+        r"^admin/hotels/(?P<property_id>.+?)/images/(?P<image_id>.+)/$",
         AdminHotelImageDeleteView.as_view(),
         name="admin-hotel-image-delete",
     ),
