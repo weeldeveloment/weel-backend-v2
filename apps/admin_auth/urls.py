@@ -34,8 +34,8 @@ urlpatterns = [
     path('users/clients/', AdminClientsListView.as_view(), name='admin-clients-list'),
     path('users/partners/', AdminPartnersListView.as_view(), name='admin-partners-list'),
     # Hotel Management
+    # Specific sub-paths MUST come before the catch-all detail view
     path('hotels/', AdminHotelListView.as_view(), name='admin-hotels-list'),
-    path('hotels/<path:property_id>/', AdminHotelDetailView.as_view(), name='admin-hotel-detail'),
     path('hotels/<path:property_id>/classify/', AdminHotelClassifyView.as_view(), name='admin-hotel-classify'),
     path('hotels/<path:property_id>/rooms/', AdminHotelRoomInventoryView.as_view(), name='admin-hotel-rooms'),
     path('hotels/<path:property_id>/room-types/', AdminHotelRoomTypesView.as_view(), name='admin-hotel-room-types'),
@@ -52,6 +52,7 @@ urlpatterns = [
     path('hotels/<path:property_id>/reviews/', AdminHotelReviewsView.as_view(), name='admin-hotel-reviews'),
     path('hotels/<path:property_id>/reviews/<int:review_id>/respond/', AdminReviewRespondView.as_view(), name='admin-review-respond'),
     path('hotels/<path:property_id>/reviews/<int:review_id>/hide/', AdminReviewHideView.as_view(), name='admin-review-hide'),
+    path('hotels/<path:property_id>/', AdminHotelDetailView.as_view(), name='admin-hotel-detail'),
     # B2B Companies
     path('b2b/companies/', AdminB2BCompaniesView.as_view(), name='admin-b2b-companies'),
     path('b2b/companies/<int:company_id>/', AdminB2BCompanyDetailView.as_view(), name='admin-b2b-company-detail'),
