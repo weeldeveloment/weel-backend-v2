@@ -4,7 +4,7 @@ import logging
 from datetime import date
 from typing import Any
 
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -53,13 +53,35 @@ from apps.pms.serializers import (
 )
 from apps.b2b.repository import list_b2b_users, get_company
 from apps.b2b.serializers import B2BCompanySerializer, B2BUserSerializer
+from property.hotel_repository import decode_hotel_guid, encode_hotel_guid
+from apps.platform.raw_repository import list_organizations
 
 logger = logging.getLogger(__name__)
+
+
+def _set_tenant_from_guid(hotel_guid: str) -> int | None:
+    decoded = decode_hotel_guid(hotel_guid)
+    if not decoded:
+        return None
+    schema_name, numeric_id = decoded
+    with connection.cursor() as cursor:
+        cursor.execute("SET search_path TO %s, public", [schema_name])
+    return numeric_id
 
 
 class AdminBaseView(APIView):
     authentication_classes = [AdminJWTAuthentication]
     permission_classes = [IsAdminUser]
+
+
+class AdminHotelBaseView(AdminBaseView):
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        raw = self.kwargs.get("property_id")
+        if raw is not None:
+            numeric_id = _set_tenant_from_guid(str(raw))
+            if numeric_id is not None:
+                self.kwargs["property_id"] = numeric_id
 
 
 class ClassifyPropertySerializer(serializers.Serializer):
@@ -71,16 +93,27 @@ class ClassifyPropertySerializer(serializers.Serializer):
     )
 
 
-class AdminHotelListView(AdminBaseView):
+class AdminHotelListView(AdminHotelBaseView):
     """List all hotels across all organizations — admin view"""
 
     @swagger_auto_schema(responses={200: PropertySerializer(many=True)})
     def get(self, request):
-        properties = fetch_all("SELECT * FROM pms_property WHERE is_active = TRUE ORDER BY name ASC")
-        return Response(PropertySerializer(properties, many=True).data)
+        orgs = list_organizations()
+        all_properties: list[dict[str, Any]] = []
+        for org in orgs:
+            schema = org.get("schema_name")
+            if not schema:
+                continue
+            rows = fetch_all(
+                f"SELECT * FROM {schema}.pms_property WHERE is_active = TRUE ORDER BY name ASC"
+            )
+            for row in rows:
+                row["guid"] = encode_hotel_guid(schema, row["id"])
+            all_properties.extend(rows)
+        return Response(PropertySerializer(all_properties, many=True).data)
 
 
-class AdminHotelDetailView(AdminBaseView):
+class AdminHotelDetailView(AdminHotelBaseView):
 
     @swagger_auto_schema(responses={200: PropertySerializer()})
     def get(self, request, property_id):
@@ -100,7 +133,7 @@ class AdminHotelDetailView(AdminBaseView):
         return Response(PropertySerializer(prop).data)
 
 
-class AdminHotelClassifyView(AdminBaseView):
+class AdminHotelClassifyView(AdminHotelBaseView):
     """Assign star rating and Weel classification to a hotel"""
 
     @swagger_auto_schema(request_body=ClassifyPropertySerializer, responses={200: PropertySerializer()})
@@ -118,7 +151,7 @@ class AdminHotelClassifyView(AdminBaseView):
         return Response(PropertySerializer(prop).data)
 
 
-class AdminHotelRoomInventoryView(AdminBaseView):
+class AdminHotelRoomInventoryView(AdminHotelBaseView):
     """Mirrored room inventory — uses same PMS data source"""
 
     @swagger_auto_schema(responses={200: RoomSerializer(many=True)})
@@ -128,7 +161,7 @@ class AdminHotelRoomInventoryView(AdminBaseView):
         return Response(RoomSerializer(rooms, many=True).data)
 
 
-class AdminHotelRoomTypesView(AdminBaseView):
+class AdminHotelRoomTypesView(AdminHotelBaseView):
     """List room types for a property"""
 
     @swagger_auto_schema(responses={200: RoomTypeSerializer(many=True)})
@@ -137,7 +170,7 @@ class AdminHotelRoomTypesView(AdminBaseView):
         return Response(RoomTypeSerializer(types, many=True).data)
 
 
-class AdminHotelCalendarView(AdminBaseView):
+class AdminHotelCalendarView(AdminHotelBaseView):
     """Mirrored calendar — uses same PMS availability data"""
 
     @swagger_auto_schema(
@@ -163,7 +196,7 @@ class AdminHotelCalendarView(AdminBaseView):
         return Response(slots)
 
 
-class AdminHotelBookingsView(AdminBaseView):
+class AdminHotelBookingsView(AdminHotelBaseView):
     """Admin view of hotel bookings"""
 
     @swagger_auto_schema(responses={200: BookingSerializer(many=True)})
@@ -180,7 +213,7 @@ class AdminHotelBookingsView(AdminBaseView):
         return Response(BookingSerializer(bookings, many=True).data)
 
 
-class AdminHotelBookingDetailView(AdminBaseView):
+class AdminHotelBookingDetailView(AdminHotelBaseView):
     """Get or update a specific booking"""
 
     @swagger_auto_schema(responses={200: BookingSerializer()})
@@ -204,7 +237,7 @@ class AdminHotelBookingDetailView(AdminBaseView):
         return Response(BookingSerializer(updated).data)
 
 
-class AdminHotelBookingCreateView(AdminBaseView):
+class AdminHotelBookingCreateView(AdminHotelBaseView):
     """Quick-create a booking"""
 
     @swagger_auto_schema(responses={201: BookingSerializer()})
@@ -244,7 +277,7 @@ class AdminHotelBookingCreateView(AdminBaseView):
         return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
 
 
-class AdminHotelBookingMoveView(AdminBaseView):
+class AdminHotelBookingMoveView(AdminHotelBaseView):
     """Move booking to a different room / date range (drag on calendar)"""
 
     @swagger_auto_schema(responses={200: BookingSerializer()})
@@ -264,7 +297,7 @@ class AdminHotelBookingMoveView(AdminBaseView):
         return Response(BookingSerializer(booking).data)
 
 
-class AdminHotelBookingAcceptView(AdminBaseView):
+class AdminHotelBookingAcceptView(AdminHotelBaseView):
     """Accept a booking"""
 
     @swagger_auto_schema(responses={200: BookingSerializer()})
@@ -275,7 +308,7 @@ class AdminHotelBookingAcceptView(AdminBaseView):
         return Response(BookingSerializer(booking).data)
 
 
-class AdminHotelBookingCancelView(AdminBaseView):
+class AdminHotelBookingCancelView(AdminHotelBaseView):
     """Cancel a booking"""
 
     @swagger_auto_schema(responses={200: BookingSerializer()})
@@ -289,7 +322,7 @@ class AdminHotelBookingCancelView(AdminBaseView):
         return Response(BookingSerializer(booking).data)
 
 
-class AdminHotelBookingCheckInView(AdminBaseView):
+class AdminHotelBookingCheckInView(AdminHotelBaseView):
     """Check in a booking"""
 
     @swagger_auto_schema(responses={200: BookingSerializer()})
@@ -300,7 +333,7 @@ class AdminHotelBookingCheckInView(AdminBaseView):
         return Response(BookingSerializer(booking).data)
 
 
-class AdminHotelBookingCheckOutView(AdminBaseView):
+class AdminHotelBookingCheckOutView(AdminHotelBaseView):
     """Check out a booking"""
 
     @swagger_auto_schema(responses={200: BookingSerializer()})
@@ -311,7 +344,7 @@ class AdminHotelBookingCheckOutView(AdminBaseView):
         return Response(BookingSerializer(booking).data)
 
 
-class AdminHotelRatesView(AdminBaseView):
+class AdminHotelRatesView(AdminHotelBaseView):
     """List rates for a property"""
 
     @swagger_auto_schema(responses={200: RateSerializer(many=True)})
@@ -321,7 +354,7 @@ class AdminHotelRatesView(AdminBaseView):
         return Response(RateSerializer(rates, many=True).data)
 
 
-class AdminHotelReviewsView(AdminBaseView):
+class AdminHotelReviewsView(AdminHotelBaseView):
 
     @swagger_auto_schema(responses={200: ReviewSerializer(many=True)})
     def get(self, request, property_id):
@@ -329,7 +362,7 @@ class AdminHotelReviewsView(AdminBaseView):
         return Response(ReviewSerializer(reviews, many=True).data)
 
 
-class AdminReviewRespondView(AdminBaseView):
+class AdminReviewRespondView(AdminHotelBaseView):
 
     @swagger_auto_schema(request_body=ReviewRespondSerializer, responses={200: ReviewSerializer()})
     def post(self, request, property_id, review_id):
@@ -342,7 +375,7 @@ class AdminReviewRespondView(AdminBaseView):
         return Response(ReviewSerializer(review).data)
 
 
-class AdminReviewHideView(AdminBaseView):
+class AdminReviewHideView(AdminHotelBaseView):
     """Admin can hide/complain a review"""
 
     @swagger_auto_schema(request_body=ReviewComplainSerializer, responses={200: ReviewSerializer()})
