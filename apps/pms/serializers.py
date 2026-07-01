@@ -31,6 +31,7 @@ class PropertyImageSerializer(serializers.Serializer):
 
 class PropertySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
+    guid = serializers.CharField(read_only=True, required=False)
     organization_id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(max_length=200)
     description_uz = serializers.CharField(required=False, allow_blank=True, allow_null=True)

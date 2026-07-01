@@ -4,7 +4,7 @@ import logging
 from datetime import date
 from typing import Any
 
-from django.db import IntegrityError, connection
+from django.db import IntegrityError, connection, transaction
 
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from shared.raw.db import fetch_all, fetch_one
+from shared.raw.db import fetch_all
 
 from .authentication import AdminJWTAuthentication
 from .permissions import IsAdminUser
@@ -82,6 +82,10 @@ class AdminHotelBaseView(AdminBaseView):
             numeric_id = _set_tenant_from_guid(str(raw))
             if numeric_id is not None:
                 self.kwargs["property_id"] = numeric_id
+
+    def dispatch(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().dispatch(request, *args, **kwargs)
 
 
 class ClassifyPropertySerializer(serializers.Serializer):
