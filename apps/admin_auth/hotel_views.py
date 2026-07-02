@@ -26,6 +26,7 @@ from apps.pms.repository import (
     complain_review,
     create_booking,
     find_or_create_guest,
+    get_analytics,
     get_booking,
     get_property,
     get_room_availability,
@@ -41,6 +42,8 @@ from apps.pms.repository import (
     update_property,
 )
 from apps.pms.serializers import (
+    AnalyticsQuerySerializer,
+    AnalyticsResponseSerializer,
     BookingSerializer,
     MoveBookingSerializer,
     PropertySerializer,
@@ -418,3 +421,35 @@ class AdminB2BUsersView(AdminBaseView):
     def get(self, request, company_id):
         users = list_b2b_users(company_id)
         return Response(B2BUserSerializer(users, many=True).data)
+
+
+class AdminHotelAnalyticsView(AdminHotelBaseView):
+    """Analytics data for a property"""
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter("date_from", openapi.IN_QUERY, description="Start date", type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("date_to", openapi.IN_QUERY, description="End date", type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("metric", openapi.IN_QUERY, description="Chart metric", type=openapi.TYPE_STRING, enum=["check_ins", "revenue", "bookings", "occupancy"]),
+            openapi.Parameter("category", openapi.IN_QUERY, description="Room category filter", type=openapi.TYPE_STRING),
+            openapi.Parameter("floor", openapi.IN_QUERY, description="Floor filter", type=openapi.TYPE_STRING),
+            openapi.Parameter("search", openapi.IN_QUERY, description="Room number search", type=openapi.TYPE_STRING),
+        ],
+        responses={200: AnalyticsResponseSerializer()},
+    )
+    def get(self, request, property_id):
+        serializer = AnalyticsQuerySerializer(data=request.query_params)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = get_analytics(
+            property_id=property_id,
+            date_from=serializer.validated_data["date_from"],
+            date_to=serializer.validated_data["date_to"],
+            metric=serializer.validated_data.get("metric", "revenue"),
+            category=serializer.validated_data.get("category"),
+            floor=serializer.validated_data.get("floor"),
+            search=serializer.validated_data.get("search"),
+        )
+
+        return Response(AnalyticsResponseSerializer(data).data)

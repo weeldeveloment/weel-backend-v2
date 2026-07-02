@@ -2,6 +2,7 @@ from django.urls import path
 from .views import AdminLoginView, AdminMeView, AdminRefreshTokenView, AdminRegisterView
 from .users_views import AdminClientsListView, AdminPartnersListView
 from .hotel_views import (
+    AdminHotelAnalyticsView,
     AdminHotelListView,
     AdminHotelDetailView,
     AdminHotelClassifyView,
@@ -52,6 +53,7 @@ urlpatterns = [
     path('hotels/<path:property_id>/reviews/', AdminHotelReviewsView.as_view(), name='admin-hotel-reviews'),
     path('hotels/<path:property_id>/reviews/<int:review_id>/respond/', AdminReviewRespondView.as_view(), name='admin-review-respond'),
     path('hotels/<path:property_id>/reviews/<int:review_id>/hide/', AdminReviewHideView.as_view(), name='admin-review-hide'),
+    path('hotels/<path:property_id>/analytics/', AdminHotelAnalyticsView.as_view(), name='admin-hotel-analytics'),
     path('hotels/<path:property_id>/', AdminHotelDetailView.as_view(), name='admin-hotel-detail'),
     # B2B Companies
     path('b2b/companies/', AdminB2BCompaniesView.as_view(), name='admin-b2b-companies'),

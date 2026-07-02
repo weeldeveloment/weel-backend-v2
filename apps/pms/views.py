@@ -44,6 +44,7 @@ from apps.pms.repository import (
     delete_room_type,
     expire_holds,
     find_or_create_guest,
+    get_analytics,
     get_booking,
     get_booking_history,
     get_effective_rate,
@@ -77,6 +78,8 @@ from apps.pms.repository import (
     update_room_type,
 )
 from apps.pms.serializers import (
+    AnalyticsQuerySerializer,
+    AnalyticsResponseSerializer,
     BookingHistorySerializer,
     BookingSerializer,
     CalendarSlotSerializer,
@@ -824,3 +827,41 @@ class ReviewComplainView(PMSBaseView):
         if not review:
             return Response({"detail": "Review not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(ReviewSerializer(review).data)
+
+
+class AnalyticsView(PMSBaseView):
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter("date_from", openapi.IN_QUERY, description="Start date", type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("date_to", openapi.IN_QUERY, description="End date", type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("metric", openapi.IN_QUERY, description="Chart metric", type=openapi.TYPE_STRING, enum=["check_ins", "revenue", "bookings", "occupancy"]),
+            openapi.Parameter("category", openapi.IN_QUERY, description="Room category filter", type=openapi.TYPE_STRING),
+            openapi.Parameter("floor", openapi.IN_QUERY, description="Floor filter", type=openapi.TYPE_STRING),
+            openapi.Parameter("search", openapi.IN_QUERY, description="Room number search", type=openapi.TYPE_STRING),
+        ],
+        responses={200: AnalyticsResponseSerializer()},
+    )
+    def get(self, request, property_id):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        prop = get_property(property_id, organization_id=int(org_id))
+        if not prop:
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AnalyticsQuerySerializer(data=request.query_params)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = get_analytics(
+            property_id=property_id,
+            date_from=serializer.validated_data["date_from"],
+            date_to=serializer.validated_data["date_to"],
+            metric=serializer.validated_data.get("metric", "revenue"),
+            category=serializer.validated_data.get("category"),
+            floor=serializer.validated_data.get("floor"),
+            search=serializer.validated_data.get("search"),
+        )
+
+        return Response(AnalyticsResponseSerializer(data).data)
