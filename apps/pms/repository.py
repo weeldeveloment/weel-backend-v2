@@ -1505,14 +1505,14 @@ def get_analytics(
         SELECT r.id as room_id, r.room_number, rt.name as category, r.floor,
                COALESCE(SUM(b.total_cost::numeric), 0) as revenue,
                COUNT(b.id) as booking_count,
-               r.currency
+               COALESCE(b.currency, rt.currency, 'UZS') as currency
         FROM {_t(PMS_ROOM_TABLE)} r
         LEFT JOIN {_t(PMS_ROOM_TYPE_TABLE)} rt ON rt.id = r.room_type_id
         LEFT JOIN {_t(PMS_BOOKING_TABLE)} b ON b.room_id = r.id
             AND b.check_in BETWEEN %s AND %s
             AND b.status NOT IN ('cancelled', 'no_show')
         WHERE {room_where}
-        GROUP BY r.id, r.room_number, rt.name, r.floor, r.currency
+        GROUP BY r.id, r.room_number, rt.name, r.floor, b.currency, rt.currency
         ORDER BY r.room_number ASC
         """,
         [date_from, date_to] + room_params,
