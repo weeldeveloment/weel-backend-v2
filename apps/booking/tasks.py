@@ -85,7 +85,7 @@ def auto_cancel_booking(self, booking_id):
     )
 
     NotificationService.send_to_client(
-        client=_client_ref(int(booking["client_user_id"])),
+        client=_client_ref(int(booking["created_by"])),
         title="Booking cancelled",
         message=(
             f"Your booking for {booking.get('property_title')} was not confirmed in time "
@@ -187,7 +187,7 @@ def auto_complete_booking(self, booking_id):
     )
 
     NotificationService.send_to_client(
-        client=_client_ref(int(booking["client_user_id"])),
+        client=_client_ref(int(booking["created_by"])),
         title="Бронирование завершено🎉",
         message=(
             f"Бронирование объекта «{booking.get('property_title')}» успешно завершено🏠\n"
@@ -243,7 +243,7 @@ def send_pending_booking_payment_reminders(self):
 
         if 24 >= minutes_left > 6 and stage != "24m":
             NotificationService.send_to_client(
-                client=_client_ref(int(booking["client_user_id"])),
+                client=_client_ref(int(booking["created_by"])),
                 title="Payment reminder",
                 message=(
                     f"You have about 24 minutes left to complete payment for "
@@ -260,7 +260,7 @@ def send_pending_booking_payment_reminders(self):
             )
         elif 6 >= minutes_left > 1 and stage != "6m":
             NotificationService.send_to_client(
-                client=_client_ref(int(booking["client_user_id"])),
+                client=_client_ref(int(booking["created_by"])),
                 title="Payment reminder",
                 message=(
                     f"You have about 6 minutes left to complete payment for "
@@ -277,7 +277,7 @@ def send_pending_booking_payment_reminders(self):
             )
         elif 1 >= minutes_left > 0 and stage != "1m":
             NotificationService.send_to_client(
-                client=_client_ref(int(booking["client_user_id"])),
+                client=_client_ref(int(booking["created_by"])),
                 title="Payment reminder",
                 message=(
                     f"You have about 1 minute left to complete payment for "
@@ -292,3 +292,82 @@ def send_pending_booking_payment_reminders(self):
                 "Payment reminder (1m) sent",
                 extra={"booking_id": str(booking["guid"])},
             )
+
+
+# ─── Hotel Booking Tasks ─────────────────────────────────────────────────────
+
+
+@app.task(
+    name="booking.auto_cancel_hotel",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def auto_cancel_hotel_booking(self, booking_id):
+    from apps.hotels.repository import (
+        get_hotel_booking_by_id,
+        release_hotel_booking_calendar_slots,
+        update_hotel_booking_status,
+    )
+
+    booking = get_hotel_booking_by_id(int(booking_id))
+    if not booking:
+        logger.warning(
+            "auto_cancel_hotel: booking not found",
+            extra={"booking_id": str(booking_id)},
+        )
+        return
+    if booking["status"] != "pending":
+        logger.info(
+            "auto_cancel_hotel: skipped",
+            extra={"booking_id": str(booking_id), "status": booking["status"]},
+        )
+        return
+
+    logger.info(
+        "auto_cancel_hotel: triggered",
+        extra={"booking_id": str(booking_id)},
+    )
+
+    tx = get_latest_transaction_history_for_booking(int(booking["id"]))
+    if tx and tx.get("transaction_id") and tx.get("hold_id"):
+        plum_service = PlumAPIService()
+        try:
+            plum_service.dismiss_hold(
+                transaction_id=tx["transaction_id"],
+                hold_id=tx["hold_id"],
+            )
+        except PlumAPIError as plum_api_error:
+            logger.warning(
+                "auto_cancel_hotel: dismiss_hold failed",
+                extra={
+                    "booking_id": str(booking_id),
+                    "error": plum_api_error.message,
+                    "status_code": plum_api_error.status_code,
+                },
+            )
+    mark_latest_transaction_dismissed(int(booking["id"]))
+
+    release_hotel_booking_calendar_slots(
+        room_id=int(booking["room_id"]),
+        check_in=booking["check_in"],
+        check_out=booking["check_out"],
+    )
+    update_hotel_booking_status(int(booking["id"]), "cancelled")
+
+    NotificationService.send_to_client(
+        client=_client_ref(int(booking["created_by"])),
+        title="Hotel booking cancelled",
+        message=(
+            f"Your hotel booking {booking.get('booking_number')} was not confirmed in time "
+            f"and has been released. The room is available again for these dates."
+        ),
+        notification_type="system",
+        data={"booking_id": str(booking["id"])},
+    )
+
+    logger.info(
+        "auto_cancel_hotel: booking cancelled successfully",
+        extra={"booking_id": str(booking_id)},
+    )
