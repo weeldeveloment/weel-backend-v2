@@ -547,3 +547,92 @@ class RawAdminBookingListSerializer(serializers.Serializer):
         payload["client"] = instance
         payload["property"] = instance
         return super().to_representation(payload)
+
+
+# ─── Hotel Booking Serializers ────────────────────────────────────────────────
+
+
+class HotelBookingCreateSerializer(serializers.Serializer):
+    hotel_guid = serializers.CharField()
+    room_id = serializers.IntegerField(min_value=1)
+    check_in = serializers.DateField()
+    check_out = serializers.DateField()
+    guests = serializers.IntegerField(min_value=1)
+    card_id = serializers.CharField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        check_in = attrs["check_in"]
+        check_out = attrs["check_out"]
+        if check_out <= check_in:
+            raise serializers.ValidationError(_("check_out must be after check_in."))
+        return attrs
+
+
+class HotelBookingListSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    booking_number = serializers.CharField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    check_in = serializers.DateField(read_only=True)
+    check_out = serializers.DateField(read_only=True)
+    adult_count = serializers.IntegerField(read_only=True)
+    child_count = serializers.IntegerField(read_only=True)
+    total_cost = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    hold_amount = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    hotel_name = serializers.CharField(read_only=True)
+    hotel_city = serializers.CharField(read_only=True)
+    hotel_star_rating = serializers.IntegerField(read_only=True, allow_null=True)
+    room_number = serializers.CharField(read_only=True)
+    room_name = serializers.CharField(read_only=True)
+    room_type_name = serializers.CharField(read_only=True)
+    room_type_preset = serializers.CharField(read_only=True)
+    room_price_per_night = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+
+    def to_representation(self, instance):
+        payload = dict(instance)
+        payload["total_cost"] = str(payload.get("total_cost") or "0")
+        payload["hold_amount"] = str(payload.get("hold_amount") or "0")
+        payload["room_price_per_night"] = str(payload.get("room_price_per_night") or "0")
+        return super().to_representation(payload)
+
+
+class HotelBookingDetailSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    booking_number = serializers.CharField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    check_in = serializers.DateField(read_only=True)
+    check_out = serializers.DateField(read_only=True)
+    adult_count = serializers.IntegerField(read_only=True)
+    child_count = serializers.IntegerField(read_only=True)
+    total_cost = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    hold_amount = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    hotel_name = serializers.CharField(read_only=True)
+    hotel_city = serializers.CharField(read_only=True)
+    hotel_address = serializers.CharField(read_only=True)
+    hotel_star_rating = serializers.IntegerField(read_only=True, allow_null=True)
+    hotel_check_in_time = serializers.CharField(read_only=True, allow_null=True)
+    hotel_check_out_time = serializers.CharField(read_only=True, allow_null=True)
+    hotel_latitude = serializers.CharField(read_only=True, allow_null=True)
+    hotel_longitude = serializers.CharField(read_only=True, allow_null=True)
+    hotel_images = serializers.JSONField(read_only=True)
+    room_number = serializers.CharField(read_only=True)
+    room_name = serializers.CharField(read_only=True)
+    room_floor = serializers.IntegerField(read_only=True, allow_null=True)
+    room_price_per_night = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    room_bedroom_count = serializers.IntegerField(read_only=True, allow_null=True)
+    room_beds = serializers.IntegerField(read_only=True, allow_null=True)
+    room_capacity = serializers.IntegerField(read_only=True, allow_null=True)
+    room_type_name = serializers.CharField(read_only=True)
+    room_type_preset = serializers.CharField(read_only=True)
+    room_meal_plan = serializers.CharField(read_only=True, allow_null=True)
+    room_images = serializers.JSONField(read_only=True)
+
+    def to_representation(self, instance):
+        payload = dict(instance)
+        payload["total_cost"] = str(payload.get("total_cost") or "0")
+        payload["hold_amount"] = str(payload.get("hold_amount") or "0")
+        payload["room_price_per_night"] = str(payload.get("room_price_per_night") or "0")
+        payload["hotel_images"] = payload.get("hotel_images") or []
+        payload["room_images"] = payload.get("room_images") or []
+        return super().to_representation(payload)

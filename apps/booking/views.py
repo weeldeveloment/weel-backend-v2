@@ -1,3 +1,5 @@
+import logging
+
 from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -42,6 +44,7 @@ from .raw_booking_repository import (
 )
 from payment.raw_repository import (
     create_charge_transaction_from_latest,
+    create_hold_transaction,
     get_latest_transaction_history_for_booking,
     mark_latest_transaction_dismissed,
 )
@@ -55,11 +58,17 @@ from .raw_serializers import (
     RawClientBookingHistoryListSerializer,
     RawClientBookingListSerializer,
     RawPartnerBookingListSerializer,
+    HotelBookingCreateSerializer,
+    HotelBookingListSerializer,
+    HotelBookingDetailSerializer,
 )
 from .raw_create_service import RawBookingCreateService
 from .helpers import client_can_cancel, get_cancellation_error_message
 from payment.exchange_rate import exchange_rate
 from payment.services import PlumAPIError, PlumAPIService
+from notification.service import NotificationService
+
+logger = logging.getLogger(__name__)
 
 property_id_param = openapi.Parameter(
     "property_id",
@@ -1120,20 +1129,9 @@ class ClientHotelBookingCreateView(APIView):
     @swagger_auto_schema(
         operation_id="createHotelBooking",
         operation_summary="Create a hotel booking",
-        operation_description="Client-only. Creates a pending hotel booking. Uses `guests` instead of adults/children.",
+        operation_description="Client-only. Creates a pending hotel booking with payment hold, calendar slots, and notifications.",
         tags=["Hotel / Booking"],
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=["hotel_guid", "room_id", "check_in", "check_out", "guests"],
-            properties={
-                "hotel_guid": openapi.Schema(type=openapi.TYPE_STRING, description="Encoded hotel GUID."),
-                "room_id": openapi.Schema(type=openapi.TYPE_INTEGER),
-                "check_in": openapi.Schema(type=openapi.TYPE_STRING, format="date"),
-                "check_out": openapi.Schema(type=openapi.TYPE_STRING, format="date"),
-                "guests": openapi.Schema(type=openapi.TYPE_INTEGER),
-                "card_id": openapi.Schema(type=openapi.TYPE_STRING, description="Saved card ID."),
-            },
-        ),
+        request_body=HotelBookingCreateSerializer,
         responses={
             201: openapi.Schema(
                 type=openapi.TYPE_OBJECT,
@@ -1141,8 +1139,12 @@ class ClientHotelBookingCreateView(APIView):
                     "booking_id": openapi.Schema(type=openapi.TYPE_INTEGER),
                     "booking_number": openapi.Schema(type=openapi.TYPE_STRING),
                     "status": openapi.Schema(type=openapi.TYPE_STRING),
-                    "total_price": openapi.Schema(type=openapi.TYPE_STRING),
+                    "total_cost": openapi.Schema(type=openapi.TYPE_STRING),
                     "hold_amount": openapi.Schema(type=openapi.TYPE_STRING),
+                    "check_in": openapi.Schema(type=openapi.TYPE_STRING, format="date"),
+                    "check_out": openapi.Schema(type=openapi.TYPE_STRING, format="date"),
+                    "adult_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "child_count": openapi.Schema(type=openapi.TYPE_INTEGER),
                 },
             ),
             400: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
@@ -1152,53 +1154,236 @@ class ClientHotelBookingCreateView(APIView):
                 "detail": openapi.Schema(type=openapi.TYPE_STRING),
             }),
         },
-    )
+        )
+    @transaction.atomic
     def post(self, request):
-        hotel_guid = request.data.get("hotel_guid")
-        room_id = request.data.get("room_id")
-        check_in_str = request.data.get("check_in")
-        check_out_str = request.data.get("check_out")
-        guests = request.data.get("guests")
-        card_id = request.data.get("card_id")
+        serializer = HotelBookingCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
 
-        if not all([hotel_guid, room_id, check_in_str, check_out_str, guests]):
-            raise ValidationError({"detail": _("hotel_guid, room_id, check_in, check_out, guests are required.")})
+        _schema, hotel_id = _decode_hotel_guid_or_404(str(data["hotel_guid"]))
+        room_id = data["room_id"]
+        ci = data["check_in"]
+        co = data["check_out"]
+        guests = data["guests"]
+        card_id = data.get("card_id")
 
-        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+        from apps.hotels.repository import (
+            create_hotel_booking,
+            create_hotel_booking_calendar_slots,
+            get_room_with_details,
+        )
 
-        try:
-            ci = date.fromisoformat(str(check_in_str))
-            co = date.fromisoformat(str(check_out_str))
-        except ValueError:
-            raise ValidationError({"detail": _("Invalid date format. Use YYYY-MM-DD.")})
-        if co <= ci:
-            raise ValidationError({"detail": _("check_out must be after check_in.")})
-        if not isinstance(guests, int) or guests < 1:
-            raise ValidationError({"detail": _("guests must be a positive integer.")})
+        room = get_room_with_details(room_id)
+        if not room:
+            raise ValidationError({"detail": _("Room not found or inactive.")})
+        if guests > (room.get("capacity") or 0):
+            raise ValidationError({"detail": _("Guest count exceeds room capacity.")})
 
-        from apps.hotels.repository import create_hotel_booking
         booking = create_hotel_booking(
             property_id=hotel_id,
-            room_id=int(room_id),
+            room_id=room_id,
             client_user_id=int(request.user.id),
             check_in=ci,
             check_out=co,
-            guests=int(guests),
+            adults=guests,
+            children=0,
             card_id=str(card_id) if card_id else None,
         )
         if not booking:
-            raise ValidationError(_("Booking could not be created. Check room availability."))
+            raise ValidationError({"detail": _("Booking could not be created. Room is not available for the selected dates.")})
+
+        hold_amount = booking["hold_amount"]
+
+        if card_id:
+            plum_service = PlumAPIService()
+            try:
+                hold = plum_service.create_hold(
+                    client=request.user,
+                    card_id=str(card_id),
+                    amount=hold_amount,
+                )
+            except PlumAPIError as plum_api_error:
+                raise ValidationError({"detail": plum_api_error.message})
+            except Exception:
+                raise ValidationError({"detail": _("Payment service is temporarily unavailable. Please try again later.")})
+
+            hold_result = (hold or {}).get("result") or {}
+            create_hold_transaction(
+                booking_id=int(booking["id"]),
+                client_user_id=int(request.user.id),
+                partner_user_id=None,
+                amount=hold_result.get("totalAmount") or hold_amount,
+                transaction_id=hold_result.get("transactionId"),
+                hold_id=hold_result.get("holdId"),
+                card_id=hold_result.get("cardId") or str(card_id),
+                extra_id=hold_result.get("extraId"),
+            )
+
+        create_hotel_booking_calendar_slots(
+            booking_id=int(booking["id"]),
+            room_id=room_id,
+            check_in=ci,
+            check_out=co,
+        )
+
+        NotificationService.send_to_client(
+            client=SimpleNamespace(id=int(request.user.id)),
+            title="Hotel booking created",
+            message=(
+                f"Your hotel booking {booking['booking_number']} has been created. "
+                f"You have 30 minutes to complete payment; otherwise the booking "
+                f"will be released and the room will become available for others."
+            ),
+            notification_type="system",
+            data={"booking_id": str(booking["id"])},
+        )
+
+        from .tasks import auto_cancel_hotel_booking
+        auto_cancel_hotel_booking.apply_async(
+            kwargs={"booking_id": booking["id"]},
+            countdown=60 * 30,
+        )
 
         return Response(
             {
                 "booking_id": booking["id"],
                 "booking_number": booking["booking_number"],
                 "status": booking["status"],
-                "total_price": str(booking["total_price"]),
+                "total_cost": str(booking["total_cost"]),
                 "hold_amount": str(booking["hold_amount"]),
                 "check_in": str(booking["check_in"]),
                 "check_out": str(booking["check_out"]),
-                "guests": booking["guests"],
+                "adult_count": booking["adult_count"],
+                "child_count": booking["child_count"],
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class ClientHotelBookingListView(APIView):
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [IsClient]
+
+    @swagger_auto_schema(
+        operation_id="listClientHotelBookings",
+        operation_summary="List client hotel bookings",
+        operation_description="Returns all hotel bookings for the authenticated client.",
+        tags=["Hotel / Booking"],
+        manual_parameters=[
+            openapi.Parameter("status", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Filter by status."),
+        ],
+        responses={200: HotelBookingListSerializer(many=True)},
+    )
+    def get(self, request):
+        from apps.hotels.repository import list_client_hotel_bookings
+
+        status_param = request.query_params.get("status")
+        statuses = [status_param] if status_param else None
+
+        bookings = list_client_hotel_bookings(
+            client_user_id=int(request.user.id),
+            statuses=statuses,
+        )
+        serializer = HotelBookingListSerializer(bookings, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ClientHotelBookingDetailView(APIView):
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [IsClient]
+
+    @swagger_auto_schema(
+        operation_id="getClientHotelBookingDetail",
+        operation_summary="Get hotel booking detail",
+        operation_description="Returns detailed information about a specific hotel booking.",
+        tags=["Hotel / Booking"],
+        responses={
+            200: HotelBookingDetailSerializer(),
+            404: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                "detail": openapi.Schema(type=openapi.TYPE_STRING),
+            }),
+        },
+    )
+    def get(self, request, booking_id):
+        from apps.hotels.repository import get_client_hotel_booking
+
+        booking = get_client_hotel_booking(
+            booking_id=int(booking_id),
+            client_user_id=int(request.user.id),
+        )
+        if not booking:
+            raise NotFound({"detail": _("Hotel booking not found.")})
+
+        serializer = HotelBookingDetailSerializer(booking)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ClientHotelBookingCancelView(APIView):
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [IsClient]
+
+    @swagger_auto_schema(
+        operation_id="cancelClientHotelBooking",
+        operation_summary="Cancel a hotel booking",
+        operation_description="Client cancels their hotel booking. Dismisses payment hold and releases calendar slots.",
+        tags=["Hotel / Booking"],
+        responses={
+            200: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                "detail": openapi.Schema(type=openapi.TYPE_STRING),
+            }),
+            400: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                "detail": openapi.Schema(type=openapi.TYPE_STRING),
+            }),
+            404: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                "detail": openapi.Schema(type=openapi.TYPE_STRING),
+            }),
+        },
+    )
+    def post(self, request, booking_id):
+        from apps.hotels.repository import (
+            get_client_hotel_booking,
+            release_hotel_booking_calendar_slots,
+            update_hotel_booking_status,
+        )
+
+        booking = get_client_hotel_booking(
+            booking_id=int(booking_id),
+            client_user_id=int(request.user.id),
+        )
+        if not booking:
+            raise NotFound({"detail": _("Hotel booking not found.")})
+
+        if booking["status"] not in ("pending", "confirmed"):
+            raise ValidationError({"detail": _("Only pending or confirmed bookings can be cancelled.")})
+
+        tx = get_latest_transaction_history_for_booking(int(booking["id"]))
+        if tx and tx.get("transaction_id") and tx.get("hold_id"):
+            plum_service = PlumAPIService()
+            try:
+                plum_service.dismiss_hold(
+                    transaction_id=tx["transaction_id"],
+                    hold_id=tx["hold_id"],
+                )
+            except PlumAPIError as plum_api_error:
+                logger.warning(
+                    "cancel hotel booking: dismiss_hold failed",
+                    extra={
+                        "booking_id": str(booking_id),
+                        "error": plum_api_error.message,
+                        "status_code": plum_api_error.status_code,
+                    },
+                )
+        mark_latest_transaction_dismissed(int(booking["id"]))
+
+        release_hotel_booking_calendar_slots(
+            room_id=int(booking["room_id"]),
+            check_in=booking["check_in"],
+            check_out=booking["check_out"],
+        )
+        update_hotel_booking_status(int(booking["id"]), "cancelled")
+
+        return Response(
+            {"detail": _("Booking cancelled successfully.")},
+            status=status.HTTP_200_OK,
         )
