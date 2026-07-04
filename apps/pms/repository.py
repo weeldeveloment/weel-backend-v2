@@ -766,6 +766,21 @@ def list_bookings(
     )
 
 
+def list_newest_bookings(property_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"""
+        SELECT b.*, r.room_number, g.first_name as guest_first_name, g.last_name as guest_last_name
+        FROM {_t(PMS_BOOKING_TABLE)} b
+        LEFT JOIN {_t(PMS_ROOM_TABLE)} r ON r.id = b.room_id
+        LEFT JOIN {_t(PMS_GUEST_TABLE)} g ON g.id = b.guest_id
+        WHERE b.property_id = %s
+        ORDER BY b.created_at DESC
+        LIMIT %s
+        """,
+        [property_id, limit],
+    )
+
+
 def get_booking(booking_id: int, property_id: int | None = None) -> dict[str, Any] | None:
     if property_id:
         return fetch_one(

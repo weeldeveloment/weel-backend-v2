@@ -422,6 +422,24 @@ def get_platform_user_by_email(email: str) -> dict[str, Any] | None:
     )
 
 
+def get_platform_user_by_phone(phone: str) -> dict[str, Any] | None:
+    candidates = [phone.strip()]
+    raw = phone.strip()
+    if raw.startswith("+"):
+        candidates.append(raw[1:])
+    else:
+        candidates.append(f"+{raw}")
+    placeholders = ",".join(["%s"] * len(candidates))
+    return fetch_one(
+        f"""
+        SELECT * FROM public.{_table(PLATFORM_USER_TABLE)}
+        WHERE phone IN ({placeholders}) AND is_active = TRUE
+        LIMIT 1
+        """,
+        candidates,
+    )
+
+
 def get_platform_user_by_id(user_id: int) -> dict[str, Any] | None:
     return fetch_one(
         f"""

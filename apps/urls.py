@@ -12,4 +12,5 @@ urlpatterns = [
     path("admin-auth/", include(("apps.admin_auth.urls", "admin_auth"), "admin_auth")),
     path("property/", include(("recommendation.urls", "recommendation"), "recommendation")),
     path("payment/", include(("payment.urls", "payment"), "payment")),
+    path("hotel-bot/", include(("hotel_bot.urls", "hotel_bot"), "hotel_bot")),
 ]

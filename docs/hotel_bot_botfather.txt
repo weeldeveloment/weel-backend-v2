@@ -1,0 +1,83 @@
+══════════════════════════════════════════
+  WEEL HOTEL BOT — BOTFATHER SOZLAMALARI
+══════════════════════════════════════════
+
+─────────────────────────────
+1. NAME  (bot nomi)
+─────────────────────────────
+WEEL Hotel Manager
+
+
+─────────────────────────────
+2. USERNAME  (bot username)
+─────────────────────────────
+weelhotelbot
+(yoki bo'sh bo'lsa: weel_hotel_bot)
+
+
+─────────────────────────────
+3. ABOUT  (/setabouttext)
+─────────────────────────────
+WEEL PMS tizimi uchun rasmiy bot. Zayafkalarni kuzating va PMS ilovasini Telegramdan oching.
+
+
+─────────────────────────────
+4. DESCRIPTION  (/setdescription)
+─────────────────────────────
+🏨 WEEL Hotel Manager — mehmonxona egasi va menejerlar uchun qulay yordamchi.
+
+✅ PMS tizimiga ro'yxatdan o'tgan raqam orqali kirish
+📋 Hotelga kelayotgan va mavjud zayafkalarni ko'rish
+🆕 Eng yangi 10 ta zayafkani bir zumda ko'rish
+🔗 PMS ilovasini to'g'ridan-to'g'ri Telegramdan ochish
+
+Botdan foydalanish uchun WEEL PMS tizimida ro'yxatdan o'tgan bo'lishingiz kerak.
+
+
+─────────────────────────────
+5. DESCRIPTION PICTURE  (/setdescriptionpicture)
+─────────────────────────────
+Tavsiya:
+  - O'lcham: 640×360 px (landscape)
+  - Rang sxemasi: WEEL brandiga mos (qora/oq yoki to'q ko'k)
+  - Mazmun: WEEL logotipi + "Hotel Manager" yozuvi + hotel rasmi (lobby yoki bino)
+  - Fayl formati: PNG yoki JPG
+
+Tayyorlash uchun dizaynchiga bering yoki Canva/Figma da yasang.
+
+
+─────────────────────────────
+6. BOT PROFILE PICTURE  (/setuserpic)
+─────────────────────────────
+Tavsiya:
+  - O'lcham: 512×512 px (kvadrat)
+  - Mazmun: WEEL logotipi yoki "W" harfi + kichik hotel/kalit belgisi
+  - Fon: to'q ko'k (#1A2B4A) yoki qora
+  - Fayl formati: PNG (shaffof fon ham bo'ladi)
+
+
+─────────────────────────────
+7. COMMANDS  (/setcommands)
+─────────────────────────────
+(BotFather ga aynan quyidagini ko'chiring-yapishtiiring)
+
+start - Botni ishga tushirish va tizimga kirish
+new - Eng yangi 10 ta zayafkani ko'rish
+
+
+─────────────────────────────
+8. BOTFATHER MENU BUTTON  (webhook o'rnatgandan so'ng avtomatik)
+─────────────────────────────
+Text : PMS ochish
+URL  : https://pms.weel.uz
+
+(Bu tugma setup_hotel_bot_webhook buyrug'i bajarilganda avtomatik o'rnatiladi)
+
+
+─────────────────────────────
+9. WEBHOOK O'RNATISH BUYRUG'I
+─────────────────────────────
+python manage.py setup_hotel_bot_webhook https://api.weel.uz
+
+
+══════════════════════════════════════════

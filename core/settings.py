@@ -155,6 +155,7 @@ LOCAL_APPS: list[str] = [
     "apps.b2b",
     "apps.documents",
     "apps.hotels",
+    "apps.hotel_bot",
 ]
 
 THIRD_PART_APPS = [
@@ -625,6 +626,8 @@ BOOKING_EXTRA_GUEST_FEE_UZS = (os.getenv("BOOKING_EXTRA_GUEST_FEE_UZS") or "1000
 TELEGRAM_BOT_TOKEN_APP = os.getenv("TELEGRAM_BOT_TOKEN_APP")
 BOT_TOKEN = TELEGRAM_BOT_TOKEN_APP
 MINIAPP_URL = os.getenv("MINIAPP_URL", "https://partners.weel.uz/")
+HOTEL_BOT_TOKEN = os.getenv("HOTEL_BOT_TOKEN")
+PMS_MINIAPP_URL = os.getenv("PMS_MINIAPP_URL", "https://pms.weel.uz")
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "https://api.weel.uz")
 FRONTEND_LOG_TOKEN = (os.getenv("FRONTEND_LOG_TOKEN") or "").strip()
 
