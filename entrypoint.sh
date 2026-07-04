@@ -1,8 +1,7 @@
 #!/bin/sh
 set -e
 
-WEBHOOK_BASE="${WEBHOOK_BASE_URL:-${DEV:+https://dev.weel.uz}}"
-WEBHOOK_BASE="${WEBHOOK_BASE:-https://api.weel.uz}"
+WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
 
 # Run webhook setup in background so daphne starts immediately
 # (health checks must pass before webhook setup finishes)

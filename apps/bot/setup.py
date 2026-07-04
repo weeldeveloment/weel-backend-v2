@@ -70,20 +70,18 @@ async def set_webhook(base_url: str):
         write_timeout=15.0,
         pool_timeout=10.0,
     )
-    bot = Bot(token=token, request=request)
-    async with bot:
-        await _call_with_retry(
-            lambda: bot.set_webhook(url=webhook_url, allowed_updates=["message"]),
-            label="set_webhook",
-        )
-        logger.info("Telegram webhook set to %s", webhook_url)
 
-        menu_button = MenuButtonWebApp(
-            text="Ilovani ochish",
-            web_app=WebAppInfo(url=miniapp_url),
-        )
-        await _call_with_retry(
-            lambda: bot.set_chat_menu_button(menu_button=menu_button),
-            label="set_chat_menu_button",
-        )
-        logger.info("Telegram menu button set to open: %s", miniapp_url)
+    async def _do_setup():
+        bot = Bot(token=token, request=request)
+        async with bot:
+            await bot.set_webhook(url=webhook_url, allowed_updates=["message"])
+            logger.info("Telegram webhook set to %s", webhook_url)
+
+            menu_button = MenuButtonWebApp(
+                text="Ilovani ochish",
+                web_app=WebAppInfo(url=miniapp_url),
+            )
+            await bot.set_chat_menu_button(menu_button=menu_button)
+            logger.info("Telegram menu button set to open: %s", miniapp_url)
+
+    await _call_with_retry(_do_setup, label="main_bot.set_webhook")
