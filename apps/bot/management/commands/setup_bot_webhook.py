@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -19,6 +20,11 @@ class Command(BaseCommand):
             default=None,
             help="Override WEBHOOK_BASE_URL (e.g. https://api.weel.uz)",
         )
+        parser.add_argument(
+            "--strict",
+            action="store_true",
+            help="Exit with non-zero status code if webhook setup fails.",
+        )
 
     def handle(self, *args, **options):
         base_url = options["base_url"] or getattr(settings, "WEBHOOK_BASE_URL", "")
@@ -35,5 +41,15 @@ class Command(BaseCommand):
             return
 
         self.stdout.write(f"Setting webhook with base URL: {base_url}")
-        asyncio.run(set_webhook(base_url))
+        try:
+            asyncio.run(set_webhook(base_url))
+        except Exception as exc:
+            logger.exception("Main bot webhook setup failed: %s", exc)
+            self.stderr.write(self.style.WARNING(
+                f"Webhook setup failed: {exc}. Continuing startup."
+            ))
+            if options.get("strict"):
+                sys.exit(1)
+            return
+
         self.stdout.write(self.style.SUCCESS("Webhook registered successfully."))
