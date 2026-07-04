@@ -180,6 +180,7 @@ class HotelAdminListSerializer(HotelListSerializer):
     organization = HotelAdminOrganizationSerializer(read_only=True)
     property_detail = HotelAdminPropertyDetailSerializer(source="*", read_only=True)
     tenant_schema = serializers.CharField(allow_blank=True, allow_null=True)
+    legal_info = serializers.DictField(child=serializers.CharField(allow_blank=True, allow_null=True), read_only=True)
 
     def to_representation(self, instance):
         row = dict(instance)
@@ -212,6 +213,8 @@ class HotelAdminListSerializer(HotelListSerializer):
             "is_quiet_hours": bool(row.get("is_quiet_hours", True)),
             "star_rating": row.get("star_rating"),
         }
+        raw_legal = row.get("legal_info")
+        data["legal_info"] = raw_legal if isinstance(raw_legal, dict) else {}
         return data
 
 
@@ -258,6 +261,11 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
         child=serializers.CharField(),
         required=False,
         allow_empty=True,
+    )
+    legal_info = serializers.DictField(
+        child=serializers.CharField(allow_blank=True, allow_null=True),
+        required=False,
+        allow_null=True,
     )
     property_detail = HotelAdminPropertyDetailSerializer(required=False)
 
@@ -315,6 +323,9 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
             prepared["amenities"] = [str(value).strip() for value in attrs.get("amenities") or [] if str(value).strip()]
         if "img" in attrs:
             prepared["photos"] = [str(value) for value in attrs.get("img") or [] if value]
+        if "legal_info" in attrs and attrs.get("legal_info") is not None:
+            raw_legal = attrs.get("legal_info") or {}
+            prepared["legal_info"] = {k: (str(v) if v is not None else "") for k, v in raw_legal.items()}
 
         if isinstance(property_detail, dict):
             for key in (

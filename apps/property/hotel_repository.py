@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json as _json
 import math
 from collections.abc import Callable
 from datetime import date, datetime, time
@@ -65,6 +66,13 @@ def _serialize_hotel_row(
     payload["rooms"] = None
     payload["beds"] = None
     payload["bathrooms"] = None
+    raw_legal = payload.get("legal_info")
+    if isinstance(raw_legal, str):
+        try:
+            raw_legal = _json.loads(raw_legal)
+        except Exception:
+            raw_legal = {}
+    payload["legal_info"] = raw_legal if isinstance(raw_legal, dict) else {}
     payload["is_allowed_alcohol"] = bool(payload.get("alcohol_allowed", False))
     payload["is_allowed_corporate"] = False
     payload["is_allowed_pets"] = bool(payload.get("pets_allowed", False))
@@ -136,6 +144,7 @@ def _fetch_hotel_rows_for_schema(
                     p.longitude::text AS longitude,
                     p.star_rating,
                     COALESCE(p.amenities, ARRAY[]::text[]) AS amenities,
+                    COALESCE(p.legal_info, '{{}}'::jsonb) AS legal_info,
                     p.check_in_time,
                     p.check_out_time,
                     p.cancellation_policy,
@@ -405,6 +414,7 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     longitude,
                     star_rating,
                     amenities,
+                    legal_info,
                     check_in_time,
                     check_out_time,
                     cancellation_policy,
@@ -421,7 +431,7 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     created_at,
                     updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING id
                 """,
@@ -438,6 +448,7 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     values.get("longitude"),
                     values.get("star_rating"),
                     values.get("amenities") or [],
+                    _json.dumps(values.get("legal_info") or {}),
                     values.get("check_in_time"),
                     values.get("check_out_time"),
                     values.get("cancellation_policy"),
@@ -486,6 +497,7 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         "longitude",
         "star_rating",
         "amenities",
+        "legal_info",
         "check_in_time",
         "check_out_time",
         "cancellation_policy",
@@ -502,7 +514,14 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         "is_recommended",
         "verification_status",
     }
-    filtered_values = {key: value for key, value in values.items() if key in allowed_columns}
+    filtered_values = {}
+    for key, value in values.items():
+        if key not in allowed_columns:
+            continue
+        if key == "legal_info" and isinstance(value, dict):
+            filtered_values[key] = _json.dumps(value)
+        else:
+            filtered_values[key] = value
     filtered_values["organization_id"] = organization["id"]
     if not filtered_values:
         return get_admin_hotel(hotel_guid)
