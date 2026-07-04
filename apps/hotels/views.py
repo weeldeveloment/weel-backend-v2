@@ -15,7 +15,6 @@ from apps.hotels.repository import (
     count_hotels,
     get_available_rooms,
     get_hotel_card,
-    get_hotel_images,
     get_hotel_reviews,
     search_hotels,
 )
@@ -82,10 +81,8 @@ class HotelDetailView(APIView):
         if not hotel:
             return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        images = get_hotel_images(hotel_id)
         reviews = get_hotel_reviews(hotel_id, limit=5)
-
-        hotel["images"] = images
+        hotel["images"] = hotel.get("photos") or []
         hotel["reviews"] = reviews
         return Response(HotelDetailSerializer(hotel).data)
 

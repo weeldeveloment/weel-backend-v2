@@ -1,8 +1,23 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+
 from rest_framework import serializers
+
+
+class LenientDecimalField(serializers.DecimalField):
+    def to_internal_value(self, data):
+        try:
+            value = Decimal(str(data).strip())
+            quantized = value.quantize(
+                Decimal('0.' + '0' * self.decimal_places),
+                rounding=ROUND_HALF_UP,
+            )
+            data = str(quantized)
+        except Exception:
+            self.fail('invalid')
+        return super().to_internal_value(data)
 
 
 class JSONStringField(serializers.Field):
@@ -31,6 +46,7 @@ class PropertyImageSerializer(serializers.Serializer):
 
 class PropertySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
+    guid = serializers.CharField(read_only=True, required=False)
     organization_id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(max_length=200)
     description_uz = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -40,8 +56,8 @@ class PropertySerializer(serializers.Serializer):
     full_address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     country = serializers.CharField(required=False, default="UZ")
-    latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
-    longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    latitude = LenientDecimalField(max_digits=17, decimal_places=14, required=False, allow_null=True)
+    longitude = LenientDecimalField(max_digits=17, decimal_places=14, required=False, allow_null=True)
     star_rating = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=5)
     weel_classification = serializers.ChoiceField(
         choices=["standard", "essential", "comfort", "comfort_plus", "business", "premium", "signature"],
@@ -314,3 +330,79 @@ class ResizeBookingSerializer(serializers.Serializer):
 
 class MealPlanChangeSerializer(serializers.Serializer):
     meal_plan = serializers.ChoiceField(choices=["RO", "BB", "HB", "FB", "AI", "UAI"])
+
+
+class AnalyticsQuerySerializer(serializers.Serializer):
+    date_from = serializers.DateField()
+    date_to = serializers.DateField()
+    metric = serializers.ChoiceField(
+        choices=["check_ins", "revenue", "bookings", "occupancy"],
+        required=False,
+        default="revenue",
+    )
+    category = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    floor = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    search = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, data):
+        if data["date_to"] < data["date_from"]:
+            raise serializers.ValidationError({"date_to": "date_to must be >= date_from."})
+        return data
+
+
+class ChangeSerializer(serializers.Serializer):
+    value = serializers.FloatField()
+    change = serializers.FloatField()
+    change_percent = serializers.FloatField()
+
+
+class ChangeWithCurrencySerializer(serializers.Serializer):
+    value = serializers.FloatField()
+    change = serializers.FloatField()
+    change_percent = serializers.FloatField()
+    currency = serializers.CharField()
+
+
+class KPIResponseSerializer(serializers.Serializer):
+    check_ins = ChangeSerializer()
+    revenue = ChangeWithCurrencySerializer()
+    bookings = ChangeSerializer()
+    occupancy = ChangeSerializer()
+    current_guests = serializers.SerializerMethodField()
+
+    def get_current_guests(self, obj):
+        return {"value": obj.get("current_guests", {}).get("value", 0)}
+
+
+class ChartPointSerializer(serializers.Serializer):
+    date = serializers.CharField()
+    value = serializers.FloatField()
+    previous_value = serializers.FloatField(allow_null=True)
+
+
+class ChartResponseSerializer(serializers.Serializer):
+    points = ChartPointSerializer(many=True)
+    metric = serializers.CharField()
+
+
+class RoomAnalyticsSerializer(serializers.Serializer):
+    room_id = serializers.IntegerField()
+    room_number = serializers.CharField()
+    category = serializers.CharField()
+    occupancy = ChangeSerializer()
+    revenue = ChangeWithCurrencySerializer()
+    adr = ChangeWithCurrencySerializer()
+    revpar = ChangeWithCurrencySerializer()
+
+
+class PeriodResponseSerializer(serializers.Serializer):
+    type = serializers.CharField()
+    date_from = serializers.CharField()
+    date_to = serializers.CharField()
+
+
+class AnalyticsResponseSerializer(serializers.Serializer):
+    kpi = KPIResponseSerializer()
+    chart = ChartResponseSerializer()
+    rooms = RoomAnalyticsSerializer(many=True)
+    period = PeriodResponseSerializer()

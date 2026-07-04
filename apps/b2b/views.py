@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 
+
 from apps.b2b.repository import (
     add_trip_employee,
     create_budget_request,

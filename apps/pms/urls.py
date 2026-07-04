@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AnalyticsView,
     BookingAcceptView,
     BookingCancelView,
     BookingCheckInView,
@@ -81,4 +82,7 @@ urlpatterns = [
     path("properties/<int:property_id>/reviews/", ReviewListCreateView.as_view(), name="pms-review-list-create"),
     path("properties/<int:property_id>/reviews/<int:review_id>/respond/", ReviewRespondView.as_view(), name="pms-review-respond"),
     path("properties/<int:property_id>/reviews/<int:review_id>/complain/", ReviewComplainView.as_view(), name="pms-review-complain"),
+
+    # Analytics
+    path("properties/<int:property_id>/analytics/", AnalyticsView.as_view(), name="pms-analytics"),
 ]

@@ -42,6 +42,8 @@ def _build_media_url(request, media_path: Any) -> list[str]:
         if item.startswith("http://") or item.startswith("https://"):
             urls.append(item)
             continue
+        if item.startswith("blob:"):
+            continue
         try:
             url = default_storage.url(item)
         except Exception:
@@ -82,6 +84,7 @@ def _favorite_guid_set(context: dict[str, Any] | None) -> set[str]:
 
 
 class HotelListSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
     guid = serializers.CharField()
     title = serializers.CharField()
     img = serializers.ListField(child=serializers.CharField(), allow_empty=True)

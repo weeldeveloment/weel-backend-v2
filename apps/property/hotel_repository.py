@@ -106,6 +106,7 @@ def _fetch_hotel_rows_for_schema(
     *,
     hotel_id: int | None = None,
     include_inactive: bool = False,
+    include_unverified: bool = False,
 ) -> list[dict[str, Any]]:
     def _query() -> list[dict[str, Any]]:
         with connection.cursor() as cursor:
@@ -116,6 +117,8 @@ def _fetch_hotel_rows_for_schema(
                 params.append(hotel_id)
             if not include_inactive:
                 where.append("COALESCE(p.is_active, TRUE) = TRUE")
+            if not include_unverified:
+                where.append("COALESCE(p.is_verified, FALSE) = TRUE")
             where_sql = f"WHERE {' AND '.join(where)}" if where else ""
             cursor.execute(
                 f"""
@@ -261,18 +264,24 @@ def list_hotel_organizations() -> list[dict[str, Any]]:
 
 def list_hotels(
     *,
+<<<<<<< HEAD
     search: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
     radius_km: float = 10.0,
     limit: int | None = None,
     testing_only: bool | None = None,
+=======
+    limit: int | None = None,
+    testing_only: bool | None = None,
+    include_unverified: bool = False,
+>>>>>>> baf4a29e561077a9d6661e5e03518e2550b0f296
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
     for organization in list_hotel_organizations():
         try:
-            tenant_rows = _fetch_hotel_rows_for_schema(organization["schema_name"])
+            tenant_rows = _fetch_hotel_rows_for_schema(organization["schema_name"], include_unverified=include_unverified)
         except Exception:
             continue
         rows.extend(
@@ -314,6 +323,7 @@ def list_admin_hotels(
             tenant_rows = _fetch_hotel_rows_for_schema(
                 organization["schema_name"],
                 include_inactive=True,
+                include_unverified=True,
             )
         except Exception:
             continue
@@ -349,7 +359,23 @@ def get_admin_hotel(hotel_guid: str) -> dict[str, Any] | None:
         schema_name,
         hotel_id=hotel_id,
         include_inactive=True,
+        include_unverified=True,
     )
+    if not rows:
+        return None
+    return _serialize_hotel_row(rows[0], organization)
+
+
+def get_hotel_for_public(hotel_guid: str) -> dict[str, Any] | None:
+    """Fetch a single active AND verified hotel by encoded GUID."""
+    decoded = decode_hotel_guid(hotel_guid)
+    if not decoded:
+        return None
+    schema_name, hotel_id = decoded
+    organization = get_organization_by_schema(schema_name)
+    if not organization:
+        return None
+    rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hotel_id)
     if not rows:
         return None
     return _serialize_hotel_row(rows[0], organization)
@@ -358,6 +384,12 @@ def get_admin_hotel(hotel_guid: str) -> dict[str, Any] | None:
 def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str, Any] | None:
     safe_schema = _safe_schema_name(schema_name)
     if not safe_schema:
+        return None
+    organization = get_organization_by_schema(safe_schema)
+    if not organization:
+        return None
+    organization_id = organization.get("id")
+    if not organization_id:
         return None
 
     def _insert() -> dict[str, Any] | None:
@@ -389,15 +421,17 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     photos,
                     is_active,
                     is_testing,
+                    is_verified,
+                    verification_status,
                     created_at,
                     updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING id
                 """,
                 [
-                    values.get("organization_id"),
+                    int(organization_id),
                     values.get("name"),
                     values.get("description_uz"),
                     values.get("description_ru"),
@@ -420,6 +454,8 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     values.get("photos") or [],
                     values.get("is_active", True),
                     values.get("is_testing", False),
+                    values.get("is_verified", False),
+                    values.get("verification_status", "waiting"),
                     now,
                     now,
                 ],
@@ -440,8 +476,10 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
     if not decoded:
         return None
     schema_name, hotel_id = decoded
+    organization = get_organization_by_schema(schema_name)
+    if not organization:
+        return None
     allowed_columns = {
-        "organization_id",
         "name",
         "description_uz",
         "description_ru",
@@ -465,11 +503,15 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         "is_active",
         "is_testing",
         "is_verified",
+<<<<<<< HEAD
         "is_archived",
         "is_recommended",
+=======
+>>>>>>> baf4a29e561077a9d6661e5e03518e2550b0f296
         "verification_status",
     }
     filtered_values = {key: value for key, value in values.items() if key in allowed_columns}
+    filtered_values["organization_id"] = organization["id"]
     if not filtered_values:
         return get_admin_hotel(hotel_guid)
 
@@ -509,12 +551,8 @@ def delete_admin_hotel(*, hotel_guid: str) -> bool:
     def _delete() -> bool:
         with connection.cursor() as cursor:
             cursor.execute(
-                """
-                UPDATE pms_property
-                SET is_active = FALSE, updated_at = %s
-                WHERE id = %s
-                """,
-                [timezone.now(), hotel_id],
+                "DELETE FROM pms_property WHERE id = %s",
+                [hotel_id],
             )
             return cursor.rowcount > 0
 
@@ -540,3 +578,35 @@ def admin_remove_hotel_image(*, hotel_guid: str, image_path: str) -> dict[str, A
     if len(next_images) == len(existing):
         return None
     return update_admin_hotel(hotel_guid=hotel_guid, values={"photos": next_images})
+
+
+def list_hotel_favorites(
+    favorite_guids: set[str],
+) -> list[dict[str, Any]]:
+    """Fetch full hotel rows for a set of encoded hotel GUIDs."""
+    by_schema: dict[str, list[int]] = {}
+    for guid in favorite_guids:
+        decoded = decode_hotel_guid(guid)
+        if not decoded:
+            continue
+        schema_name, hotel_id = decoded
+        by_schema.setdefault(schema_name, []).append(hotel_id)
+
+    results: list[dict[str, Any]] = []
+    org_cache: dict[str, dict[str, Any] | None] = {}
+
+    for schema_name, hotel_ids in by_schema.items():
+        org = org_cache.get(schema_name)
+        if org is None:
+            org = get_organization_by_schema(schema_name)
+            org_cache[schema_name] = org
+        if not org:
+            continue
+        for hid in hotel_ids:
+            try:
+                rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hid)
+                if rows:
+                    results.append(_serialize_hotel_row(rows[0], org))
+            except Exception:
+                continue
+    return results

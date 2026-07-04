@@ -7,6 +7,7 @@ from .views import (
     PmsOrganizationView,
     PmsSendOTPLoginView,
     PmsSendOTPRegisterView,
+    PmsSwitchOrganizationView,
     PmsTokenRefreshView,
     PmsVerifyOTPLoginView,
     PmsVerifyOTPRegisterView,
@@ -22,4 +23,5 @@ urlpatterns = [
     path("organization/", PmsOrganizationView.as_view(), name="pms-organization"),
     path("organization/members/", PmsMembersView.as_view(), name="pms-members"),
     path("organization/members/<int:member_id>/", PmsMemberDetailView.as_view(), name="pms-member-detail"),
+    path("switch-organization/", PmsSwitchOrganizationView.as_view(), name="pms-switch-organization"),
 ]

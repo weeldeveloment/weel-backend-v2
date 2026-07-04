@@ -48,6 +48,8 @@ def _build_media_url(request, media_path: Any) -> list[str]:
         if item.startswith("http://") or item.startswith("https://"):
             urls.append(item)
             continue
+        if item.startswith("blob:"):
+            continue
         try:
             url = default_storage.url(item)
         except Exception:
@@ -169,6 +171,7 @@ def _parse_int_maybe(value: Any) -> int | None:
 
 
 class ApartmentListSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
     guid = serializers.UUIDField()
     title = serializers.CharField()
     img = serializers.ListField(child=serializers.CharField(), allow_empty=True)

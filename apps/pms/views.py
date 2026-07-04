@@ -17,6 +17,8 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
 from apps.platform.authentication import PmsJWTAuthentication
+from apps.platform.raw_repository import get_organization_by_id, get_organization_member
+from apps.shared.permissions import HasOrganization
 
 from apps.pms.repository import (
     accept_booking,
@@ -42,6 +44,7 @@ from apps.pms.repository import (
     delete_room_type,
     expire_holds,
     find_or_create_guest,
+    get_analytics,
     get_booking,
     get_booking_history,
     get_effective_rate,
@@ -75,6 +78,8 @@ from apps.pms.repository import (
     update_room_type,
 )
 from apps.pms.serializers import (
+    AnalyticsQuerySerializer,
+    AnalyticsResponseSerializer,
     BookingHistorySerializer,
     BookingSerializer,
     CalendarSlotSerializer,
@@ -101,7 +106,7 @@ logger = logging.getLogger(__name__)
 
 class PMSBaseView(APIView):
     authentication_classes = [PmsJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasOrganization]
 
 
 def _get_user_id(request) -> int | None:
@@ -113,22 +118,36 @@ def _get_user_id(request) -> int | None:
 
 def _require_org(request):
     org = getattr(request, "organization", None)
+    org_id = None
     if org:
         if isinstance(org, dict):
-            return org.get("id")
-        return org
+            org_id = org.get("id")
+        else:
+            org_id = org
 
     user = getattr(request, "user", None)
-    if isinstance(user, dict):
-        org_id = user.get("organization_id")
-        if org_id:
-            return org_id
+    if org_id is None:
+        if isinstance(user, dict):
+            org_id = user.get("organization_id")
+        else:
+            org_id = getattr(user, "organization_id", None)
 
-    org_id = getattr(user, "organization_id", None)
-    if org_id:
-        return org_id
+    user_id = _get_user_id(request)
+    try:
+        parsed_org_id = int(org_id) if org_id is not None else None
+    except (TypeError, ValueError):
+        return None
 
-    return getattr(request, "META", {}).get("HTTP_X_ORGANIZATION_ID")
+    if not parsed_org_id or not user_id:
+        return None
+
+    if not get_organization_by_id(parsed_org_id):
+        return None
+
+    if not get_organization_member(parsed_org_id, int(user_id)):
+        return None
+
+    return parsed_org_id
 
 
 class PropertyListCreateView(PMSBaseView):
@@ -808,3 +827,41 @@ class ReviewComplainView(PMSBaseView):
         if not review:
             return Response({"detail": "Review not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(ReviewSerializer(review).data)
+
+
+class AnalyticsView(PMSBaseView):
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter("date_from", openapi.IN_QUERY, description="Start date", type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("date_to", openapi.IN_QUERY, description="End date", type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("metric", openapi.IN_QUERY, description="Chart metric", type=openapi.TYPE_STRING, enum=["check_ins", "revenue", "bookings", "occupancy"]),
+            openapi.Parameter("category", openapi.IN_QUERY, description="Room category filter", type=openapi.TYPE_STRING),
+            openapi.Parameter("floor", openapi.IN_QUERY, description="Floor filter", type=openapi.TYPE_STRING),
+            openapi.Parameter("search", openapi.IN_QUERY, description="Room number search", type=openapi.TYPE_STRING),
+        ],
+        responses={200: AnalyticsResponseSerializer()},
+    )
+    def get(self, request, property_id):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        prop = get_property(property_id, organization_id=int(org_id))
+        if not prop:
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AnalyticsQuerySerializer(data=request.query_params)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = get_analytics(
+            property_id=property_id,
+            date_from=serializer.validated_data["date_from"],
+            date_to=serializer.validated_data["date_to"],
+            metric=serializer.validated_data.get("metric", "revenue"),
+            category=serializer.validated_data.get("category"),
+            floor=serializer.validated_data.get("floor"),
+            search=serializer.validated_data.get("search"),
+        )
+
+        return Response(AnalyticsResponseSerializer(data).data)

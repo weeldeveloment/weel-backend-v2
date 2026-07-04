@@ -1,11 +1,11 @@
-# Fallback: agar Dokploy Nixpacks’ni ishlatmasa yoki siz build’ni Dockerfile orqali qilmoqchi bo‘lsangiz.
-# Dokploy’da Build Type ni "Dockerfile" qilib qo‘ying.
-
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    POETRY_VERSION=2.1.0 \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_CREATE=false
 
 WORKDIR /app
 
@@ -16,8 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install "poetry==$POETRY_VERSION"
+
+COPY pyproject.toml ./
+RUN poetry install --only main --no-root --no-ansi
 
 COPY . .
 

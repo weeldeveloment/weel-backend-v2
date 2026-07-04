@@ -45,6 +45,9 @@ from .views import (
     CategoryPropertyRecommendationView,
     CategoryLatestPropertyListView,
     PropertyListCreateView,
+    HotelPropertyDetailView,
+    HotelPropertyReviewListCreateView,
+    HotelPropertyFavoriteToggleView,
 )
 
 
@@ -119,6 +122,16 @@ urlpatterns = [
         name="hotel-property-list",
     ),
     path(
+        "hotels/<path:hotel_guid>/reviews/",
+        HotelPropertyReviewListCreateView.as_view(),
+        name="hotel-property-review-list-create",
+    ),
+    path(
+        "hotels/<path:hotel_guid>/",
+        HotelPropertyDetailView.as_view(),
+        name="hotel-property-detail",
+    ),
+    path(
         "cottages/<uuid:property_id>/",
         CottagePropertyRetrieveUpdateDestroyView.as_view(),
         name="cottage-property-retrieve-update-destroy",
@@ -127,6 +140,11 @@ urlpatterns = [
         "<uuid:property_id>/favorite/",
         PropertyFavoriteToggleView.as_view(),
         name="property-favorite-toggle",
+    ),
+    path(
+        "<path:hotel_guid>/favorite/",
+        HotelPropertyFavoriteToggleView.as_view(),
+        name="hotel-property-favorite-toggle",
     ),
     path(
         "cottages/<uuid:property_id>/images/",
@@ -203,6 +221,16 @@ urlpatterns = [
         AdminHotelListCreateView.as_view(),
         name="admin-hotel-create",
     ),
+    re_path(
+        r"^admin/hotels/(?P<property_id>.+?)/images/(?P<image_id>.+)/$",
+        AdminHotelImageDeleteView.as_view(),
+        name="admin-hotel-image-delete",
+    ),
+    path(
+        "admin/hotels/<path:property_id>/images/",
+        AdminHotelImageCreateView.as_view(),
+        name="admin-hotel-image-create",
+    ),
     path(
         "admin/hotels/<path:hotel_id>/",
         AdminHotelPatchView.as_view(),
@@ -227,16 +255,6 @@ urlpatterns = [
         "admin/apartments/<uuid:property_id>/images/<path:image_id>/",
         AdminPropertyImageDeleteView.as_view(),
         name="admin-apartment-image-delete",
-    ),
-    path(
-        "admin/hotels/<path:property_id>/images/",
-        AdminHotelImageCreateView.as_view(),
-        name="admin-hotel-image-create",
-    ),
-    path(
-        "admin/hotels/<path:property_id>/images/<path:image_id>/",
-        AdminHotelImageDeleteView.as_view(),
-        name="admin-hotel-image-delete",
     ),
     path(
         "admin/regions/",

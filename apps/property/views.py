@@ -109,9 +109,12 @@ from .hotel_repository import (
     admin_append_hotel_images,
     admin_remove_hotel_image,
     create_admin_hotel,
+    decode_hotel_guid,
     delete_admin_hotel,
     get_admin_hotel,
+    get_hotel_for_public,
     list_admin_hotels,
+    list_hotel_favorites,
     list_hotel_organizations,
     list_hotels,
     update_admin_hotel,
@@ -1567,8 +1570,10 @@ class UnifiedRecommendationsListView(APIView):
                 "property",
                 "apartment",
                 "cottage",
+                "hotel",
                 "apartments",
                 "cottages",
+                "hotels",
             }:
                 return []
             source_params = request.query_params.copy()
@@ -1644,6 +1649,14 @@ class UnifiedRecommendationsListView(APIView):
                 existing = {str(item.get("guid") or "") for item in result}
                 result = [g for g in guaranteed if str(g.get("guid", "")) not in existing] + result
                 return result
+
+            if property_type in {"hotel", "hotels"}:
+                rows = _list_hotel_rows(
+                    source_params,
+                    default_limit=15,
+                    testing_only=testing_only,
+                )
+                return HotelListSerializer(rows, many=True, context=ctx).data
 
             apt_rows = _list_apartment_rows(
                 source_params,
@@ -1903,6 +1916,188 @@ class HotelPropertyListView(APIView):
             serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
             return paginator.get_paginated_response(serializer.data)
         return Response(HotelListSerializer(rows, many=True, context=ctx).data)
+
+
+# ---------------------------------------------------------------------------
+# Hotel detail, reviews, favorites — encoded-GUID endpoints
+# ---------------------------------------------------------------------------
+
+
+class HotelPropertyDetailView(APIView):
+    authentication_classes = [OptionalClientOrPartnerJWTAuthentication]
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_id="retrieveHotelProperty",
+        operation_summary="Retrieve a hotel property detail",
+        operation_description="Returns full hotel detail including images, amenities, and recent reviews. Accepts encoded hotel GUID (e.g. `tenant_schema:id`).",
+        tags=["Property / Public"],
+        manual_parameters=[
+            openapi.Parameter(
+                "hotel_guid", openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                description="Encoded hotel GUID (schema_name:id).",
+            ),
+        ],
+        responses={200: HotelListSerializer(), 404: _ERROR_DETAIL_SCHEMA},
+    )
+    def get(self, request, hotel_guid):
+        row = get_hotel_for_public(str(hotel_guid))
+        if not row:
+            raise NotFound(_("Hotel not found"))
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        return Response(HotelListSerializer(row, context=ctx).data)
+
+
+class HotelPropertyReviewListCreateView(APIView):
+    authentication_classes = [ClientJWTAuthentication]
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsClient()]
+        return [AllowAny()]
+
+    @swagger_auto_schema(
+        operation_id="listHotelReviews",
+        operation_summary="List hotel reviews",
+        operation_description="Returns public reviews for a hotel by encoded GUID.",
+        tags=["Property / Reviews"],
+        manual_parameters=[
+            openapi.Parameter(
+                "hotel_guid", openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                description="Encoded hotel GUID.",
+            ),
+        ],
+        responses={200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
+    )
+    def get(self, request, hotel_guid):
+        decoded = decode_hotel_guid(str(hotel_guid))
+        if not decoded:
+            raise NotFound(_("Hotel not found"))
+        _schema, hotel_id = decoded
+        from apps.hotels.repository import get_hotel_reviews
+        reviews = get_hotel_reviews(hotel_id)
+        return Response(reviews, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        operation_id="createHotelReview",
+        operation_summary="Create a hotel review",
+        operation_description="Client-only. Creates a review for a hotel after an eligible completed booking.",
+        tags=["Property / Reviews"],
+        manual_parameters=[
+            openapi.Parameter(
+                "hotel_guid", openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                description="Encoded hotel GUID.",
+            ),
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "rating": openapi.Schema(type=openapi.TYPE_INTEGER),
+                "comment": openapi.Schema(type=openapi.TYPE_STRING),
+            },
+        ),
+        responses={201: openapi.Schema(type=openapi.TYPE_OBJECT), 400: _ERROR_VALIDATION_SCHEMA},
+    )
+    def post(self, request, hotel_guid):
+        decoded = decode_hotel_guid(str(hotel_guid))
+        if not decoded:
+            raise NotFound(_("Hotel not found"))
+        schema_name, hotel_id = decoded
+
+        rating = request.data.get("rating")
+        comment = request.data.get("comment", "")
+        if not rating or not isinstance(rating, int) or rating < 1 or rating > 5:
+            raise ValidationError({"rating": _("Rating must be an integer between 1 and 5.")})
+
+        from apps.hotels.repository import create_hotel_review
+        from apps.hotels.repository import has_eligible_hotel_booking_for_review
+
+        can_review = has_eligible_hotel_booking_for_review(
+            client_user_id=int(request.user.id),
+            property_id=hotel_id,
+        )
+        if not can_review:
+            raise ValidationError(
+                _("You can leave a review only for accepted or completed hotel bookings")
+            )
+
+        created = create_hotel_review(
+            property_id=hotel_id,
+            client_user_id=int(request.user.id),
+            guest_name=str(request.user),
+            rating=rating,
+            text=comment,
+        )
+        if not created:
+            raise ValidationError(_("Review could not be created"))
+        return Response(created, status=status.HTTP_201_CREATED)
+
+
+class HotelPropertyFavoriteToggleView(APIView):
+    authentication_classes = [ClientJWTAuthentication]
+    permission_classes = [IsClient]
+
+    @swagger_auto_schema(
+        operation_id="toggleHotelFavorite",
+        operation_summary="Toggle hotel favorite",
+        operation_description="Client-only. Adds/removes a hotel from favorites by encoded GUID.",
+        tags=["Property / Client"],
+        manual_parameters=[
+            openapi.Parameter(
+                "hotel_guid", openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                description="Encoded hotel GUID.",
+            ),
+        ],
+        responses={
+            200: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                "is_favorite": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+            }),
+            201: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                "is_favorite": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+            }),
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def post(self, request, hotel_guid):
+        row = get_hotel_for_public(str(hotel_guid))
+        if not row:
+            raise NotFound(_("Hotel not found"))
+        favorite_guids = _load_favorite_guids(int(request.user.id))
+        guid = str(row["guid"])
+        if guid in favorite_guids:
+            favorite_guids.remove(guid)
+            _store_favorite_guids(int(request.user.id), favorite_guids)
+            return Response(
+                {"detail": _("Removed from favorites"), "is_favorite": False},
+                status=status.HTTP_200_OK,
+            )
+        favorite_guids.add(guid)
+        _store_favorite_guids(int(request.user.id), favorite_guids)
+        return Response(
+            {"detail": _("Added to favorites"), "is_favorite": True},
+            status=status.HTTP_201_CREATED,
+        )
+
+    def delete(self, request, hotel_guid):
+        row = get_hotel_for_public(str(hotel_guid))
+        if not row:
+            raise NotFound(_("Hotel not found"))
+        favorite_guids = _load_favorite_guids(int(request.user.id))
+        favorite_guids.discard(str(row["guid"]))
+        _store_favorite_guids(int(request.user.id), favorite_guids)
+        return Response(
+            {"detail": _("Removed from favorites"), "is_favorite": False},
+            status=status.HTTP_200_OK,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -4307,9 +4502,11 @@ class SavedPropertyListView(APIView):
             for r in _list_cottage_rows(request.query_params, public_only=True)
             if str(r.get("guid")) in favorite_guids
         ]
+        hotel_rows = list_hotel_favorites(favorite_guids)
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
             + CottageListSerializer(cot_rows, many=True, context=ctx).data
+            + HotelListSerializer(hotel_rows, many=True, context=ctx).data
         )
         return Response(data, status=status.HTTP_200_OK)
 

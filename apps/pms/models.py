@@ -161,6 +161,8 @@ class Property(HardDeleteBaseModel):
     photos: list = field(default_factory=list)
     is_active: bool = True
     is_testing: bool = False
+    is_verified: bool = False
+    verification_status: str = "waiting"
     _meta = SimpleNamespace(db_table="pms_property")
 
 

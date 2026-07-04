@@ -2,7 +2,9 @@
 .env.*
 .git
 .gitignore
+.gitattributes
 .github
+.pytest_cache
 __pycache__
 *.pyc
 *.pyo
@@ -18,3 +20,10 @@ monitoring/
 postman/
 postman_tests/
 .cursor/
+backups/
+docs/
+ngrok.yml
+Makefile
+*.swp
+*.swo
+*~
