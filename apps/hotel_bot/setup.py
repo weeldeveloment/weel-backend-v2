@@ -38,7 +38,9 @@ async def set_webhook(base_url: str) -> None:
     webhook_url = f"{base_url.rstrip('/')}/api/hotel-bot/webhook/{secret}/"
     pms_url = getattr(settings, "PMS_MINIAPP_URL", "https://pms.weel.uz")
 
-    bot = Bot(token=token)
+    from telegram.request import HTTPXRequest
+    request = HTTPXRequest(connect_timeout=8.0, read_timeout=10.0)
+    bot = Bot(token=token, request=request)
     async with bot:
         await bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
         logger.info("Hotel bot webhook set to %s", webhook_url)
