@@ -192,7 +192,36 @@ class ApartmentPagination(_OptionalLimitPagePagination):
 
 
 PROPERTY_LIST_QUERY_PARAMS = [
-    openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+    openapi.Parameter(
+        "search",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_STRING,
+        description=(
+            "Fuzzy text search using pg_trgm trigrams. "
+            "Matches against property title and city — tolerates typos and partial words."
+        ),
+    ),
+    openapi.Parameter(
+        "lat",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_NUMBER,
+        format="float",
+        description="Latitude for geographic radius search. Requires `lon` to be set.",
+    ),
+    openapi.Parameter(
+        "lon",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_NUMBER,
+        format="float",
+        description="Longitude for geographic radius search. Requires `lat` to be set.",
+    ),
+    openapi.Parameter(
+        "radius",
+        openapi.IN_QUERY,
+        type=openapi.TYPE_NUMBER,
+        format="float",
+        description="Search radius in kilometres. Default: 10. Only used when `lat` and `lon` are provided.",
+    ),
     openapi.Parameter(
         "location_id",
         openapi.IN_QUERY,
@@ -701,6 +730,15 @@ def _parse_decimal(value) -> Decimal | None:
         return None
 
 
+def _parse_float(value) -> float | None:
+    if value in (None, "", "null", "None", "undefined"):
+        return None
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _preferred_language(request) -> str:
     raw = (request.headers.get("Accept-Language") or "").lower()
     if raw.startswith("ru"):
@@ -994,6 +1032,10 @@ def _extract_list_params(source):
                     if district_id is None:
                         prefecture_id = resolve_prefecture_id_by_guid(raw)
 
+    lat = _parse_float(_source_get(source, "lat"))
+    lon = _parse_float(_source_get(source, "lon"))
+    radius_km = _parse_float(_source_get(source, "radius")) or 10.0
+
     return {
         "search": _source_get(source, "search"),
         "region_id": region_id,
@@ -1002,6 +1044,9 @@ def _extract_list_params(source):
         "corporate": corporate_filter,
         "min_price": _parse_decimal(_source_get(source, "min_price")),
         "max_price": _parse_decimal(_source_get(source, "max_price")),
+        "lat": lat,
+        "lon": lon,
+        "radius_km": radius_km,
         "limit": limit,
     }
 
@@ -1097,8 +1142,15 @@ def _list_hotel_rows(
         source, default_ordering="-created_at", default_limit=default_limit
     )
     limit = pp.pop("limit", None)
-    rows = list_hotels(limit=limit, testing_only=testing_only)
-    return rows
+    lp = _extract_list_params(source)
+    rows = list_hotels(
+        search=lp.get("search"),
+        lat=lp.get("lat"),
+        lon=lp.get("lon"),
+        radius_km=lp.get("radius_km") or 10.0,
+        testing_only=testing_only,
+    )
+    return prepare_property_rows(rows, limit=limit, **pp)
 
 
 def _serialize_partner_user(user) -> dict | None:
@@ -2072,7 +2124,10 @@ class RegionPropertyListView(APIView):
         },
     )
     def get(self, request, *args, **kwargs):
-        region_id = _parse_int(self.kwargs.get("region_id"))
+        region_id_raw = self.kwargs.get("region_id")
+        region_id = _parse_int(region_id_raw)
+        if region_id is None and region_id_raw:
+            region_id = resolve_region_id_by_guid(str(region_id_raw))
         if region_id is None:
             return Response([], status=status.HTTP_200_OK)
         testing_only = _is_testing_mode_request(request)

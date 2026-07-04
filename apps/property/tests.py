@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from unittest.mock import patch
 from uuid import uuid4
@@ -11,7 +11,14 @@ from django.utils import timezone
 
 from rest_framework.test import APIRequestFactory
 
-from property.apartment_repository import APARTMENT_TYPE_GUID, COTTAGE_TYPE_GUID, list_property_types, parse_property_kind
+from property.apartment_repository import (
+    APARTMENT_TYPE_GUID,
+    COTTAGE_TYPE_GUID,
+    list_property_types,
+    parse_property_kind,
+    _sort_rows,
+    prepare_property_rows,
+)
 from property.apartment_serializers import ApartmentAdminUpdateSerializer, ApartmentCreateSerializer, ApartmentListSerializer, ApartmentDetailSerializer, _parse_int_maybe
 from property.cottage_serializers import CottageCreateSerializer, CottageListSerializer, CottageDetailSerializer
 from property.cottage_serializers import CottageAdminUpdateSerializer
@@ -84,8 +91,15 @@ class ApartmentSerializerTests(SimpleTestCase):
             "city": "Tashkent",
             "region_id": 1,
             "district_id": 2,
+            "prefecture_id": None,
             "average_rating": 4.7,
             "created_at": timezone.now(),
+            "services": [],
+            "guests": None,
+            "rooms": None,
+            "beds": None,
+            "bathrooms": None,
+            "is_allowed_corporate": False,
         }
         request = APIRequestFactory().get("/api/property/apartments/")
         serializer = ApartmentListSerializer(row, context={"request": request, "favorite_guids": [str(guid)]})
@@ -103,7 +117,7 @@ class ApartmentSerializerTests(SimpleTestCase):
         self.assertNotIn("district", data)
         self.assertEqual(data["latitude"], "41.3")
         self.assertEqual(data["longitude"], "69.2")
-        self.assertNotIn("property_location", data)
+        self.assertIn("property_location", data)
         self.assertEqual(data["img"], ["http://testserver/media/test.jpg"])
 
 
@@ -127,8 +141,17 @@ class CottageSerializerTests(SimpleTestCase):
             "city": "Tashkent",
             "region_id": None,
             "district_id": None,
+            "prefecture_id": None,
             "average_rating": 5.0,
             "created_at": timezone.now(),
+            "services": [],
+            "guests": None,
+            "rooms": None,
+            "beds": None,
+            "bathrooms": None,
+            "comment_count": 0,
+            "review_count": 0,
+            "is_allowed_corporate": False,
         }
         request = APIRequestFactory().get("/api/property/cottages/")
         serializer = CottageListSerializer(row, context={"request": request, "favorite_guids": []})
@@ -137,7 +160,7 @@ class CottageSerializerTests(SimpleTestCase):
         self.assertEqual(str(data["price_per_person"]), "60000.00")
         self.assertEqual(str(data["price_on_working_days"]), "120000.00")
         self.assertEqual(str(data["price_on_weekends"]), "180000.00")
-        self.assertNotIn("price", data)
+        self.assertEqual(data["price"], [])
 
 
 class DetailSerializerTests(SimpleTestCase):
@@ -471,6 +494,8 @@ class AdminSerializerTestingFlagTests(SimpleTestCase):
 
 
 class PublicTestingModeViewTests(SimpleTestCase):
+    databases = ["default"]
+
     def setUp(self):
         self.factory = APIRequestFactory()
 
@@ -503,8 +528,10 @@ class PublicTestingModeViewTests(SimpleTestCase):
         self.assertFalse(mock_list_rows.call_args.kwargs["testing_only"])
 
     @patch("property.views._track_client_search")
+    @patch("property.views._list_hotel_rows", return_value=[])
     def test_hotel_public_list_passes_testing_only_true(
         self,
+        _mock_hotel_rows,
         _mock_track,
     ):
         request = self.factory.get("/api/property/hotels/?page=2&limit=10", HTTP_X_TESTING_MODE="true")
@@ -580,8 +607,10 @@ class PublicTestingModeViewTests(SimpleTestCase):
         self.assertIsNone(mock_list_rows.call_args.kwargs["default_limit"])
 
     @patch("property.views._favorite_guids_from_request", return_value=set())
+    @patch("property.views._list_hotel_rows", return_value=[])
     def test_properties_endpoint_returns_empty_for_single_kind_hotels(
         self,
+        _mock_hotel_rows,
         _mock_favorites,
     ):
         request = self.factory.get(
@@ -628,8 +657,10 @@ class PublicTestingModeViewTests(SimpleTestCase):
     @patch("property.views._favorite_guids_from_request", return_value=set())
     @patch("property.views._list_cottage_rows", return_value=[])
     @patch("property.views._list_apartment_rows", return_value=[])
+    @patch("property.views.resolve_region_id_by_guid", return_value=7)
     def test_region_public_list_passes_testing_only_true(
         self,
+        _mock_resolve,
         mock_apartments,
         mock_cottages,
         _mock_favorites,
@@ -744,3 +775,288 @@ class AdminDeleteCottageTests(SimpleTestCase):
         self.assertTrue(any("delete from" in sql and "booking" in sql for sql in sqls))
         self.assertTrue(any("delete from" in sql and "calendar" in sql for sql in sqls))
         self.assertTrue(any("delete from" in sql and "cottage" in sql for sql in sqls))
+
+
+def _make_row(**kwargs):
+    """Return a minimal property row dict for sort testing."""
+    base = {
+        "id": 1,
+        "guid": uuid4(),
+        "title": "Test",
+        "property_kind": "apartment",
+        "currency": "UZS",
+        "price": Decimal("100000"),
+        "average_rating": Decimal("5.0"),
+        "review_count": 0,
+        "comment_count": 0,
+        "is_allowed_corporate": False,
+        "created_at": timezone.now(),
+    }
+    base.update(kwargs)
+    return base
+
+
+class SortRowsTests(SimpleTestCase):
+    """Unit tests for _sort_rows — all sort parameter values."""
+
+    def _rows_by_price(self):
+        return [
+            _make_row(id=1, order_price_uzs=Decimal("300000")),
+            _make_row(id=2, order_price_uzs=Decimal("100000")),
+            _make_row(id=3, order_price_uzs=Decimal("200000")),
+        ]
+
+    def test_price_high_sorts_descending(self):
+        rows = self._rows_by_price()
+        result = _sort_rows(rows, sort="price_high")
+        self.assertEqual([r["id"] for r in result], [1, 3, 2])
+
+    def test_price_low_sorts_ascending(self):
+        rows = self._rows_by_price()
+        result = _sort_rows(rows, sort="price_low")
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    def test_rating_high_sorts_descending(self):
+        rows = [
+            _make_row(id=1, average_rating=Decimal("3.0")),
+            _make_row(id=2, average_rating=Decimal("5.0")),
+            _make_row(id=3, average_rating=Decimal("4.0")),
+        ]
+        result = _sort_rows(rows, sort="rating_high")
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    def test_rating_low_sorts_ascending(self):
+        rows = [
+            _make_row(id=1, average_rating=Decimal("3.0")),
+            _make_row(id=2, average_rating=Decimal("5.0")),
+            _make_row(id=3, average_rating=Decimal("4.0")),
+        ]
+        result = _sort_rows(rows, sort="rating_low")
+        self.assertEqual([r["id"] for r in result], [1, 3, 2])
+
+    def test_reviews_high_sorts_by_review_count_descending(self):
+        rows = [
+            _make_row(id=1, review_count=5),
+            _make_row(id=2, review_count=20),
+            _make_row(id=3, review_count=10),
+        ]
+        result = _sort_rows(rows, sort="reviews_high")
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    def test_reviews_low_sorts_by_review_count_ascending(self):
+        rows = [
+            _make_row(id=1, review_count=5),
+            _make_row(id=2, review_count=20),
+            _make_row(id=3, review_count=10),
+        ]
+        result = _sort_rows(rows, sort="reviews_low")
+        self.assertEqual([r["id"] for r in result], [1, 3, 2])
+
+    def test_title_asc_sorts_alphabetically(self):
+        rows = [
+            _make_row(id=1, title="Zebra"),
+            _make_row(id=2, title="Apple"),
+            _make_row(id=3, title="Mango"),
+        ]
+        result = _sort_rows(rows, sort="title_asc")
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    def test_title_desc_sorts_reverse_alphabetically(self):
+        rows = [
+            _make_row(id=1, title="Zebra"),
+            _make_row(id=2, title="Apple"),
+            _make_row(id=3, title="Mango"),
+        ]
+        result = _sort_rows(rows, sort="title_desc")
+        self.assertEqual([r["id"] for r in result], [1, 3, 2])
+
+    def test_title_sort_is_case_insensitive(self):
+        rows = [
+            _make_row(id=1, title="zebra"),
+            _make_row(id=2, title="Apple"),
+        ]
+        result = _sort_rows(rows, sort="title_asc")
+        self.assertEqual([r["id"] for r in result], [2, 1])
+
+    def test_corporate_yes_puts_allowed_first(self):
+        rows = [
+            _make_row(id=1, is_allowed_corporate=False),
+            _make_row(id=2, is_allowed_corporate=True),
+            _make_row(id=3, is_allowed_corporate=False),
+        ]
+        result = _sort_rows(rows, sort="corporate_yes")
+        self.assertEqual(result[0]["id"], 2)
+
+    def test_corporate_no_puts_not_allowed_first(self):
+        rows = [
+            _make_row(id=1, is_allowed_corporate=True),
+            _make_row(id=2, is_allowed_corporate=False),
+            _make_row(id=3, is_allowed_corporate=True),
+        ]
+        result = _sort_rows(rows, sort="corporate_no")
+        self.assertEqual(result[0]["id"], 2)
+
+    def test_unknown_sort_falls_back_to_ordering(self):
+        now = timezone.now()
+        import datetime as dt
+        rows = [
+            _make_row(id=1, created_at=now - dt.timedelta(days=2)),
+            _make_row(id=2, created_at=now),
+            _make_row(id=3, created_at=now - dt.timedelta(days=1)),
+        ]
+        result = _sort_rows(rows, sort="nonexistent", ordering="-created_at")
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    def test_no_sort_default_ordering_descending_by_created_at(self):
+        import datetime as dt
+        now = timezone.now()
+        rows = [
+            _make_row(id=1, created_at=now - dt.timedelta(days=2)),
+            _make_row(id=2, created_at=now),
+            _make_row(id=3, created_at=now - dt.timedelta(days=1)),
+        ]
+        result = _sort_rows(rows)
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    def test_ordering_created_at_ascending(self):
+        import datetime as dt
+        now = timezone.now()
+        rows = [
+            _make_row(id=1, created_at=now - dt.timedelta(days=2)),
+            _make_row(id=2, created_at=now),
+            _make_row(id=3, created_at=now - dt.timedelta(days=1)),
+        ]
+        result = _sort_rows(rows, ordering="created_at")
+        self.assertEqual([r["id"] for r in result], [1, 3, 2])
+
+    def test_price_high_with_equal_prices_uses_id_as_tiebreaker(self):
+        rows = [
+            _make_row(id=3, order_price_uzs=Decimal("100000")),
+            _make_row(id=1, order_price_uzs=Decimal("100000")),
+            _make_row(id=2, order_price_uzs=Decimal("100000")),
+        ]
+        result = _sort_rows(rows, sort="price_high")
+        self.assertEqual([r["id"] for r in result], [3, 2, 1])
+
+    def test_review_count_none_treated_as_zero(self):
+        rows = [
+            _make_row(id=1, review_count=None),
+            _make_row(id=2, review_count=5),
+        ]
+        result = _sort_rows(rows, sort="reviews_high")
+        self.assertEqual(result[0]["id"], 2)
+
+    def test_empty_rows_returns_empty(self):
+        self.assertEqual(_sort_rows([], sort="price_high"), [])
+        self.assertEqual(_sort_rows([], sort="title_asc"), [])
+        self.assertEqual(_sort_rows([]), [])
+
+
+class PreparePropertyRowsSortTests(SimpleTestCase):
+    """Integration tests for prepare_property_rows with sort param."""
+
+    def _make_apartment_row(self, **kwargs):
+        base = {
+            "id": 1,
+            "guid": uuid4(),
+            "title": "Test",
+            "property_kind": "apartment",
+            "currency": "UZS",
+            "price": Decimal("100000"),
+            "average_rating": Decimal("5.0"),
+            "review_count": 0,
+            "comment_count": 0,
+            "is_allowed_corporate": False,
+            "created_at": timezone.now(),
+        }
+        base.update(kwargs)
+        return base
+
+    @patch("property.apartment_repository._exchange_rate_safe", return_value=Decimal("12500"))
+    def test_prepare_rows_price_high_sort(self, _mock_rate):
+        ref_date = date(2026, 7, 4)
+        rows = [
+            self._make_apartment_row(id=1, price=Decimal("300000")),
+            self._make_apartment_row(id=2, price=Decimal("100000")),
+            self._make_apartment_row(id=3, price=Decimal("200000")),
+        ]
+        result = prepare_property_rows(rows, reference_date=ref_date, sort="price_high")
+        self.assertEqual([r["id"] for r in result], [1, 3, 2])
+
+    @patch("property.apartment_repository._exchange_rate_safe", return_value=Decimal("12500"))
+    def test_prepare_rows_price_low_sort(self, _mock_rate):
+        ref_date = date(2026, 7, 4)
+        rows = [
+            self._make_apartment_row(id=1, price=Decimal("300000")),
+            self._make_apartment_row(id=2, price=Decimal("100000")),
+            self._make_apartment_row(id=3, price=Decimal("200000")),
+        ]
+        result = prepare_property_rows(rows, reference_date=ref_date, sort="price_low")
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    @patch("property.apartment_repository._exchange_rate_safe", return_value=Decimal("12500"))
+    def test_prepare_rows_filters_by_min_max_price_before_sorting(self, _mock_rate):
+        ref_date = date(2026, 7, 4)
+        rows = [
+            self._make_apartment_row(id=1, price=Decimal("50000")),
+            self._make_apartment_row(id=2, price=Decimal("200000")),
+            self._make_apartment_row(id=3, price=Decimal("500000")),
+        ]
+        result = prepare_property_rows(
+            rows, reference_date=ref_date, sort="price_low",
+            min_price=Decimal("100000"), max_price=Decimal("400000"),
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], 2)
+
+    @patch("property.apartment_repository._exchange_rate_safe", return_value=Decimal("12500"))
+    def test_prepare_rows_limit_applied_after_sort(self, _mock_rate):
+        ref_date = date(2026, 7, 4)
+        rows = [
+            self._make_apartment_row(id=1, price=Decimal("300000")),
+            self._make_apartment_row(id=2, price=Decimal("100000")),
+            self._make_apartment_row(id=3, price=Decimal("200000")),
+        ]
+        result = prepare_property_rows(rows, reference_date=ref_date, sort="price_high", limit=2)
+        self.assertEqual([r["id"] for r in result], [1, 3])
+
+    @patch("property.apartment_repository._exchange_rate_safe", return_value=Decimal("12500"))
+    def test_prepare_rows_rating_high_sort(self, _mock_rate):
+        ref_date = date(2026, 7, 4)
+        rows = [
+            self._make_apartment_row(id=1, average_rating=Decimal("3.5")),
+            self._make_apartment_row(id=2, average_rating=Decimal("5.0")),
+            self._make_apartment_row(id=3, average_rating=Decimal("4.2")),
+        ]
+        result = prepare_property_rows(rows, reference_date=ref_date, sort="rating_high")
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    @patch("property.apartment_repository._exchange_rate_safe", return_value=Decimal("12500"))
+    def test_prepare_rows_reviews_high_sort(self, _mock_rate):
+        ref_date = date(2026, 7, 4)
+        rows = [
+            self._make_apartment_row(id=1, review_count=2),
+            self._make_apartment_row(id=2, review_count=15),
+            self._make_apartment_row(id=3, review_count=7),
+        ]
+        result = prepare_property_rows(rows, reference_date=ref_date, sort="reviews_high")
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    @patch("property.apartment_repository._exchange_rate_safe", return_value=Decimal("12500"))
+    def test_prepare_rows_title_asc_sort(self, _mock_rate):
+        ref_date = date(2026, 7, 4)
+        rows = [
+            self._make_apartment_row(id=1, title="Zebra Apartment"),
+            self._make_apartment_row(id=2, title="Apple Apartment"),
+            self._make_apartment_row(id=3, title="Mango Apartment"),
+        ]
+        result = prepare_property_rows(rows, reference_date=ref_date, sort="title_asc")
+        self.assertEqual([r["id"] for r in result], [2, 3, 1])
+
+    @patch("property.apartment_repository._exchange_rate_safe", return_value=Decimal("12500"))
+    def test_prepare_rows_sets_order_price_uzs_field(self, _mock_rate):
+        ref_date = date(2026, 7, 4)
+        rows = [self._make_apartment_row(id=1, price=Decimal("100000"), currency="UZS")]
+        result = prepare_property_rows(rows, reference_date=ref_date)
+        self.assertIn("order_price_uzs", result[0])
+        self.assertEqual(result[0]["order_price_uzs"], Decimal("100000"))

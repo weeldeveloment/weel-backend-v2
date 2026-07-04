@@ -201,6 +201,9 @@ def list_cottages(
     min_price: Decimal | None = None,
     max_price: Decimal | None = None,
     testing_only: bool | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    radius_km: float = 10.0,
     limit: int | None = None,
     offset: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -218,8 +221,25 @@ def list_cottages(
     if recommended_only:
         where.append("COALESCE(c.is_recommended, FALSE) = TRUE")
     if search:
-        where.append("LOWER(COALESCE(c.title, '')) LIKE LOWER(%s)")
-        params.append(f"%{search.strip()}%")
+        raw = search.strip()
+        like_param = f"%{raw}%"
+        where.append(
+            "(c.title ILIKE %s"
+            " OR COALESCE(c.city, '') ILIKE %s"
+            " OR word_similarity(%s, c.title) > 0.3"
+            " OR word_similarity(%s, COALESCE(c.city, '')) > 0.3)"
+        )
+        params.extend([like_param, like_param, raw, raw])
+    if lat is not None and lon is not None:
+        where.append(
+            "(c.latitude IS NOT NULL AND c.longitude IS NOT NULL"
+            " AND 6371.0 * 2.0 * asin(sqrt("
+            "   power(sin((radians(%s) - radians(c.latitude::float))  / 2.0), 2.0)"
+            "   + cos(radians(c.latitude::float)) * cos(radians(%s))"
+            "   * power(sin((radians(%s) - radians(c.longitude::float)) / 2.0), 2.0)"
+            " )) <= %s)"
+        )
+        params.extend([lat, lat, lon, radius_km])
     if region_id is not None:
         where.append(f"{REGION_SELECT_SQL} = %s")
         params.append(region_id)

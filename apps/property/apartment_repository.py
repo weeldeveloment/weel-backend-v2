@@ -395,6 +395,9 @@ def list_apartments(
     min_price: Decimal | None = None,
     max_price: Decimal | None = None,
     testing_only: bool | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    radius_km: float = 10.0,
     limit: int | None = None,
     offset: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -412,8 +415,25 @@ def list_apartments(
     if recommended_only:
         where.append("COALESCE(a.is_recommended, FALSE) = TRUE")
     if search:
-        where.append("LOWER(COALESCE(a.title, '')) LIKE LOWER(%s)")
-        params.append(f"%{search.strip()}%")
+        raw = search.strip()
+        like_param = f"%{raw}%"
+        where.append(
+            "(a.title ILIKE %s"
+            " OR COALESCE(a.city, '') ILIKE %s"
+            " OR word_similarity(%s, a.title) > 0.3"
+            " OR word_similarity(%s, COALESCE(a.city, '')) > 0.3)"
+        )
+        params.extend([like_param, like_param, raw, raw])
+    if lat is not None and lon is not None:
+        where.append(
+            "(a.latitude IS NOT NULL AND a.longitude IS NOT NULL"
+            " AND 6371.0 * 2.0 * asin(sqrt("
+            "   power(sin((radians(%s) - radians(a.latitude::float))  / 2.0), 2.0)"
+            "   + cos(radians(a.latitude::float)) * cos(radians(%s))"
+            "   * power(sin((radians(%s) - radians(a.longitude::float)) / 2.0), 2.0)"
+            " )) <= %s)"
+        )
+        params.extend([lat, lat, lon, radius_km])
     if region_id is not None:
         where.append("a.region_id = %s")
         params.append(region_id)
@@ -992,7 +1012,7 @@ def _sort_rows(rows: list[dict[str, Any]], *, ordering: str | None = None, sort:
         return sorted(rows, key=lambda r: (int(r.get("review_count") or 0), r.get("id") or 0), reverse=desc)
     if key_name == "is_allowed_corporate":
         return sorted(rows, key=lambda r: (bool(r.get("is_allowed_corporate")), r.get("id") or 0), reverse=desc)
-    return sorted(rows, key=lambda r: (r.get("created_at"), r.get("id") or 0), reverse=True)
+    return sorted(rows, key=lambda r: (r.get("created_at"), r.get("id") or 0), reverse=desc)
 
 
 def prepare_property_rows(

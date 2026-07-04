@@ -27,6 +27,11 @@ class Command(BaseCommand):
                 # pms_room — new columns
                 ("pms_room", "display_name", "ALTER TABLE pms_room ADD COLUMN IF NOT EXISTS display_name VARCHAR(200)"),
                 ("pms_room", "bedroom_count", "ALTER TABLE pms_room ADD COLUMN IF NOT EXISTS bedroom_count INTEGER DEFAULT 1"),
+                # pms_property — verification fields
+                ("pms_property", "is_verified", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT FALSE"),
+                ("pms_property", "is_archived", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE"),
+                ("pms_property", "is_recommended", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS is_recommended BOOLEAN NOT NULL DEFAULT FALSE"),
+                ("pms_property", "verification_status", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20) DEFAULT 'waiting'"),
                 # pms_booking — new columns
                 ("pms_booking", "hold_amount", "ALTER TABLE pms_booking ADD COLUMN IF NOT EXISTS hold_amount NUMERIC(10,2)"),
                 ("pms_booking", "confirmed_at", "ALTER TABLE pms_booking ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ"),

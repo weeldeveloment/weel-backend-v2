@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from datetime import date, datetime, time
 from typing import Any, TypeVar
@@ -68,10 +69,16 @@ def _serialize_hotel_row(
     payload["is_allowed_corporate"] = False
     payload["is_allowed_pets"] = bool(payload.get("pets_allowed", False))
     payload["is_quiet_hours"] = bool(payload.get("quiet_hours", True))
+    payload["is_verified"] = bool(payload.get("is_verified", False))
+    payload["is_archived"] = bool(payload.get("is_archived", False))
+    payload["is_recommended"] = bool(payload.get("is_recommended", False))
+    payload["verification_status"] = payload.get("verification_status") or "waiting"
     payload["average_rating"] = (
         float(payload["star_rating"]) if payload.get("star_rating") is not None else None
     )
+    payload["property_kind"] = "hotel"
     payload["comment_count"] = 0
+    payload["review_count"] = 0
     payload["check_in_time"] = _iso_time(payload.get("check_in_time"))
     payload["check_out_time"] = _iso_time(payload.get("check_out_time"))
     payload["organization_id"] = organization.get("id") if organization else None
@@ -137,6 +144,10 @@ def _fetch_hotel_rows_for_schema(
                     COALESCE(p.photos, ARRAY[]::text[]) AS photos,
                     COALESCE(p.is_active, TRUE) AS is_active,
                     COALESCE(p.is_testing, FALSE) AS is_testing,
+                    COALESCE(p.is_verified, FALSE) AS is_verified,
+                    COALESCE(p.is_archived, FALSE) AS is_archived,
+                    COALESCE(p.is_recommended, FALSE) AS is_recommended,
+                    COALESCE(p.verification_status, 'waiting') AS verification_status,
                     p.created_at,
                     p.updated_at,
                     %s AS tenant_schema
@@ -163,6 +174,15 @@ def _sort_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+         * math.sin(dlon / 2) ** 2)
+    return 6371.0 * 2.0 * math.asin(math.sqrt(a))
+
+
 def _matches_search(row: dict[str, Any], search: str | None) -> bool:
     raw = str(search or "").strip().lower()
     if not raw:
@@ -174,7 +194,30 @@ def _matches_search(row: dict[str, Any], search: str | None) -> bool:
         row.get("city"),
         row.get("address"),
     )
-    return any(raw in str(value or "").lower() for value in haystacks)
+    haystack_text = " ".join(str(v or "").lower() for v in haystacks)
+    if raw in haystack_text:
+        return True
+    # Word-level partial match: every search word appears somewhere
+    words = raw.split()
+    return all(any(word in str(v or "").lower() for v in haystacks) for word in words)
+
+
+def _matches_location(
+    row: dict[str, Any],
+    lat: float | None,
+    lon: float | None,
+    radius_km: float,
+) -> bool:
+    if lat is None or lon is None:
+        return True
+    try:
+        row_lat = float(row.get("latitude") or 0)
+        row_lon = float(row.get("longitude") or 0)
+    except (TypeError, ValueError):
+        return False
+    if row_lat == 0.0 and row_lon == 0.0:
+        return False
+    return _haversine_km(lat, lon, row_lat, row_lon) <= radius_km
 
 
 def _matches_created_range(
@@ -216,7 +259,15 @@ def list_hotel_organizations() -> list[dict[str, Any]]:
     return organizations
 
 
-def list_hotels(*, limit: int | None = None, testing_only: bool | None = None) -> list[dict[str, Any]]:
+def list_hotels(
+    *,
+    search: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    radius_km: float = 10.0,
+    limit: int | None = None,
+    testing_only: bool | None = None,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
     for organization in list_hotel_organizations():
@@ -229,6 +280,11 @@ def list_hotels(*, limit: int | None = None, testing_only: bool | None = None) -
             for row in tenant_rows
             if testing_only is None or bool(row.get("is_testing", False)) is bool(testing_only)
         )
+
+    if search:
+        rows = [r for r in rows if _matches_search(r, search)]
+    if lat is not None and lon is not None:
+        rows = [r for r in rows if _matches_location(r, lat, lon, radius_km)]
 
     _sort_rows(rows)
     if limit is not None:
@@ -408,6 +464,10 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         "photos",
         "is_active",
         "is_testing",
+        "is_verified",
+        "is_archived",
+        "is_recommended",
+        "verification_status",
     }
     filtered_values = {key: value for key, value in values.items() if key in allowed_columns}
     if not filtered_values:

@@ -170,6 +170,10 @@ class HotelAdminPropertyDetailSerializer(serializers.Serializer):
 class HotelAdminListSerializer(HotelListSerializer):
     is_active = serializers.BooleanField(read_only=True)
     is_testing = serializers.BooleanField(read_only=True)
+    is_verified = serializers.BooleanField(read_only=True)
+    is_archived = serializers.BooleanField(read_only=True)
+    is_recommended = serializers.BooleanField(read_only=True)
+    verification_status = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
     organization = HotelAdminOrganizationSerializer(read_only=True)
     property_detail = HotelAdminPropertyDetailSerializer(source="*", read_only=True)
     tenant_schema = serializers.CharField(allow_blank=True, allow_null=True)
@@ -179,6 +183,10 @@ class HotelAdminListSerializer(HotelListSerializer):
         data = super().to_representation(row)
         data["is_active"] = bool(row.get("is_active", True))
         data["is_testing"] = bool(row.get("is_testing", False))
+        data["is_verified"] = bool(row.get("is_verified", False))
+        data["is_archived"] = bool(row.get("is_archived", False))
+        data["is_recommended"] = bool(row.get("is_recommended", False))
+        data["verification_status"] = row.get("verification_status") or "waiting"
         data["tenant_schema"] = row.get("tenant_schema")
         data["organization"] = {
             "id": row.get("organization_id"),
@@ -235,6 +243,14 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
     timezone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     is_active = serializers.BooleanField(required=False)
     is_testing = serializers.BooleanField(required=False)
+    is_verified = serializers.BooleanField(required=False)
+    is_archived = serializers.BooleanField(required=False)
+    is_recommended = serializers.BooleanField(required=False)
+    verification_status = serializers.ChoiceField(
+        choices=["waiting", "accepted", "cancelled"],
+        required=False,
+        allow_null=True,
+    )
     img = serializers.ListField(
         child=serializers.CharField(),
         required=False,
@@ -277,6 +293,10 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
             "timezone",
             "is_active",
             "is_testing",
+            "is_verified",
+            "is_archived",
+            "is_recommended",
+            "verification_status",
         ):
             if key in attrs:
                 prepared[key] = attrs.get(key)

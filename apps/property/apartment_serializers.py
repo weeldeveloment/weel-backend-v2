@@ -353,7 +353,7 @@ class ApartmentDetailSerializer(serializers.Serializer):
             row["description_uz"] = (
                 row.get("description_en") or row.get("description_ru") or ""
             )
-        row["comment_count"] = int(row.get("comment_count") or 0)
+        row["comment_count"] = int(row.get("review_count") or row.get("comment_count") or 0)
         favorites = _favorite_guid_set(self.context)
         row["is_favorite"] = str(row.get("guid")) in favorites
         row["services"] = row.get("services") or []
