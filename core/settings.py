@@ -213,8 +213,10 @@ ASGI_APPLICATION = "core.asgi.application"
 _db_port = os.environ.get("DB_PORT", "5432")
 if _db_port in ("", "db_port"):
     _db_port = "5432"
-_db_conn_max_age = int((os.environ.get("DB_CONN_MAX_AGE") or "60").strip() or "60")
-_db_conn_health_checks = bool(int((os.environ.get("DB_CONN_HEALTH_CHECKS") or "1").strip() or "1"))
+# ASGI (Daphne) deployments must use CONN_MAX_AGE=0: persistent connections
+# accumulate one per thread and exhaust PostgreSQL's max_connections under load.
+_db_conn_max_age = int((os.environ.get("DB_CONN_MAX_AGE") or "0").strip() or "0")
+_db_conn_health_checks = bool(int((os.environ.get("DB_CONN_HEALTH_CHECKS") or "0").strip() or "0"))
 
 DATABASES = {
     "default": {

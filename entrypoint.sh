@@ -12,4 +12,7 @@ WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://api.weel.uz}"
   echo "Bot webhook setup complete"
 ) &
 
-exec daphne -b 0.0.0.0 -p 8000 core.asgi:application
+# Limit thread pool to cap DB connections per container (sync views each use one thread).
+# With CONN_MAX_AGE=0, connections close after each request so this is a safety net.
+DAPHNE_THREADS="${DAPHNE_THREADS:-10}"
+exec daphne -b 0.0.0.0 -p 8000 -t "$DAPHNE_THREADS" core.asgi:application
