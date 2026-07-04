@@ -119,13 +119,12 @@ async def _handle_phone(update: Update, chat_id: int, phone: str) -> None:
         )
         return
 
-    # Send OTP
+    # Send OTP via Eskiz with the standard WEEL verification template
     eskiz = EskizService()
     otp_code = OTPRedisService.create_otp(phone, SmsPurpose.PMS_LOGIN)
-    message = f"WEEL Hotel Bot - tasdiqlash kodi: {otp_code}"
 
     try:
-        eskiz.send_text_sms(phone, message)
+        eskiz.send_sms(phone, otp_code)
         is_sent = True
     except Exception:
         logger.exception("Failed to send OTP to %s", phone)
