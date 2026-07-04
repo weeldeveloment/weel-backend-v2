@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import threading
-
+from concurrent.futures import Future
 from json import JSONDecodeError
 
 from django.http import HttpResponse, HttpResponseForbidden
@@ -16,25 +16,58 @@ from .setup import build_application, get_webhook_secret
 
 logger = logging.getLogger(__name__)
 
-_app = None
 _loop = None
+_loop_thread = None
+_app = None
+_init_future: Future | None = None
 _lock = threading.Lock()
+_INIT_TIMEOUT = 30.0
 
 
-def _ensure_ready():
-    global _app, _loop
-    if _app is not None:
+def _start_loop_once() -> None:
+    global _loop, _loop_thread
+    if _loop is not None:
         return
     with _lock:
-        if _app is not None:
+        if _loop is not None:
             return
         _loop = asyncio.new_event_loop()
-        thread = threading.Thread(target=_loop.run_forever, daemon=True)
-        thread.start()
+        _loop_thread = threading.Thread(
+            target=_loop.run_forever,
+            daemon=True,
+            name="telegram-bot-loop",
+        )
+        _loop_thread.start()
 
-        _app = build_application()
-        fut = asyncio.run_coroutine_threadsafe(_app.initialize(), _loop)
-        fut.result(timeout=10)
+
+def _ensure_ready() -> None:
+    global _app, _init_future
+    _start_loop_once()
+
+    with _lock:
+        if (
+            _init_future is not None
+            and _init_future.done()
+            and _init_future.exception() is None
+        ):
+            return
+
+        if _init_future is not None and _init_future.done() and _init_future.exception() is not None:
+            _init_future = None
+            _app = None
+
+        if _init_future is None:
+            if _app is None:
+                _app = build_application()
+            _init_future = asyncio.run_coroutine_threadsafe(
+                _app.initialize(), _loop
+            )
+
+    try:
+        _init_future.result(timeout=_INIT_TIMEOUT)
+    except Exception:
+        logger.exception("Telegram bot application initialization failed")
+        raise
 
 
 @method_decorator(csrf_exempt, name="dispatch")
