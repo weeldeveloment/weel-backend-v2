@@ -264,18 +264,13 @@ def list_hotel_organizations() -> list[dict[str, Any]]:
 
 def list_hotels(
     *,
-<<<<<<< HEAD
     search: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
     radius_km: float = 10.0,
     limit: int | None = None,
     testing_only: bool | None = None,
-=======
-    limit: int | None = None,
-    testing_only: bool | None = None,
     include_unverified: bool = False,
->>>>>>> baf4a29e561077a9d6661e5e03518e2550b0f296
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
@@ -503,11 +498,8 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         "is_active",
         "is_testing",
         "is_verified",
-<<<<<<< HEAD
         "is_archived",
         "is_recommended",
-=======
->>>>>>> baf4a29e561077a9d6661e5e03518e2550b0f296
         "verification_status",
     }
     filtered_values = {key: value for key, value in values.items() if key in allowed_columns}
