@@ -144,7 +144,7 @@ COTTAGE_SELECT = f"""
 def _cottage_select(*, include_price_history: bool = True) -> str:
     sql = COTTAGE_SELECT
     if include_price_history:
-        sql += """,
+        sql += f""",
         COALESCE(monthly_prices.price_data, '[]'::jsonb) AS price
     FROM {COTTAGE_TABLE} c
     LEFT JOIN (
@@ -191,7 +191,7 @@ def _cottage_select(*, include_price_history: bool = True) -> str:
         LIMIT 1
     ) current_price ON TRUE"""
     else:
-        sql += """
+        sql += f"""
     FROM {COTTAGE_TABLE} c
     LEFT JOIN (
         SELECT prefecture_id, MIN(district_id) AS district_id
