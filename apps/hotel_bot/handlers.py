@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
+from asgiref.sync import sync_to_async
 from django.core.cache import cache
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
@@ -22,6 +23,13 @@ from apps.users.models.logs import SmsPurpose
 from apps.users.raw_repository import create_sms_log
 from apps.platform.raw_repository import get_platform_user_by_phone, get_user_organizations
 from apps.pms.repository import list_properties, list_bookings, list_newest_bookings
+
+get_platform_user_by_phone = sync_to_async(get_platform_user_by_phone, thread_sensitive=False)
+get_user_organizations = sync_to_async(get_user_organizations, thread_sensitive=False)
+create_sms_log = sync_to_async(create_sms_log, thread_sensitive=False)
+list_properties = sync_to_async(list_properties, thread_sensitive=False)
+list_bookings = sync_to_async(list_bookings, thread_sensitive=False)
+list_newest_bookings = sync_to_async(list_newest_bookings, thread_sensitive=False)
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +119,7 @@ async def _handle_phone(update: Update, chat_id: int, phone: str) -> None:
         return
 
     # Check if phone is registered in PMS (platform_user table)
-    user = get_platform_user_by_phone(phone)
+    user = await get_platform_user_by_phone(phone)
     if not user:
         await update.message.reply_text(
             "Bu raqam PMS tizimida ro'yxatdan o'tmagan.\n"
@@ -130,7 +138,7 @@ async def _handle_phone(update: Update, chat_id: int, phone: str) -> None:
         logger.exception("Failed to send OTP to %s", phone)
         is_sent = False
 
-    create_sms_log(phone, SmsPurpose.PMS_LOGIN, is_sent)
+    await create_sms_log(phone, SmsPurpose.PMS_LOGIN, is_sent)
 
     if not is_sent:
         await update.message.reply_text(
@@ -173,7 +181,7 @@ async def _handle_otp(update: Update, chat_id: int, otp: str) -> None:
 
 
 async def _show_organizations(update: Update, chat_id: int, platform_user_id: int) -> None:
-    orgs = get_user_organizations(platform_user_id)
+    orgs = await get_user_organizations(platform_user_id)
     if not orgs:
         await update.message.reply_text(
             "Sizga biriktirilgan hotel topilmadi.\n"
@@ -200,7 +208,7 @@ async def _show_organizations(update: Update, chat_id: int, platform_user_id: in
 
 async def _show_bookings_for_org(update_or_query, org: dict) -> None:
     org_id = org["id"]
-    properties = list_properties(organization_id=org_id)
+    properties = await list_properties(organization_id=org_id)
 
     if not properties:
         text = f"🏨 *{org['name']}*\n\nBu hotelda xona topilmadi."
@@ -214,7 +222,7 @@ async def _show_bookings_for_org(update_or_query, org: dict) -> None:
     all_lines = [f"🏨 *{org['name']}* — Yaqin 30 kundagi zayafkalar\n"]
 
     for prop in properties:
-        bookings = list_bookings(
+        bookings = await list_bookings(
             property_id=prop["id"],
             from_date=today,
             to_date=today + timedelta(days=30),
@@ -288,7 +296,7 @@ async def new_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     platform_user_id = user_data["platform_user_id"]
-    orgs = get_user_organizations(platform_user_id)
+    orgs = await get_user_organizations(platform_user_id)
     if not orgs:
         await update.message.reply_text("Sizga biriktirilgan hotel topilmadi.")
         return
@@ -312,7 +320,7 @@ async def new_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def _show_newest_for_org(update_or_query, org: dict) -> None:
     org_id = org["id"]
-    properties = list_properties(organization_id=org_id)
+    properties = await list_properties(organization_id=org_id)
 
     if not properties:
         text = f"🏨 *{org['name']}*\n\nBu hotelda mulk topilmadi."
@@ -325,7 +333,7 @@ async def _show_newest_for_org(update_or_query, org: dict) -> None:
     all_lines = [f"🏨 *{org['name']}* — Eng yangi 10 ta zayafka\n"]
 
     for prop in properties:
-        bookings = list_newest_bookings(property_id=prop["id"], limit=10)
+        bookings = await list_newest_bookings(property_id=prop["id"], limit=10)
         if not bookings:
             continue
 
@@ -364,11 +372,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     chat_id = update.effective_chat.id
     data = query.data or ""
 
-    from apps.platform.raw_repository import get_organization_by_id
+    from apps.platform.raw_repository import get_organization_by_id as _get_organization_by_id
+    get_organization_by_id = sync_to_async(_get_organization_by_id, thread_sensitive=False)
 
     if data.startswith("org:"):
         org_id = int(data.split(":")[1])
-        org = get_organization_by_id(org_id)
+        org = await get_organization_by_id(org_id)
         if not org:
             await query.edit_message_text("Hotel topilmadi.")
             return
@@ -376,7 +385,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     elif data.startswith("new_org:"):
         org_id = int(data.split(":")[1])
-        org = get_organization_by_id(org_id)
+        org = await get_organization_by_id(org_id)
         if not org:
             await query.edit_message_text("Hotel topilmadi.")
             return
