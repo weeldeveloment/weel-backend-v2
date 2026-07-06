@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import io
 import logging
 from decimal import Decimal
 from typing import Any
 
 from django.core.files.storage import default_storage
 from django.db import IntegrityError
+from django.http import HttpResponse
 from django.utils import timezone
+from openpyxl import Workbook
 from rest_framework import status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -52,6 +55,7 @@ from apps.pms.repository import (
     get_or_create_calendar_slot,
     get_property,
     get_property_images,
+    get_rate_by_id,
     get_room,
     get_room_availability,
     get_room_images,
@@ -751,8 +755,7 @@ class RateListCreateView(PMSBaseView):
 class RateRetrieveUpdateDestroyView(PMSBaseView):
     @swagger_auto_schema(responses={200: RateSerializer()})
     def get(self, request, property_id, rate_id):
-        rates = list_rates(property_id)
-        rate = next((r for r in rates if r["id"] == rate_id), None)
+        rate = get_rate_by_id(rate_id)
         if not rate:
             return Response({"detail": "Rate not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(RateSerializer(rate).data)
@@ -865,3 +868,76 @@ class AnalyticsView(PMSBaseView):
         )
 
         return Response(AnalyticsResponseSerializer(data).data)
+
+
+class AnalyticsExportView(PMSBaseView):
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter("date_from", openapi.IN_QUERY, description="Start date", type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("date_to", openapi.IN_QUERY, description="End date", type=openapi.TYPE_STRING, format="date", required=True),
+            openapi.Parameter("metric", openapi.IN_QUERY, description="Chart metric", type=openapi.TYPE_STRING, enum=["check_ins", "revenue", "bookings", "occupancy"]),
+            openapi.Parameter("category", openapi.IN_QUERY, description="Room category filter", type=openapi.TYPE_STRING),
+            openapi.Parameter("floor", openapi.IN_QUERY, description="Floor filter", type=openapi.TYPE_STRING),
+            openapi.Parameter("search", openapi.IN_QUERY, description="Room number search", type=openapi.TYPE_STRING),
+        ],
+        responses={200: openapi.Response(description="XLSX file", schema=openapi.Schema(type=openapi.TYPE_FILE))},
+    )
+    def get(self, request, property_id):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        prop = get_property(property_id, organization_id=int(org_id))
+        if not prop:
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AnalyticsQuerySerializer(data=request.query_params)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = get_analytics(
+            property_id=property_id,
+            date_from=serializer.validated_data["date_from"],
+            date_to=serializer.validated_data["date_to"],
+            metric=serializer.validated_data.get("metric", "revenue"),
+            category=serializer.validated_data.get("category"),
+            floor=serializer.validated_data.get("floor"),
+            search=serializer.validated_data.get("search"),
+        )
+
+        serialized = AnalyticsResponseSerializer(data).data
+        rooms = serialized.get("rooms", [])
+        date_from = serializer.validated_data["date_from"].isoformat()
+        date_to = serializer.validated_data["date_to"].isoformat()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Room Analytics"
+
+        currency = ""
+        if rooms:
+            currency = rooms[0].get("revenue", {}).get("currency", "")
+
+        headers = ["Room", "Category", "Occupancy %", f"Revenue ({currency})", "Change %", f"ADR ({currency})", f"RevPAR ({currency})"]
+        for col, header in enumerate(headers, 1):
+            ws.cell(row=1, column=col, value=header)
+
+        for row_idx, room in enumerate(rooms, 2):
+            ws.cell(row=row_idx, column=1, value=room.get("room_number"))
+            ws.cell(row=row_idx, column=2, value=room.get("category"))
+            ws.cell(row=row_idx, column=3, value=room.get("occupancy", {}).get("value"))
+            ws.cell(row=row_idx, column=4, value=room.get("revenue", {}).get("value"))
+            ws.cell(row=row_idx, column=5, value=room.get("revenue", {}).get("change_percent"))
+            ws.cell(row=row_idx, column=6, value=room.get("adr", {}).get("value"))
+            ws.cell(row=row_idx, column=7, value=room.get("revpar", {}).get("value"))
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="analytics_{date_from}_{date_to}.xlsx"'
+        return response

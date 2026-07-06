@@ -197,17 +197,15 @@ def create_hotel_booking_calendar_slots(
     check_in: date,
     check_out: date,
 ) -> None:
-    d = check_in
-    while d < check_out:
-        execute(
-            """
-            INSERT INTO pms_calendar_slot (room_id, date, status, created_at, updated_at)
-            VALUES (%s, %s, 'occupied', NOW(), NOW())
-            ON CONFLICT (room_id, date) DO UPDATE SET status = 'occupied', updated_at = NOW()
-            """,
-            [room_id, d],
-        )
-        d += timedelta(days=1)
+    execute(
+        """
+        INSERT INTO pms_calendar_slot (room_id, date, status, created_at, updated_at)
+        SELECT %s, d.date, 'occupied', NOW(), NOW()
+        FROM generate_series(%s::date, %s::date - 1, '1 day'::interval) AS d(date)
+        ON CONFLICT (room_id, date) DO UPDATE SET status = 'occupied', updated_at = NOW()
+        """,
+        [room_id, check_in, check_out],
+    )
 
 
 def release_hotel_booking_calendar_slots(
@@ -215,17 +213,16 @@ def release_hotel_booking_calendar_slots(
     check_in: date,
     check_out: date,
 ) -> None:
-    d = check_in
-    while d < check_out:
-        execute(
-            """
-            UPDATE pms_calendar_slot
-            SET status = 'available', updated_at = NOW()
-            WHERE room_id = %s AND date = %s AND status = 'occupied'
-            """,
-            [room_id, d],
-        )
-        d += timedelta(days=1)
+    execute(
+        """
+        UPDATE pms_calendar_slot
+        SET status = 'available', updated_at = NOW()
+        WHERE room_id = %s
+          AND date >= %s AND date < %s
+          AND status = 'occupied'
+        """,
+        [room_id, check_in, check_out],
+    )
 
 
 def list_client_hotel_bookings(

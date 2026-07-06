@@ -4,7 +4,7 @@ import logging
 from datetime import date
 from typing import Any
 
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, connection
 
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -87,8 +87,12 @@ class AdminHotelBaseView(AdminBaseView):
                 self.kwargs["property_id"] = numeric_id
 
     def dispatch(self, request, *args, **kwargs):
-        with transaction.atomic():
+        try:
             return super().dispatch(request, *args, **kwargs)
+        finally:
+            if request.method in ("GET", "HEAD", "OPTIONS"):
+                with connection.cursor() as cursor:
+                    cursor.execute("SET search_path TO public")
 
 
 class ClassifyPropertySerializer(serializers.Serializer):

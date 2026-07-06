@@ -119,24 +119,26 @@ def upsert_calendar_days(
 
     main_col, other_col = _property_columns(property_kind)
     now = timezone.now()
-    for day in days:
-        execute(
-            f"""
-            INSERT INTO {get_table_name("calendar")} (
-                guid,
-                created_at,
-                updated_at,
-                status,
-                date,
-                {main_col},
-                {other_col}
-            ) VALUES (%s, %s, %s, %s, %s, %s, NULL)
-            ON CONFLICT ({main_col}, date) DO UPDATE
-            SET status = EXCLUDED.status,
-                updated_at = EXCLUDED.updated_at
-            """,
-            [uuid.uuid4(), now, now, status, day, property_id],
+
+    execute(
+        f"""
+        INSERT INTO {get_table_name("calendar")} (
+            guid,
+            created_at,
+            updated_at,
+            status,
+            date,
+            {main_col},
+            {other_col}
         )
+        SELECT gen_random_uuid(), %s, %s, %s, d.date, %s, NULL
+        FROM unnest(%s::date[]) AS d(date)
+        ON CONFLICT ({main_col}, date) DO UPDATE
+        SET status = EXCLUDED.status,
+            updated_at = EXCLUDED.updated_at
+        """,
+        [now, now, status, property_id, days],
+    )
 
 
 def delete_calendar_days_by_status(

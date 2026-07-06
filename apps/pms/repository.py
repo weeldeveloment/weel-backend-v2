@@ -476,14 +476,17 @@ def get_or_create_calendar_slot(room_id: int, slot_date: date, status: str = "av
 
 
 def block_dates(*, room_ids: list[int], from_date: date, to_date: date) -> list[dict[str, Any]]:
-    results = []
-    for room_id in room_ids:
-        d = from_date
-        while d <= to_date:
-            slot = get_or_create_calendar_slot(room_id, d, "blocked")
-            results.append(slot)
-            d += timedelta(days=1)
-    return results
+    return fetch_all(
+        f"""
+        INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, created_at, updated_at)
+        SELECT r.id, d.date, 'blocked', %s, %s
+        FROM unnest(%s::int[]) AS r(id)
+        CROSS JOIN generate_series(%s::date, %s::date, '1 day'::interval) AS d(date)
+        ON CONFLICT (room_id, date) DO UPDATE SET status = 'blocked', updated_at = %s
+        RETURNING *
+        """,
+        [timezone.now(), timezone.now(), room_ids, from_date, to_date, timezone.now()],
+    )
 
 
 def unblock_dates(*, room_ids: list[int], from_date: date, to_date: date) -> int:
@@ -499,19 +502,19 @@ def unblock_dates(*, room_ids: list[int], from_date: date, to_date: date) -> int
 
 
 def hold_dates(*, room_ids: list[int], from_date: date, to_date: date, hold_duration_minutes: int = 30) -> list[dict[str, Any]]:
-    results = []
     expires = timezone.now() + timedelta(minutes=hold_duration_minutes)
-    for room_id in room_ids:
-        d = from_date
-        while d <= to_date:
-            slot = get_or_create_calendar_slot(room_id, d, "held")
-            fetch_one(
-                f"UPDATE {_t(PMS_CALENDAR_SLOT_TABLE)} SET status = 'held', hold_expires_at = %s, updated_at = %s WHERE id = %s RETURNING *",
-                [expires, timezone.now(), slot["id"]],
-            )
-            results.append(slot)
-            d += timedelta(days=1)
-    return results
+    now = timezone.now()
+    return fetch_all(
+        f"""
+        INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, hold_expires_at, created_at, updated_at)
+        SELECT r.id, d.date, 'held', %s, %s, %s
+        FROM unnest(%s::int[]) AS r(id)
+        CROSS JOIN generate_series(%s::date, %s::date, '1 day'::interval) AS d(date)
+        ON CONFLICT (room_id, date) DO UPDATE SET status = 'held', hold_expires_at = %s, updated_at = %s
+        RETURNING *
+        """,
+        [expires, now, now, room_ids, from_date, to_date, expires, now],
+    )
 
 
 def unhold_dates(*, room_ids: list[int], from_date: date, to_date: date) -> int:
@@ -713,17 +716,15 @@ def create_booking(
             user_id=kwargs.get("created_by"),
         )
 
-        d = check_in
-        while d < check_out:
-            execute(
-                f"""
-                INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, created_at, updated_at)
-                VALUES (%s, %s, 'occupied', %s, %s)
-                ON CONFLICT (room_id, date) DO UPDATE SET status = 'occupied', updated_at = %s
-                """,
-                [room_id, d, now, now, now],
-            )
-            d += timedelta(days=1)
+        execute(
+            f"""
+            INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, created_at, updated_at)
+            SELECT %s, d.date, 'occupied', %s, %s
+            FROM generate_series(%s::date, %s::date - 1, '1 day'::interval) AS d(date)
+            ON CONFLICT (room_id, date) DO UPDATE SET status = 'occupied', updated_at = %s
+            """,
+            [room_id, now, now, check_in, check_out, now],
+        )
 
     return booking
 
@@ -916,22 +917,23 @@ def cancel_booking(booking_id: int, user_id: int | None = None) -> dict[str, Any
         )
 
         if booking.get("room_id") and booking.get("check_in") and booking.get("check_out"):
-            d = booking["check_in"]
-            if hasattr(d, "date"):
-                d = d.date()
-            end = booking["check_out"]
-            if hasattr(end, "date"):
-                end = end.date()
-            while d < end:
-                execute(
-                    f"""
-                    UPDATE {_t(PMS_CALENDAR_SLOT_TABLE)}
-                    SET status = 'available', updated_at = %s
-                    WHERE room_id = %s AND date = %s AND status = 'occupied'
-                    """,
-                    [timezone.now(), booking["room_id"], d],
-                )
-                d += timedelta(days=1)
+            check_in = booking["check_in"]
+            if hasattr(check_in, "date"):
+                check_in = check_in.date()
+            check_out = booking["check_out"]
+            if hasattr(check_out, "date"):
+                check_out = check_out.date()
+            execute(
+                f"""
+                UPDATE {_t(PMS_CALENDAR_SLOT_TABLE)}
+                SET status = 'available', updated_at = %s
+                WHERE room_id = %s
+                  AND date >= %s
+                  AND date < %s
+                  AND status = 'occupied'
+                """,
+                [timezone.now(), booking["room_id"], check_in, check_out],
+            )
 
     return result
 
@@ -1023,33 +1025,31 @@ def move_booking(
             user_id=user_id,
         )
 
+        now = timezone.now()
         if old_room_id and old_check_in and old_check_out:
-            d = old_check_in
-            while d < old_check_out:
-                execute(
-                    f"""
-                    UPDATE {_t(PMS_CALENDAR_SLOT_TABLE)}
-                    SET status = 'available', updated_at = %s
-                    WHERE room_id = %s AND date = %s AND status = 'occupied'
-                    """,
-                    [timezone.now(), old_room_id, d],
-                )
-                d += timedelta(days=1)
+            execute(
+                f"""
+                UPDATE {_t(PMS_CALENDAR_SLOT_TABLE)}
+                SET status = 'available', updated_at = %s
+                WHERE room_id = %s
+                  AND date >= %s AND date < %s
+                  AND status = 'occupied'
+                """,
+                [now, old_room_id, old_check_in, old_check_out],
+            )
 
         actual_check_in = new_check_in or old_check_in
         actual_check_out = new_check_out or old_check_out
         if actual_check_in and actual_check_out:
-            d = actual_check_in
-            while d < actual_check_out:
-                execute(
-                    f"""
-                    INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, created_at, updated_at)
-                    VALUES (%s, %s, 'occupied', %s, %s)
-                    ON CONFLICT (room_id, date) DO UPDATE SET status = 'occupied', updated_at = %s
-                    """,
-                    [new_room_id, d, timezone.now(), timezone.now(), timezone.now()],
-                )
-                d += timedelta(days=1)
+            execute(
+                f"""
+                INSERT INTO {_t(PMS_CALENDAR_SLOT_TABLE)} (room_id, date, status, created_at, updated_at)
+                SELECT %s, d.date, 'occupied', %s, %s
+                FROM generate_series(%s::date, %s::date - 1, '1 day'::interval) AS d(date)
+                ON CONFLICT (room_id, date) DO UPDATE SET status = 'occupied', updated_at = %s
+                """,
+                [new_room_id, now, now, actual_check_in, actual_check_out, now],
+            )
 
     return result
 
@@ -1120,6 +1120,13 @@ def create_rate(*, property_id: int, room_type_id: int, date_from: date, date_to
             kwargs.get("currency", "USD"), kwargs.get("min_stay", 1),
             kwargs.get("is_weekend_rate", False), now, now,
         ],
+    )
+
+
+def get_rate_by_id(rate_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {_t(PMS_RATE_TABLE)} WHERE id = %s",
+        [rate_id],
     )
 
 
@@ -1265,244 +1272,185 @@ def get_analytics(
 ) -> dict[str, Any]:
     prev_date_from = date_from - (date_to - date_from) - timedelta(days=1)
     prev_date_to = date_from - timedelta(days=1)
-
-    def _calc_kpi(d_from: date, d_to: date) -> dict[str, Any]:
-        check_ins = fetch_one(
-            f"""
-            SELECT COUNT(*) as count
-            FROM {_t(PMS_BOOKING_TABLE)} b
-            WHERE b.property_id = %s
-              AND b.check_in BETWEEN %s AND %s
-              AND b.status NOT IN ('cancelled', 'no_show')
-            """,
-            [property_id, d_from, d_to],
-        ) or {"count": 0}
-
-        revenue = fetch_one(
-            f"""
-            SELECT COALESCE(SUM(total_cost::numeric), 0) as total, currency
-            FROM {_t(PMS_BOOKING_TABLE)} b
-            WHERE b.property_id = %s
-              AND b.check_in BETWEEN %s AND %s
-              AND b.status NOT IN ('cancelled', 'no_show')
-            GROUP BY currency
-            """,
-            [property_id, d_from, d_to],
-        ) or {"total": 0, "currency": "UZS"}
-
-        bookings = fetch_one(
-            f"""
-            SELECT COUNT(*) as count
-            FROM {_t(PMS_BOOKING_TABLE)} b
-            WHERE b.property_id = %s
-              AND b.created_at::date BETWEEN %s AND %s
-            """,
-            [property_id, d_from, d_to],
-        ) or {"count": 0}
-
-        total_rooms = fetch_one(
-            f"""
-            SELECT COUNT(*) as count
-            FROM {_t(PMS_ROOM_TABLE)} r
-            WHERE r.property_id = %s AND r.is_active = TRUE
-            """,
-            [property_id],
-        ) or {"count": 1}
-
-        occupied_nights = fetch_one(
-            f"""
-            SELECT COUNT(DISTINCT cs.date || '-' || cs.room_id) as count
-            FROM {_t(PMS_CALENDAR_SLOT_TABLE)} cs
-            JOIN {_t(PMS_ROOM_TABLE)} r ON r.id = cs.room_id
-            WHERE r.property_id = %s
-              AND cs.date BETWEEN %s AND %s
-              AND cs.status = 'occupied'
-            """,
-            [property_id, d_from, d_to],
-        ) or {"count": 0}
-
-        days_in_period = (d_to - d_from).days + 1
-        occupancy = (occupied_nights["count"] / (total_rooms["count"] * days_in_period) * 100) if total_rooms["count"] > 0 and days_in_period > 0 else 0
-
-        current_guests = fetch_one(
-            f"""
-            SELECT COUNT(DISTINCT b.guest_id) as count
-            FROM {_t(PMS_BOOKING_TABLE)} b
-            WHERE b.property_id = %s
-              AND b.check_in <= %s
-              AND b.check_out > %s
-              AND b.status = 'checked_in'
-            """,
-            [property_id, d_to, d_to],
-        ) or {"count": 0}
-
-        return {
-            "check_ins": check_ins["count"],
-            "revenue": float(revenue["total"]),
-            "currency": revenue.get("currency", "UZS"),
-            "bookings": bookings["count"],
-            "occupancy": round(occupancy, 1),
-            "current_guests": current_guests["count"],
-        }
-
-    current_kpi = _calc_kpi(date_from, date_to)
-    prev_kpi = _calc_kpi(prev_date_from, prev_date_to)
+    days_in_period = (date_to - date_from).days + 1
 
     def _calc_change(current: float, previous: float) -> tuple[float, float]:
         change = current - previous
-        change_percent = (change / previous * 100) if previous > 0 else 0
-        return round(change, 2), round(change_percent, 1)
+        pct = (change / previous * 100) if previous > 0 else 0
+        return round(change, 2), round(pct, 1)
 
-    check_ins_change, check_ins_pct = _calc_change(current_kpi["check_ins"], prev_kpi["check_ins"])
-    revenue_change, revenue_pct = _calc_change(current_kpi["revenue"], prev_kpi["revenue"])
-    bookings_change, bookings_pct = _calc_change(current_kpi["bookings"], prev_kpi["bookings"])
-    occupancy_change, occupancy_pct = _calc_change(current_kpi["occupancy"], prev_kpi["occupancy"])
+    # --- KPIs: single query for current + previous ---
+    total_rooms = fetch_one(
+        f"SELECT COUNT(*) as count FROM {_t(PMS_ROOM_TABLE)} WHERE property_id = %s AND is_active = TRUE",
+        [property_id],
+    ) or {"count": 1}
+    room_count = total_rooms["count"]
+
+    kpi_row = fetch_one(
+        f"""
+        SELECT
+            COUNT(*) FILTER (WHERE period = 'current' AND b.status NOT IN ('cancelled', 'no_show')) AS cur_check_ins,
+            COALESCE(SUM(total_cost::numeric) FILTER (WHERE period = 'current' AND b.status NOT IN ('cancelled', 'no_show')), 0) AS cur_revenue,
+            COUNT(*) FILTER (WHERE period = 'current') AS cur_bookings,
+            COALESCE(SUM(total_cost::numeric) FILTER (WHERE period = 'previous' AND b.status NOT IN ('cancelled', 'no_show')), 0) AS prev_revenue,
+            COUNT(*) FILTER (WHERE period = 'previous' AND b.status NOT IN ('cancelled', 'no_show')) AS prev_check_ins,
+            COUNT(*) FILTER (WHERE period = 'previous') AS prev_bookings,
+            COALESCE(MAX(b.currency) FILTER (WHERE period = 'current'), 'UZS') AS currency
+        FROM (
+            SELECT b.*, 'current' AS period
+            FROM {_t(PMS_BOOKING_TABLE)} b
+            WHERE b.property_id = %s AND b.check_in BETWEEN %s AND %s
+            UNION ALL
+            SELECT b.*, 'previous' AS period
+            FROM {_t(PMS_BOOKING_TABLE)} b
+            WHERE b.property_id = %s AND b.check_in BETWEEN %s AND %s
+        ) b
+        """,
+        [property_id, date_from, date_to, property_id, prev_date_from, prev_date_to],
+    ) or {"cur_check_ins": 0, "cur_revenue": 0, "cur_bookings": 0, "prev_revenue": 0, "prev_check_ins": 0, "prev_bookings": 0, "currency": "UZS"}
+
+    occ_current = fetch_one(
+        f"""
+        SELECT COUNT(DISTINCT cs.date || '-' || cs.room_id) as count
+        FROM {_t(PMS_CALENDAR_SLOT_TABLE)} cs
+        JOIN {_t(PMS_ROOM_TABLE)} r ON r.id = cs.room_id
+        WHERE r.property_id = %s AND cs.date BETWEEN %s AND %s AND cs.status = 'occupied'
+        """,
+        [property_id, date_from, date_to],
+    ) or {"count": 0}
+    occ_prev = fetch_one(
+        f"""
+        SELECT COUNT(DISTINCT cs.date || '-' || cs.room_id) as count
+        FROM {_t(PMS_CALENDAR_SLOT_TABLE)} cs
+        JOIN {_t(PMS_ROOM_TABLE)} r ON r.id = cs.room_id
+        WHERE r.property_id = %s AND cs.date BETWEEN %s AND %s AND cs.status = 'occupied'
+        """,
+        [property_id, prev_date_from, prev_date_to],
+    ) or {"count": 0}
+
+    cur_occ = (occ_current["count"] / (room_count * days_in_period) * 100) if room_count > 0 and days_in_period > 0 else 0
+    prev_occ = (occ_prev["count"] / (room_count * max(days_in_period, 1)) * 100) if room_count > 0 else 0
+
+    cur_guests = fetch_one(
+        f"""
+        SELECT COUNT(DISTINCT b.guest_id) as count
+        FROM {_t(PMS_BOOKING_TABLE)} b
+        WHERE b.property_id = %s AND b.check_in <= %s AND b.check_out > %s AND b.status = 'checked_in'
+        """,
+        [property_id, date_to, date_to],
+    ) or {"count": 0}
+
+    cur = {
+        "check_ins": int(kpi_row["cur_check_ins"]),
+        "revenue": float(kpi_row["cur_revenue"]),
+        "bookings": int(kpi_row["cur_bookings"]),
+        "occupancy": round(cur_occ, 1),
+        "current_guests": int(cur_guests["count"]),
+    }
+    prev = {
+        "check_ins": int(kpi_row["prev_check_ins"]),
+        "revenue": float(kpi_row["prev_revenue"]),
+        "bookings": int(kpi_row["prev_bookings"]),
+        "occupancy": round(prev_occ, 1),
+    }
+
+    ci_ch, ci_pct = _calc_change(cur["check_ins"], prev["check_ins"])
+    rev_ch, rev_pct = _calc_change(cur["revenue"], prev["revenue"])
+    bk_ch, bk_pct = _calc_change(cur["bookings"], prev["bookings"])
+    occ_ch, occ_pct = _calc_change(cur["occupancy"], prev["occupancy"])
 
     kpi = {
-        "check_ins": {
-            "value": current_kpi["check_ins"],
-            "change": check_ins_change,
-            "change_percent": check_ins_pct,
-        },
-        "revenue": {
-            "value": current_kpi["revenue"],
-            "change": revenue_change,
-            "change_percent": revenue_pct,
-            "currency": current_kpi["currency"],
-        },
-        "bookings": {
-            "value": current_kpi["bookings"],
-            "change": bookings_change,
-            "change_percent": bookings_pct,
-        },
-        "occupancy": {
-            "value": current_kpi["occupancy"],
-            "change": occupancy_change,
-            "change_percent": occupancy_pct,
-        },
-        "current_guests": {
-            "value": current_kpi["current_guests"],
-        },
+        "check_ins": {"value": cur["check_ins"], "change": ci_ch, "change_percent": ci_pct},
+        "revenue": {"value": cur["revenue"], "change": rev_ch, "change_percent": rev_pct, "currency": kpi_row["currency"]},
+        "bookings": {"value": cur["bookings"], "change": bk_ch, "change_percent": bk_pct},
+        "occupancy": {"value": cur["occupancy"], "change": occ_ch, "change_percent": occ_pct},
+        "current_guests": {"value": cur["current_guests"]},
     }
 
-    def _calc_chart(d_from: date, d_to: date, metric_name: str) -> list[dict[str, Any]]:
-        points = []
-        current_date = d_from
-        while current_date <= d_to:
-            next_date = current_date + timedelta(days=1)
+    # --- Chart: single query with generate_series ---
+    offset_days = (date_to - date_from).days + 1
+    chart_points = []
+    if metric == "occupancy":
+        occ_chart = fetch_all(
+            f"""
+            SELECT d.date::date AS dt, COUNT(DISTINCT cs.room_id) as occupied
+            FROM generate_series(%s::date, %s::date, '1 day'::interval) AS d(date)
+            LEFT JOIN {_t(PMS_CALENDAR_SLOT_TABLE)} cs ON cs.date = d.date::date AND cs.status = 'occupied'
+            LEFT JOIN {_t(PMS_ROOM_TABLE)} r ON r.id = cs.room_id AND r.property_id = %s
+            GROUP BY d.date::date
+            ORDER BY d.date::date
+            """,
+            [date_from, date_to, property_id],
+        )
+        prev_occ_chart = fetch_all(
+            f"""
+            SELECT d.date::date AS dt, COUNT(DISTINCT cs.room_id) as occupied
+            FROM generate_series(%s::date, %s::date, '1 day'::interval) AS d(date)
+            LEFT JOIN {_t(PMS_CALENDAR_SLOT_TABLE)} cs ON cs.date = d.date::date AND cs.status = 'occupied'
+            LEFT JOIN {_t(PMS_ROOM_TABLE)} r ON r.id = cs.room_id AND r.property_id = %s
+            GROUP BY d.date::date
+            ORDER BY d.date::date
+            """,
+            [prev_date_from, prev_date_to, property_id],
+        )
+        for i, row in enumerate(occ_chart):
+            prev_val = None
+            if i < len(prev_occ_chart):
+                prev_val = (prev_occ_chart[i]["occupied"] / room_count * 100) if room_count > 0 else 0
+            chart_points.append({
+                "date": row["dt"].isoformat() if hasattr(row["dt"], "isoformat") else str(row["dt"]),
+                "value": round((row["occupied"] / room_count * 100) if room_count > 0 else 0, 1),
+                "previous_value": round(prev_val, 1) if prev_val is not None else None,
+            })
+    else:
+        if metric == "check_ins":
+            field = "COUNT(*) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show'))"
+            prev_field = field
+        elif metric == "revenue":
+            field = "COALESCE(SUM(b.total_cost::numeric) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show')), 0)"
+            prev_field = field
+        elif metric == "bookings":
+            field = "COUNT(*)"
+            prev_field = field
+        else:
+            field = "COUNT(*)"
+            prev_field = field
 
-            if metric_name == "check_ins":
-                result = fetch_one(
-                    f"""
-                    SELECT COUNT(*) as value
-                    FROM {_t(PMS_BOOKING_TABLE)} b
-                    WHERE b.property_id = %s
-                      AND b.check_in = %s
-                      AND b.status NOT IN ('cancelled', 'no_show')
-                    """,
-                    [property_id, current_date],
-                )
-            elif metric_name == "revenue":
-                result = fetch_one(
-                    f"""
-                    SELECT COALESCE(SUM(total_cost::numeric), 0) as value
-                    FROM {_t(PMS_BOOKING_TABLE)} b
-                    WHERE b.property_id = %s
-                      AND b.check_in = %s
-                      AND b.status NOT IN ('cancelled', 'no_show')
-                    """,
-                    [property_id, current_date],
-                )
-            elif metric_name == "bookings":
-                result = fetch_one(
-                    f"""
-                    SELECT COUNT(*) as value
-                    FROM {_t(PMS_BOOKING_TABLE)} b
-                    WHERE b.property_id = %s
-                      AND b.created_at::date = %s
-                    """,
-                    [property_id, current_date],
-                )
-            else:
-                total_rooms = fetch_one(
-                    f"""
-                    SELECT COUNT(*) as count
-                    FROM {_t(PMS_ROOM_TABLE)} r
-                    WHERE r.property_id = %s AND r.is_active = TRUE
-                    """,
-                    [property_id],
-                ) or {"count": 1}
-
-                occupied = fetch_one(
-                    f"""
-                    SELECT COUNT(DISTINCT room_id) as count
-                    FROM {_t(PMS_CALENDAR_SLOT_TABLE)} cs
-                    JOIN {_t(PMS_ROOM_TABLE)} r ON r.id = cs.room_id
-                    WHERE r.property_id = %s
-                      AND cs.date = %s
-                      AND cs.status = 'occupied'
-                    """,
-                    [property_id, current_date],
-                ) or {"count": 0}
-
-                value = (occupied["count"] / total_rooms["count"] * 100) if total_rooms["count"] > 0 else 0
-                result = {"value": value}
-
-            prev_result = None
-            prev_date = current_date - timedelta(days=(d_to - d_from).days + 1)
-            if prev_date >= prev_date_from:
-                if metric_name == "check_ins":
-                    prev_result = fetch_one(
-                        f"""
-                        SELECT COUNT(*) as value
-                        FROM {_t(PMS_BOOKING_TABLE)} b
-                        WHERE b.property_id = %s
-                          AND b.check_in = %s
-                          AND b.status NOT IN ('cancelled', 'no_show')
-                        """,
-                        [property_id, prev_date],
-                    )
-                elif metric_name == "revenue":
-                    prev_result = fetch_one(
-                        f"""
-                        SELECT COALESCE(SUM(total_cost::numeric), 0) as value
-                        FROM {_t(PMS_BOOKING_TABLE)} b
-                        WHERE b.property_id = %s
-                          AND b.check_in = %s
-                          AND b.status NOT IN ('cancelled', 'no_show')
-                        """,
-                        [property_id, prev_date],
-                    )
-                elif metric_name == "bookings":
-                    prev_result = fetch_one(
-                        f"""
-                        SELECT COUNT(*) as value
-                        FROM {_t(PMS_BOOKING_TABLE)} b
-                        WHERE b.property_id = %s
-                          AND b.created_at::date = %s
-                        """,
-                        [property_id, prev_date],
-                    )
-
-            points.append({
-                "date": current_date.isoformat(),
-                "value": float(result["value"]) if result else 0,
-                "previous_value": float(prev_result["value"]) if prev_result else None,
+        cur_chart = fetch_all(
+            f"""
+            SELECT d.date::date AS dt, {field} AS value
+            FROM generate_series(%s::date, %s::date, '1 day'::interval) AS d(date)
+            LEFT JOIN {_t(PMS_BOOKING_TABLE)} b ON {f"b.check_in = d.date::date" if metric != "bookings" else "b.created_at::date = d.date::date"}
+                AND b.property_id = %s
+            GROUP BY d.date::date
+            ORDER BY d.date::date
+            """,
+            [date_from, date_to, property_id],
+        )
+        prev_chart = fetch_all(
+            f"""
+            SELECT d.date::date AS dt, {prev_field} AS value
+            FROM generate_series(%s::date, %s::date, '1 day'::interval) AS d(date)
+            LEFT JOIN {_t(PMS_BOOKING_TABLE)} b ON {f"b.check_in = d.date::date" if metric != "bookings" else "b.created_at::date = d.date::date"}
+                AND b.property_id = %s
+            GROUP BY d.date::date
+            ORDER BY d.date::date
+            """,
+            [prev_date_from, prev_date_to, property_id],
+        )
+        for i, row in enumerate(cur_chart):
+            prev_val = float(prev_chart[i]["value"]) if i < len(prev_chart) else None
+            chart_points.append({
+                "date": row["dt"].isoformat() if hasattr(row["dt"], "isoformat") else str(row["dt"]),
+                "value": float(row["value"]) if row["value"] is not None else 0,
+                "previous_value": prev_val,
             })
 
-            current_date = next_date
+    chart = {"points": chart_points, "metric": metric}
 
-        return points
-
-    chart_points = _calc_chart(date_from, date_to, metric)
-    chart = {
-        "points": chart_points,
-        "metric": metric,
-    }
-
+    # --- Room analytics: single batched query ---
     room_conditions = ["r.property_id = %s", "r.is_active = TRUE"]
     room_params: list[Any] = [property_id]
-
     if category:
         room_conditions.append("rt.name = %s")
         room_params.append(category)
@@ -1512,126 +1460,59 @@ def get_analytics(
     if search:
         room_conditions.append("r.room_number ILIKE %s")
         room_params.append(f"%{search}%")
-
     room_where = " AND ".join(room_conditions)
 
     rooms_raw = fetch_all(
         f"""
-        SELECT r.id as room_id, r.room_number, rt.name as category, r.floor,
-               COALESCE(SUM(b.total_cost::numeric), 0) as revenue,
-               COUNT(b.id) as booking_count,
-               COALESCE(b.currency, rt.currency, 'UZS') as currency
+        SELECT
+            r.id as room_id, r.room_number, rt.name as category, r.floor,
+            COALESCE(SUM(b.total_cost::numeric) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show')), 0) as revenue,
+            COUNT(b.id) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show')) as booking_count,
+            COALESCE(MAX(b.currency), 'UZS') as currency,
+            COUNT(DISTINCT cs.date) FILTER (WHERE cs.status = 'occupied' AND cs.date BETWEEN %s AND %s) as cur_occ_nights,
+            COUNT(DISTINCT cs.date) FILTER (WHERE cs.status = 'occupied' AND cs.date BETWEEN %s AND %s) as prev_occ_nights,
+            COALESCE(SUM(b.total_cost::numeric) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show') AND b.check_in BETWEEN %s AND %s), 0) as prev_revenue,
+            COUNT(b.id) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show') AND b.check_in BETWEEN %s AND %s) as prev_booking_count
         FROM {_t(PMS_ROOM_TABLE)} r
         LEFT JOIN {_t(PMS_ROOM_TYPE_TABLE)} rt ON rt.id = r.room_type_id
-        LEFT JOIN {_t(PMS_BOOKING_TABLE)} b ON b.room_id = r.id
-            AND b.check_in BETWEEN %s AND %s
-            AND b.status NOT IN ('cancelled', 'no_show')
+        LEFT JOIN {_t(PMS_BOOKING_TABLE)} b ON b.room_id = r.id AND b.check_in BETWEEN %s AND %s
+        LEFT JOIN {_t(PMS_CALENDAR_SLOT_TABLE)} cs ON cs.room_id = r.id
         WHERE {room_where}
-        GROUP BY r.id, r.room_number, rt.name, r.floor, b.currency, rt.currency
+        GROUP BY r.id, r.room_number, rt.name, r.floor
         ORDER BY r.room_number ASC
         """,
-        [date_from, date_to] + room_params,
+        [date_from, date_to, prev_date_from, prev_date_to, prev_date_from, prev_date_to, prev_date_from, prev_date_to, date_from, date_to] + room_params,
     )
 
-    days_in_period = (date_to - date_from).days + 1
-
-    def _calc_room_analytics(room: dict[str, Any]) -> dict[str, Any]:
-        room_id = room["room_id"]
-
-        occupied_nights = fetch_one(
-            f"""
-            SELECT COUNT(DISTINCT date) as count
-            FROM {_t(PMS_CALENDAR_SLOT_TABLE)}
-            WHERE room_id = %s
-              AND date BETWEEN %s AND %s
-              AND status = 'occupied'
-            """,
-            [room_id, date_from, date_to],
-        ) or {"count": 0}
-
-        occupancy = (occupied_nights["count"] / days_in_period * 100) if days_in_period > 0 else 0
-
-        prev_occupied = fetch_one(
-            f"""
-            SELECT COUNT(DISTINCT date) as count
-            FROM {_t(PMS_CALENDAR_SLOT_TABLE)}
-            WHERE room_id = %s
-              AND date BETWEEN %s AND %s
-              AND status = 'occupied'
-            """,
-            [room_id, prev_date_from, prev_date_to],
-        ) or {"count": 0}
-
-        prev_occupancy = (prev_occupied["count"] / days_in_period * 100) if days_in_period > 0 else 0
-
-        prev_revenue = fetch_one(
-            f"""
-            SELECT COALESCE(SUM(total_cost::numeric), 0) as total
-            FROM {_t(PMS_BOOKING_TABLE)}
-            WHERE room_id = %s
-              AND check_in BETWEEN %s AND %s
-              AND status NOT IN ('cancelled', 'no_show')
-            """,
-            [room_id, prev_date_from, prev_date_to],
-        ) or {"total": 0}
-
+    rooms = []
+    for room in rooms_raw:
         revenue = float(room["revenue"])
-        prev_rev = float(prev_revenue["total"])
-        adr = revenue / room["booking_count"] if room["booking_count"] > 0 else 0
-        prev_adr = prev_rev / max(1, fetch_one(
-            f"""
-            SELECT COUNT(*) as count
-            FROM {_t(PMS_BOOKING_TABLE)}
-            WHERE room_id = %s
-              AND check_in BETWEEN %s AND %s
-              AND status NOT IN ('cancelled', 'no_show')
-            """,
-            [room_id, prev_date_from, prev_date_to],
-        )["count"])
+        prev_rev = float(room["prev_revenue"] or 0)
+        bcount = room["booking_count"]
+        prev_bcount = room["prev_booking_count"] or 1
 
+        cur_occ_pct = (room["cur_occ_nights"] / days_in_period * 100) if days_in_period > 0 else 0
+        prev_occ_pct = (room["prev_occ_nights"] / max(days_in_period, 1) * 100) if days_in_period > 0 else 0
+
+        adr = revenue / bcount if bcount > 0 else 0
+        prev_adr = prev_rev / prev_bcount if prev_bcount > 0 else 0
         revpar = revenue / days_in_period if days_in_period > 0 else 0
-        prev_revpar = prev_rev / days_in_period if days_in_period > 0 else 0
+        prev_revpar = prev_rev / max(days_in_period, 1) if days_in_period > 0 else 0
 
-        def _change(curr: float, prev: float) -> tuple[float, float]:
-            ch = curr - prev
-            pct = (ch / prev * 100) if prev > 0 else 0
-            return round(ch, 2), round(pct, 1)
+        occ_ch, occ_pct_v = _calc_change(cur_occ_pct, prev_occ_pct)
+        rev_ch, rev_pct_v = _calc_change(revenue, prev_rev)
+        adr_ch, adr_pct_v = _calc_change(adr, prev_adr)
+        rp_ch, rp_pct_v = _calc_change(revpar, prev_revpar)
 
-        occ_change, occ_pct = _change(occupancy, prev_occupancy)
-        rev_change, rev_pct = _change(revenue, prev_rev)
-        adr_change, adr_pct = _change(adr, prev_adr)
-        revpar_change, revpar_pct = _change(revpar, prev_revpar)
-
-        return {
-            "room_id": room_id,
+        rooms.append({
+            "room_id": room["room_id"],
             "room_number": room["room_number"],
             "category": room["category"] or "Standard",
-            "occupancy": {
-                "value": round(occupancy, 1),
-                "change": occ_change,
-                "change_percent": occ_pct,
-            },
-            "revenue": {
-                "value": revenue,
-                "change": rev_change,
-                "change_percent": rev_pct,
-                "currency": room.get("currency", "UZS"),
-            },
-            "adr": {
-                "value": round(adr, 2),
-                "change": adr_change,
-                "change_percent": adr_pct,
-                "currency": room.get("currency", "UZS"),
-            },
-            "revpar": {
-                "value": round(revpar, 2),
-                "change": revpar_change,
-                "change_percent": revpar_pct,
-                "currency": room.get("currency", "UZS"),
-            },
-        }
-
-    rooms = [_calc_room_analytics(r) for r in rooms_raw]
+            "occupancy": {"value": round(cur_occ_pct, 1), "change": occ_ch, "change_percent": occ_pct_v},
+            "revenue": {"value": revenue, "change": rev_ch, "change_percent": rev_pct_v, "currency": room["currency"]},
+            "adr": {"value": round(adr, 2), "change": adr_ch, "change_percent": adr_pct_v, "currency": room["currency"]},
+            "revpar": {"value": round(revpar, 2), "change": rp_ch, "change_percent": rp_pct_v, "currency": room["currency"]},
+        })
 
     return {
         "kpi": kpi,

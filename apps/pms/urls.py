@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AnalyticsExportView,
     AnalyticsView,
     BookingAcceptView,
     BookingCancelView,
@@ -85,4 +86,5 @@ urlpatterns = [
 
     # Analytics
     path("properties/<int:property_id>/analytics/", AnalyticsView.as_view(), name="pms-analytics"),
+    path("properties/<int:property_id>/analytics/export/", AnalyticsExportView.as_view(), name="pms-analytics-export"),
 ]

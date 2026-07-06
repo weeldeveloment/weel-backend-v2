@@ -115,6 +115,8 @@ def _fetch_hotel_rows_for_schema(
     hotel_id: int | None = None,
     include_inactive: bool = False,
     include_unverified: bool = False,
+    search: str | None = None,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     def _query() -> list[dict[str, Any]]:
         with connection.cursor() as cursor:
@@ -127,7 +129,15 @@ def _fetch_hotel_rows_for_schema(
                 where.append("COALESCE(p.is_active, TRUE) = TRUE")
             if not include_unverified:
                 where.append("COALESCE(p.is_verified, FALSE) = TRUE")
+            if search:
+                raw_search = str(search).strip()
+                where.append(
+                    "(p.name ILIKE %s OR COALESCE(p.city, '') ILIKE %s OR COALESCE(p.address, '') ILIKE %s)"
+                )
+                like = f"%{raw_search}%"
+                params.extend([like, like, like])
             where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+            limit_sql = f"LIMIT {int(limit)}" if limit else ""
             cursor.execute(
                 f"""
                 SELECT
@@ -166,6 +176,7 @@ def _fetch_hotel_rows_for_schema(
                 FROM pms_property p
                 {where_sql}
                 ORDER BY p.created_at DESC, p.id DESC
+                {limit_sql}
                 """,
                 [schema_name, *params],
             )
@@ -282,20 +293,29 @@ def list_hotels(
     include_unverified: bool = False,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    remaining = limit
 
     for organization in list_hotel_organizations():
         try:
-            tenant_rows = _fetch_hotel_rows_for_schema(organization["schema_name"], include_unverified=include_unverified)
+            tenant_rows = _fetch_hotel_rows_for_schema(
+                organization["schema_name"],
+                include_unverified=include_unverified,
+                search=search,
+                limit=remaining,
+            )
         except Exception:
             continue
-        rows.extend(
+        serialized = [
             _serialize_hotel_row(row, organization)
             for row in tenant_rows
             if testing_only is None or bool(row.get("is_testing", False)) is bool(testing_only)
-        )
+        ]
+        rows.extend(serialized)
+        if limit:
+            remaining = limit - len(rows)
+            if remaining <= 0:
+                break
 
-    if search:
-        rows = [r for r in rows if _matches_search(r, search)]
     if lat is not None and lon is not None:
         rows = [r for r in rows if _matches_location(r, lat, lon, radius_km)]
 
@@ -328,6 +348,7 @@ def list_admin_hotels(
                 organization["schema_name"],
                 include_inactive=True,
                 include_unverified=True,
+                search=search,
             )
         except Exception:
             continue
@@ -340,8 +361,6 @@ def list_admin_hotels(
                 created_from=created_from,
                 created_to=created_to,
             ):
-                continue
-            if not _matches_search(payload, search):
                 continue
             rows.append(payload)
 

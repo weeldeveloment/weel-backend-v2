@@ -249,6 +249,22 @@ def create_tenant_schema(schema_name: str) -> None:
             );
         """)
 
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_property_image_property_id ON pms_property_image (property_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_room_property_id ON pms_room (property_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_room_room_type_id ON pms_room (room_type_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_room_image_room_id ON pms_room_image (room_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_property_id ON pms_booking (property_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_room_id ON pms_booking (room_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_guest_id ON pms_booking (guest_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_created_by ON pms_booking (created_by)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_history_booking_id ON pms_booking_history (booking_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_rate_property_id ON pms_rate (property_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_rate_room_type_id ON pms_rate (room_type_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_review_property_id ON pms_review (property_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_review_booking_id ON pms_review (booking_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_room_type_property_id ON pms_room_type (property_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_calendar_slot_status_expires ON pms_calendar_slot (status, hold_expires_at)")
+
         cursor.execute("SET search_path TO public")
 
 
