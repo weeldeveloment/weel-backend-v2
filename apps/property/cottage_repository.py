@@ -81,7 +81,7 @@ REGION_SELECT_SQL = "COALESCE(c.region_id, d.region_id)" if HAS_COTTAGE_REGION_I
 DISTRICT_SELECT_SQL = "COALESCE(c.district_id, dp.district_id)" if HAS_COTTAGE_DISTRICT_ID else "dp.district_id"
 
 
-COTTAGE_SELECT = f"""
+COTTAGE_SELECT = """
     SELECT
         'cottage' AS property_kind,
         c.id,
@@ -138,7 +138,13 @@ COTTAGE_SELECT = f"""
         u.last_name AS partner_last_name,
         u.phone_number AS partner_phone_number,
         COALESCE(stats.average_rating, 5.0) AS average_rating,
-        COALESCE(stats.review_count, 0) AS review_count,
+        COALESCE(stats.review_count, 0) AS review_count"""
+
+
+def _cottage_select(*, include_price_history: bool = True) -> str:
+    sql = COTTAGE_SELECT
+    if include_price_history:
+        sql += """,
         COALESCE(monthly_prices.price_data, '[]'::jsonb) AS price
     FROM {COTTAGE_TABLE} c
     LEFT JOIN (
@@ -183,8 +189,39 @@ COTTAGE_SELECT = f"""
         WHERE cp.cottage_id = c.id
           AND CURRENT_DATE BETWEEN cp.month_from AND cp.month_to
         LIMIT 1
-    ) current_price ON TRUE
-"""
+    ) current_price ON TRUE"""
+    else:
+        sql += """
+    FROM {COTTAGE_TABLE} c
+    LEFT JOIN (
+        SELECT prefecture_id, MIN(district_id) AS district_id
+        FROM {DISTRICT_PREFECTURE_TABLE}
+        GROUP BY prefecture_id
+    ) dp ON dp.prefecture_id = c.prefecture_id
+    LEFT JOIN {DISTRICT_TABLE} d ON d.id = dp.district_id
+    LEFT JOIN {REGION_TABLE} reg ON reg.id = d.region_id
+    LEFT JOIN {PREFECTURE_TABLE} pref ON CAST(pref.id AS TEXT) = CAST(c.prefecture_id AS TEXT)
+    LEFT JOIN {USERS_TABLE} u ON u.id = c.partner_user_id
+    LEFT JOIN LATERAL (
+        SELECT
+            ROUND(COALESCE(AVG(r.rating), 5.0), 2) AS average_rating,
+            COUNT(*) AS review_count
+        FROM {REVIEW_TABLE} r
+        WHERE r.cottage_id = c.id
+          AND (COALESCE(r.is_hidden, FALSE) = FALSE)
+          AND r.rating IS NOT NULL
+    ) stats ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT
+            cp.price_per_person,
+            cp.price_on_working_days,
+            cp.price_on_weekends
+        FROM {COTTAGE_PRICE_TABLE} cp
+        WHERE cp.cottage_id = c.id
+          AND CURRENT_DATE BETWEEN cp.month_from AND cp.month_to
+        LIMIT 1
+    ) current_price ON TRUE"""
+    return sql
 
 
 def list_cottages(
@@ -270,7 +307,7 @@ def list_cottages(
 
     return fetch_all(
         f"""
-        {COTTAGE_SELECT}
+        {_cottage_select(include_price_history=False)}
         WHERE {' AND '.join(where)}
         ORDER BY c.created_at DESC, c.id DESC
         {'LIMIT %s' if limit else ''}
@@ -283,7 +320,7 @@ def list_cottages(
 def get_cottage_for_public(cottage_guid: str) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        {COTTAGE_SELECT}
+        {_cottage_select(include_price_history=True)}
         WHERE c.guid = %s
           AND COALESCE(c.is_verified, FALSE) = TRUE
           AND COALESCE(c.is_archived, FALSE) = FALSE
@@ -296,7 +333,7 @@ def get_cottage_for_public(cottage_guid: str) -> dict[str, Any] | None:
 def get_cottage_for_partner(cottage_guid: str, partner_user_id: int) -> dict[str, Any] | None:
     return fetch_one(
         f"""
-        {COTTAGE_SELECT}
+        {_cottage_select(include_price_history=True)}
         WHERE c.guid = %s
           AND c.partner_user_id = %s
         LIMIT 1
@@ -560,7 +597,7 @@ def admin_get_cottage(cottage_guid: str) -> dict[str, Any] | None:
     """Fetch a cottage by guid with no ownership/visibility filters (admin use)."""
     return fetch_one(
         f"""
-        {COTTAGE_SELECT}
+        {_cottage_select(include_price_history=True)}
         WHERE c.guid = %s
         LIMIT 1
         """,

@@ -77,7 +77,7 @@ from .apartment_serializers import (
     ApartmentUpdateSerializer,
 )
 from .cottage_repository import (
-    COTTAGE_SELECT,
+    _cottage_select,
     admin_append_cottage_images,
     admin_create_cottage,
     admin_delete_cottage,
@@ -1609,7 +1609,7 @@ class UnifiedRecommendationsListView(APIView):
                     return []
                 gcot_rows = fetch_all(
                     f"""
-                    {COTTAGE_SELECT}
+                    {_cottage_select(include_price_history=True)}
                     WHERE CAST(c.guid AS TEXT) IN %s
                       AND COALESCE(c.is_verified, FALSE) = TRUE
                       AND COALESCE(c.is_archived, FALSE) = FALSE
