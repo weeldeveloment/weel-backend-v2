@@ -3,7 +3,7 @@ Hotel Bot handlers.
 
 Flow:
   /start  →  ask phone
-  phone   →  send OTP via Eskiz (user must be registered in PMS as platform_user)
+  phone   →  send OTP via Eskiz (user must be registered in PMS, users table role=pms)
   OTP     →  verify → show organizations
   org cb  →  show upcoming bookings for that organization's properties
 """
@@ -20,11 +20,11 @@ from telegram.ext import ContextTypes
 
 from apps.users.services import EskizService, OTPRedisService
 from apps.users.models.logs import SmsPurpose
-from apps.users.raw_repository import create_sms_log
-from apps.platform.raw_repository import get_platform_user_by_phone, get_user_organizations
+from apps.users.raw_repository import create_sms_log, get_active_user_by_phone
+from apps.platform.raw_repository import get_user_organizations
 from apps.pms.repository import list_properties, list_bookings, list_newest_bookings
 
-get_platform_user_by_phone = sync_to_async(get_platform_user_by_phone, thread_sensitive=False)
+get_active_user_by_phone = sync_to_async(get_active_user_by_phone, thread_sensitive=False)
 get_user_organizations = sync_to_async(get_user_organizations, thread_sensitive=False)
 create_sms_log = sync_to_async(create_sms_log, thread_sensitive=False)
 list_properties = sync_to_async(list_properties, thread_sensitive=False)
@@ -118,8 +118,8 @@ async def _handle_phone(update: Update, chat_id: int, phone: str) -> None:
         )
         return
 
-    # Check if phone is registered in PMS (platform_user table)
-    user = await get_platform_user_by_phone(phone)
+    # Check if phone is registered in PMS (users table, role=pms)
+    user = await get_active_user_by_phone(phone, role="pms")
     if not user:
         await update.message.reply_text(
             "Bu raqam PMS tizimida ro'yxatdan o'tmagan.\n"
@@ -147,7 +147,7 @@ async def _handle_phone(update: Update, chat_id: int, phone: str) -> None:
         return
 
     # Store phone temporarily
-    cache.set(_user_key(chat_id), {"phone": phone, "platform_user_id": user["id"]}, _STATE_TTL)
+    cache.set(_user_key(chat_id), {"phone": phone, "platform_user_id": user.id}, _STATE_TTL)
     _set_state(chat_id, STATE_WAIT_OTP)
 
     await update.message.reply_text(
