@@ -285,6 +285,19 @@ class PartnerProfileSerializer(serializers.Serializer):
         return str(obj.guid) if getattr(obj, "guid", None) else None
 
 
+class PmsProfileSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    guid = serializers.SerializerMethodField(read_only=True)
+    first_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    last_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    phone_number = serializers.CharField(read_only=True)
+    avatar = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+    def get_guid(self, obj):
+        return str(obj.guid) if getattr(obj, "guid", None) else None
+
+
 class PartnerPassportUploadSerializer(serializers.Serializer):
     document = serializers.FileField(required=True)
 
