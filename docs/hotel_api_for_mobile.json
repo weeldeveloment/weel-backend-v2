@@ -1,0 +1,176 @@
+{
+  "base_url": "https://api.weel.uz/api/hotels/",
+  "swagger_url": "https://api.weel.uz/swagger/",
+  "auth": "none (public, AllowAny)",
+  "endpoints": [
+    {
+      "name": "Search hotels",
+      "method": "GET",
+      "path": "/api/hotels/search/",
+      "query_params": [
+        { "name": "city", "type": "string", "required": false },
+        { "name": "check_in", "type": "date (YYYY-MM-DD)", "required": false },
+        { "name": "check_out", "type": "date (YYYY-MM-DD)", "required": false, "note": "must be after check_in" },
+        { "name": "guests", "type": "int", "required": false, "default": 1 },
+        { "name": "star_rating", "type": "int (1-5)", "required": false },
+        { "name": "weel_classification", "type": "string", "required": false, "choices": ["standard", "essential", "comfort", "comfort_plus", "business", "premium", "signature"] },
+        { "name": "themes", "type": "array[string]", "required": false },
+        { "name": "price_min", "type": "decimal", "required": false },
+        { "name": "price_max", "type": "decimal", "required": false },
+        { "name": "sort_by", "type": "string", "required": false, "default": "popular", "choices": ["popular", "rating", "reviews", "cheap", "expensive"] },
+        { "name": "page", "type": "int", "required": false, "default": 1 },
+        { "name": "page_size", "type": "int", "required": false, "default": 20, "max": 100 }
+      ],
+      "response_200_example": {
+        "count": 42,
+        "page": 1,
+        "page_size": 20,
+        "results": [
+          {
+            "id": 1,
+            "name": "Hotel Uzbekistan",
+            "city": "Tashkent",
+            "full_address": "...",
+            "star_rating": 4,
+            "weel_classification": "comfort",
+            "themes": ["business"],
+            "description": "...",
+            "rating": 4.5,
+            "review_count": 120,
+            "check_in_time": "14:00:00",
+            "check_out_time": "12:00:00",
+            "latitude": 41.31,
+            "longitude": 69.28,
+            "min_price": 500000.00
+          }
+        ]
+      }
+    },
+    {
+      "name": "Hotel detail",
+      "method": "GET",
+      "path": "/api/hotels/{hotel_id}/",
+      "path_params": [
+        { "name": "hotel_id", "type": "int", "required": true }
+      ],
+      "response_200_example": {
+        "id": 1,
+        "name": "Hotel Uzbekistan",
+        "city": "Tashkent",
+        "full_address": "...",
+        "star_rating": 4,
+        "weel_classification": "comfort",
+        "themes": ["business"],
+        "description": "...",
+        "rating": 4.5,
+        "review_count": 120,
+        "check_in_time": "14:00:00",
+        "check_out_time": "12:00:00",
+        "latitude": 41.31,
+        "longitude": 69.28,
+        "min_price": 500000.00,
+        "amenities": ["wifi", "parking"],
+        "wifi": true,
+        "parking": true,
+        "pool": false,
+        "restaurant": true,
+        "gym": false,
+        "pets_allowed": false,
+        "alcohol_allowed": true,
+        "quiet_hours": false,
+        "images": [{ "url": "https://..." }],
+        "reviews": [
+          {
+            "id": 1,
+            "guest_name": "Aziz",
+            "rating": 4.5,
+            "text": "Zo'r joy edi",
+            "response": null,
+            "created_at": "2026-06-01T10:00:00Z"
+          }
+        ]
+      },
+      "response_404_example": { "detail": "Hotel not found." }
+    },
+    {
+      "name": "Available rooms",
+      "method": "GET",
+      "path": "/api/hotels/{hotel_id}/rooms/",
+      "path_params": [
+        { "name": "hotel_id", "type": "int", "required": true }
+      ],
+      "query_params": [
+        { "name": "check_in", "type": "date (YYYY-MM-DD)", "required": true },
+        { "name": "check_out", "type": "date (YYYY-MM-DD)", "required": true, "note": "must be after check_in" },
+        { "name": "guests", "type": "int", "required": false, "default": 1 }
+      ],
+      "response_200_example": [
+        {
+          "id": 10,
+          "room_number": "101",
+          "floor": 1,
+          "display_name": "Deluxe Room",
+          "bedroom_count": 1,
+          "price_per_night": 500000.00,
+          "beds": [{ "type": "double", "count": 1 }],
+          "amenities": ["ac", "tv"],
+          "capacity_adults": 2,
+          "capacity_children": 1,
+          "room_type_name": "Deluxe",
+          "preset": "standard",
+          "area_sqm": 25.5,
+          "meal_plan": "breakfast",
+          "images": ["https://..."]
+        }
+      ],
+      "response_404_example": { "detail": "Hotel not found." }
+    },
+    {
+      "name": "Room price",
+      "method": "GET",
+      "path": "/api/hotels/{hotel_id}/rooms/{room_id}/price/",
+      "path_params": [
+        { "name": "hotel_id", "type": "int", "required": true },
+        { "name": "room_id", "type": "int", "required": true }
+      ],
+      "query_params": [
+        { "name": "check_in", "type": "date (YYYY-MM-DD)", "required": true },
+        { "name": "check_out", "type": "date (YYYY-MM-DD)", "required": true }
+      ],
+      "response_200_example": {
+        "nights": 3,
+        "price_per_night": 500000.00,
+        "total_price": 1500000.00,
+        "hold_amount": 300000.00,
+        "remaining_on_arrival": 1200000.00
+      },
+      "response_400_example": { "detail": "Room not found or invalid dates." }
+    },
+    {
+      "name": "Hotel reviews",
+      "method": "GET",
+      "path": "/api/hotels/{hotel_id}/reviews/",
+      "path_params": [
+        { "name": "hotel_id", "type": "int", "required": true }
+      ],
+      "query_params": [
+        { "name": "limit", "type": "int", "required": false, "default": 10 },
+        { "name": "offset", "type": "int", "required": false, "default": 0 }
+      ],
+      "response_200_example": [
+        {
+          "id": 1,
+          "guest_name": "Aziz",
+          "rating": 4.5,
+          "text": "Zo'r joy edi",
+          "response": null,
+          "created_at": "2026-06-01T10:00:00Z"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Bu endpoint'lar public bo'lgani uchun API key yoki token kerak emas.",
+    "Booking va payment jarayonlari alohida, autentifikatsiya talab qiluvchi endpoint'lar orqali amalga oshiriladi (/api/booking/, /api/payment/) — bu faylga kiritilmagan."
+  ]
+}

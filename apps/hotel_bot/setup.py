@@ -4,9 +4,9 @@ import logging
 
 from django.conf import settings
 
-from telegram import Bot, MenuButtonWebApp, WebAppInfo
+from telegram import Bot, MenuButtonWebApp, Update, WebAppInfo
 from telegram.error import NetworkError, TimedOut
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, CallbackQueryHandler, filters
 from telegram.request import HTTPXRequest
 
 from .handlers import start_handler, message_handler, callback_handler, new_handler
@@ -19,6 +19,18 @@ def get_webhook_secret() -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:32]
 
 
+async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.exception("Unhandled error in hotel bot update handling", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_chat:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Kechirasiz, xatolik yuz berdi. Iltimos, /start orqali qaytadan urinib ko'ring.",
+            )
+        except Exception:
+            logger.exception("Failed to notify user about hotel bot error")
+
+
 def build_application() -> Application:
     token = settings.HOTEL_BOT_TOKEN
     if not token:
@@ -29,6 +41,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("new", new_handler))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    app.add_error_handler(_on_error)
     return app
 
 
