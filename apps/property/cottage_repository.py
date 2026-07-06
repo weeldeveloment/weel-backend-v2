@@ -81,7 +81,7 @@ REGION_SELECT_SQL = "COALESCE(c.region_id, d.region_id)" if HAS_COTTAGE_REGION_I
 DISTRICT_SELECT_SQL = "COALESCE(c.district_id, dp.district_id)" if HAS_COTTAGE_DISTRICT_ID else "dp.district_id"
 
 
-COTTAGE_SELECT = """
+COTTAGE_SELECT = f"""
     SELECT
         'cottage' AS property_kind,
         c.id,
@@ -142,10 +142,7 @@ COTTAGE_SELECT = """
 
 
 def _cottage_select(*, include_price_history: bool = True) -> str:
-    sql = COTTAGE_SELECT.format(
-        REGION_SELECT_SQL=REGION_SELECT_SQL,
-        DISTRICT_SELECT_SQL=DISTRICT_SELECT_SQL,
-    )
+    sql = COTTAGE_SELECT
     if include_price_history:
         sql += """,
         COALESCE(monthly_prices.price_data, '[]'::jsonb) AS price
