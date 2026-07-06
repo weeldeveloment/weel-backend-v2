@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import AdminLoginView, AdminMeView, AdminRefreshTokenView, AdminRegisterView
-from .users_views import AdminClientsListView, AdminPartnersListView
+from .users_views import AdminClientsListView, AdminPartnersListView, AdminPmsUsersListView
 from .hotel_views import (
     AdminHotelAnalyticsView,
     AdminHotelListView,
@@ -34,6 +34,7 @@ urlpatterns = [
     # Users management
     path('users/clients/', AdminClientsListView.as_view(), name='admin-clients-list'),
     path('users/partners/', AdminPartnersListView.as_view(), name='admin-partners-list'),
+    path('users/pms/', AdminPmsUsersListView.as_view(), name='admin-pms-users-list'),
     # Hotel Management
     # Specific sub-paths MUST come before the catch-all detail view
     path('hotels/', AdminHotelListView.as_view(), name='admin-hotels-list'),
