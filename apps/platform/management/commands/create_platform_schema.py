@@ -41,7 +41,7 @@ class Command(BaseCommand):
                 CREATE TABLE IF NOT EXISTS platform_organization_member (
                     id BIGSERIAL PRIMARY KEY,
                     organization_id BIGINT NOT NULL REFERENCES platform_organization(id) ON DELETE CASCADE,
-                    user_id BIGINT NOT NULL REFERENCES users_user(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     role VARCHAR(20) NOT NULL DEFAULT 'manager',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
