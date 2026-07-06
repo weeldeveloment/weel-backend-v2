@@ -142,7 +142,10 @@ COTTAGE_SELECT = """
 
 
 def _cottage_select(*, include_price_history: bool = True) -> str:
-    sql = COTTAGE_SELECT
+    sql = COTTAGE_SELECT.format(
+        REGION_SELECT_SQL=REGION_SELECT_SQL,
+        DISTRICT_SELECT_SQL=DISTRICT_SELECT_SQL,
+    )
     if include_price_history:
         sql += """,
         COALESCE(monthly_prices.price_data, '[]'::jsonb) AS price
