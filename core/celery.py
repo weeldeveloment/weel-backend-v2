@@ -88,6 +88,10 @@ app.conf.beat_schedule = {
         "task": "property.tasks.send_cottage_price_reminders",
         "schedule": crontab(day_of_month=1, hour=9, minute=0),  # 1st of every month at 09:00
     },
+    "expire_stale_activity_bookings": {
+        "task": "activities.expire_stale_pending_bookings",
+        "schedule": crontab(minute="*/2"),  # hold TTL is 5 min — check often to release fast
+    },
 }
 
 # app.conf.task_queues = (

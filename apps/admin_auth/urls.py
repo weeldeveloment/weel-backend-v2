@@ -25,6 +25,11 @@ from .hotel_views import (
     AdminB2BCompanyDetailView,
     AdminB2BUsersView,
 )
+from apps.activities.views import (
+    AdminActivityCalendarView,
+    AdminActivityDetailView,
+    AdminActivityListView,
+)
 
 urlpatterns = [
     path('login/', AdminLoginView.as_view(), name='admin-login'),
@@ -60,4 +65,8 @@ urlpatterns = [
     path('b2b/companies/', AdminB2BCompaniesView.as_view(), name='admin-b2b-companies'),
     path('b2b/companies/<int:company_id>/', AdminB2BCompanyDetailView.as_view(), name='admin-b2b-company-detail'),
     path('b2b/companies/<int:company_id>/users/', AdminB2BUsersView.as_view(), name='admin-b2b-users'),
+    # Adventure Activities
+    path('activities/', AdminActivityListView.as_view(), name='admin-activities-list'),
+    path('activities/<uuid:guid>/', AdminActivityDetailView.as_view(), name='admin-activity-detail'),
+    path('activities/<uuid:guid>/calendar/', AdminActivityCalendarView.as_view(), name='admin-activity-calendar'),
 ]

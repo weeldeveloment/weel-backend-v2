@@ -272,6 +272,7 @@ urlpatterns += [
     path("api/b2b/", include("apps.b2b.urls")),
     path("api/documents/", include("apps.documents.urls")),
     path("api/hotels/", include("apps.hotels.urls")),
+    path("api/activities/", include("apps.activities.urls")),
 ]
 
 if settings.ENABLE_SWAGGER_UI:
