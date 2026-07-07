@@ -656,6 +656,65 @@ def list_active_trip_employees(company_id: int, type_: str = "all") -> list[dict
     )
 
 
+# ─── Dashboard summary ───────────────────────────────────────────────────────
+
+def get_dashboard_summary(company_id: int) -> dict[str, Any]:
+    """Return the 4 top-line dashboard numbers for a company:
+
+    - ``monthly_limit``          – owner-set overall monthly budget (b2b_travel_policy.monthly_budget)
+    - ``spent_this_month``       – sum of approved budget-request amounts reviewed/created this calendar month
+    - ``active_employees``       – distinct employees currently on a trip or with an upcoming one
+    - ``pending_limit_requests`` – count of budget-requests awaiting review
+    """
+    now = timezone.now()
+    year, month = now.year, now.month
+
+    policy = get_or_create_travel_policy(company_id)
+    monthly_limit = policy.get("monthly_budget") or Decimal("0")
+
+    spent_row = fetch_one(
+        f"""
+        SELECT COALESCE(SUM(br.amount), 0) AS spent
+        FROM {B2B_BUDGET_REQUEST_TABLE} br
+        JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = br.trip_id
+        WHERE t.company_id = %s AND br.status = 'approved'
+          AND EXTRACT(YEAR FROM COALESCE(br.reviewed_at, br.created_at)) = %s
+          AND EXTRACT(MONTH FROM COALESCE(br.reviewed_at, br.created_at)) = %s
+        """,
+        [company_id, year, month],
+    ) or {}
+
+    active_employees_row = fetch_one(
+        f"""
+        SELECT COUNT(DISTINCT te.employee_id) AS cnt
+        FROM {B2B_TRIP_EMPLOYEE_TABLE} te
+        JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = te.trip_id
+        WHERE t.company_id = %s
+          AND t.status IN ('active', 'pending')
+          AND te.status NOT IN ('cancelled', 'checked_out')
+          AND t.end_date >= CURRENT_DATE
+        """,
+        [company_id],
+    ) or {}
+
+    pending_requests_row = fetch_one(
+        f"""
+        SELECT COUNT(*) AS cnt
+        FROM {B2B_BUDGET_REQUEST_TABLE} br
+        JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = br.trip_id
+        WHERE t.company_id = %s AND br.status = 'pending'
+        """,
+        [company_id],
+    ) or {}
+
+    return {
+        "monthly_limit": monthly_limit,
+        "spent_this_month": spent_row.get("spent") or Decimal("0"),
+        "active_employees": active_employees_row.get("cnt") or 0,
+        "pending_limit_requests": pending_requests_row.get("cnt") or 0,
+    }
+
+
 # ─── Department monthly spending ────────────────────────────────────────────
 
 def get_department_monthly_spending(

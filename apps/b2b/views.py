@@ -28,6 +28,7 @@ from apps.b2b.repository import (
     create_voucher,
     delete_policy_rule,
     get_company,
+    get_dashboard_summary,
     get_department_monthly_spending,
     get_department_spending,
     get_employee,
@@ -59,6 +60,7 @@ from apps.b2b.serializers import (
     B2BUserSerializer,
     BudgetRequestSerializer,
     BusinessTripSerializer,
+    DashboardSummarySerializer,
     DepartmentMonthlySpendingSerializer,
     GlobalTravelLimitSerializer,
     RecentTripEmployeeSerializer,
@@ -442,6 +444,41 @@ class B2BStatisticsView(APIView):
                 for d in departments
             ],
         })
+
+
+# ─── Dashboard summary ──────────────────────────────────────────────────────
+
+class DashboardSummaryView(APIView):
+    """GET /api/b2b/dashboard/summary/
+
+    Returns the 4 top-line numbers shown on the company dashboard:
+      monthly_limit          – owner-set overall monthly budget limit
+      spent_this_month       – approved spend for the current calendar month
+      active_employees       – distinct employees currently on/about to go on a trip
+      pending_limit_requests – budget-requests awaiting owner review
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Dashboard uchun 4 ta asosiy statistika",
+        operation_description=(
+            "Umumiy oylik limit (`monthly_limit`), shu oy sarflangan summa "
+            "(`spent_this_month`), komandirovkada yoki rejada turgan xodimlar "
+            "soni (`active_employees`) va owner tomonidan ko'rib chiqilishi "
+            "kutilayotgan limit oshirish so'rovlari sonini (`pending_limit_requests`) "
+            "qaytaradi."
+        ),
+        responses={
+            200: DashboardSummarySerializer(),
+            400: openapi.Response(description="Company context required."),
+        },
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        data = get_dashboard_summary(company_id)
+        return Response(DashboardSummarySerializer(data).data)
 
 
 # ─── Recent trip employees ─────────────────────────────────────────────────

@@ -192,6 +192,14 @@ class DepartmentMonthlySpendingSerializer(serializers.Serializer):
     month_spend = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
 
+class DashboardSummarySerializer(serializers.Serializer):
+    """Serializer for the 4-card dashboard summary endpoint."""
+    monthly_limit = serializers.DecimalField(max_digits=14, decimal_places=2)
+    spent_this_month = serializers.DecimalField(max_digits=14, decimal_places=2)
+    active_employees = serializers.IntegerField()
+    pending_limit_requests = serializers.IntegerField()
+
+
 class GlobalTravelLimitSerializer(serializers.Serializer):
     """Serializer for the company-wide (global) travel limit.
 
