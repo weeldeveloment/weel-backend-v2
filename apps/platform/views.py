@@ -53,6 +53,7 @@ from apps.platform.serializers import (
     PlatformUserUpdateSerializer,
     UpdateMemberRoleSerializer,
 )
+from apps.pms.repository import has_any_properties
 from users.models.logs import SmsPurpose
 from users.services import OTPRedisService
 from users.tasks import send_otp_sms_eskiz
@@ -287,6 +288,7 @@ class PmsVerifyOTPRegisterView(APIView):
                 "refresh": tokens["refresh"],
                 "user": PlatformUserSerializer(user_dict).data,
                 "organization": OrganizationSerializer(org).data,
+                "has_properties": False,
             }).data,
             status=status.HTTP_201_CREATED,
         )
@@ -387,6 +389,7 @@ class PmsVerifyOTPLoginView(APIView):
             primary_org = orgs[0]
 
         tokens = _create_pms_tokens(user, organization_id=primary_org["id"])
+        has_properties = has_any_properties(organization_id=primary_org["id"])
 
         return Response(
             PmsLoginResponseSerializer({
@@ -395,6 +398,7 @@ class PmsVerifyOTPLoginView(APIView):
                 "user": PlatformUserSerializer(user).data,
                 "organization": OrganizationSerializer(primary_org).data,
                 "organizations": [OrganizationSerializer(o).data for o in orgs],
+                "has_properties": has_properties,
             }).data,
         )
 
@@ -436,11 +440,13 @@ class PmsSwitchOrganizationView(APIView):
         }
 
         tokens = _create_pms_tokens(user_dict, organization_id=target_org["id"])
+        has_properties = has_any_properties(organization_id=target_org["id"])
 
         return Response({
             "access": tokens["access"],
             "refresh": tokens["refresh"],
             "organization": OrganizationSerializer(target_org).data,
+            "has_properties": has_properties,
         })
 
 
@@ -461,10 +467,13 @@ class PmsMeView(APIView):
         orgs = get_user_organizations(user_id)
         primary_org = _get_primary_organization(orgs, _get_request_organization_id(request))
 
+        has_properties = has_any_properties(organization_id=primary_org["id"]) if primary_org else False
+
         return Response({
             "user": PlatformUserSerializer(user_data).data,
             "organization": OrganizationSerializer(primary_org).data if primary_org else None,
             "organizations": [OrganizationSerializer(o).data for o in orgs],
+            "has_properties": has_properties,
         })
 
     @swagger_auto_schema(
@@ -492,10 +501,13 @@ class PmsMeView(APIView):
         orgs = get_user_organizations(int(user_id))
         primary_org = _get_primary_organization(orgs, _get_request_organization_id(request))
 
+        has_properties = has_any_properties(organization_id=primary_org["id"]) if primary_org else False
+
         return Response({
             "user": PlatformUserSerializer(updated_user).data,
             "organization": OrganizationSerializer(primary_org).data if primary_org else None,
             "organizations": [OrganizationSerializer(o).data for o in orgs],
+            "has_properties": has_properties,
         })
 
 

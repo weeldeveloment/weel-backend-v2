@@ -135,6 +135,7 @@ class PaymentStatus:
 class Property(HardDeleteBaseModel):
     id: int | None = None
     organization_id: int | None = None
+    partner_user_id: int | None = None
     name: str | None = None
     description_uz: str | None = None
     description_ru: str | None = None

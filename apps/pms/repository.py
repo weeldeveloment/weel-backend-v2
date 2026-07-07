@@ -114,6 +114,14 @@ def create_property(*, organization_id: int, name: str, **kwargs: Any) -> dict[s
     )
 
 
+def has_any_properties(*, organization_id: int) -> bool:
+    row = fetch_one(
+        f"SELECT EXISTS(SELECT 1 FROM {_t(PMS_PROPERTY_TABLE)} WHERE organization_id = %s AND is_active = TRUE) AS exists_flag",
+        [organization_id],
+    )
+    return bool(row and row["exists_flag"])
+
+
 def list_properties(*, organization_id: int, is_active: bool = True) -> list[dict[str, Any]]:
     if is_active:
         return fetch_all(

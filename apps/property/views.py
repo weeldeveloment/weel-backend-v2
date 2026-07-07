@@ -3874,6 +3874,7 @@ class AdminAllPropertiesListView(APIView):
                 created_from=_parse_date(request.query_params.get("created_from")),
                 created_to=_parse_date(request.query_params.get("created_to")),
             )
+            rows = _attach_partner_users(rows)
             return Response(
                 HotelAdminListSerializer(rows, many=True, context=ctx).data
             )
@@ -4037,6 +4038,13 @@ class AdminHotelListCreateView(APIView):
         created = create_admin_hotel(schema_name=tenant_schema, values=prepared)
         if not created:
             raise APIException(_("Failed to create hotel"))
+        partner_id = _parse_int(created.get("partner_user_id"))
+        created = dict(created)
+        created["partner_user"] = (
+            _serialize_partner_user(get_user_by_id(partner_id))
+            if partner_id is not None
+            else None
+        )
         return Response(
             HotelAdminListSerializer(created, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
@@ -4057,6 +4065,13 @@ class AdminHotelPatchView(APIView):
         row = get_admin_hotel(str(hotel_id))
         if not row:
             raise NotFound(_("Hotel not found"))
+        partner_id = _parse_int(row.get("partner_user_id"))
+        row = dict(row)
+        row["partner_user"] = (
+            _serialize_partner_user(get_user_by_id(partner_id))
+            if partner_id is not None
+            else None
+        )
         return Response(
             HotelAdminListSerializer(row, context={"request": request}).data,
             status=status.HTTP_200_OK,
@@ -4083,6 +4098,13 @@ class AdminHotelPatchView(APIView):
         updated = update_admin_hotel(hotel_guid=str(hotel_id), values=prepared)
         if not updated:
             raise NotFound(_("Hotel not found"))
+        partner_id = _parse_int(updated.get("partner_user_id"))
+        updated = dict(updated)
+        updated["partner_user"] = (
+            _serialize_partner_user(get_user_by_id(partner_id))
+            if partner_id is not None
+            else None
+        )
         return Response(
             HotelAdminListSerializer(updated, context={"request": request}).data,
             status=status.HTTP_200_OK,

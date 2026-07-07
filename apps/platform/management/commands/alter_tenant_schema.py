@@ -28,6 +28,8 @@ class Command(BaseCommand):
                 # pms_room — new columns
                 ("pms_room", "display_name", "ALTER TABLE pms_room ADD COLUMN IF NOT EXISTS display_name VARCHAR(200)"),
                 ("pms_room", "bedroom_count", "ALTER TABLE pms_room ADD COLUMN IF NOT EXISTS bedroom_count INTEGER DEFAULT 1"),
+                # pms_property — partner_user_id
+                ("pms_property", "partner_user_id", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS partner_user_id INTEGER"),
                 # pms_property — verification fields
                 ("pms_property", "is_verified", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT FALSE"),
                 ("pms_property", "is_archived", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE"),

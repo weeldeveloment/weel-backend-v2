@@ -129,6 +129,7 @@ class PmsLoginResponseSerializer(serializers.Serializer):
     user = PlatformUserSerializer()
     organization = OrganizationSerializer()
     organizations = OrganizationSerializer(many=True, required=False)
+    has_properties = serializers.BooleanField(required=False, default=False)
 
 
 class PmsSwitchOrgSerializer(serializers.Serializer):
@@ -177,12 +178,14 @@ class PmsMeResponseSerializer(serializers.Serializer):
     user = PlatformUserSerializer()
     organization = OrganizationSerializer(allow_null=True, required=False, default=None)
     organizations = OrganizationSerializer(many=True)
+    has_properties = serializers.BooleanField(required=False, default=False)
 
 
 class PmsSwitchOrgResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
     refresh = serializers.CharField()
     organization = OrganizationSerializer()
+    has_properties = serializers.BooleanField(required=False, default=False)
 
 
 class PmsTokenRefreshResponseSerializer(serializers.Serializer):

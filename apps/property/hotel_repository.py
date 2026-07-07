@@ -89,6 +89,7 @@ def _serialize_hotel_row(
     payload["review_count"] = 0
     payload["check_in_time"] = _iso_time(payload.get("check_in_time"))
     payload["check_out_time"] = _iso_time(payload.get("check_out_time"))
+    payload["partner_user_id"] = payload.get("partner_user_id")
     payload["organization_id"] = organization.get("id") if organization else None
     payload["organization_name"] = organization.get("name") if organization else None
     payload["organization_slug"] = organization.get("slug") if organization else None
@@ -143,6 +144,7 @@ def _fetch_hotel_rows_for_schema(
                 SELECT
                     p.id,
                     p.organization_id,
+                    p.partner_user_id,
                     p.name,
                     p.description_uz,
                     p.description_ru,
@@ -422,6 +424,7 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                 """
                 INSERT INTO pms_property (
                     organization_id,
+                    partner_user_id,
                     name,
                     description_uz,
                     description_ru,
@@ -450,12 +453,13 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     created_at,
                     updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING id
                 """,
                 [
                     int(organization_id),
+                    values.get("partner_user_id"),
                     values.get("name"),
                     values.get("description_uz"),
                     values.get("description_ru"),
@@ -532,6 +536,7 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         "is_archived",
         "is_recommended",
         "verification_status",
+        "partner_user_id",
     }
     filtered_values = {}
     for key, value in values.items():
