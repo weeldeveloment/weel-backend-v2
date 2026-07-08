@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from django.utils import timezone
@@ -71,12 +72,6 @@ def parse_property_kind(value: str | UUID | None) -> str | None:
     return TYPE_GUID_TO_KIND.get(raw)
 
 
-_DEFAULT_TYPE_ICONS: dict[str, str] = {
-    str(COTTAGE_TYPE_GUID): "property/icons/home-03.svg",
-    str(APARTMENT_TYPE_GUID): "property/icons/building-skyscraper2.svg",
-    str(HOTEL_TYPE_GUID): "property/icons/building-skyscraper2.svg",
-}
-
 _DEFAULT_TYPE_DATA: list[dict[str, Any]] = [
     {
         "guid": str(COTTAGE_TYPE_GUID),
@@ -103,9 +98,9 @@ _DEFAULT_TYPE_DATA: list[dict[str, Any]] = [
 
 
 def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
-    data = _load_property_types_from_db() or _DEFAULT_TYPE_DATA
+    db_icons = _load_db_icons()
     result = []
-    for row in data:
+    for row in _DEFAULT_TYPE_DATA:
         if language == "ru":
             title = row["title_ru"]
         elif language == "en":
@@ -116,36 +111,39 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
         result.append({
             "guid": row["guid"],
             "title": title,
-            "icon_url": row.get("icon") or _DEFAULT_TYPE_ICONS.get(row["guid"], ""),
+            "icon_url": db_icons.get(kind) or row["icon"],
             "kind": kind,
         })
     return result
 
 
-def _load_property_types_from_db() -> list[dict[str, Any]] | None:
-    property_type_table = "property_propertytype"
+def _load_db_icons() -> dict[str, str]:
+    property_type_table = "property_type"
     if not table_exists(property_type_table):
-        return None
+        return {}
     try:
         rows = fetch_all(
             f"""
-            SELECT
-                guid::text AS guid,
-                title_en,
-                title_ru,
-                title_uz,
-                icon
+            SELECT slug, icon_url
             FROM {get_table_name(property_type_table)}
-            WHERE guid IN (%s, %s, %s)
+            WHERE slug IN (%s, %s, %s)
+              AND icon_url IS NOT NULL
+              AND icon_url != ''
             """,
-            [str(APARTMENT_TYPE_GUID), str(COTTAGE_TYPE_GUID), str(HOTEL_TYPE_GUID)],
+            [PROPERTY_KIND_APARTMENT, PROPERTY_KIND_COTTAGE, PROPERTY_KIND_HOTEL],
         )
     except Exception:
-        logger.warning("Failed to load property types from DB, using defaults", exc_info=True)
-        return None
-    if not rows:
-        return None
-    return rows
+        logger.warning("Failed to load type icons from DB", exc_info=True)
+        return {}
+    result: dict[str, str] = {}
+    for row in rows:
+        url = row["icon_url"]
+        if url.startswith(("http://", "https://")):
+            path = urlparse(url).path
+            if path:
+                url = path.lstrip("/")
+        result[row["slug"]] = url
+    return result
 
 
 def list_property_services(language: str = "uz") -> list[dict[str, Any]]:

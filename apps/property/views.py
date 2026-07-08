@@ -41,8 +41,7 @@ from .apartment_repository import (
     PROPERTY_KIND_COTTAGE,
     TYPE_GUID_TO_KIND,
     _DEFAULT_TYPE_DATA,
-    _DEFAULT_TYPE_ICONS,
-    _load_property_types_from_db,
+    _load_db_icons,
     admin_append_apartment_images,
     admin_create_apartment,
     admin_get_apartment,
@@ -1291,17 +1290,17 @@ class PropertyTypeAdminListView(APIView):
         },
     )
     def get(self, request, *args, **kwargs):
-        rows = _load_property_types_from_db() or _DEFAULT_TYPE_DATA
+        db_icons = _load_db_icons()
         result = []
-        for row in rows:
+        for row in _DEFAULT_TYPE_DATA:
             guid = row["guid"]
             kind = TYPE_GUID_TO_KIND.get(guid, "")
-            icon_path = row.get("icon") or _DEFAULT_TYPE_ICONS.get(guid, "")
+            icon_path = db_icons.get(kind) or row["icon"]
             result.append({
                 "guid": guid,
-                "title_en": row.get("title_en", ""),
-                "title_ru": row.get("title_ru", ""),
-                "title_uz": row.get("title_uz", ""),
+                "title_en": row["title_en"],
+                "title_ru": row["title_ru"],
+                "title_uz": row["title_uz"],
                 "icon_url": _build_media_url(request, icon_path),
                 "kind": kind,
             })
@@ -1349,8 +1348,10 @@ class PropertyTypeIconUploadView(APIView):
     )
     def post(self, request, type_guid, *args, **kwargs):
         guid = str(type_guid).strip().lower()
-        if guid not in TYPE_GUID_TO_KIND:
+        kind = TYPE_GUID_TO_KIND.get(guid)
+        if not kind:
             raise NotFound("Property type not found.")
+        slug = kind
 
         uploaded = request.FILES.get("icon")
         if not uploaded:
@@ -1364,42 +1365,25 @@ class PropertyTypeIconUploadView(APIView):
                 {"icon": f"Unsupported format '{ext}'. Allowed: {', '.join(sorted(allowed_ext))}."}
             )
 
+        property_type_table_name = "property_type"
+        if not table_exists(property_type_table_name):
+            raise ValidationError(
+                {"icon": "Property type table does not exist. Icon upload requires the property_type table."}
+            )
+
         upload_path = f"property/icons/{uuid4()}.{ext}"
         saved_path = default_storage.save(upload_path, uploaded)
 
-        property_type_table = "property_propertytype"
-        if table_exists(property_type_table):
-            try:
-                table = get_table_name(property_type_table)
-                existing = fetch_one(
-                    f"SELECT id FROM {table} WHERE guid = %s LIMIT 1",
-                    [guid],
-                )
-                if existing:
-                    execute(
-                        f"UPDATE {table} SET icon = %s, updated_at = %s WHERE guid = %s",
-                        [saved_path, timezone.now(), guid],
-                    )
-                else:
-                    kind = TYPE_GUID_TO_KIND.get(guid, "")
-                    default_data = next(
-                        (d for d in _DEFAULT_TYPE_DATA if d["guid"] == guid), None
-                    )
-                    execute(
-                        f"INSERT INTO {table} (guid, created_at, updated_at, title_en, title_ru, title_uz, icon) "
-                        f"VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                        [
-                            guid,
-                            timezone.now(),
-                            timezone.now(),
-                            default_data["title_en"] if default_data else "",
-                            default_data["title_ru"] if default_data else "",
-                            default_data["title_uz"] if default_data else "",
-                            saved_path,
-                        ],
-                    )
-            except Exception:
-                logger.warning("Failed to persist icon to DB; icon saved to storage only", exc_info=True)
+        try:
+            table = get_table_name(property_type_table_name)
+            execute(
+                f"UPDATE {table} SET icon_url = %s WHERE slug = %s",
+                [saved_path, slug],
+            )
+        except Exception:
+            default_storage.delete(saved_path)
+            logger.warning("Failed to persist icon to DB; uploaded file cleaned up", exc_info=True)
+            raise ValidationError({"icon": "Failed to save icon. Please try again."})
 
         _invalidate_property_type_cache()
 
