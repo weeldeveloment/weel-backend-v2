@@ -9,6 +9,7 @@ from typing import Any
 from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one
+from apps.b2b.models import BudgetRequestStatus
 from apps.b2b.raw.tables import (
     B2B_COMPANY_TABLE,
     B2B_USER_TABLE,
@@ -397,11 +398,50 @@ def delete_policy_rule(rule_id: int) -> int:
 
 # ─── Budget Requests ──────────────────────────────────────────────────────────
 
-def create_budget_request(*, trip_id: int, employee_id: int, requested_by: int, amount: Decimal, reason: str) -> dict[str, Any] | None:
+def get_employee_month_spend(employee_id: int, year: int, month: int) -> Decimal:
+    """Sum of this employee's *approved* budget-request amounts for the given
+    calendar month (used to check against ``B2BEmployee.individual_limit``,
+    which is treated as a monthly cap)."""
+    row = fetch_one(
+        f"""
+        SELECT COALESCE(SUM(amount), 0) AS spent
+        FROM {B2B_BUDGET_REQUEST_TABLE}
+        WHERE employee_id = %s AND status = 'approved'
+          AND EXTRACT(YEAR FROM COALESCE(reviewed_at, created_at)) = %s
+          AND EXTRACT(MONTH FROM COALESCE(reviewed_at, created_at)) = %s
+        """,
+        [employee_id, year, month],
+    ) or {}
+    return row.get("spent") or Decimal("0")
+
+
+def create_budget_request(
+    *,
+    trip_id: int,
+    employee_id: int,
+    requested_by: int,
+    amount: Decimal,
+    reason: str,
+    auto_approved: bool = False,
+) -> dict[str, Any] | None:
+    """Create a budget request.
+
+    When ``auto_approved`` is True (the requested amount is within the
+    employee's ``individual_limit``), the request is stored already
+    ``approved`` with ``reviewed_at`` set — no owner action needed. Otherwise
+    it is stored ``pending`` so it shows up for the owner to review.
+    """
     now = timezone.now()
+    req_status = BudgetRequestStatus.APPROVED if auto_approved else BudgetRequestStatus.PENDING
+    reviewed_at = now if auto_approved else None
     return fetch_one(
-        f"INSERT INTO {B2B_BUDGET_REQUEST_TABLE} (trip_id, employee_id, requested_by, amount, reason, status, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, 'pending', %s, %s) RETURNING *",
-        [trip_id, employee_id, requested_by, amount, reason, now, now],
+        f"""
+        INSERT INTO {B2B_BUDGET_REQUEST_TABLE}
+            (trip_id, employee_id, requested_by, amount, reason, status, reviewed_at, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [trip_id, employee_id, requested_by, amount, reason, req_status, reviewed_at, now, now],
     )
 
 

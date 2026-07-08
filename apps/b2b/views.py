@@ -33,6 +33,7 @@ from apps.b2b.repository import (
     get_department_monthly_spending,
     get_department_spending,
     get_employee,
+    get_employee_month_spend,
     get_or_create_travel_policy,
     get_policy_rule,
     get_spending_overview,
@@ -340,9 +341,41 @@ class TravelPolicyView(APIView):
 
 
 class BudgetRequestListCreateView(APIView):
+    """GET/POST /b2b/budget-requests/
+
+    A budget request is how an executer (performer, e.g. the one who sends an
+    employee on a business trip) asks the owner for extra budget when an
+    employee's spend for the current calendar month would go over that
+    employee's owner-set monthly cap (``B2BEmployee.individual_limit``).
+
+    - The executer presses one button (``POST``) with the trip/employee/amount.
+    - If this month's already-approved spend for that employee + the new
+      ``amount`` still fits within ``individual_limit`` (or no limit is set),
+      the request is auto-approved immediately — no owner action needed.
+    - If it would exceed the monthly limit, the request is stored ``pending``,
+      tagged with the executer as ``requested_by``, and shows up for the
+      owner via ``GET ?status=pending`` to review (approve/reject) via
+      ``POST /budget-requests/<id>/review/``.
+    """
     permission_classes = [IsAuthenticated]
 
-    @swagger_auto_schema(responses={200: BudgetRequestSerializer(many=True)})
+    @swagger_auto_schema(
+        operation_summary="Byudjet so'rovlarini olish (owner uchun)",
+        operation_description=(
+            "Kompaniyaning barcha byudjet so'rovlarini qaytaradi. "
+            "`status=pending` bilan filtrlab, owner tasdig'ini kutayotgan — "
+            "ya'ni xodimning oylik individual_limit'idan oshib ketgan va "
+            "executer tomonidan yuborilgan so'rovlarni ko'rish mumkin."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                enum=["pending", "approved", "rejected"],
+                description="Holat bo'yicha filtr. Owner uchun odatda `pending`.",
+            ),
+        ],
+        responses={200: BudgetRequestSerializer(many=True)},
+    )
     def get(self, request):
         company_id = _get_company_id(request)
         if not company_id:
@@ -351,18 +384,59 @@ class BudgetRequestListCreateView(APIView):
         requests = list_budget_requests(company_id, status=req_status)
         return Response(BudgetRequestSerializer(requests, many=True).data)
 
-    @swagger_auto_schema(request_body=BudgetRequestSerializer, responses={201: BudgetRequestSerializer()})
+    @swagger_auto_schema(
+        operation_summary="Byudjet so'rovi yuborish (oylik limit yetmasa ownerga boradi)",
+        operation_description=(
+            "Executer (komandirovkaga xodim jo'natayotgan foydalanuvchi) "
+            "xodim uchun qo'shimcha summa so'raydi — bitta tugma bosish "
+            "yetarli. Tizim shu oy uchun xodimning allaqachon tasdiqlangan "
+            "xarajatlari + yangi `amount` ni xodimning oylik "
+            "`individual_limit`i bilan solishtiradi:\n\n"
+            "- Agar limit yetsa — so'rov avtomatik `approved` bo'ladi, "
+            "owner aralashuvi shart emas.\n"
+            "- Agar limit yetmasa — so'rov `pending` holatda, so'rovchi "
+            "(executer) `requested_by` sifatida saqlanadi va owner uni "
+            "`GET ?status=pending` orqali ko'rib, tasdiqlaydi/rad etadi."
+        ),
+        request_body=BudgetRequestSerializer,
+        responses={
+            201: BudgetRequestSerializer(),
+            400: openapi.Response(description="Validation error / Company context required."),
+            404: openapi.Response(description="Employee or trip not found."),
+        },
+    )
     def post(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = BudgetRequestSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         validated = serializer.validated_data
+
+        employee = get_employee(validated["employee_id"], company_id)
+        if not employee:
+            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+        trip = get_trip(validated["trip_id"], company_id)
+        if not trip:
+            return Response({"detail": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        amount = validated["amount"]
+        individual_limit = employee.get("individual_limit")
+        if individual_limit is None:
+            within_limit = True
+        else:
+            now = timezone.now()
+            month_spend = get_employee_month_spend(employee["id"], now.year, now.month)
+            within_limit = (month_spend + amount) <= individual_limit
+
         budget_req = create_budget_request(
             trip_id=validated["trip_id"],
             employee_id=validated["employee_id"],
             requested_by=_get_user_id(request),
-            amount=validated["amount"],
+            amount=amount,
             reason=validated["reason"],
+            auto_approved=within_limit,
         )
         if not budget_req:
             return Response({"detail": "Failed to create budget request."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
