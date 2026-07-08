@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+from psycopg2.extensions import quote_ident
+
 from django.db import connection
 from django.utils import timezone
 
@@ -273,6 +275,25 @@ def delete_orphaned_pms_user(user_id: int) -> None:
         f"DELETE FROM {USER_TABLE} WHERE id = %s AND role = 'pms'",
         [user_id],
     )
+
+
+def drop_tenant_schema(schema_name: str) -> None:
+    with connection.cursor() as cursor:
+        safe_name = quote_ident(schema_name, cursor.cursor)
+        cursor.execute(f"DROP SCHEMA IF EXISTS {safe_name} CASCADE")
+
+
+def hard_delete_organization(org_id: int) -> bool:
+    result = execute(
+        f"""
+        DELETE FROM public.{_table(ORGANIZATION_TABLE)}
+        WHERE id = %s
+        """,
+        [org_id],
+    ) > 0
+    if result:
+        invalidate_org_schema_cache(org_id)
+    return result
 
 
 def user_has_org_membership(user_id: int) -> bool:

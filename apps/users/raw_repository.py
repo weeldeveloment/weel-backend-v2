@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
@@ -11,6 +12,8 @@ from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 from shared.raw.compat import get_table_name
 from shared.raw.entities import RawUser
 from shared.raw.tables import USER_TABLE
+
+logger = logging.getLogger(__name__)
 
 
 def _row_to_user(row: dict[str, Any] | None) -> RawUser | None:
@@ -480,6 +483,47 @@ def soft_deactivate_user(user: RawUser) -> None:
         )
 
     log_account_deletion(user_id, user_id, user.role)
+
+
+def hard_delete_pms_user(user_id: int) -> bool:
+    if table_exists("user_map"):
+        execute("DELETE FROM user_map WHERE user_id = %s", [user_id])
+    else:
+        logger.warning("user_map table not found — skipping cleanup for user %s", user_id)
+
+    if table_exists("notification"):
+        execute("DELETE FROM notification WHERE recipient_user_id = %s", [user_id])
+    else:
+        logger.warning("notification table not found — skipping cleanup for user %s", user_id)
+
+    if table_exists("chat_conversation"):
+        execute(
+            f"""
+            UPDATE chat_conversation
+            SET client_user_id = NULL, partner_user_id = NULL
+            WHERE client_user_id = %s OR partner_user_id = %s
+            """,
+            [user_id, user_id],
+        )
+    else:
+        logger.warning("chat_conversation table not found — skipping cleanup for user %s", user_id)
+
+    if table_exists("chat_message"):
+        execute(
+            f"""
+            UPDATE chat_message
+            SET receiver_user_id = NULL
+            WHERE sender_user_id = %s OR receiver_user_id = %s
+            """,
+            [user_id, user_id],
+        )
+    else:
+        logger.warning("chat_message table not found — skipping cleanup for user %s", user_id)
+
+    return execute(
+        f"DELETE FROM {USER_TABLE} WHERE id = %s AND role = 'pms'",
+        [user_id],
+    ) > 0
 
 
 def log_account_deletion(user_id: int, deleted_by: int, role: str) -> None:
