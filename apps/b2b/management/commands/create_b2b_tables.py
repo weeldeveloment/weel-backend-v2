@@ -78,6 +78,7 @@ class Command(BaseCommand):
                     date_of_birth DATE,
                     passport_series VARCHAR(10),
                     passport_number VARCHAR(20),
+                    passport_upload VARCHAR(500),
                     pinfl VARCHAR(20),
                     individual_limit NUMERIC(12,2),
                     status VARCHAR(20) DEFAULT 'available',
@@ -85,6 +86,9 @@ class Command(BaseCommand):
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+            """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_upload VARCHAR(500);
             """)
             self.stdout.write("  Created b2b_employee")
 

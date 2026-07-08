@@ -38,22 +38,46 @@ class B2BDepartmentSerializer(serializers.Serializer):
 
 
 class B2BEmployeeSerializer(serializers.Serializer):
+    """Xodimni ko'rsatish (GET) hamda yangilash (PATCH, partial) uchun serializer.
+
+    ``passport_upload`` bu yerda faqat o'qish uchun (saqlangan fayl URL manzili) —
+    xodim yaratishda fayl ``B2BEmployeeCreateSerializer`` orqali qabul qilinadi va
+    view darajasida ``default_storage`` ga yuklanadi.
+    """
     id = serializers.IntegerField(read_only=True)
     company_id = serializers.IntegerField(read_only=True)
-    department_id = serializers.IntegerField(required=False, allow_null=True)
+    department_id = serializers.IntegerField(required=True)
     department_name = serializers.CharField(read_only=True, allow_null=True)
     full_name = serializers.CharField(max_length=200)
     position = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
-    phone = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
+    email = serializers.EmailField(required=True)
+    phone = serializers.CharField(max_length=20, required=True)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     passport_series = serializers.CharField(max_length=10, required=False, allow_blank=True, allow_null=True)
     passport_number = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
-    pinfl = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
+    passport_upload = serializers.CharField(read_only=True, allow_null=True)
+    pinfl = serializers.CharField(max_length=20, required=True)
     individual_limit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     status = serializers.ChoiceField(choices=["available", "on_trip", "blocked"], required=False, default="available")
     is_active = serializers.BooleanField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+
+
+class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
+    """POST ``/b2b/employees/`` uchun serializer (multipart/form-data).
+
+    ``pinfl``, ``email``, ``phone``, ``department_id`` — xodim yaratishning
+    asosiy majburiy maydonlari. ``passport_upload`` fayl sifatida shu yerda
+    validatsiya qilinadi (view uni ``request.FILES`` orqali o'qiydi, chunki
+    u B2BEmployeeSerializer'da faqat o'qish uchun CharField).
+    """
+    passport_upload = serializers.FileField(required=True)
+
+    def validate_passport_upload(self, file):
+        max_size = 5 * 1024 * 1024  # 5MB
+        if file.size > max_size:
+            raise serializers.ValidationError("Fayl hajmi 5MB dan oshmasligi kerak.")
+        return file
 
 
 class BusinessTripSerializer(serializers.Serializer):

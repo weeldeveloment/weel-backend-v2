@@ -5,6 +5,7 @@ import random
 from datetime import timedelta
 from typing import Any
 
+from django.core.files.storage import default_storage
 from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import status
@@ -56,6 +57,7 @@ from apps.b2b.serializers import (
     ActiveTripEmployeeSerializer,
     B2BCompanySerializer,
     B2BDepartmentSerializer,
+    B2BEmployeeCreateSerializer,
     B2BEmployeeSerializer,
     B2BUserSerializer,
     BudgetRequestSerializer,
@@ -154,18 +156,46 @@ class B2BEmployeeListCreateView(APIView):
         employees = list_employees(company_id, search=search)
         return Response(B2BEmployeeSerializer(employees, many=True).data)
 
-    @swagger_auto_schema(request_body=B2BEmployeeSerializer, responses={201: B2BEmployeeSerializer()})
+    @swagger_auto_schema(
+        operation_summary="Yangi xodim qo'shish",
+        operation_description=(
+            "Kompaniyaga yangi xodim qo'shadi. `department_id`, `email`, `phone`, "
+            "`pinfl` va `passport_upload` (passport rasmi/fayli) — barchasi majburiy."
+        ),
+        consumes=["multipart/form-data"],
+        manual_parameters=[
+            openapi.Parameter("full_name", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Xodimning to'liq ismi"),
+            openapi.Parameter("department_id", openapi.IN_FORM, type=openapi.TYPE_INTEGER, required=True, description="Bo'lim ID (majburiy)"),
+            openapi.Parameter("email", openapi.IN_FORM, type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, required=True, description="Email (majburiy)"),
+            openapi.Parameter("phone", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Telefon raqami (majburiy)"),
+            openapi.Parameter("pinfl", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="PINFL (majburiy)"),
+            openapi.Parameter("passport_upload", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Passport fayli/rasmi (pdf, jpg, png; maksimum 5MB)"),
+            openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Lavozimi"),
+            openapi.Parameter("date_of_birth", openapi.IN_FORM, type=openapi.TYPE_STRING, format=openapi.FORMAT_DATE, required=False, description="Tug'ilgan sana (YYYY-MM-DD)"),
+            openapi.Parameter("passport_series", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Passport seriyasi"),
+            openapi.Parameter("passport_number", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Passport raqami"),
+            openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Xodim uchun individual limit"),
+            openapi.Parameter("status", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["available", "on_trip", "blocked"], required=False, description="Xodim holati (default: available)"),
+        ],
+        responses={
+            201: B2BEmployeeSerializer(),
+            400: openapi.Response(description="Validation error / Company context required."),
+        },
+    )
     def post(self, request):
         company_id = _get_company_id(request)
         if not company_id:
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
-        serializer = B2BEmployeeSerializer(data=request.data)
+        serializer = B2BEmployeeCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         validated = serializer.validated_data
+        passport_file = validated.pop("passport_upload")
+        saved_path = default_storage.save(f"b2b/employees/passports/{passport_file.name}", passport_file)
         employee = create_employee(
             company_id=company_id,
             full_name=validated.pop("full_name"),
+            passport_upload=default_storage.url(saved_path),
             **{k: v for k, v in validated.items() if k not in ("company_id", "department_name")},
         )
         if not employee:

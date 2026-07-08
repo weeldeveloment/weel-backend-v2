@@ -108,6 +108,7 @@ class B2BEmployee(HardDeleteBaseModel):
     date_of_birth: date | None = None
     passport_series: str | None = None
     passport_number: str | None = None
+    passport_upload: str | None = None
     pinfl: str | None = None
     individual_limit: Decimal | None = None
     status: str = EmployeeStatus.AVAILABLE
