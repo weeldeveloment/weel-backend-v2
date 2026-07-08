@@ -186,4 +186,50 @@ class Command(BaseCommand):
             """)
             self.stdout.write("  Created b2b_travel_voucher")
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS b2b_hotel_booking_request (
+                    id BIGSERIAL PRIMARY KEY,
+                    company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                    trip_id BIGINT REFERENCES b2b_business_trip(id) ON DELETE SET NULL,
+                    hotel_guid VARCHAR(300) NOT NULL,
+                    tenant_schema VARCHAR(100) NOT NULL,
+                    hotel_property_id BIGINT NOT NULL,
+                    hotel_name VARCHAR(200),
+                    check_in DATE NOT NULL,
+                    check_out DATE NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    requested_by BIGINT REFERENCES b2b_user(id) ON DELETE SET NULL,
+                    reviewed_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            self.stdout.write("  Created b2b_hotel_booking_request")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS b2b_hotel_booking_room (
+                    id BIGSERIAL PRIMARY KEY,
+                    booking_request_id BIGINT NOT NULL REFERENCES b2b_hotel_booking_request(id) ON DELETE CASCADE,
+                    room_id BIGINT NOT NULL,
+                    room_name VARCHAR(200),
+                    pms_booking_id BIGINT,
+                    price_per_night NUMERIC(10,2),
+                    total_price NUMERIC(12,2),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            self.stdout.write("  Created b2b_hotel_booking_room")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS b2b_hotel_booking_room_employee (
+                    id BIGSERIAL PRIMARY KEY,
+                    booking_room_id BIGINT NOT NULL REFERENCES b2b_hotel_booking_room(id) ON DELETE CASCADE,
+                    employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            self.stdout.write("  Created b2b_hotel_booking_room_employee")
+
         self.stdout.write(self.style.SUCCESS("B2B tables created successfully."))

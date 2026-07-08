@@ -58,12 +58,7 @@ class HotelSearchView(APIView):
         offset = (page - 1) * page_size
 
         hotels = search_hotels(**d, limit=page_size, offset=offset)
-        count = count_hotels(
-            city=d.get("city"),
-            star_rating=d.get("star_rating"),
-            weel_classification=d.get("weel_classification"),
-            themes=d.get("themes"),
-        )
+        count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"})
         return Response({
             "count": count,
             "page": page,
