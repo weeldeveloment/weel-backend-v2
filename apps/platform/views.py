@@ -22,7 +22,8 @@ from apps.platform.raw_repository import (
     create_organization,
     create_organization_member,
     create_tenant_schema,
-    deactivate_organization,
+    drop_tenant_schema,
+    hard_delete_organization,
     delete_orphaned_pms_user,
     get_organization_by_id,
     get_organization_by_slug,
@@ -62,7 +63,7 @@ from users.raw_repository import (
     create_pms_user,
     get_active_user_by_phone,
     get_user_by_id,
-    soft_deactivate_user,
+    hard_delete_pms_user,
     update_user_profile,
 )
 from users.tokens import create_pms_tokens
@@ -573,32 +574,32 @@ class PmsMeView(APIView):
             )
 
         orgs = get_user_organizations(user_id)
-        for org in orgs:
-            members = list_organization_members(org["id"])
-            active_members = [
-                m for m in members
-                if str(m.get("user_id")) != str(user_id)
-            ]
-            if not active_members:
-                deactivate_organization(org["id"])
+
+        with transaction.atomic():
+            for org in orgs:
+                remove_organization_member(org["id"], user_id)
+                hard_delete_organization(org["id"])
                 logger.info(
-                    "Deactivated organization %s — last member %s deleted account",
+                    "Deleted organization %s — user %s deleted account",
                     org["id"],
                     user_id,
                 )
 
-        refresh_token = request.data.get("refresh")
-        if refresh_token:
-            try:
-                token = RefreshToken(refresh_token)
-                token.blacklist()
-            except Exception:
-                pass
+            hard_delete_pms_user(user_id)
 
-        soft_deactivate_user(user_data)
+            refresh_token = request.data.get("refresh")
+            if refresh_token:
+                try:
+                    token = RefreshToken(refresh_token)
+                    token.blacklist()
+                except Exception:
+                    pass
+
+        for org in orgs:
+            drop_tenant_schema(org["schema_name"])
 
         return Response(
-            {"detail": _("Account has been deactivated.")},
+            {"detail": _("Account has been permanently deleted.")},
             status=status.HTTP_200_OK,
         )
 
