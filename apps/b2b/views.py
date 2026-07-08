@@ -6,7 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from django.core.files.storage import default_storage
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -18,12 +18,15 @@ from drf_yasg.utils import swagger_auto_schema
 
 
 from apps.b2b.repository import (
+    add_hotel_booking_room,
+    add_hotel_booking_room_employee,
     add_trip_employee,
     create_budget_request,
     create_company,
     create_b2b_user,
     create_department,
     create_employee,
+    create_hotel_booking_request,
     create_policy_rule,
     create_trip,
     create_voucher,
@@ -33,6 +36,8 @@ from apps.b2b.repository import (
     get_department_monthly_spending,
     get_department_spending,
     get_employee,
+    get_employee_month_spend,
+    get_hotel_booking_request,
     get_or_create_travel_policy,
     get_policy_rule,
     get_spending_overview,
@@ -42,6 +47,8 @@ from apps.b2b.repository import (
     list_budget_requests,
     list_departments,
     list_employees,
+    list_hotel_booking_requests,
+    list_hotel_booking_rooms,
     list_policy_rules_by_type,
     list_recent_trip_employees,
     list_trip_employees,
@@ -49,9 +56,26 @@ from apps.b2b.repository import (
     review_budget_request,
     update_company,
     update_employee,
+    update_hotel_booking_request_status,
     update_policy_rule,
     update_travel_policy,
     update_trip,
+)
+from apps.b2b.models import HotelBookingRequestStatus
+from apps.b2b.permissions import IsB2BPerformer
+from apps.property.hotel_repository import _run_in_schema, decode_hotel_guid, get_hotel_for_public
+from apps.hotels.repository import (
+    count_hotels,
+    create_hotel_booking,
+    get_available_rooms,
+    get_bookings_status,
+    search_hotels,
+)
+from apps.hotels.serializers import (
+    HotelCardSerializer,
+    HotelSearchParamsSerializer,
+    RoomAvailabilitySerializer,
+    RoomSelectParamsSerializer,
 )
 from apps.b2b.serializers import (
     ActiveTripEmployeeSerializer,
@@ -65,6 +89,9 @@ from apps.b2b.serializers import (
     DashboardSummarySerializer,
     DepartmentMonthlySpendingSerializer,
     GlobalTravelLimitSerializer,
+    HotelBookingRequestCreateSerializer,
+    HotelBookingRequestDetailSerializer,
+    HotelBookingRequestSerializer,
     RecentTripEmployeeSerializer,
     ReviewBudgetRequestSerializer,
     TravelPolicyRuleCreateSerializer,
@@ -90,6 +117,388 @@ def _get_user_id(request) -> int | None:
     if isinstance(user, dict):
         return user.get("id")
     return getattr(user, "id", None)
+
+
+class B2BHotelSearchView(APIView):
+    """GET /b2b/hotels/search/
+
+    Executer (performer) uchun mehmonxona qidiruv/filterlash — komandirovkaga
+    xodim jo'natish uchun mos hotel tanlashda ishlatiladi. Faqat B2B
+    "executer" (performer) rolidagi foydalanuvchilar uchun ochiq — owner bu
+    endpointdan foydalana olmaydi.
+    """
+    permission_classes = [IsAuthenticated, IsB2BPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Mehmonxonalarni qidirish/filterlash (executer uchun)",
+        operation_description=(
+            "Komandirovka uchun mehmonxona tanlash. `sort_by` orqali: "
+            "`popular` (mashhur), `weel_recommended` (weel-tavsiya), "
+            "`cheap` (eng arzon), `expensive` (eng qimmat). Xarita bo'yicha "
+            "tanlov uchun `lat`/`lon`/`radius_km` (km). Kalendar: "
+            "`check_in`/`check_out` + `guests` (necha kishi) berilsa, faqat "
+            "shu sanalar oralig'ida va shu odam soniga mos BO'SH xona bor "
+            "mehmonxonalar qaytariladi. Har bir natija `hotel_guid` bilan "
+            "keladi — mehmonxona bir nechta tashkilotlar (sxemalar) bo'ylab "
+            "qidirilgani uchun bu identifikator raqamli `id`dan ko'ra "
+            "ishonchliroq."
+        ),
+        query_serializer=HotelSearchParamsSerializer,
+        responses={200: openapi.Response(
+            "Paginated hotel list",
+            openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "page": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "page_size": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "results": openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                    ),
+                },
+            ),
+        )},
+        tags=["B2B / Executer"],
+    )
+    def get(self, request):
+        params = HotelSearchParamsSerializer(data=request.query_params)
+        if not params.is_valid():
+            return Response(params.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        d = params.validated_data
+        page = d.pop("page")
+        page_size = d.pop("page_size")
+        offset = (page - 1) * page_size
+
+        hotels = search_hotels(**d, limit=page_size, offset=offset)
+        count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"})
+        return Response({
+            "count": count,
+            "page": page,
+            "page_size": page_size,
+            "results": HotelCardSerializer(hotels, many=True).data,
+        })
+
+
+class B2BHotelRoomsView(APIView):
+    """GET /b2b/hotels/<hotel_guid>/rooms/
+
+    Bosqich 2 (1-qadam): bosqich-1'da tanlangan mehmonxona + sanalarga mos
+    bo'sh xonalar ro'yxati — har bir xonaning sig'imi (`capacity`) qancha
+    xodim joylashtirish mumkinligini ko'rsatadi.
+    """
+    permission_classes = [IsAuthenticated, IsB2BPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Mehmonxona xonalarini olish (executer, bosqich 2)",
+        operation_description=(
+            "Bosqich-1'da tanlangan `hotel_guid` uchun, xuddi shu "
+            "`check_in`/`check_out`/`guests` bilan bo'sh xonalarni qaytaradi. "
+            "Har bir xonaning `capacity`si — unga nechta xodim biriktirish "
+            "mumkinligini bildiradi (odatda 1 yoki 2)."
+        ),
+        query_serializer=RoomSelectParamsSerializer,
+        responses={
+            200: RoomAvailabilitySerializer(many=True),
+            400: openapi.Response(description="Invalid hotel_guid / validation error."),
+            404: openapi.Response(description="Hotel not found."),
+        },
+        tags=["B2B / Executer"],
+    )
+    def get(self, request, hotel_guid):
+        decoded = decode_hotel_guid(hotel_guid)
+        if not decoded:
+            return Response({"detail": "Invalid hotel_guid."}, status=status.HTTP_400_BAD_REQUEST)
+        schema_name, hotel_id = decoded
+
+        params = RoomSelectParamsSerializer(data=request.query_params)
+        if not params.is_valid():
+            return Response(params.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            rooms = _run_in_schema(
+                schema_name,
+                lambda: get_available_rooms(
+                    hotel_id,
+                    check_in=params.validated_data["check_in"],
+                    check_out=params.validated_data["check_out"],
+                    guests=params.validated_data["guests"],
+                ),
+            )
+        except Exception:
+            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(RoomAvailabilitySerializer(rooms, many=True).data)
+
+
+def _refresh_booking_request_status(booking_request: dict) -> dict:
+    """Pull-based status sync: while a request is still `pending`, ask the
+    hotel's own tenant schema whether its sibling `pms_booking` rows have
+    been accepted/rejected by the partner, and persist the derived group
+    status. Called on every read (list + detail) so "qabul qilindi" /
+    "bekor qilindi" reflects reality without needing a push from the PMS
+    side.
+    """
+    if booking_request.get("status") != HotelBookingRequestStatus.PENDING:
+        return booking_request
+    rooms = list_hotel_booking_rooms(booking_request["id"])
+    booking_ids = [r["pms_booking_id"] for r in rooms if r.get("pms_booking_id")]
+    if not booking_ids:
+        return booking_request
+    try:
+        statuses = _run_in_schema(
+            booking_request["tenant_schema"],
+            lambda: get_bookings_status(booking_ids),
+        )
+    except Exception:
+        return booking_request
+    status_values = {s["status"] for s in statuses}
+    if not status_values:
+        return booking_request
+    if "cancelled" in status_values:
+        new_status = HotelBookingRequestStatus.REJECTED
+    elif status_values <= {"confirmed", "checked_in", "checked_out"}:
+        new_status = HotelBookingRequestStatus.CONFIRMED
+    else:
+        return booking_request
+    updated = update_hotel_booking_request_status(
+        booking_request["id"], new_status, reviewed_at=timezone.now(),
+    )
+    return updated or booking_request
+
+
+class B2BHotelBookingListCreateView(APIView):
+    """GET/POST /b2b/hotels/bookings/
+
+    Bosqich 2 (2-qadam) yakuni: tanlangan xonalar + har biriga biriktirilgan
+    xodimlar bilan BITTA bron so'rovi yuboriladi. Bitta so'rov ichida bir
+    nechta xona (va shu orqali bir nechta `pms_booking` yozuvi) bo'lishi
+    mumkin, lekin bularning barchasi bronlash tarixida BITTA yozuv sifatida
+    ko'rinadi.
+    """
+    permission_classes = [IsAuthenticated, IsB2BPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Bron so'rovlari tarixini olish (executer)",
+        operation_description=(
+            "Har bir bron so'rovi (bir nechta xona/xodimni o'z ichiga olgan "
+            "guruh) shu yerda BITTA qator sifatida ko'rinadi — "
+            "`room_count`/`employee_count` bilan qisqacha. To'liq tafsilot "
+            "uchun `GET /b2b/hotels/bookings/<id>/` ga o'ting."
+        ),
+        manual_parameters=[
+            openapi.Parameter("trip_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Komandirovka bo'yicha filtr"),
+            openapi.Parameter(
+                "status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                enum=["pending", "confirmed", "rejected"],
+                description="Holat bo'yicha filtr",
+            ),
+        ],
+        responses={200: HotelBookingRequestSerializer(many=True)},
+        tags=["B2B / Executer"],
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        trip_id = request.query_params.get("trip_id")
+        req_status = request.query_params.get("status")
+        rows = list_hotel_booking_requests(
+            company_id,
+            trip_id=int(trip_id) if trip_id else None,
+            status=req_status,
+        )
+        rows = [_refresh_booking_request_status(r) for r in rows]
+        return Response(HotelBookingRequestSerializer(rows, many=True).data)
+
+    @swagger_auto_schema(
+        operation_summary="Bron so'rovini yuborish (xonalar + xodimlar, executer)",
+        operation_description=(
+            "Bosqich-2 yakuni: `hotel_guid`, sanalar va har bir xonaga "
+            "biriktirilgan xodimlar (`employee_ids`, xonaga qarab 1 yoki 2 "
+            "kishi) yuboriladi. Server: (1) har bir xonani qayta "
+            "mavjudligini tekshiradi, (2) har bir xona uchun mehmonxonaning "
+            "o'z sxemasida `pms_booking` yaratadi, (3) xodimlarni shu "
+            "tripning `TripEmployee` yozuvlariga biriktiradi. Butun jarayon "
+            "bitta tranzaksiya — birorta xona band bo'lib chiqsa, hech narsa "
+            "yaratilmaydi. Natijada mehmonxona holati `pending` bo'ladi — "
+            "mehmonxona qabul qilsa `confirmed` (\"qabul qilindi\"), rad "
+            "etsa `rejected` (\"bekor bo'ldi\") ga o'zgaradi."
+        ),
+        request_body=HotelBookingRequestCreateSerializer,
+        responses={
+            201: HotelBookingRequestDetailSerializer(),
+            400: openapi.Response(description="Validation error / room not available / capacity exceeded."),
+            404: openapi.Response(description="Trip, hotel or employee not found."),
+        },
+        tags=["B2B / Executer"],
+    )
+    def post(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = HotelBookingRequestCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
+
+        trip = get_trip(data["trip_id"], company_id)
+        if not trip:
+            return Response({"detail": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        decoded = decode_hotel_guid(data["hotel_guid"])
+        if not decoded:
+            return Response({"detail": "Invalid hotel_guid."}, status=status.HTTP_400_BAD_REQUEST)
+        schema_name, hotel_id = decoded
+
+        hotel = get_hotel_for_public(data["hotel_guid"])
+        if not hotel:
+            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        check_in = data["check_in"]
+        check_out = data["check_out"]
+
+        # Re-check availability server-side (race-safe) before touching anything.
+        try:
+            available_rooms = _run_in_schema(
+                schema_name,
+                lambda: get_available_rooms(hotel_id, check_in=check_in, check_out=check_out, guests=1),
+            )
+        except Exception:
+            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        available_by_id = {r["id"]: r for r in available_rooms}
+
+        seen_employee_ids: set[int] = set()
+        for room in data["rooms"]:
+            avail_room = available_by_id.get(room["room_id"])
+            if not avail_room:
+                return Response(
+                    {"detail": f"Room {room['room_id']} is not available for these dates."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            capacity = avail_room.get("capacity")
+            if capacity is not None and len(room["employee_ids"]) > capacity:
+                return Response(
+                    {"detail": f"Room {room['room_id']} capacity is {capacity}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            for employee_id in room["employee_ids"]:
+                if not get_employee(employee_id, company_id):
+                    return Response(
+                        {"detail": f"Employee {employee_id} not found."},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+                seen_employee_ids.add(employee_id)
+
+        requested_by = _get_user_id(request)
+
+        with transaction.atomic():
+            booking_request = create_hotel_booking_request(
+                company_id=company_id,
+                trip_id=data["trip_id"],
+                hotel_guid=data["hotel_guid"],
+                tenant_schema=schema_name,
+                hotel_property_id=hotel_id,
+                hotel_name=hotel.get("title") or hotel.get("name"),
+                check_in=check_in,
+                check_out=check_out,
+                requested_by=requested_by,
+            )
+            if not booking_request:
+                transaction.set_rollback(True)
+                return Response(
+                    {"detail": "Failed to create booking request."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+            for room in data["rooms"]:
+                avail_room = available_by_id[room["room_id"]]
+                room_id = room["room_id"]
+
+                def _create_room_booking(rid=room_id, employees=room["employee_ids"]):
+                    return create_hotel_booking(
+                        property_id=hotel_id,
+                        room_id=rid,
+                        client_user_id=requested_by,
+                        check_in=check_in,
+                        check_out=check_out,
+                        adults=len(employees),
+                        b2b_company_id=company_id,
+                    )
+
+                pms_booking = _run_in_schema(schema_name, _create_room_booking)
+                if not pms_booking:
+                    transaction.set_rollback(True)
+                    return Response(
+                        {"detail": f"Room {room_id} could not be booked (may have just been taken)."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                booking_room = add_hotel_booking_room(
+                    booking_request_id=booking_request["id"],
+                    room_id=room_id,
+                    room_name=avail_room.get("display_name") or avail_room.get("room_type_name"),
+                    pms_booking_id=pms_booking["id"],
+                    price_per_night=avail_room.get("price_per_night"),
+                    total_price=pms_booking.get("total_cost"),
+                )
+                for employee_id in room["employee_ids"]:
+                    add_hotel_booking_room_employee(
+                        booking_room_id=booking_room["id"],
+                        employee_id=employee_id,
+                    )
+                    add_trip_employee(
+                        trip_id=data["trip_id"],
+                        employee_id=employee_id,
+                        property_id=hotel_id,
+                        room_id=room_id,
+                        check_in=check_in,
+                        check_out=check_out,
+                        pms_booking_id=pms_booking["id"],
+                        status="invited",
+                    )
+
+        rooms = list_hotel_booking_rooms(booking_request["id"])
+        booking_request["rooms"] = rooms
+        booking_request["room_count"] = len(rooms)
+        booking_request["employee_count"] = sum(len(r["employees"]) for r in rooms)
+        return Response(
+            HotelBookingRequestDetailSerializer(booking_request).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class B2BHotelBookingDetailView(APIView):
+    """GET /b2b/hotels/bookings/<booking_id>/
+
+    Bitta bron so'rovining to'liq tafsiloti — bosishda "hammasi ko'rinadi":
+    mehmonxona, sanalar, holat, va har bir xona + unga biriktirilgan
+    xodimlar ro'yxati.
+    """
+    permission_classes = [IsAuthenticated, IsB2BPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Bron so'rovi tafsilotini olish (executer)",
+        responses={
+            200: HotelBookingRequestDetailSerializer(),
+            404: openapi.Response(description="Booking not found."),
+        },
+        tags=["B2B / Executer"],
+    )
+    def get(self, request, booking_id):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        booking_request = get_hotel_booking_request(booking_id, company_id)
+        if not booking_request:
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        booking_request = _refresh_booking_request_status(booking_request)
+        rooms = list_hotel_booking_rooms(booking_id)
+        booking_request["rooms"] = rooms
+        booking_request["room_count"] = len(rooms)
+        booking_request["employee_count"] = sum(len(r["employees"]) for r in rooms)
+        return Response(HotelBookingRequestDetailSerializer(booking_request).data)
 
 
 class B2BCompanyView(APIView):
@@ -340,9 +749,41 @@ class TravelPolicyView(APIView):
 
 
 class BudgetRequestListCreateView(APIView):
+    """GET/POST /b2b/budget-requests/
+
+    A budget request is how an executer (performer, e.g. the one who sends an
+    employee on a business trip) asks the owner for extra budget when an
+    employee's spend for the current calendar month would go over that
+    employee's owner-set monthly cap (``B2BEmployee.individual_limit``).
+
+    - The executer presses one button (``POST``) with the trip/employee/amount.
+    - If this month's already-approved spend for that employee + the new
+      ``amount`` still fits within ``individual_limit`` (or no limit is set),
+      the request is auto-approved immediately — no owner action needed.
+    - If it would exceed the monthly limit, the request is stored ``pending``,
+      tagged with the executer as ``requested_by``, and shows up for the
+      owner via ``GET ?status=pending`` to review (approve/reject) via
+      ``POST /budget-requests/<id>/review/``.
+    """
     permission_classes = [IsAuthenticated]
 
-    @swagger_auto_schema(responses={200: BudgetRequestSerializer(many=True)})
+    @swagger_auto_schema(
+        operation_summary="Byudjet so'rovlarini olish (owner uchun)",
+        operation_description=(
+            "Kompaniyaning barcha byudjet so'rovlarini qaytaradi. "
+            "`status=pending` bilan filtrlab, owner tasdig'ini kutayotgan — "
+            "ya'ni xodimning oylik individual_limit'idan oshib ketgan va "
+            "executer tomonidan yuborilgan so'rovlarni ko'rish mumkin."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                enum=["pending", "approved", "rejected"],
+                description="Holat bo'yicha filtr. Owner uchun odatda `pending`.",
+            ),
+        ],
+        responses={200: BudgetRequestSerializer(many=True)},
+    )
     def get(self, request):
         company_id = _get_company_id(request)
         if not company_id:
@@ -351,18 +792,59 @@ class BudgetRequestListCreateView(APIView):
         requests = list_budget_requests(company_id, status=req_status)
         return Response(BudgetRequestSerializer(requests, many=True).data)
 
-    @swagger_auto_schema(request_body=BudgetRequestSerializer, responses={201: BudgetRequestSerializer()})
+    @swagger_auto_schema(
+        operation_summary="Byudjet so'rovi yuborish (oylik limit yetmasa ownerga boradi)",
+        operation_description=(
+            "Executer (komandirovkaga xodim jo'natayotgan foydalanuvchi) "
+            "xodim uchun qo'shimcha summa so'raydi — bitta tugma bosish "
+            "yetarli. Tizim shu oy uchun xodimning allaqachon tasdiqlangan "
+            "xarajatlari + yangi `amount` ni xodimning oylik "
+            "`individual_limit`i bilan solishtiradi:\n\n"
+            "- Agar limit yetsa — so'rov avtomatik `approved` bo'ladi, "
+            "owner aralashuvi shart emas.\n"
+            "- Agar limit yetmasa — so'rov `pending` holatda, so'rovchi "
+            "(executer) `requested_by` sifatida saqlanadi va owner uni "
+            "`GET ?status=pending` orqali ko'rib, tasdiqlaydi/rad etadi."
+        ),
+        request_body=BudgetRequestSerializer,
+        responses={
+            201: BudgetRequestSerializer(),
+            400: openapi.Response(description="Validation error / Company context required."),
+            404: openapi.Response(description="Employee or trip not found."),
+        },
+    )
     def post(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = BudgetRequestSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         validated = serializer.validated_data
+
+        employee = get_employee(validated["employee_id"], company_id)
+        if not employee:
+            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+        trip = get_trip(validated["trip_id"], company_id)
+        if not trip:
+            return Response({"detail": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        amount = validated["amount"]
+        individual_limit = employee.get("individual_limit")
+        if individual_limit is None:
+            within_limit = True
+        else:
+            now = timezone.now()
+            month_spend = get_employee_month_spend(employee["id"], now.year, now.month)
+            within_limit = (month_spend + amount) <= individual_limit
+
         budget_req = create_budget_request(
             trip_id=validated["trip_id"],
             employee_id=validated["employee_id"],
             requested_by=_get_user_id(request),
-            amount=validated["amount"],
+            amount=amount,
             reason=validated["reason"],
+            auto_approved=within_limit,
         )
         if not budget_req:
             return Response({"detail": "Failed to create budget request."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -9,6 +9,7 @@ from typing import Any
 from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one
+from apps.b2b.models import BudgetRequestStatus, HotelBookingRequestStatus
 from apps.b2b.raw.tables import (
     B2B_COMPANY_TABLE,
     B2B_USER_TABLE,
@@ -21,6 +22,9 @@ from apps.b2b.raw.tables import (
     B2B_TRAVEL_POLICY_RULE_TABLE,
     B2B_BUDGET_REQUEST_TABLE,
     B2B_TRAVEL_VOUCHER_TABLE,
+    B2B_HOTEL_BOOKING_REQUEST_TABLE,
+    B2B_HOTEL_BOOKING_ROOM_TABLE,
+    B2B_HOTEL_BOOKING_ROOM_EMPLOYEE_TABLE,
 )
 
 logger = logging.getLogger(__name__)
@@ -397,11 +401,50 @@ def delete_policy_rule(rule_id: int) -> int:
 
 # ─── Budget Requests ──────────────────────────────────────────────────────────
 
-def create_budget_request(*, trip_id: int, employee_id: int, requested_by: int, amount: Decimal, reason: str) -> dict[str, Any] | None:
+def get_employee_month_spend(employee_id: int, year: int, month: int) -> Decimal:
+    """Sum of this employee's *approved* budget-request amounts for the given
+    calendar month (used to check against ``B2BEmployee.individual_limit``,
+    which is treated as a monthly cap)."""
+    row = fetch_one(
+        f"""
+        SELECT COALESCE(SUM(amount), 0) AS spent
+        FROM {B2B_BUDGET_REQUEST_TABLE}
+        WHERE employee_id = %s AND status = 'approved'
+          AND EXTRACT(YEAR FROM COALESCE(reviewed_at, created_at)) = %s
+          AND EXTRACT(MONTH FROM COALESCE(reviewed_at, created_at)) = %s
+        """,
+        [employee_id, year, month],
+    ) or {}
+    return row.get("spent") or Decimal("0")
+
+
+def create_budget_request(
+    *,
+    trip_id: int,
+    employee_id: int,
+    requested_by: int,
+    amount: Decimal,
+    reason: str,
+    auto_approved: bool = False,
+) -> dict[str, Any] | None:
+    """Create a budget request.
+
+    When ``auto_approved`` is True (the requested amount is within the
+    employee's ``individual_limit``), the request is stored already
+    ``approved`` with ``reviewed_at`` set — no owner action needed. Otherwise
+    it is stored ``pending`` so it shows up for the owner to review.
+    """
     now = timezone.now()
+    req_status = BudgetRequestStatus.APPROVED if auto_approved else BudgetRequestStatus.PENDING
+    reviewed_at = now if auto_approved else None
     return fetch_one(
-        f"INSERT INTO {B2B_BUDGET_REQUEST_TABLE} (trip_id, employee_id, requested_by, amount, reason, status, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, 'pending', %s, %s) RETURNING *",
-        [trip_id, employee_id, requested_by, amount, reason, now, now],
+        f"""
+        INSERT INTO {B2B_BUDGET_REQUEST_TABLE}
+            (trip_id, employee_id, requested_by, amount, reason, status, reviewed_at, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [trip_id, employee_id, requested_by, amount, reason, req_status, reviewed_at, now, now],
     )
 
 
@@ -444,6 +487,161 @@ def create_voucher(*, trip_id: int, voucher_number: str, pdf_url: str | None = N
 
 def get_voucher(trip_id: int) -> dict[str, Any] | None:
     return fetch_one(f"SELECT * FROM {B2B_TRAVEL_VOUCHER_TABLE} WHERE trip_id = %s", [trip_id])
+
+
+# ─── Hotel Booking Requests (2-step: hotel+dates -> rooms+employees) ──────────
+#
+# A booking request is the "group" that makes a multi-room, multi-employee
+# hotel booking show up as ONE entry in the executer's booking history. Each
+# room in it maps to a real ``pms_booking`` row created inside that hotel's
+# own tenant schema (see apps/hotels/repository.py + apps/property/hotel_repository.py
+# for the schema-switching machinery) — there is no cross-schema FK, just a
+# plain ``pms_booking_id`` reference resolved via ``tenant_schema``.
+
+def create_hotel_booking_request(
+    *,
+    company_id: int,
+    trip_id: int | None,
+    hotel_guid: str,
+    tenant_schema: str,
+    hotel_property_id: int,
+    hotel_name: str | None,
+    check_in: date,
+    check_out: date,
+    requested_by: int | None,
+) -> dict[str, Any] | None:
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_HOTEL_BOOKING_REQUEST_TABLE}
+            (company_id, trip_id, hotel_guid, tenant_schema, hotel_property_id, hotel_name,
+             check_in, check_out, status, requested_by, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [
+            company_id, trip_id, hotel_guid, tenant_schema, hotel_property_id, hotel_name,
+            check_in, check_out, HotelBookingRequestStatus.PENDING, requested_by, now, now,
+        ],
+    )
+
+
+def add_hotel_booking_room(
+    *,
+    booking_request_id: int,
+    room_id: int,
+    room_name: str | None,
+    pms_booking_id: int | None,
+    price_per_night: Decimal | None,
+    total_price: Decimal | None,
+) -> dict[str, Any] | None:
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_HOTEL_BOOKING_ROOM_TABLE}
+            (booking_request_id, room_id, room_name, pms_booking_id, price_per_night, total_price, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [booking_request_id, room_id, room_name, pms_booking_id, price_per_night, total_price, now, now],
+    )
+
+
+def add_hotel_booking_room_employee(*, booking_room_id: int, employee_id: int) -> dict[str, Any] | None:
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_HOTEL_BOOKING_ROOM_EMPLOYEE_TABLE} (booking_room_id, employee_id, created_at, updated_at)
+        VALUES (%s, %s, %s, %s)
+        RETURNING *
+        """,
+        [booking_room_id, employee_id, now, now],
+    )
+
+
+def get_hotel_booking_request(booking_request_id: int, company_id: int | None = None) -> dict[str, Any] | None:
+    if company_id is not None:
+        return fetch_one(
+            f"SELECT * FROM {B2B_HOTEL_BOOKING_REQUEST_TABLE} WHERE id = %s AND company_id = %s",
+            [booking_request_id, company_id],
+        )
+    return fetch_one(f"SELECT * FROM {B2B_HOTEL_BOOKING_REQUEST_TABLE} WHERE id = %s", [booking_request_id])
+
+
+def list_hotel_booking_requests(
+    company_id: int,
+    *,
+    trip_id: int | None = None,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    conditions = ["br.company_id = %s"]
+    params: list[Any] = [company_id]
+    if trip_id is not None:
+        conditions.append("br.trip_id = %s")
+        params.append(trip_id)
+    if status:
+        conditions.append("br.status = %s")
+        params.append(status)
+    where = " AND ".join(conditions)
+    return fetch_all(
+        f"""
+        SELECT
+            br.*,
+            (SELECT COUNT(*) FROM {B2B_HOTEL_BOOKING_ROOM_TABLE} r WHERE r.booking_request_id = br.id) AS room_count,
+            (
+                SELECT COUNT(*) FROM {B2B_HOTEL_BOOKING_ROOM_EMPLOYEE_TABLE} re
+                JOIN {B2B_HOTEL_BOOKING_ROOM_TABLE} r ON r.id = re.booking_room_id
+                WHERE r.booking_request_id = br.id
+            ) AS employee_count
+        FROM {B2B_HOTEL_BOOKING_REQUEST_TABLE} br
+        WHERE {where}
+        ORDER BY br.created_at DESC
+        """,
+        params,
+    )
+
+
+def list_hotel_booking_rooms(booking_request_id: int) -> list[dict[str, Any]]:
+    rooms = fetch_all(
+        f"SELECT * FROM {B2B_HOTEL_BOOKING_ROOM_TABLE} WHERE booking_request_id = %s ORDER BY id ASC",
+        [booking_request_id],
+    )
+    if not rooms:
+        return rooms
+    room_ids = [r["id"] for r in rooms]
+    employees = fetch_all(
+        f"""
+        SELECT re.booking_room_id, e.id AS employee_id, e.full_name, e.position
+        FROM {B2B_HOTEL_BOOKING_ROOM_EMPLOYEE_TABLE} re
+        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = re.employee_id
+        WHERE re.booking_room_id = ANY(%s)
+        ORDER BY re.id ASC
+        """,
+        [room_ids],
+    )
+    by_room: dict[int, list[dict[str, Any]]] = {}
+    for emp in employees:
+        by_room.setdefault(emp["booking_room_id"], []).append(emp)
+    for room in rooms:
+        room["employees"] = by_room.get(room["id"], [])
+    return rooms
+
+
+def update_hotel_booking_request_status(
+    booking_request_id: int,
+    status: str,
+    *,
+    reviewed_at: datetime | None = None,
+) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        UPDATE {B2B_HOTEL_BOOKING_REQUEST_TABLE}
+        SET status = %s, reviewed_at = %s, updated_at = %s
+        WHERE id = %s
+        RETURNING *
+        """,
+        [status, reviewed_at, timezone.now(), booking_request_id],
+    )
 
 
 # ─── Statistics ───────────────────────────────────────────────────────────────

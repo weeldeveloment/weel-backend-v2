@@ -51,6 +51,15 @@ class EmployeeStatus:
     CHOICES = [AVAILABLE, ON_TRIP, BLOCKED]
 
 
+class HotelBookingRequestStatus:
+    """Status of a whole multi-room hotel booking request (the group)."""
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+
+    CHOICES = [PENDING, CONFIRMED, REJECTED]
+
+
 @dataclass(slots=True)
 class B2BCompany(HardDeleteBaseModel):
     id: int | None = None
@@ -114,6 +123,53 @@ class B2BEmployee(HardDeleteBaseModel):
     status: str = EmployeeStatus.AVAILABLE
     is_active: bool = True
     _meta = SimpleNamespace(db_table="b2b_employee")
+
+
+@dataclass(slots=True)
+class HotelBookingRequest(HardDeleteBaseModel):
+    """One executer action: pick a hotel + dates + N rooms + employees.
+
+    Hotels live in per-organization tenant schemas (see
+    apps/property/hotel_repository.py), so this row stores the encoded
+    ``hotel_guid`` ("<schema>:<id>") plus a plain ``tenant_schema``/
+    ``hotel_property_id`` split for convenience — there is no cross-schema
+    FK to ``pms_property``. The actual per-room ``pms_booking`` rows live in
+    that hotel's own schema; this table is the "group" that makes the whole
+    multi-room request show up as ONE entry in booking history.
+    """
+    id: int | None = None
+    company_id: int | None = None
+    trip_id: int | None = None
+    hotel_guid: str | None = None
+    tenant_schema: str | None = None
+    hotel_property_id: int | None = None
+    hotel_name: str | None = None
+    check_in: date | None = None
+    check_out: date | None = None
+    status: str = HotelBookingRequestStatus.PENDING
+    requested_by: int | None = None
+    reviewed_at: datetime | None = None
+    _meta = SimpleNamespace(db_table="b2b_hotel_booking_request")
+
+
+@dataclass(slots=True)
+class HotelBookingRoom(HardDeleteBaseModel):
+    id: int | None = None
+    booking_request_id: int | None = None
+    room_id: int | None = None
+    room_name: str | None = None
+    pms_booking_id: int | None = None
+    price_per_night: Decimal | None = None
+    total_price: Decimal | None = None
+    _meta = SimpleNamespace(db_table="b2b_hotel_booking_room")
+
+
+@dataclass(slots=True)
+class HotelBookingRoomEmployee(HardDeleteBaseModel):
+    id: int | None = None
+    booking_room_id: int | None = None
+    employee_id: int | None = None
+    _meta = SimpleNamespace(db_table="b2b_hotel_booking_room_employee")
 
 
 @dataclass(slots=True)

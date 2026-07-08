@@ -3,7 +3,7 @@ from __future__ import annotations
 from rest_framework import serializers
 
 
-SORT_CHOICES = ["popular", "rating", "reviews", "cheap", "expensive"]
+SORT_CHOICES = ["popular", "rating", "reviews", "cheap", "expensive", "weel_recommended"]
 
 WEEL_CLASS_CHOICES = [
     "standard", "essential", "comfort", "comfort_plus",
@@ -18,9 +18,15 @@ class HotelSearchParamsSerializer(serializers.Serializer):
     guests = serializers.IntegerField(required=False, default=1, min_value=1)
     star_rating = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=5)
     weel_classification = serializers.ChoiceField(choices=WEEL_CLASS_CHOICES, required=False, allow_null=True)
+    is_recommended = serializers.BooleanField(required=False, allow_null=True, default=None)
     themes = serializers.ListField(child=serializers.CharField(), required=False)
     price_min = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
     price_max = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    # Map/location filter: hotels within `radius_km` of (lat, lon).
+    lat = serializers.FloatField(required=False, allow_null=True)
+    lon = serializers.FloatField(required=False, allow_null=True)
+    radius_km = serializers.FloatField(required=False, default=10.0, min_value=0.1)
+    # "mashhur" | "weel_recommended" (weel-tavsiya) | "cheap" (eng arzon) | "expensive" (eng qimmat)
     sort_by = serializers.ChoiceField(choices=SORT_CHOICES, required=False, default="popular")
     page = serializers.IntegerField(required=False, default=1, min_value=1)
     page_size = serializers.IntegerField(required=False, default=20, min_value=1, max_value=100)
@@ -30,16 +36,22 @@ class HotelSearchParamsSerializer(serializers.Serializer):
         check_out = data.get("check_out")
         if check_in and check_out and check_out <= check_in:
             raise serializers.ValidationError({"check_out": "check_out must be after check_in."})
+        if (data.get("lat") is None) != (data.get("lon") is None):
+            raise serializers.ValidationError({"lon": "Both lat and lon must be provided together."})
         return data
 
 
 class HotelCardSerializer(serializers.Serializer):
     id = serializers.IntegerField()
+    hotel_guid = serializers.CharField(allow_null=True, required=False)
+    organization_name = serializers.CharField(allow_null=True, required=False)
     name = serializers.CharField()
     city = serializers.CharField(allow_null=True)
     full_address = serializers.CharField(allow_null=True)
     star_rating = serializers.IntegerField(allow_null=True)
     weel_classification = serializers.CharField(allow_null=True)
+    is_recommended = serializers.BooleanField(default=False)
+    booking_count = serializers.IntegerField(default=0)
     themes = serializers.ListField(child=serializers.CharField(), default=list)
     description = serializers.CharField(allow_null=True)
     rating = serializers.DecimalField(max_digits=3, decimal_places=2, allow_null=True)
@@ -49,6 +61,7 @@ class HotelCardSerializer(serializers.Serializer):
     latitude = serializers.FloatField(allow_null=True)
     longitude = serializers.FloatField(allow_null=True)
     min_price = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
+    available_rooms = serializers.IntegerField(default=0)
 
 
 class HotelDetailSerializer(HotelCardSerializer):
