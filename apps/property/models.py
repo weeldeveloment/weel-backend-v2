@@ -24,6 +24,7 @@ class PropertyType(BaseModel):
     title_en: str | None = None
     title_ru: str | None = None
     title_uz: str | None = None
+    icon: str | None = None
     _meta = SimpleNamespace(db_table="property_type")
 
 

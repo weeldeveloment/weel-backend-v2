@@ -24,7 +24,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from shared.permissions import IsClient, IsPartner, IsPartnerOrAdmin
 from shared.raw.compat import get_table_name
-from shared.raw.db import fetch_all
+from shared.raw.db import fetch_all, fetch_one, execute, table_exists
 from users.authentication import (
     ClientJWTAuthentication,
     OptionalClientOrPartnerJWTAuthentication,
@@ -35,9 +35,14 @@ from users.raw_repository import fetch_users_by_ids, get_user_by_id
 from .apartment_repository import (
     APARTMENT_TYPE_GUID,
     COTTAGE_TYPE_GUID,
+    HOTEL_TYPE_GUID,
     PROPERTY_KIND_HOTEL,
     PROPERTY_KIND_APARTMENT,
     PROPERTY_KIND_COTTAGE,
+    TYPE_GUID_TO_KIND,
+    _DEFAULT_TYPE_DATA,
+    _DEFAULT_TYPE_ICONS,
+    _load_property_types_from_db,
     admin_append_apartment_images,
     admin_create_apartment,
     admin_get_apartment,
@@ -968,6 +973,14 @@ def _get_or_set_cached_payload(request, cache_key: str, timeout: int, loader):
     return payload
 
 
+def _invalidate_property_type_cache() -> None:
+    for lang in ("en", "ru", "uz"):
+        try:
+            cache.delete_pattern(f"*property:type-list:v2:{lang}:*")
+        except Exception:
+            cache.delete(f"property:type-list:v2:{lang}:testing=0:query=")
+
+
 def _validate_image_upload(uploaded):
     if uploaded is None:
         raise ValidationError({"image": [_("This field is required.")]})
@@ -1245,6 +1258,158 @@ class PropertyTypeListView(APIView):
             _load,
         )
         return Response(data, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Admin Property Type Management
+# ---------------------------------------------------------------------------
+
+class PropertyTypeAdminListView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_id="adminListPropertyTypes",
+        operation_summary="List property types (admin)",
+        operation_description="Returns all property types with titles in all languages, kind, and current icon URL.",
+        tags=["Admin / Property"],
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                        "title_en": openapi.Schema(type=openapi.TYPE_STRING),
+                        "title_ru": openapi.Schema(type=openapi.TYPE_STRING),
+                        "title_uz": openapi.Schema(type=openapi.TYPE_STRING),
+                        "icon_url": openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                        "kind": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        rows = _load_property_types_from_db() or _DEFAULT_TYPE_DATA
+        result = []
+        for row in rows:
+            guid = row["guid"]
+            kind = TYPE_GUID_TO_KIND.get(guid, "")
+            icon_path = row.get("icon") or _DEFAULT_TYPE_ICONS.get(guid, "")
+            result.append({
+                "guid": guid,
+                "title_en": row.get("title_en", ""),
+                "title_ru": row.get("title_ru", ""),
+                "title_uz": row.get("title_uz", ""),
+                "icon_url": _build_media_url(request, icon_path),
+                "kind": kind,
+            })
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class PropertyTypeIconUploadView(APIView):
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_id="adminUploadPropertyTypeIcon",
+        operation_summary="Upload icon for a property type",
+        operation_description="Admin-only. Uploads an SVG or PNG icon for the specified property type.",
+        tags=["Admin / Property"],
+        manual_parameters=[
+            openapi.Parameter(
+                "type_guid",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                format="uuid",
+                required=True,
+                description="Property type GUID.",
+            ),
+            openapi.Parameter(
+                "icon",
+                openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=True,
+                description="Icon image file (SVG or PNG).",
+            ),
+        ],
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "guid": openapi.Schema(type=openapi.TYPE_STRING, format="uuid"),
+                    "icon_url": openapi.Schema(type=openapi.TYPE_STRING),
+                },
+            ),
+            400: _ERROR_DETAIL_SCHEMA,
+            404: _ERROR_DETAIL_SCHEMA,
+        },
+    )
+    def post(self, request, type_guid, *args, **kwargs):
+        guid = str(type_guid).strip().lower()
+        if guid not in TYPE_GUID_TO_KIND:
+            raise NotFound("Property type not found.")
+
+        uploaded = request.FILES.get("icon")
+        if not uploaded:
+            raise ValidationError({"icon": "This field is required."})
+
+        allowed_ext = {"svg", "png"}
+        name = (uploaded.name or "").lower()
+        ext = name.rsplit(".", 1)[-1] if "." in name else ""
+        if ext not in allowed_ext:
+            raise ValidationError(
+                {"icon": f"Unsupported format '{ext}'. Allowed: {', '.join(sorted(allowed_ext))}."}
+            )
+
+        upload_path = f"property/icons/{uuid4()}.{ext}"
+        saved_path = default_storage.save(upload_path, uploaded)
+
+        property_type_table = "property_propertytype"
+        if table_exists(property_type_table):
+            try:
+                table = get_table_name(property_type_table)
+                existing = fetch_one(
+                    f"SELECT id FROM {table} WHERE guid = %s LIMIT 1",
+                    [guid],
+                )
+                if existing:
+                    execute(
+                        f"UPDATE {table} SET icon = %s, updated_at = %s WHERE guid = %s",
+                        [saved_path, timezone.now(), guid],
+                    )
+                else:
+                    kind = TYPE_GUID_TO_KIND.get(guid, "")
+                    default_data = next(
+                        (d for d in _DEFAULT_TYPE_DATA if d["guid"] == guid), None
+                    )
+                    execute(
+                        f"INSERT INTO {table} (guid, created_at, updated_at, title_en, title_ru, title_uz, icon) "
+                        f"VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        [
+                            guid,
+                            timezone.now(),
+                            timezone.now(),
+                            default_data["title_en"] if default_data else "",
+                            default_data["title_ru"] if default_data else "",
+                            default_data["title_uz"] if default_data else "",
+                            saved_path,
+                        ],
+                    )
+            except Exception:
+                logger.warning("Failed to persist icon to DB; icon saved to storage only", exc_info=True)
+
+        _invalidate_property_type_cache()
+
+        return Response(
+            {
+                "guid": guid,
+                "icon_url": _build_media_url(request, saved_path),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class PropertyServiceListView(APIView):

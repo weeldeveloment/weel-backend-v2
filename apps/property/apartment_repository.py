@@ -71,30 +71,39 @@ def parse_property_kind(value: str | UUID | None) -> str | None:
     return TYPE_GUID_TO_KIND.get(raw)
 
 
+_DEFAULT_TYPE_ICONS: dict[str, str] = {
+    str(COTTAGE_TYPE_GUID): "property/icons/home-03.svg",
+    str(APARTMENT_TYPE_GUID): "property/icons/building-skyscraper2.svg",
+    str(HOTEL_TYPE_GUID): "property/icons/building-skyscraper2.svg",
+}
+
+_DEFAULT_TYPE_DATA: list[dict[str, Any]] = [
+    {
+        "guid": str(COTTAGE_TYPE_GUID),
+        "title_en": "Cottage",
+        "title_ru": "Дача",
+        "title_uz": "Dacha",
+        "icon": "property/icons/home-03.svg",
+    },
+    {
+        "guid": str(APARTMENT_TYPE_GUID),
+        "title_en": "Apartment",
+        "title_ru": "Квартира",
+        "title_uz": "Kvartira",
+        "icon": "property/icons/building-skyscraper2.svg",
+    },
+    {
+        "guid": str(HOTEL_TYPE_GUID),
+        "title_en": "Hotel",
+        "title_ru": "Отель",
+        "title_uz": "Mehmonxona",
+        "icon": "property/icons/building-skyscraper2.svg",
+    },
+]
+
+
 def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
-    data = [
-        {
-            "guid": str(COTTAGE_TYPE_GUID),
-            "title_en": "Cottage",
-            "title_ru": "Дача",
-            "title_uz": "Dacha",
-            "icon": "property/icons/home-03.svg",
-        },
-        {
-            "guid": str(APARTMENT_TYPE_GUID),
-            "title_en": "Apartment",
-            "title_ru": "Квартира",
-            "title_uz": "Kvartira",
-            "icon": "property/icons/building-skyscraper2.svg",
-        },
-        {
-            "guid": str(HOTEL_TYPE_GUID),
-            "title_en": "Hotel",
-            "title_ru": "Отель",
-            "title_uz": "Mehmonxona",
-            "icon": "property/icons/building-skyscraper2.svg",
-        },
-    ]
+    data = _load_property_types_from_db() or _DEFAULT_TYPE_DATA
     result = []
     for row in data:
         if language == "ru":
@@ -107,10 +116,36 @@ def list_property_types(language: str = "uz") -> list[dict[str, Any]]:
         result.append({
             "guid": row["guid"],
             "title": title,
-            "icon_url": row["icon"],
+            "icon_url": row.get("icon") or _DEFAULT_TYPE_ICONS.get(row["guid"], ""),
             "kind": kind,
         })
     return result
+
+
+def _load_property_types_from_db() -> list[dict[str, Any]] | None:
+    property_type_table = "property_propertytype"
+    if not table_exists(property_type_table):
+        return None
+    try:
+        rows = fetch_all(
+            f"""
+            SELECT
+                guid::text AS guid,
+                title_en,
+                title_ru,
+                title_uz,
+                icon
+            FROM {get_table_name(property_type_table)}
+            WHERE guid IN (%s, %s, %s)
+            """,
+            [str(APARTMENT_TYPE_GUID), str(COTTAGE_TYPE_GUID), str(HOTEL_TYPE_GUID)],
+        )
+    except Exception:
+        logger.warning("Failed to load property types from DB, using defaults", exc_info=True)
+        return None
+    if not rows:
+        return None
+    return rows
 
 
 def list_property_services(language: str = "uz") -> list[dict[str, Any]]:

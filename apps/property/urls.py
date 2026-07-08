@@ -2,6 +2,8 @@ from django.urls import path, re_path
 
 from .views import (
     PropertyTypeListView,
+    PropertyTypeAdminListView,
+    PropertyTypeIconUploadView,
     PropertyFilterByLinkView,
     ApartmentPropertyListCreateView,
     CottagePropertyListCreateView,
@@ -53,6 +55,16 @@ from .views import (
 
 urlpatterns = [
     path("types/", PropertyTypeListView.as_view(), name="property-type-list"),
+    path(
+        "admin/types/",
+        PropertyTypeAdminListView.as_view(),
+        name="admin-property-type-list",
+    ),
+    path(
+        "admin/types/<uuid:type_guid>/icon/",
+        PropertyTypeIconUploadView.as_view(),
+        name="admin-property-type-icon-upload",
+    ),
     path("location/", LocationListView.as_view(), name="location"),
     path("regions/", RegionListView.as_view(), name="region-list"),
     path(
