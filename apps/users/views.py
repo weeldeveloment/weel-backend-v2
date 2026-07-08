@@ -383,7 +383,13 @@ optional_refresh_request_body = openapi.Schema(
 )
 
 
-def deactivate_account(user, refresh_token=None):
+def deactivate_account(user, refresh_token=None, otp_code=None, phone_number=None):
+    if otp_code and phone_number:
+        purpose = SmsPurpose.ACCOUNT_DELETE
+        verified_phone = OTPRedisService.verify_otp(phone_number, otp_code, purpose)
+        if not verified_phone:
+            return False
+
     if refresh_token:
         try:
             token = CustomRefreshToken(refresh_token)
@@ -392,11 +398,67 @@ def deactivate_account(user, refresh_token=None):
             pass
 
     if not user:
-        return
+        return None
     role = getattr(user, "role", None)
     if role not in ("client", "partner"):
-        return
+        return None
     soft_deactivate_user(user)
+    return True
+
+
+class AccountDeleteRequestView(APIView):
+    authentication_classes = (ClientOrPartnerJWTAuthentication,)
+    permission_classes = (IsClientOrPartner,)
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_login_send"
+
+    @swagger_auto_schema(
+        tags=["Auth - Profile"],
+        operation_summary="Send OTP for account deletion",
+        operation_description="Sends an OTP to the authenticated user's phone"
+                            " to confirm account deletion.",
+        responses={
+            200: openapi.Response(
+                description="OTP sent successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                        "phone_number": openapi.Schema(type=openapi.TYPE_STRING),
+                        "expires_in": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            400: "Bad Request — user has no phone number",
+            401: "Unauthorized",
+            403: "Forbidden",
+        },
+    )
+    def post(self, request):
+        user = request.user
+        phone_number = getattr(user, "phone_number", None)
+        if not phone_number:
+            return Response(
+                {"detail": _("User has no phone number.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        purpose = SmsPurpose.ACCOUNT_DELETE
+        otp_code = OTPRedisService.create_otp(phone_number, purpose)
+        logger.info(
+            "Account deletion OTP generated for user %s: %s",
+            getattr(user, "id", "unknown"),
+            otp_code,
+        )
+        send_otp_sms_eskiz.delay(phone_number, purpose, otp_code)
+
+        return Response(
+            {
+                "detail": _("OTP sent successfully"),
+                "phone_number": phone_number,
+                "expires_in": f"{OTPRedisService.OTP_EXPIRE} seconds",
+            }
+        )
 
 
 class ClientLogoutView(APIView):
@@ -849,15 +911,23 @@ class PartnerProfileView(APIView):
 
     @swagger_auto_schema(
         tags=["Auth - Profile"],
-        operation_summary="Permanently delete own partner profile",
+        operation_summary="Deactivate own partner profile",
         operation_description=(
-            "Hard delete partner account and related records. "
+            "Soft deactivate the partner account. Requires OTP verification. "
+            "The account is deactivated and PII is anonymized. "
             "This action is irreversible."
         ),
-        request_body=optional_refresh_request_body,
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "otp_code": openapi.Schema(type=openapi.TYPE_STRING, description="OTP code sent for deletion"),
+                "refresh": openapi.Schema(type=openapi.TYPE_STRING, description="Refresh token to blacklist"),
+            },
+            required=["otp_code"],
+        ),
         responses={
             200: openapi.Response(
-                description="Partner account permanently deleted",
+                description="Partner account deactivated",
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
@@ -865,15 +935,40 @@ class PartnerProfileView(APIView):
                     },
                 ),
             ),
+            400: "Invalid OTP code",
             401: "Unauthorized",
             403: "Forbidden",
         },
     )
     def delete(self, request):
+        otp_code = request.data.get("otp_code")
+        if not otp_code:
+            return Response(
+                {"detail": _("OTP code is required.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         refresh_token = request.data.get("refresh")
-        deactivate_account(request.user, refresh_token=refresh_token)
+        phone_number = getattr(request.user, "phone_number", None)
+        result = deactivate_account(
+            request.user,
+            refresh_token=refresh_token,
+            otp_code=otp_code,
+            phone_number=phone_number,
+        )
+        if result is False:
+            return Response(
+                {"detail": _("Invalid or expired OTP code.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if result is None:
+            return Response(
+                {"detail": _("Account could not be deactivated.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         return Response(
-            {"detail": _("Account has been deleted.")},
+            {"detail": _("Account has been deactivated.")},
             status=status.HTTP_200_OK,
         )
 
@@ -882,21 +977,30 @@ class OwnAccountView(APIView):
     """
     DELETE — faqat o'z akkauntini o'chiradi (Partner yoki Client).
     Tekshiruv: token orqali kirgan user o'zini o'chiradi.
+    OTP verification required.
     """
     authentication_classes = (ClientOrPartnerJWTAuthentication,)
     permission_classes = (IsClientOrPartner,)
 
     @swagger_auto_schema(
         tags=["Auth - Profile"],
-        operation_summary="Permanently delete own account (Client or Partner)",
+        operation_summary="Deactivate own account (Client or Partner)",
         operation_description=(
-            "Hard delete the authenticated client or partner account and related records. "
+            "Soft deactivate the authenticated client or partner account. "
+            "Requires OTP verification. The account is deactivated and PII is anonymized. "
             "This action is irreversible."
         ),
-        request_body=optional_refresh_request_body,
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "otp_code": openapi.Schema(type=openapi.TYPE_STRING, description="OTP code sent for deletion"),
+                "refresh": openapi.Schema(type=openapi.TYPE_STRING, description="Refresh token to blacklist"),
+            },
+            required=["otp_code"],
+        ),
         responses={
             200: openapi.Response(
-                description="Account permanently deleted",
+                description="Account deactivated",
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
@@ -904,15 +1008,40 @@ class OwnAccountView(APIView):
                     },
                 ),
             ),
+            400: "Invalid OTP code",
             401: "Unauthorized",
             403: "Forbidden",
         },
     )
     def delete(self, request):
+        otp_code = request.data.get("otp_code")
+        if not otp_code:
+            return Response(
+                {"detail": _("OTP code is required.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         refresh_token = request.data.get("refresh")
-        deactivate_account(request.user, refresh_token=refresh_token)
+        phone_number = getattr(request.user, "phone_number", None)
+        result = deactivate_account(
+            request.user,
+            refresh_token=refresh_token,
+            otp_code=otp_code,
+            phone_number=phone_number,
+        )
+        if result is False:
+            return Response(
+                {"detail": _("Invalid or expired OTP code.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if result is None:
+            return Response(
+                {"detail": _("Account could not be deactivated.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         return Response(
-            {"detail": _("Account has been deleted.")},
+            {"detail": _("Account has been deactivated.")},
             status=status.HTTP_200_OK,
         )
 

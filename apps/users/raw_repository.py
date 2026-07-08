@@ -399,6 +399,9 @@ def update_user_profile(
 
 
 def soft_deactivate_user(user: RawUser) -> None:
+    now = timezone.now()
+    user_id = user.id
+
     if user.is_partner:
         execute(
             f"""
@@ -410,25 +413,86 @@ def soft_deactivate_user(user: RawUser) -> None:
                 updated_at = %s
             WHERE id = %s
             """,
-            [
-                f"d{user.id}",
-                f"deleted_{user.id}",
-                timezone.now(),
-                user.id,
-            ],
+            [f"d{user_id}", f"deleted_{user_id}", now, user_id],
         )
-        return
+
+        execute(
+            f"""
+            UPDATE property
+            SET is_archived = TRUE,
+                updated_at = %s
+            WHERE partner_user_id = %s AND is_archived = FALSE
+            """,
+            [now, user_id],
+        )
+    else:
+        execute(
+            f"""
+            UPDATE {USER_TABLE}
+            SET is_active = FALSE,
+                phone_number = %s,
+                updated_at = %s
+            WHERE id = %s
+            """,
+            [f"d{user_id}", now, user_id],
+        )
 
     execute(
         f"""
-        UPDATE {USER_TABLE}
-        SET is_active = FALSE,
-            phone_number = %s,
+        UPDATE booking
+        SET status = 'cancelled',
             updated_at = %s
-        WHERE id = %s
+        WHERE client_user_id = %s AND status NOT IN ('cancelled', 'completed')
         """,
-        [f"d{user.id}", timezone.now(), user.id],
+        [now, user_id],
     )
+
+    if table_exists("user_map"):
+        execute(
+            "DELETE FROM user_map WHERE user_id = %s",
+            [user_id],
+        )
+
+    if table_exists("notification"):
+        execute(
+            "DELETE FROM notification WHERE recipient_user_id = %s",
+            [user_id],
+        )
+
+    if table_exists("chat_conversation"):
+        execute(
+            f"""
+            UPDATE chat_conversation
+            SET client_user_id = NULL, partner_user_id = NULL
+            WHERE client_user_id = %s OR partner_user_id = %s
+            """,
+            [user_id, user_id],
+        )
+
+    if table_exists("chat_message"):
+        execute(
+            f"""
+            UPDATE chat_message
+            SET receiver_user_id = NULL
+            WHERE sender_user_id = %s OR receiver_user_id = %s
+            """,
+            [user_id, user_id],
+        )
+
+    log_account_deletion(user_id, user_id, user.role)
+
+
+def log_account_deletion(user_id: int, deleted_by: int, role: str) -> None:
+    now = timezone.now()
+    if table_exists("account_deletion_log"):
+        execute(
+            f"""
+            INSERT INTO account_deletion_log
+                (user_id, deleted_by, role, deleted_at)
+            VALUES (%s, %s, %s, %s)
+            """,
+            [user_id, deleted_by, role, now],
+        )
 
 
 def table_capability_snapshot() -> dict[str, bool]:

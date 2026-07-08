@@ -25,6 +25,7 @@ from .views import (
     PartnerPassportUploadView,
     PartnerUpdateView,
     OwnAccountView,
+    AccountDeleteRequestView,
 )
 
 app_name = "users"
@@ -107,5 +108,10 @@ urlpatterns = [
     ),
     path("refresh/", UserTokenRefreshView.as_view(), name="token_refresh"),
     path("account/", OwnAccountView.as_view(), name="own_account"),
+    path(
+        "account/delete/request/",
+        AccountDeleteRequestView.as_view(),
+        name="account_delete_request",
+    ),
     path("", include(router.urls)),
 ]

@@ -22,6 +22,7 @@ from apps.platform.raw_repository import (
     create_organization,
     create_organization_member,
     create_tenant_schema,
+    deactivate_organization,
     delete_orphaned_pms_user,
     get_organization_by_id,
     get_organization_by_slug,
@@ -61,6 +62,7 @@ from users.raw_repository import (
     create_pms_user,
     get_active_user_by_phone,
     get_user_by_id,
+    soft_deactivate_user,
     update_user_profile,
 )
 from users.tokens import create_pms_tokens
@@ -389,7 +391,7 @@ class PmsVerifyOTPLoginView(APIView):
             primary_org = orgs[0]
 
         tokens = _create_pms_tokens(user, organization_id=primary_org["id"])
-        has_properties = has_any_properties(organization_id=primary_org["id"])
+        has_properties = has_any_properties(organization_id=primary_org["id"], schema_name=primary_org.get("schema_name"))
 
         return Response(
             PmsLoginResponseSerializer({
@@ -440,7 +442,7 @@ class PmsSwitchOrganizationView(APIView):
         }
 
         tokens = _create_pms_tokens(user_dict, organization_id=target_org["id"])
-        has_properties = has_any_properties(organization_id=target_org["id"])
+        has_properties = has_any_properties(organization_id=target_org["id"], schema_name=target_org.get("schema_name"))
 
         return Response({
             "access": tokens["access"],
@@ -467,7 +469,7 @@ class PmsMeView(APIView):
         orgs = get_user_organizations(user_id)
         primary_org = _get_primary_organization(orgs, _get_request_organization_id(request))
 
-        has_properties = has_any_properties(organization_id=primary_org["id"]) if primary_org else False
+        has_properties = has_any_properties(organization_id=primary_org["id"], schema_name=primary_org.get("schema_name")) if primary_org else False
 
         return Response({
             "user": PlatformUserSerializer(user_data).data,
@@ -501,7 +503,7 @@ class PmsMeView(APIView):
         orgs = get_user_organizations(int(user_id))
         primary_org = _get_primary_organization(orgs, _get_request_organization_id(request))
 
-        has_properties = has_any_properties(organization_id=primary_org["id"]) if primary_org else False
+        has_properties = has_any_properties(organization_id=primary_org["id"], schema_name=primary_org.get("schema_name")) if primary_org else False
 
         return Response({
             "user": PlatformUserSerializer(updated_user).data,
@@ -509,6 +511,159 @@ class PmsMeView(APIView):
             "organizations": [OrganizationSerializer(o).data for o in orgs],
             "has_properties": has_properties,
         })
+
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["otp_code"],
+            properties={
+                "otp_code": openapi.Schema(type=openapi.TYPE_STRING, description="OTP code for deletion"),
+                "refresh": openapi.Schema(type=openapi.TYPE_STRING, description="Refresh token to blacklist"),
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Account deactivated",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={"detail": openapi.Schema(type=openapi.TYPE_STRING)},
+                ),
+            ),
+            400: "Invalid OTP code",
+            401: "Unauthorized",
+        },
+        tags=["platform"],
+        operation_summary="Deactivate own platform account",
+        operation_description=(
+            "Soft deactivate the authenticated PMS platform account. "
+            "Requires OTP verification. Organizations where the user is the "
+            "last active member will also be deactivated."
+        ),
+    )
+    def delete(self, request):
+        user_id = _get_request_user_id(request)
+        if not user_id:
+            return Response({"detail": "Not authenticated."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        user_data = get_user_by_id(user_id, role="pms", active_only=True)
+        if not user_data:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        otp_code = request.data.get("otp_code")
+        if not otp_code:
+            return Response(
+                {"detail": "OTP code is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        phone_number = getattr(user_data, "phone_number", None)
+        if not phone_number:
+            return Response(
+                {"detail": "User has no phone number."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        verified_phone = OTPRedisService.verify_otp(
+            phone_number, otp_code, SmsPurpose.PMS_ACCOUNT_DELETE
+        )
+        if not verified_phone:
+            return Response(
+                {"detail": "Invalid or expired OTP code."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        orgs = get_user_organizations(user_id)
+        for org in orgs:
+            members = list_organization_members(org["id"])
+            active_members = [
+                m for m in members
+                if str(m.get("user_id")) != str(user_id)
+            ]
+            if not active_members:
+                deactivate_organization(org["id"])
+                logger.info(
+                    "Deactivated organization %s — last member %s deleted account",
+                    org["id"],
+                    user_id,
+                )
+
+        refresh_token = request.data.get("refresh")
+        if refresh_token:
+            try:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+            except Exception:
+                pass
+
+        soft_deactivate_user(user_data)
+
+        return Response(
+            {"detail": _("Account has been deactivated.")},
+            status=status.HTTP_200_OK,
+        )
+
+
+class PmsAccountDeleteRequestView(APIView):
+    authentication_classes = [PmsJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_login_send"
+
+    @swagger_auto_schema(
+        responses={
+            200: openapi.Response(
+                description="OTP sent successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "detail": openapi.Schema(type=openapi.TYPE_STRING),
+                        "phone_number": openapi.Schema(type=openapi.TYPE_STRING),
+                        "expires_in": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            400: "Bad Request — user has no phone number",
+            401: "Unauthorized",
+        },
+        tags=["platform"],
+        operation_summary="Send OTP for platform account deletion",
+        operation_description=(
+            "Sends an OTP to the authenticated platform user's phone "
+            "to confirm account deletion."
+        ),
+    )
+    def post(self, request):
+        user_id = _get_request_user_id(request)
+        if not user_id:
+            return Response({"detail": "Not authenticated."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        user_data = get_user_by_id(user_id, role="pms", active_only=True)
+        if not user_data:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        phone_number = getattr(user_data, "phone_number", None)
+        if not phone_number:
+            return Response(
+                {"detail": _("User has no phone number.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        purpose = SmsPurpose.PMS_ACCOUNT_DELETE
+        otp_code = OTPRedisService.create_otp(phone_number, purpose)
+        logger.info(
+            "Platform account deletion OTP generated for user %s: %s",
+            user_id,
+            otp_code,
+        )
+        send_otp_sms_eskiz.delay(phone_number, purpose, otp_code)
+
+        return Response(
+            {
+                "detail": _("OTP sent successfully"),
+                "phone_number": phone_number,
+                "expires_in": f"{OTPRedisService.OTP_EXPIRE} seconds",
+            }
+        )
 
 
 class PmsOrganizationView(APIView):

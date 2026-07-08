@@ -12,6 +12,8 @@ class SmsPurpose(ChoiceEnum):
     PMS_LOGIN = "PM_LGN"
     PMS_REGISTER = "PM_RGR"
     B2B_LOGIN = "B2_LGN"
+    ACCOUNT_DELETE = "AC_DEL"
+    PMS_ACCOUNT_DELETE = "PM_DEL"
 
 
 SmsPurpose.choices = build_choices(SmsPurpose)

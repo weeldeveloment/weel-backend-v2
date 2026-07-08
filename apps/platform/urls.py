@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    PmsAccountDeleteRequestView,
     PmsMemberDetailView,
     PmsMembersView,
     PmsMeView,
@@ -19,6 +20,7 @@ urlpatterns = [
     path("login/", PmsSendOTPLoginView.as_view(), name="pms-login"),
     path("login/verify/", PmsVerifyOTPLoginView.as_view(), name="pms-login-verify"),
     path("me/", PmsMeView.as_view(), name="pms-me"),
+    path("me/delete/request/", PmsAccountDeleteRequestView.as_view(), name="pms-delete-request"),
     path("token/refresh/", PmsTokenRefreshView.as_view(), name="pms-token-refresh"),
     path("organization/", PmsOrganizationView.as_view(), name="pms-organization"),
     path("organization/members/", PmsMembersView.as_view(), name="pms-members"),
