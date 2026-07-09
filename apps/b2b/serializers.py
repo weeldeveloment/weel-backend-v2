@@ -302,17 +302,6 @@ class DashboardSummarySerializer(serializers.Serializer):
     pending_limit_requests = serializers.IntegerField()
 
 
-class GlobalTravelLimitSerializer(serializers.Serializer):
-    """Serializer for the company-wide (global) travel limit.
-
-    Backed by the existing ``b2b_travel_policy`` row — only the two budget
-    columns are exposed here; the property/star/preference lists are managed
-    by the generic ``/travel-policy/`` endpoint.
-    """
-    budget_per_trip = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
-    monthly_budget = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
-
-
 class TravelPolicyRuleSerializer(serializers.Serializer):
     """Serializer for the per-department / per-employee travel limit rule."""
     id = serializers.IntegerField(read_only=True)
