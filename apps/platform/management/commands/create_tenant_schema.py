@@ -53,6 +53,7 @@ class Command(BaseCommand):
                     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
                     is_recommended BOOLEAN NOT NULL DEFAULT FALSE,
                     verification_status VARCHAR(20) DEFAULT 'waiting',
+                    guid UUID NOT NULL DEFAULT gen_random_uuid(),
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );

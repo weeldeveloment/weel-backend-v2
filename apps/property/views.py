@@ -2178,7 +2178,6 @@ class HotelPropertyReviewListCreateView(APIView):
 
         created = create_hotel_review(
             property_id=hotel_id,
-            client_user_id=int(request.user.id),
             guest_name=str(request.user),
             rating=rating,
             text=comment,

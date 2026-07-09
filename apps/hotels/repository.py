@@ -22,7 +22,7 @@ def _check_room_availability(
           AND NOT EXISTS (
               SELECT 1 FROM pms_booking b
               WHERE b.room_id = r.id
-                AND b.status NOT IN ('cancelled', 'completed')
+                AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
                 AND b.check_in < %s
                 AND b.check_out > %s
           )
@@ -77,7 +77,7 @@ def get_available_rooms(
           AND NOT EXISTS (
               SELECT 1 FROM pms_booking b
               WHERE b.room_id = r.id
-                AND b.status NOT IN ('cancelled', 'completed')
+                AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
                 AND b.check_in < %s
                 AND b.check_out > %s
           )
@@ -181,7 +181,7 @@ def create_hotel_booking(
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s,
             %s, 'UZS', %s, %s,
-            'pending', %s, NOW(),
+            'new', %s, NOW(),
             'H' || TO_CHAR(NOW(), 'YYMMDD') || LPAD(FLOOR(RANDOM() * 99999)::int::text, 5, '0')
         )
         RETURNING id, property_id, room_id, check_in, check_out, adult_count, child_count,
@@ -387,7 +387,7 @@ def _search_hotels_in_schema(
                   AND NOT EXISTS (
                       SELECT 1 FROM pms_booking b
                       WHERE b.room_id = r.id
-                        AND b.status NOT IN ('cancelled', 'completed')
+                        AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
                         AND b.check_in < %s
                         AND b.check_out > %s
                   )
@@ -598,7 +598,7 @@ def get_hotel_reviews(
 ) -> list[dict[str, Any]]:
     return fetch_all(
         """
-        SELECT id, guest_name, rating, text, response, created_at
+        SELECT id, guest_name, rating, text, hotel_response, created_at
         FROM pms_review
         WHERE property_id = %s AND is_complained = FALSE
         ORDER BY created_at DESC
@@ -618,8 +618,7 @@ def has_eligible_hotel_booking_for_review(
         SELECT 1 FROM pms_booking b
         WHERE b.property_id = %s
           AND b.created_by = %s
-          AND b.status IN ('confirmed', 'completed')
-          AND b.completed_at IS NOT NULL
+          AND b.status IN ('confirmed', 'checked_out')
         LIMIT 1
         """,
         [property_id, client_user_id],
@@ -630,18 +629,17 @@ def has_eligible_hotel_booking_for_review(
 def create_hotel_review(
     *,
     property_id: int,
-    client_user_id: int,
     guest_name: str,
     rating: int,
     text: str = "",
 ) -> dict[str, Any] | None:
     row = fetch_one(
         """
-        INSERT INTO pms_review (property_id, client_user_id, guest_name, rating, text, created_at)
-        VALUES (%s, %s, %s, %s, %s, NOW())
-        RETURNING id, guest_name, rating, text, response, created_at
+        INSERT INTO pms_review (property_id, guest_name, rating, text, created_at)
+        VALUES (%s, %s, %s, %s, NOW())
+        RETURNING id, guest_name, rating, text, hotel_response, created_at
         """,
-        [property_id, client_user_id, guest_name, rating, text],
+        [property_id, guest_name, rating, text],
     )
     return row
 
@@ -663,7 +661,7 @@ def get_hotel_calendar(
         ) d
         LEFT JOIN pms_booking b
             ON b.room_id = r.id
-            AND b.status NOT IN ('cancelled', 'completed')
+            AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
             AND b.check_in < d.date + 1
             AND b.check_out > d.date
         WHERE r.property_id = %s AND r.is_active = TRUE

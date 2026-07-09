@@ -91,6 +91,7 @@ def create_property(*, organization_id: int, name: str, **kwargs: Any) -> dict[s
         "alcohol_allowed": bool, "pets_allowed": bool,
         "currency": str, "timezone": str,
         "photos": _to_pg_array,
+        "partner_user_id": int,
         "is_active": bool,
         "is_verified": bool,
         "verification_status": str,
