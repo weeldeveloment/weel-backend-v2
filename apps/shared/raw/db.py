@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import json
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -8,9 +9,22 @@ from typing import Any
 from django.db import connection
 from shared.raw.compat import is_postgresql, return_star
 
+# Django's postgresql backend registers the jsonb/json psycopg2 typecasters
+# with `loads=lambda x: x` (it decodes JSONField values itself), so raw
+# cursor.execute() queries get these columns back as un-parsed JSON text
+# instead of dicts/lists. Decode them ourselves using the OIDs psycopg2
+# reports for the builtin json (114) and jsonb (3802) types.
+_JSON_TYPE_CODES = {114, 3802}
+
 
 def _row_to_dict(cursor, row: tuple[Any, ...]) -> dict[str, Any]:
-    return {desc[0]: row[idx] for idx, desc in enumerate(cursor.description)}
+    out: dict[str, Any] = {}
+    for idx, desc in enumerate(cursor.description):
+        value = row[idx]
+        if isinstance(value, str) and desc.type_code in _JSON_TYPE_CODES:
+            value = json.loads(value)
+        out[desc[0]] = value
+    return out
 
 
 _ANY_MARKER_RE = re.compile(r"__ANY_MARKER__\(%s\)")

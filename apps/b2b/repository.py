@@ -30,13 +30,6 @@ from apps.b2b.raw.tables import (
 logger = logging.getLogger(__name__)
 
 
-def _to_pg_array(v: Any) -> str:
-    if not isinstance(v, list):
-        return v
-    escaped = [f'"{str(x).replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34))}"' for x in v]
-    return "{" + ",".join(escaped) + "}"
-
-
 def _to_pg_json(v: Any) -> Any:
     if isinstance(v, (list, dict)):
         return json.dumps(v)
@@ -296,18 +289,19 @@ def get_or_create_travel_policy(company_id: int) -> dict[str, Any]:
     if existing:
         return existing
     now = timezone.now()
+    empty = _to_pg_json([])
     return fetch_one(
         f"INSERT INTO {B2B_TRAVEL_POLICY_TABLE} (company_id, allowed_star_ratings, allowed_weel_classifications, blacklisted_properties, preferred_properties, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
-        [company_id, "{}", "{}", "{}", "{}", now, now],
+        [company_id, empty, empty, empty, empty, now, now],
     ) or {}
 
 
 def update_travel_policy(company_id: int, **kwargs: Any) -> dict[str, Any] | None:
-    pg_array_fields = {"allowed_star_ratings", "allowed_weel_classifications", "blacklisted_properties", "preferred_properties"}
+    pg_json_fields = {"allowed_star_ratings", "allowed_weel_classifications", "blacklisted_properties", "preferred_properties"}
     sanitized = {}
     for k, v in kwargs.items():
-        if k in pg_array_fields and isinstance(v, list):
-            sanitized[k] = _to_pg_array(v)
+        if k in pg_json_fields and isinstance(v, list):
+            sanitized[k] = _to_pg_json(v)
         else:
             sanitized[k] = v
 
