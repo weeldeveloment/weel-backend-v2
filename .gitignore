@@ -113,3 +113,9 @@ monitoring/
 design
 
 docs
+
+# AI tool configs (local)
+.claude/
+.gemini/
+.kiro/
+.codegraph/
