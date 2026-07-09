@@ -72,30 +72,11 @@ class Command(BaseCommand):
             self.stdout.write("  Created pms_property_image")
 
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS pms_room_type (
-                    id BIGSERIAL PRIMARY KEY,
-                    property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
-                    preset VARCHAR(20),
-                    custom_name VARCHAR(100),
-                    name VARCHAR(100) NOT NULL,
-                    description TEXT,
-                    base_rate NUMERIC(10,2),
-                    currency VARCHAR(3) DEFAULT 'USD',
-                    capacity INTEGER DEFAULT 2,
-                    amenities TEXT[] DEFAULT '{}',
-                    photos TEXT[] DEFAULT '{}',
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-            """)
-            self.stdout.write("  Created pms_room_type")
-
-            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pms_room (
                     id BIGSERIAL PRIMARY KEY,
                     property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
-                    room_type_id BIGINT REFERENCES pms_room_type(id) ON DELETE SET NULL,
+                    room_type_name VARCHAR(100),
+                    room_type_preset VARCHAR(20),
                     room_number VARCHAR(20) NOT NULL,
                     display_name VARCHAR(200),
                     floor INTEGER DEFAULT 1,
@@ -115,18 +96,6 @@ class Command(BaseCommand):
                 );
             """)
             self.stdout.write("  Created pms_room")
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS pms_room_image (
-                    id BIGSERIAL PRIMARY KEY,
-                    room_id BIGINT NOT NULL REFERENCES pms_room(id) ON DELETE CASCADE,
-                    image_url VARCHAR(500) NOT NULL,
-                    "order" INTEGER NOT NULL DEFAULT 0,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-            """)
-            self.stdout.write("  Created pms_room_image")
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pms_calendar_slot (
@@ -209,7 +178,7 @@ class Command(BaseCommand):
                 CREATE TABLE IF NOT EXISTS pms_rate (
                     id BIGSERIAL PRIMARY KEY,
                     property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
-                    room_type_id BIGINT NOT NULL REFERENCES pms_room_type(id) ON DELETE CASCADE,
+                    room_id BIGINT,
                     date_from DATE NOT NULL,
                     date_to DATE NOT NULL,
                     rate NUMERIC(10,2) NOT NULL,

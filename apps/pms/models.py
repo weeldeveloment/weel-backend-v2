@@ -177,27 +177,11 @@ class PropertyImage(HardDeleteBaseModel):
 
 
 @dataclass(slots=True)
-class RoomType(HardDeleteBaseModel):
-    id: int | None = None
-    property_id: int | None = None
-    preset: str | None = None
-    custom_name: str | None = None
-    name: str | None = None
-    description: str | None = None
-    base_rate: Decimal | None = None
-    currency: str = "USD"
-    capacity: int = 2
-    amenities: list = field(default_factory=list)
-    photos: list = field(default_factory=list)
-    is_active: bool = True
-    _meta = SimpleNamespace(db_table="pms_room_type")
-
-
-@dataclass(slots=True)
 class Room(HardDeleteBaseModel):
     id: int | None = None
     property_id: int | None = None
-    room_type_id: int | None = None
+    room_type_name: str | None = None
+    room_type_preset: str | None = None
     room_number: str | None = None
     display_name: str | None = None
     floor: int = 1
@@ -212,15 +196,6 @@ class Room(HardDeleteBaseModel):
     meal_plan: str = MealPlan.BB
     is_active: bool = True
     _meta = SimpleNamespace(db_table="pms_room")
-
-
-@dataclass(slots=True)
-class RoomImage(HardDeleteBaseModel):
-    id: int | None = None
-    room_id: int | None = None
-    image_url: str | None = None
-    order: int = 0
-    _meta = SimpleNamespace(db_table="pms_room_image")
 
 
 @dataclass(slots=True)
@@ -291,7 +266,7 @@ class BookingHistory(HardDeleteBaseModel):
 class Rate(HardDeleteBaseModel):
     id: int | None = None
     property_id: int | None = None
-    room_type_id: int | None = None
+    room_id: int | None = None
     date_from: date | None = None
     date_to: date | None = None
     rate: Decimal | None = None

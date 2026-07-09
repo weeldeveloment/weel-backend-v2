@@ -12,9 +12,7 @@ from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 from apps.pms.raw.tables import (
     PMS_PROPERTY_TABLE,
     PMS_PROPERTY_IMAGE_TABLE,
-    PMS_ROOM_TYPE_TABLE,
     PMS_ROOM_TABLE,
-    PMS_ROOM_IMAGE_TABLE,
     PMS_CALENDAR_SLOT_TABLE,
     PMS_GUEST_TABLE,
     PMS_BOOKING_TABLE,
@@ -217,86 +215,6 @@ def delete_property_image(image_id: int) -> bool:
     ) > 0
 
 
-# ─── Room Types ──────────────────────────────────────────────────────────────
-
-
-def create_room_type(*, property_id: int, name: str, **kwargs: Any) -> dict[str, Any] | None:
-    now = timezone.now()
-    cols = ["property_id", "name", "created_at", "updated_at"]
-    vals = [property_id, name, now, now]
-
-    field_map = {
-        "preset": str, "custom_name": str,
-        "description": str, "base_rate": lambda v: v, "currency": str,
-        "capacity": int,
-        "amenities": _to_pg_array,
-        "photos": _to_pg_array,
-        "is_active": bool,
-    }
-
-    for key, caster in field_map.items():
-        if key in kwargs and kwargs[key] is not None:
-            cols.append(key)
-            vals.append(caster(kwargs[key]))
-
-    placeholders = ", ".join(["%s"] * len(cols))
-    col_names = ", ".join(cols)
-
-    return fetch_one(
-        f"INSERT INTO {_t(PMS_ROOM_TYPE_TABLE)} ({col_names}) VALUES ({placeholders}) RETURNING *",
-        vals,
-    )
-
-
-def list_room_types(property_id: int) -> list[dict[str, Any]]:
-    return fetch_all(
-        f"SELECT * FROM {_t(PMS_ROOM_TYPE_TABLE)} WHERE property_id = %s ORDER BY name ASC",
-        [property_id],
-    )
-
-
-def get_room_type(room_type_id: int, property_id: int | None = None) -> dict[str, Any] | None:
-    if property_id:
-        return fetch_one(
-            f"SELECT * FROM {_t(PMS_ROOM_TYPE_TABLE)} WHERE id = %s AND property_id = %s",
-            [room_type_id, property_id],
-        )
-    return fetch_one(
-        f"SELECT * FROM {_t(PMS_ROOM_TYPE_TABLE)} WHERE id = %s",
-        [room_type_id],
-    )
-
-
-def update_room_type(room_type_id: int, **kwargs: Any) -> dict[str, Any] | None:
-    if not kwargs:
-        return None
-
-    pg_array_fields = {"amenities", "photos"}
-    sanitized = {}
-    for k, v in kwargs.items():
-        if k in pg_array_fields and isinstance(v, list):
-            sanitized[k] = _to_pg_array(v)
-        else:
-            sanitized[k] = v
-
-    sets = ", ".join(f"{k} = %s" for k in sanitized)
-    values = list(sanitized.values())
-    values.append(timezone.now())
-    values.append(room_type_id)
-
-    return fetch_one(
-        f"UPDATE {_t(PMS_ROOM_TYPE_TABLE)} SET {sets}, updated_at = %s WHERE id = %s RETURNING *",
-        values,
-    )
-
-
-def delete_room_type(room_type_id: int) -> bool:
-    return execute(
-        f"UPDATE {_t(PMS_ROOM_TYPE_TABLE)} SET is_active = FALSE, updated_at = %s WHERE id = %s",
-        [timezone.now(), room_type_id],
-    ) > 0
-
-
 # ─── Rooms ───────────────────────────────────────────────────────────────────
 
 
@@ -306,7 +224,8 @@ def create_room(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
     vals = [property_id, now, now]
 
     field_map = {
-        "room_type_id": int, "room_number": str, "display_name": str,
+        "room_type_name": str, "room_type_preset": str,
+        "room_number": str, "display_name": str,
         "floor": int, "area": lambda v: v, "bedroom_count": int,
         "beds": _to_pg_json,
         "amenities": _to_pg_array,
@@ -329,13 +248,13 @@ def create_room(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
     )
 
 
-def list_rooms(property_id: int, *, room_type_id: int | None = None, is_active: bool = True) -> list[dict[str, Any]]:
+def list_rooms(property_id: int, *, room_type_name: str | None = None, is_active: bool = True) -> list[dict[str, Any]]:
     conditions = ["property_id = %s"]
     params: list[Any] = [property_id]
 
-    if room_type_id:
-        conditions.append("room_type_id = %s")
-        params.append(room_type_id)
+    if room_type_name:
+        conditions.append("room_type_name = %s")
+        params.append(room_type_name)
     if is_active:
         conditions.append("is_active = TRUE")
 
@@ -349,29 +268,11 @@ def list_rooms(property_id: int, *, room_type_id: int | None = None, is_active: 
 def get_room(room_id: int, property_id: int | None = None) -> dict[str, Any] | None:
     if property_id:
         return fetch_one(
-            f"""
-            SELECT r.*,
-                   CASE WHEN rt.id IS NOT NULL
-                        THEN JSONB_BUILD_OBJECT('id', rt.id, 'name', rt.name)
-                        ELSE NULL
-                   END AS room_type
-            FROM {_t(PMS_ROOM_TABLE)} r
-            LEFT JOIN {_t(PMS_ROOM_TYPE_TABLE)} rt ON r.room_type_id = rt.id
-            WHERE r.id = %s AND r.property_id = %s
-            """,
+            f"SELECT * FROM {_t(PMS_ROOM_TABLE)} WHERE id = %s AND property_id = %s",
             [room_id, property_id],
         )
     return fetch_one(
-        f"""
-        SELECT r.*,
-               CASE WHEN rt.id IS NOT NULL
-                    THEN JSONB_BUILD_OBJECT('id', rt.id, 'name', rt.name)
-                    ELSE NULL
-               END AS room_type
-        FROM {_t(PMS_ROOM_TABLE)} r
-        LEFT JOIN {_t(PMS_ROOM_TYPE_TABLE)} rt ON r.room_type_id = rt.id
-        WHERE r.id = %s
-        """,
+        f"SELECT * FROM {_t(PMS_ROOM_TABLE)} WHERE id = %s",
         [room_id],
     )
 
@@ -421,20 +322,6 @@ def mass_update_rooms(property_id: int, updates: list[dict[str, Any]]) -> list[d
     return results
 
 
-def get_room_images(room_id: int) -> list[dict[str, Any]]:
-    return fetch_all(
-        f"SELECT * FROM {_t(PMS_ROOM_IMAGE_TABLE)} WHERE room_id = %s ORDER BY \"order\" ASC",
-        [room_id],
-    )
-
-
-def add_room_image(room_id: int, image_url: str, order: int = 0) -> dict[str, Any] | None:
-    return fetch_one(
-        f"INSERT INTO {_t(PMS_ROOM_IMAGE_TABLE)} (room_id, image_url, \"order\", created_at, updated_at) VALUES (%s, %s, %s, %s, %s) RETURNING *",
-        [room_id, image_url, order, timezone.now(), timezone.now()],
-    )
-
-
 # ─── Calendar ────────────────────────────────────────────────────────────────
 
 
@@ -460,7 +347,7 @@ def get_calendar_slots(
     where = " AND ".join(conditions)
     return fetch_all(
         f"""
-        SELECT cs.*, r.room_number, r.room_type_id
+        SELECT cs.*, r.room_number, r.room_type_name
         FROM {_t(PMS_CALENDAR_SLOT_TABLE)} cs
         JOIN {_t(PMS_ROOM_TABLE)} r ON r.id = cs.room_id
         WHERE {room_filter} AND {where}
@@ -557,7 +444,7 @@ def get_room_availability(
 ) -> list[dict[str, Any]]:
     return fetch_all(
         f"""
-        SELECT r.id as room_id, r.room_number, r.room_type_id, r.capacity,
+        SELECT r.id as room_id, r.room_number, r.room_type_name, r.capacity,
                cs.date, cs.status
         FROM {_t(PMS_ROOM_TABLE)} r
         LEFT JOIN {_t(PMS_CALENDAR_SLOT_TABLE)} cs ON cs.room_id = r.id
@@ -1115,17 +1002,17 @@ def _add_booking_history(
 # ─── Rates ───────────────────────────────────────────────────────────────────
 
 
-def create_rate(*, property_id: int, room_type_id: int, date_from: date, date_to: date, rate: Decimal, **kwargs: Any) -> dict[str, Any] | None:
+def create_rate(*, property_id: int, room_id: int, date_from: date, date_to: date, rate: Decimal, **kwargs: Any) -> dict[str, Any] | None:
     now = timezone.now()
     return fetch_one(
         f"""
         INSERT INTO {_t(PMS_RATE_TABLE)}
-            (id, property_id, room_type_id, date_from, date_to, rate, currency, min_stay, is_weekend_rate, created_at, updated_at)
+            (id, property_id, room_id, date_from, date_to, rate, currency, min_stay, is_weekend_rate, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
-            None, property_id, room_type_id, date_from, date_to, rate,
+            None, property_id, room_id, date_from, date_to, rate,
             kwargs.get("currency", "USD"), kwargs.get("min_stay", 1),
             kwargs.get("is_weekend_rate", False), now, now,
         ],
@@ -1139,11 +1026,11 @@ def get_rate_by_id(rate_id: int) -> dict[str, Any] | None:
     )
 
 
-def list_rates(property_id: int, *, room_type_id: int | None = None) -> list[dict[str, Any]]:
-    if room_type_id:
+def list_rates(property_id: int, *, room_id: int | None = None) -> list[dict[str, Any]]:
+    if room_id:
         return fetch_all(
-            f"SELECT * FROM {_t(PMS_RATE_TABLE)} WHERE property_id = %s AND room_type_id = %s ORDER BY date_from ASC",
-            [property_id, room_type_id],
+            f"SELECT * FROM {_t(PMS_RATE_TABLE)} WHERE property_id = %s AND room_id = %s ORDER BY date_from ASC",
+            [property_id, room_id],
         )
     return fetch_all(
         f"SELECT * FROM {_t(PMS_RATE_TABLE)} WHERE property_id = %s ORDER BY date_from ASC",
@@ -1176,28 +1063,21 @@ def delete_rate(rate_id: int) -> bool:
 def get_effective_rate(
     *,
     property_id: int,
-    room_type_id: int,
+    room_id: int,
     check_date: date,
 ) -> Decimal | None:
     rate = fetch_one(
         f"""
         SELECT rate FROM {_t(PMS_RATE_TABLE)}
-        WHERE property_id = %s AND room_type_id = %s
+        WHERE property_id = %s AND room_id = %s
         AND date_from <= %s AND date_to >= %s
         ORDER BY date_from DESC
         LIMIT 1
         """,
-        [property_id, room_type_id, check_date, check_date],
+        [property_id, room_id, check_date, check_date],
     )
     if rate:
         return rate["rate"]
-
-    room_type = fetch_one(
-        f"SELECT base_rate FROM {_t(PMS_ROOM_TYPE_TABLE)} WHERE id = %s AND property_id = %s",
-        [room_type_id, property_id],
-    )
-    if room_type:
-        return room_type["base_rate"]
     return None
 
 
@@ -1461,7 +1341,7 @@ def get_analytics(
     room_conditions = ["r.property_id = %s", "r.is_active = TRUE"]
     room_params: list[Any] = [property_id]
     if category:
-        room_conditions.append("rt.name = %s")
+        room_conditions.append("r.room_type_name = %s")
         room_params.append(category)
     if floor:
         room_conditions.append("r.floor = %s")
@@ -1474,7 +1354,7 @@ def get_analytics(
     rooms_raw = fetch_all(
         f"""
         SELECT
-            r.id as room_id, r.room_number, rt.name as category, r.floor,
+            r.id as room_id, r.room_number, r.room_type_name as category, r.floor,
             COALESCE(SUM(b.total_cost::numeric) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show')), 0) as revenue,
             COUNT(b.id) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show')) as booking_count,
             COALESCE(MAX(b.currency), 'UZS') as currency,
@@ -1483,11 +1363,10 @@ def get_analytics(
             COALESCE(SUM(b.total_cost::numeric) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show') AND b.check_in BETWEEN %s AND %s), 0) as prev_revenue,
             COUNT(b.id) FILTER (WHERE b.status NOT IN ('cancelled', 'no_show') AND b.check_in BETWEEN %s AND %s) as prev_booking_count
         FROM {_t(PMS_ROOM_TABLE)} r
-        LEFT JOIN {_t(PMS_ROOM_TYPE_TABLE)} rt ON rt.id = r.room_type_id
         LEFT JOIN {_t(PMS_BOOKING_TABLE)} b ON b.room_id = r.id AND b.check_in BETWEEN %s AND %s
         LEFT JOIN {_t(PMS_CALENDAR_SLOT_TABLE)} cs ON cs.room_id = r.id
         WHERE {room_where}
-        GROUP BY r.id, r.room_number, rt.name, r.floor
+        GROUP BY r.id, r.room_number, r.room_type_name, r.floor
         ORDER BY r.room_number ASC
         """,
         [date_from, date_to, prev_date_from, prev_date_to, prev_date_from, prev_date_to, prev_date_from, prev_date_to, date_from, date_to] + room_params,

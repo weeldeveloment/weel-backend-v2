@@ -19,5 +19,16 @@
 
   // Default model for this repo.
   "model": "ollama/hf.co/mradermacher/Qwen3-8B-heretic-GGUF:Q4_K_M",
-  "small_model": "ollama/hf.co/mradermacher/Qwen3-8B-heretic-GGUF:Q4_K_M"
+  "small_model": "ollama/hf.co/mradermacher/Qwen3-8B-heretic-GGUF:Q4_K_M",
+  "mcp": {
+    "codegraph": {
+      "type": "local",
+      "command": [
+        "codegraph",
+        "serve",
+        "--mcp"
+      ],
+      "enabled": true
+    }
+  }
 }

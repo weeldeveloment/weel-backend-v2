@@ -1,8 +1,6 @@
 PMS_PROPERTY_TABLE = "pms_property"
 PMS_PROPERTY_IMAGE_TABLE = "pms_property_image"
-PMS_ROOM_TYPE_TABLE = "pms_room_type"
 PMS_ROOM_TABLE = "pms_room"
-PMS_ROOM_IMAGE_TABLE = "pms_room_image"
 PMS_CALENDAR_SLOT_TABLE = "pms_calendar_slot"
 PMS_GUEST_TABLE = "pms_guest"
 PMS_BOOKING_TABLE = "pms_booking"

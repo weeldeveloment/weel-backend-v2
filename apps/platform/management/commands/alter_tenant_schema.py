@@ -22,9 +22,9 @@ class Command(BaseCommand):
                 ("pms_property", "weel_classification", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS weel_classification VARCHAR(20)"),
                 ("pms_property", "themes", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS themes TEXT[] DEFAULT '{}'"),
                 ("pms_property", "legal_info", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS legal_info JSONB DEFAULT '{}'"),
-                # pms_room_type — new columns
-                ("pms_room_type", "preset", "ALTER TABLE pms_room_type ADD COLUMN IF NOT EXISTS preset VARCHAR(20)"),
-                ("pms_room_type", "custom_name", "ALTER TABLE pms_room_type ADD COLUMN IF NOT EXISTS custom_name VARCHAR(100)"),
+                # pms_room — new columns
+                ("pms_room", "room_type_name", "ALTER TABLE pms_room ADD COLUMN IF NOT EXISTS room_type_name VARCHAR(100)"),
+                ("pms_room", "room_type_preset", "ALTER TABLE pms_room ADD COLUMN IF NOT EXISTS room_type_preset VARCHAR(20)"),
                 # pms_room — new columns
                 ("pms_room", "display_name", "ALTER TABLE pms_room ADD COLUMN IF NOT EXISTS display_name VARCHAR(200)"),
                 ("pms_room", "bedroom_count", "ALTER TABLE pms_room ADD COLUMN IF NOT EXISTS bedroom_count INTEGER DEFAULT 1"),

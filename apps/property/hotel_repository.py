@@ -27,19 +27,36 @@ def encode_hotel_guid(schema_name: str, hotel_id: int | str) -> str:
     return f"{schema_name}:{hotel_id}"
 
 
-def decode_hotel_guid(hotel_guid: str) -> tuple[str, int] | None:
+def decode_hotel_guid(hotel_guid: str) -> tuple[str | None, str] | None:
     raw = str(hotel_guid or "").strip()
-    if ":" not in raw:
+    if not raw:
         return None
-    schema_name, raw_id = raw.split(":", 1)
-    safe_schema = _safe_schema_name(schema_name)
-    if not safe_schema:
+    if ":" in raw:
+        schema_name, raw_id = raw.split(":", 1)
+        safe_schema = _safe_schema_name(schema_name)
+        if not safe_schema:
+            return None
+        try:
+            hotel_id = int(str(raw_id).strip())
+        except (TypeError, ValueError):
+            return None
+        return safe_schema, str(hotel_id)
+    return None, raw
+
+
+def _resolve_hotel_from_guid(hotel_guid: str) -> tuple[str, int | str] | None:
+    """Resolve a hotel GUID to (schema_name, hotel_identifier) for querying.
+    Returns None if the GUID cannot be resolved.
+    Accepts both legacy composite format (schema:id) and new UUID format."""
+    decoded = decode_hotel_guid(hotel_guid)
+    if decoded is None:
         return None
-    try:
-        hotel_id = int(str(raw_id).strip())
-    except (TypeError, ValueError):
-        return None
-    return safe_schema, hotel_id
+    schema_name, identifier = decoded
+    if schema_name is not None:
+        return schema_name, int(identifier)
+    return None, identifier
+
+
 
 
 def _iso_time(value: Any) -> str | None:
@@ -58,7 +75,11 @@ def _serialize_hotel_row(
     payload = dict(row)
     tenant_schema = str(payload.get("tenant_schema") or "")
     hotel_id = int(payload.get("id") or 0)
-    payload["guid"] = encode_hotel_guid(tenant_schema, hotel_id)
+    raw_guid = payload.get("guid")
+    if raw_guid is not None:
+        payload["guid"] = str(raw_guid)
+    else:
+        payload["guid"] = encode_hotel_guid(tenant_schema, hotel_id)
     payload["title"] = payload.get("name") or payload.get("title") or ""
     payload["img"] = payload.get("photos") or payload.get("img") or []
     payload["price"] = None
@@ -114,6 +135,7 @@ def _fetch_hotel_rows_for_schema(
     schema_name: str,
     *,
     hotel_id: int | None = None,
+    hotel_guid: str | None = None,
     include_inactive: bool = False,
     include_unverified: bool = False,
     search: str | None = None,
@@ -126,6 +148,9 @@ def _fetch_hotel_rows_for_schema(
             if hotel_id is not None:
                 where.append("p.id = %s")
                 params.append(hotel_id)
+            elif hotel_guid is not None:
+                where.append("p.guid::text = %s")
+                params.append(hotel_guid)
             if not include_inactive:
                 where.append("COALESCE(p.is_active, TRUE) = TRUE")
             if not include_unverified:
@@ -143,6 +168,7 @@ def _fetch_hotel_rows_for_schema(
                 f"""
                 SELECT
                     p.id,
+                    p.guid,
                     p.organization_id,
                     p.partner_user_id,
                     p.name,
@@ -268,6 +294,29 @@ def _matches_created_range(
     return True
 
 
+def _find_hotel_by_guid_across_schemas(
+    guid_value: str,
+    *,
+    include_inactive: bool = False,
+    include_unverified: bool = False,
+) -> list[dict[str, Any]]:
+    """Search for a hotel by UUID guid across all tenant schemas."""
+    for organization in list_hotel_organizations():
+        try:
+            rows = _fetch_hotel_rows_for_schema(
+                organization["schema_name"],
+                hotel_guid=guid_value,
+                include_inactive=include_inactive,
+                include_unverified=include_unverified,
+                limit=1,
+            )
+        except Exception:
+            continue
+        if rows:
+            return rows
+    return []
+
+
 def list_hotel_organizations() -> list[dict[str, Any]]:
     organizations = []
     for organization in list_organizations():
@@ -376,16 +425,26 @@ def get_admin_hotel(hotel_guid: str) -> dict[str, Any] | None:
     decoded = decode_hotel_guid(hotel_guid)
     if not decoded:
         return None
-    schema_name, hotel_id = decoded
-    organization = get_organization_by_schema(schema_name)
-    if not organization:
-        return None
-    rows = _fetch_hotel_rows_for_schema(
-        schema_name,
-        hotel_id=hotel_id,
-        include_inactive=True,
-        include_unverified=True,
-    )
+    schema_name, identifier = decoded
+    if schema_name is not None:
+        organization = get_organization_by_schema(schema_name)
+        if not organization:
+            return None
+        rows = _fetch_hotel_rows_for_schema(
+            schema_name,
+            hotel_id=int(identifier),
+            include_inactive=True,
+            include_unverified=True,
+        )
+    else:
+        rows = _find_hotel_by_guid_across_schemas(
+            identifier,
+            include_inactive=True,
+            include_unverified=True,
+        )
+        if not rows:
+            return None
+        organization = get_organization_by_schema(rows[0].get("tenant_schema") or "")
     if not rows:
         return None
     return _serialize_hotel_row(rows[0], organization)
@@ -396,11 +455,17 @@ def get_hotel_for_public(hotel_guid: str) -> dict[str, Any] | None:
     decoded = decode_hotel_guid(hotel_guid)
     if not decoded:
         return None
-    schema_name, hotel_id = decoded
-    organization = get_organization_by_schema(schema_name)
-    if not organization:
-        return None
-    rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hotel_id)
+    schema_name, identifier = decoded
+    if schema_name is not None:
+        organization = get_organization_by_schema(schema_name)
+        if not organization:
+            return None
+        rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=int(identifier))
+    else:
+        rows = _find_hotel_by_guid_across_schemas(identifier)
+        if not rows:
+            return None
+        organization = get_organization_by_schema(rows[0].get("tenant_schema") or "")
     if not rows:
         return None
     return _serialize_hotel_row(rows[0], organization)
@@ -423,6 +488,7 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
             cursor.execute(
                 """
                 INSERT INTO pms_property (
+                    guid,
                     organization_id,
                     partner_user_id,
                     name,
@@ -453,9 +519,10 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     created_at,
                     updated_at
                 ) VALUES (
+                    gen_random_uuid(),
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
-                RETURNING id
+                RETURNING id, guid
                 """,
                 [
                     int(organization_id),
@@ -492,20 +559,30 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
             row = cursor.fetchone()
             if not row:
                 return None
-            return {"id": int(row[0])}
+            return {"id": int(row[0]), "guid": str(row[1])}
 
     created = _run_in_schema(safe_schema, _insert)
     if not created:
         return None
-    return get_admin_hotel(encode_hotel_guid(safe_schema, created["id"]))
+    return get_admin_hotel(str(created["guid"]))
 
 
 def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, Any] | None:
-    decoded = decode_hotel_guid(hotel_guid)
-    if not decoded:
+    resolved = _resolve_hotel_from_guid(hotel_guid)
+    if not resolved:
         return None
-    schema_name, hotel_id = decoded
-    organization = get_organization_by_schema(schema_name)
+    schema_name, identifier = resolved
+
+    if isinstance(identifier, int):
+        organization = get_organization_by_schema(schema_name)
+    else:
+        rows = _find_hotel_by_guid_across_schemas(
+            identifier, include_inactive=True, include_unverified=True
+        )
+        if not rows:
+            return None
+        schema_name = rows[0].get("tenant_schema") or ""
+        organization = get_organization_by_schema(schema_name)
     if not organization:
         return None
     allowed_columns = {
@@ -557,7 +634,8 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         params.append(value)
     set_parts.append("updated_at = %s")
     params.append(timezone.now())
-    params.append(hotel_id)
+    params.append(identifier)
+    where_clause = "id = %s" if isinstance(identifier, int) else "guid::text = %s"
 
     def _update() -> bool:
         with connection.cursor() as cursor:
@@ -565,7 +643,7 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
                 f"""
                 UPDATE pms_property
                 SET {", ".join(set_parts)}
-                WHERE id = %s
+                WHERE {where_clause}
                 """,
                 params,
             )
@@ -578,16 +656,25 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
 
 
 def delete_admin_hotel(*, hotel_guid: str) -> bool:
-    decoded = decode_hotel_guid(hotel_guid)
-    if not decoded:
+    resolved = _resolve_hotel_from_guid(hotel_guid)
+    if not resolved:
         return False
-    schema_name, hotel_id = decoded
+    schema_name, identifier = resolved
+
+    if isinstance(identifier, str):
+        rows = _find_hotel_by_guid_across_schemas(
+            identifier, include_inactive=True, include_unverified=True
+        )
+        if not rows:
+            return False
+        schema_name = rows[0].get("tenant_schema") or ""
+    where_clause = "id = %s" if isinstance(identifier, int) else "guid::text = %s"
 
     def _delete() -> bool:
         with connection.cursor() as cursor:
             cursor.execute(
-                "DELETE FROM pms_property WHERE id = %s",
-                [hotel_id],
+                f"DELETE FROM pms_property WHERE {where_clause}",
+                [identifier],
             )
             return cursor.rowcount > 0
 
@@ -620,13 +707,17 @@ def list_hotel_favorites(
 ) -> list[dict[str, Any]]:
     """Fetch full hotel rows for a set of encoded hotel GUIDs."""
     by_schema: dict[str, list[int]] = {}
+    uuid_guids: list[str] = []
+
     for guid in favorite_guids:
         decoded = decode_hotel_guid(guid)
         if not decoded:
             continue
-        schema_name, hotel_id = decoded
-        by_schema.setdefault(schema_name, []).append(hotel_id)
-
+        schema_name, identifier = decoded
+        if schema_name is not None:
+            by_schema.setdefault(schema_name, []).append(int(identifier))
+        else:
+            uuid_guids.append(identifier)
     results: list[dict[str, Any]] = []
     org_cache: dict[str, dict[str, Any] | None] = {}
 
@@ -644,4 +735,17 @@ def list_hotel_favorites(
                     results.append(_serialize_hotel_row(rows[0], org))
             except Exception:
                 continue
+
+    for uuid_guid in uuid_guids:
+        try:
+            rows = _find_hotel_by_guid_across_schemas(
+                uuid_guid, include_inactive=True, include_unverified=True
+            )
+            if rows:
+                row = rows[0]
+                schema_name = row.get("tenant_schema") or ""
+                org = get_organization_by_schema(schema_name)
+                results.append(_serialize_hotel_row(row, org))
+        except Exception:
+            continue
     return results

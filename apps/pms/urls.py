@@ -28,12 +28,9 @@ from .views import (
     ReviewComplainView,
     ReviewListCreateView,
     ReviewRespondView,
-    RoomImageCreateView,
     RoomListCreateView,
     RoomMassUpdateView,
     RoomRetrieveUpdateDestroyView,
-    RoomTypeListCreateView,
-    RoomTypeRetrieveUpdateDestroyView,
 )
 
 urlpatterns = [
@@ -43,15 +40,10 @@ urlpatterns = [
     path("properties/<int:property_id>/images/", PropertyImageCreateView.as_view(), name="pms-property-image-create"),
     path("properties/<int:property_id>/images/<int:image_id>/", PropertyImageDeleteView.as_view(), name="pms-property-image-delete"),
 
-    # Room Types
-    path("properties/<int:property_id>/room-types/", RoomTypeListCreateView.as_view(), name="pms-room-type-list-create"),
-    path("properties/<int:property_id>/room-types/<int:room_type_id>/", RoomTypeRetrieveUpdateDestroyView.as_view(), name="pms-room-type-detail"),
-
     # Rooms
     path("properties/<int:property_id>/rooms/", RoomListCreateView.as_view(), name="pms-room-list-create"),
     path("properties/<int:property_id>/rooms/mass-update/", RoomMassUpdateView.as_view(), name="pms-room-mass-update"),
     path("properties/<int:property_id>/rooms/<int:room_id>/", RoomRetrieveUpdateDestroyView.as_view(), name="pms-room-detail"),
-    path("properties/<int:property_id>/rooms/<int:room_id>/images/", RoomImageCreateView.as_view(), name="pms-room-image-create"),
 
     # Calendar
     path("properties/<int:property_id>/calendar/", CalendarView.as_view(), name="pms-calendar"),
