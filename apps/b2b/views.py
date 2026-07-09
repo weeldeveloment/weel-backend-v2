@@ -88,7 +88,6 @@ from apps.b2b.serializers import (
     BusinessTripSerializer,
     DashboardSummarySerializer,
     DepartmentMonthlySpendingSerializer,
-    GlobalTravelLimitSerializer,
     HotelBookingRequestCreateSerializer,
     HotelBookingRequestDetailSerializer,
     HotelBookingRequestSerializer,
@@ -1211,87 +1210,84 @@ def _hydrate_rule_with_target(company_id: int, rule: dict[str, Any]) -> dict[str
     return out
 
 
-class GlobalTravelLimitView(APIView):
-    """GET / PATCH /api/b2b/travel-policy/limits/global/
+def _validate_limit_target(company_id: int, applies_to: str, target_id: int | None) -> Response | None:
+    """Return ``None`` on success, otherwise a ready-to-return 4xx Response.
 
-    Company-wide limit that applies to *all* employees unless a more specific
-    (per-department or per-employee) rule overrides it.
+    ``all`` has no target. ``department``/``employee`` require ``target_id``
+    to point at a real row in the company.
+    """
+    if applies_to == "all":
+        return None
+    if not target_id:
+        return Response({"detail": f"target_id ({applies_to}_id) is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if applies_to == "department":
+        dept = next((d for d in list_departments(company_id) if d["id"] == target_id), None)
+        if not dept:
+            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+    elif applies_to == "employee":
+        emp = get_employee(target_id, company_id)
+        if not emp:
+            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+    return None
 
-    Backed by the existing ``b2b_travel_policy`` row.
+
+class TravelLimitsView(APIView):
+    """GET / POST /api/b2b/travel-policy/limits/?applies_to=all|department|employee
+
+    Single endpoint for all three limit tiers: the company-wide default
+    (``all``, no target), per-department, and per-employee. ``applies_to``
+    selects the tier — as a query param for GET, in the body for POST.
     """
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Global (hamma uchun) komandirovka limitini olish",
+        operation_summary="Limit qoidalarini olish",
         operation_description=(
-            "Kompaniya darajasidagi `budget_per_trip` (bir komandirovka uchun "
-            "maksimum) va `monthly_budget` (oylik limit) qiymatlarini qaytaradi. "
-            "Agar policy mavjud bo'lmasa, avtomatik yaratiladi."
+            "`applies_to` orqali qaysi turdagi limitlar qaytarilishini tanlang: "
+            "`all` — kompaniya darajasidagi global limit (target_id yo'q), "
+            "`department` — departmentlar uchun limitlar, "
+            "`employee` — xodimlar uchun individual limitlar."
         ),
-        responses={200: GlobalTravelLimitSerializer()},
+        manual_parameters=[
+            openapi.Parameter(
+                "applies_to", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                enum=["all", "department", "employee"], required=True,
+                description="Qaysi turdagi limitlarni olish kerak.",
+            ),
+        ],
+        responses={200: TravelPolicyRuleSerializer(many=True)},
     )
     def get(self, request):
         company_id = _get_company_id(request)
         if not company_id:
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
-        policy = get_or_create_travel_policy(company_id)
-        return Response(GlobalTravelLimitSerializer(policy).data)
-
-    @swagger_auto_schema(
-        operation_summary="Global limitni o'zgartirish",
-        request_body=GlobalTravelLimitSerializer,
-        responses={200: GlobalTravelLimitSerializer()},
-    )
-    def patch(self, request):
-        company_id = _get_company_id(request)
-        if not company_id:
-            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
-        serializer = GlobalTravelLimitSerializer(data=request.data, partial=True)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        policy = update_travel_policy(company_id, **serializer.validated_data)
-        if not policy:
-            return Response({"detail": "Failed to update global limit."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response(GlobalTravelLimitSerializer(policy).data)
-
-
-class _TravelLimitListCreateView(APIView):
-    """Internal base for the per-department and per-employee limit endpoints.
-
-    Concrete subclasses define ``applies_to`` ("department" or "employee") and
-    override ``_validate_target`` to ensure the ``target_id`` refers to a real
-    row in the right table.
-    """
-    applies_to: str = ""  # set in subclasses
-    target_label: str = ""  # "department" or "employee" — used in error messages
-
-    def _validate_target(self, company_id: int, target_id: int | None) -> Response | None:
-        """Return ``None`` on success, otherwise a ready-to-return 4xx Response."""
-        raise NotImplementedError
-
-    @swagger_auto_schema(
-        operation_summary="Limit qoidalarini olish",
-        responses={200: TravelPolicyRuleSerializer(many=True)},
-    )
-    def get(self, request, **_):
-        company_id = _get_company_id(request)
-        if not company_id:
-            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
-        rules = list_policy_rules_by_type(company_id, self.applies_to)
+        applies_to = request.query_params.get("applies_to")
+        if applies_to not in ("all", "department", "employee"):
+            return Response(
+                {"detail": "applies_to must be 'all', 'department' or 'employee'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rules = list_policy_rules_by_type(company_id, applies_to)
         return Response(TravelPolicyRuleSerializer(
             [_hydrate_rule_with_target(company_id, r) for r in rules], many=True
         ).data)
 
     @swagger_auto_schema(
         operation_summary="Yangi limit qoidasi qo'shish",
+        operation_description=(
+            "`applies_to`: `all` — kompaniya darajasidagi global limit (bitta "
+            "kompaniyada faqat bitta bo'lishi mumkin, `target_id` yubormang); "
+            "`department`/`employee` — mos `target_id` (department_id / "
+            "employee_id) bilan."
+        ),
         request_body=TravelPolicyRuleCreateSerializer,
         responses={
             201: TravelPolicyRuleSerializer(),
-            400: openapi.Response(description="Validation error / wrong applies_to / missing target_id"),
+            400: openapi.Response(description="Validation error / missing target_id / global limit already exists"),
             404: openapi.Response(description="Target department/employee not found"),
         },
     )
-    def post(self, request, **_):
+    def post(self, request):
         company_id = _get_company_id(request)
         if not company_id:
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1299,23 +1295,22 @@ class _TravelLimitListCreateView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         data = serializer.validated_data
+        applies_to = data["applies_to"]
+        target_id = data.get("target_id") if applies_to != "all" else None
 
-        # Force the applies_to to match the concrete endpoint — callers cannot
-        # create a department rule via the employee endpoint or vice versa.
-        if data.get("applies_to") and data["applies_to"] != self.applies_to:
-            return Response(
-                {"detail": f"applies_to must be '{self.applies_to}' for this endpoint."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        target_id = data.get("target_id")
-        bad = self._validate_target(company_id, target_id)
+        bad = _validate_limit_target(company_id, applies_to, target_id)
         if bad is not None:
             return bad
 
+        if applies_to == "all" and list_policy_rules_by_type(company_id, "all"):
+            return Response(
+                {"detail": "Global limit already exists. Use PATCH to update it."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         rule = create_policy_rule(
             company_id=company_id,
-            applies_to=self.applies_to,
+            applies_to=applies_to,
             target_id=target_id,
             budget_limit=data.get("budget_limit"),
         )
@@ -1327,18 +1322,9 @@ class _TravelLimitListCreateView(APIView):
         )
 
 
-class _TravelLimitDetailView(APIView):
-    """Internal base for PATCH/DELETE on a single limit rule."""
-    applies_to: str = ""
-
-    def _validate_target(self, company_id: int, target_id: int | None) -> Response | None:
-        raise NotImplementedError
-
-    def _get_scoped_rule(self, rule_id: int, company_id: int) -> dict | None:
-        rule = get_policy_rule(rule_id, company_id)
-        if not rule or rule.get("applies_to") != self.applies_to:
-            return None
-        return rule
+class TravelLimitDetailView(APIView):
+    """PATCH / DELETE /api/b2b/travel-policy/limits/<rule_id>/"""
+    permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
         operation_summary="Limit qoidasini tahrirlash",
@@ -1348,21 +1334,16 @@ class _TravelLimitDetailView(APIView):
             404: openapi.Response(description="Limit rule not found"),
         },
     )
-    def patch(self, request, rule_id: int, **_):
+    def patch(self, request, rule_id: int):
         company_id = _get_company_id(request)
         if not company_id:
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
-        rule = self._get_scoped_rule(rule_id, company_id)
+        rule = get_policy_rule(rule_id, company_id)
         if not rule:
             return Response({"detail": "Limit rule not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = TravelPolicyRuleUpdateSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        if "budget_limit" in serializer.validated_data:
-            new_target_id = serializer.validated_data.get("target_id", rule.get("target_id"))
-            bad = self._validate_target(company_id, new_target_id)
-            if bad is not None:
-                return bad
         updated = update_policy_rule(rule_id, **serializer.validated_data)
         if not updated:
             return Response({"detail": "Failed to update limit rule."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1377,147 +1358,12 @@ class _TravelLimitDetailView(APIView):
             404: openapi.Response(description="Limit rule not found"),
         },
     )
-    def delete(self, request, rule_id: int, **_):
+    def delete(self, request, rule_id: int):
         company_id = _get_company_id(request)
         if not company_id:
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
-        rule = self._get_scoped_rule(rule_id, company_id)
+        rule = get_policy_rule(rule_id, company_id)
         if not rule:
             return Response({"detail": "Limit rule not found."}, status=status.HTTP_404_NOT_FOUND)
         delete_policy_rule(rule_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class DepartmentTravelLimitsView(_TravelLimitListCreateView):
-    applies_to = "department"
-    target_label = "department"
-
-    @swagger_auto_schema(
-        operation_summary="Departmentlar uchun limitlarni olish",
-        operation_description="Kompaniya departmentlari uchun o'rnatilgan barcha limitlarni qaytaradi.",
-    )
-    def get(self, request, **_):
-        return super().get(request, **_)
-
-    @swagger_auto_schema(
-        operation_summary="Department uchun yangi limit qo'shish",
-        operation_description=(
-            "Tanlangan department uchun alohida budget_limit belgilaydi. "
-            "`target_id` — department id si, `budget_limit` — ruxsat berilgan "
-            "maksimum summa."
-        ),
-        request_body=TravelPolicyRuleCreateSerializer,
-        responses={
-            201: TravelPolicyRuleSerializer(),
-            400: openapi.Response(description="Validation error / wrong applies_to / missing target_id"),
-            404: openapi.Response(description="Department not found"),
-        },
-    )
-    def post(self, request, **_):
-        return super().post(request, **_)
-
-    def _validate_target(self, company_id: int, target_id: int | None) -> Response | None:
-        if not target_id:
-            return Response({"detail": "target_id (department_id) is required."}, status=status.HTTP_400_BAD_REQUEST)
-        dept = next((d for d in list_departments(company_id) if d["id"] == target_id), None)
-        if not dept:
-            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
-        return None
-
-
-class DepartmentTravelLimitDetailView(_TravelLimitDetailView):
-    applies_to = "department"
-
-    @swagger_auto_schema(
-        operation_summary="Department limitini tahrirlash",
-        operation_description="Mavjud department limitining `budget_limit` qiymatini yangilaydi.",
-        request_body=TravelPolicyRuleUpdateSerializer,
-        responses={
-            200: TravelPolicyRuleSerializer(),
-            404: openapi.Response(description="Limit rule not found"),
-        },
-    )
-    def patch(self, request, rule_id: int, **_):
-        return super().patch(request, rule_id, **_)
-
-    @swagger_auto_schema(
-        operation_summary="Department limitini o'chirish",
-        operation_description="Department limit qoidasini o'chirib tashlaydi.",
-    )
-    def delete(self, request, rule_id: int, **_):
-        return super().delete(request, rule_id, **_)
-
-    def _validate_target(self, company_id: int, target_id: int | None) -> Response | None:
-        if not target_id:
-            return Response({"detail": "target_id (department_id) is required."}, status=status.HTTP_400_BAD_REQUEST)
-        dept = next((d for d in list_departments(company_id) if d["id"] == target_id), None)
-        if not dept:
-            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
-        return None
-
-
-class EmployeeTravelLimitsView(_TravelLimitListCreateView):
-    applies_to = "employee"
-    target_label = "employee"
-
-    @swagger_auto_schema(
-        operation_summary="Employeelar uchun limitlarni olish",
-        operation_description="Kompaniya employeelari uchun o'rnatilgan barcha individual limitlarni qaytaradi.",
-    )
-    def get(self, request, **_):
-        return super().get(request, **_)
-
-    @swagger_auto_schema(
-        operation_summary="Employee uchun yangi individual limit qo'shish",
-        operation_description=(
-            "Tanlangan employee uchun alohida budget_limit belgilaydi. "
-            "`target_id` — employee id si."
-        ),
-        request_body=TravelPolicyRuleCreateSerializer,
-        responses={
-            201: TravelPolicyRuleSerializer(),
-            400: openapi.Response(description="Validation error / wrong applies_to / missing target_id"),
-            404: openapi.Response(description="Employee not found"),
-        },
-    )
-    def post(self, request, **_):
-        return super().post(request, **_)
-
-    def _validate_target(self, company_id: int, target_id: int | None) -> Response | None:
-        if not target_id:
-            return Response({"detail": "target_id (employee_id) is required."}, status=status.HTTP_400_BAD_REQUEST)
-        emp = get_employee(target_id, company_id)
-        if not emp:
-            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
-        return None
-
-
-class EmployeeTravelLimitDetailView(_TravelLimitDetailView):
-    applies_to = "employee"
-
-    @swagger_auto_schema(
-        operation_summary="Employee limitini tahrirlash",
-        operation_description="Mavjud employee limitining `budget_limit` qiymatini yangilaydi.",
-        request_body=TravelPolicyRuleUpdateSerializer,
-        responses={
-            200: TravelPolicyRuleSerializer(),
-            404: openapi.Response(description="Limit rule not found"),
-        },
-    )
-    def patch(self, request, rule_id: int, **_):
-        return super().patch(request, rule_id, **_)
-
-    @swagger_auto_schema(
-        operation_summary="Employee limitini o'chirish",
-        operation_description="Employee limit qoidasini o'chirib tashlaydi.",
-    )
-    def delete(self, request, rule_id: int, **_):
-        return super().delete(request, rule_id, **_)
-
-    def _validate_target(self, company_id: int, target_id: int | None) -> Response | None:
-        if not target_id:
-            return Response({"detail": "target_id (employee_id) is required."}, status=status.HTTP_400_BAD_REQUEST)
-        emp = get_employee(target_id, company_id)
-        if not emp:
-            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
-        return None
