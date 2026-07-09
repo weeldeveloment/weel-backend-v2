@@ -1406,6 +1406,12 @@ class DepartmentTravelLimitsView(_TravelLimitListCreateView):
             "`target_id` — department id si, `budget_limit` — ruxsat berilgan "
             "maksimum summa."
         ),
+        request_body=TravelPolicyRuleCreateSerializer,
+        responses={
+            201: TravelPolicyRuleSerializer(),
+            400: openapi.Response(description="Validation error / wrong applies_to / missing target_id"),
+            404: openapi.Response(description="Department not found"),
+        },
     )
     def post(self, request, **_):
         return super().post(request, **_)
@@ -1425,6 +1431,11 @@ class DepartmentTravelLimitDetailView(_TravelLimitDetailView):
     @swagger_auto_schema(
         operation_summary="Department limitini tahrirlash",
         operation_description="Mavjud department limitining `budget_limit` qiymatini yangilaydi.",
+        request_body=TravelPolicyRuleUpdateSerializer,
+        responses={
+            200: TravelPolicyRuleSerializer(),
+            404: openapi.Response(description="Limit rule not found"),
+        },
     )
     def patch(self, request, rule_id: int, **_):
         return super().patch(request, rule_id, **_)
@@ -1462,6 +1473,12 @@ class EmployeeTravelLimitsView(_TravelLimitListCreateView):
             "Tanlangan employee uchun alohida budget_limit belgilaydi. "
             "`target_id` — employee id si."
         ),
+        request_body=TravelPolicyRuleCreateSerializer,
+        responses={
+            201: TravelPolicyRuleSerializer(),
+            400: openapi.Response(description="Validation error / wrong applies_to / missing target_id"),
+            404: openapi.Response(description="Employee not found"),
+        },
     )
     def post(self, request, **_):
         return super().post(request, **_)
@@ -1481,6 +1498,11 @@ class EmployeeTravelLimitDetailView(_TravelLimitDetailView):
     @swagger_auto_schema(
         operation_summary="Employee limitini tahrirlash",
         operation_description="Mavjud employee limitining `budget_limit` qiymatini yangilaydi.",
+        request_body=TravelPolicyRuleUpdateSerializer,
+        responses={
+            200: TravelPolicyRuleSerializer(),
+            404: openapi.Response(description="Limit rule not found"),
+        },
     )
     def patch(self, request, rule_id: int, **_):
         return super().patch(request, rule_id, **_)
