@@ -603,6 +603,9 @@ class B2BEmployeeListCreateView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         validated = serializer.validated_data
+        department_id = validated.get("department_id")
+        if department_id and not any(d["id"] == department_id for d in list_departments(company_id)):
+            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
         passport_file = validated.pop("passport_upload")
         saved_path = default_storage.save(f"b2b/employees/passports/{passport_file.name}", passport_file)
         employee = create_employee(
@@ -633,6 +636,9 @@ class B2BEmployeeRetrieveUpdateView(APIView):
         serializer = B2BEmployeeSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        department_id = serializer.validated_data.get("department_id")
+        if department_id and not any(d["id"] == department_id for d in list_departments(company_id)):
+            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
         employee = update_employee(employee_id, **{
             k: v for k, v in serializer.validated_data.items()
             if k not in ("company_id", "department_name")
