@@ -211,7 +211,6 @@ class Command(BaseCommand):
                     id BIGSERIAL PRIMARY KEY,
                     company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
                     trip_id BIGINT REFERENCES b2b_business_trip(id) ON DELETE SET NULL,
-                    hotel_guid VARCHAR(300) NOT NULL,
                     tenant_schema VARCHAR(100) NOT NULL,
                     hotel_property_id BIGINT NOT NULL,
                     hotel_name VARCHAR(200),
