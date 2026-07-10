@@ -84,7 +84,7 @@ def _favorite_guid_set(context: dict[str, Any] | None) -> set[str]:
 
 
 class HotelListSerializer(serializers.Serializer):
-    id = serializers.IntegerField(read_only=True)
+    id = serializers.IntegerField(read_only=True, required=False)
     guid = serializers.CharField()
     title = serializers.CharField()
     img = serializers.ListField(child=serializers.CharField(), allow_empty=True)
@@ -107,7 +107,6 @@ class HotelListSerializer(serializers.Serializer):
     is_allowed_corporate = serializers.BooleanField()
     created_at = serializers.DateTimeField()
     property_type_id = serializers.UUIDField()
-    property_type = serializers.DictField()
 
     def to_representation(self, instance):
         request = self.context.get("request")
@@ -192,11 +191,15 @@ class HotelAdminListSerializer(HotelListSerializer):
     is_verified = serializers.BooleanField(read_only=True)
     is_archived = serializers.BooleanField(read_only=True)
     is_recommended = serializers.BooleanField(read_only=True)
-    verification_status = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    verification_status = serializers.CharField(
+        allow_blank=True, allow_null=True, read_only=True
+    )
     organization = HotelAdminOrganizationSerializer(read_only=True)
     property_detail = HotelAdminPropertyDetailSerializer(source="*", read_only=True)
     tenant_schema = serializers.CharField(allow_blank=True, allow_null=True)
-    legal_info = serializers.DictField(child=serializers.CharField(allow_blank=True, allow_null=True), read_only=True)
+    legal_info = serializers.DictField(
+        child=serializers.CharField(allow_blank=True, allow_null=True), read_only=True
+    )
     partner_user = HotelPartnerUserSerializer(allow_null=True, read_only=True)
 
     def to_representation(self, instance):
@@ -245,15 +248,27 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
     partner_user_id = serializers.IntegerField(required=False, allow_null=True)
     tenant_schema = serializers.CharField(required=False, allow_blank=False)
     title = serializers.CharField(required=False, allow_blank=False)
-    description_ru = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    description_uz = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    description_en = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    description_ru = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    description_uz = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    description_en = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    latitude = serializers.DecimalField(max_digits=17, decimal_places=14, required=False, allow_null=True)
-    longitude = serializers.DecimalField(max_digits=17, decimal_places=14, required=False, allow_null=True)
-    star_rating = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=7)
+    latitude = serializers.DecimalField(
+        max_digits=17, decimal_places=14, required=False, allow_null=True
+    )
+    longitude = serializers.DecimalField(
+        max_digits=17, decimal_places=14, required=False, allow_null=True
+    )
+    star_rating = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=7
+    )
     amenities = serializers.ListField(
         child=serializers.CharField(allow_blank=False),
         required=False,
@@ -261,7 +276,9 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
     )
     check_in_time = serializers.TimeField(required=False, allow_null=True)
     check_out_time = serializers.TimeField(required=False, allow_null=True)
-    cancellation_policy = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    cancellation_policy = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     is_quiet_hours = serializers.BooleanField(required=False)
     is_allowed_alcohol = serializers.BooleanField(required=False)
     is_allowed_pets = serializers.BooleanField(required=False)
@@ -306,7 +323,9 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
         if "title" in attrs:
             title = str(attrs.get("title") or "").strip()
             if not title:
-                raise serializers.ValidationError({"title": _("This field is required.")})
+                raise serializers.ValidationError(
+                    {"title": _("This field is required.")}
+                )
             prepared["name"] = title
 
         for key in ("description_ru", "description_uz", "description_en"):
@@ -345,12 +364,20 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
             prepared["pets_allowed"] = attrs.get("is_allowed_pets")
 
         if "amenities" in attrs:
-            prepared["amenities"] = [str(value).strip() for value in attrs.get("amenities") or [] if str(value).strip()]
+            prepared["amenities"] = [
+                str(value).strip()
+                for value in attrs.get("amenities") or []
+                if str(value).strip()
+            ]
         if "img" in attrs:
-            prepared["photos"] = [str(value) for value in attrs.get("img") or [] if value]
+            prepared["photos"] = [
+                str(value) for value in attrs.get("img") or [] if value
+            ]
         if "legal_info" in attrs and attrs.get("legal_info") is not None:
             raw_legal = attrs.get("legal_info") or {}
-            prepared["legal_info"] = {k: (str(v) if v is not None else "") for k, v in raw_legal.items()}
+            prepared["legal_info"] = {
+                k: (str(v) if v is not None else "") for k, v in raw_legal.items()
+            }
 
         if isinstance(property_detail, dict):
             for key in (
@@ -373,7 +400,9 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
                     if str(value).strip()
                 ]
             if "is_allowed_alcohol" in property_detail:
-                prepared["alcohol_allowed"] = bool(property_detail.get("is_allowed_alcohol"))
+                prepared["alcohol_allowed"] = bool(
+                    property_detail.get("is_allowed_alcohol")
+                )
             if "is_allowed_pets" in property_detail:
                 prepared["pets_allowed"] = bool(property_detail.get("is_allowed_pets"))
             if "is_quiet_hours" in property_detail:

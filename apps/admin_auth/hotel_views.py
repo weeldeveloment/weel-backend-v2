@@ -35,7 +35,6 @@ from apps.pms.repository import (
     list_rates,
     list_reviews,
     list_rooms,
-    list_room_types,
     move_booking,
     respond_to_review,
     update_booking_with_guest,
@@ -52,7 +51,6 @@ from apps.pms.serializers import (
     ReviewRespondSerializer,
     ReviewSerializer,
     RoomSerializer,
-    RoomTypeSerializer,
 )
 from apps.b2b.repository import list_b2b_users, get_company
 from apps.b2b.serializers import B2BCompanySerializer, B2BUserSerializer
@@ -167,18 +165,9 @@ class AdminHotelRoomInventoryView(AdminHotelBaseView):
 
     @swagger_auto_schema(responses={200: RoomSerializer(many=True)})
     def get(self, request, property_id):
-        room_type_id = request.query_params.get("room_type_id")
-        rooms = list_rooms(property_id, room_type_id=int(room_type_id) if room_type_id else None)
+        room_type_name = request.query_params.get("room_type_name")
+        rooms = list_rooms(property_id, room_type_name=room_type_name if room_type_name else None)
         return Response(RoomSerializer(rooms, many=True).data)
-
-
-class AdminHotelRoomTypesView(AdminHotelBaseView):
-    """List room types for a property"""
-
-    @swagger_auto_schema(responses={200: RoomTypeSerializer(many=True)})
-    def get(self, request, property_id):
-        types = list_room_types(property_id)
-        return Response(RoomTypeSerializer(types, many=True).data)
 
 
 class AdminHotelCalendarView(AdminHotelBaseView):
@@ -360,8 +349,8 @@ class AdminHotelRatesView(AdminHotelBaseView):
 
     @swagger_auto_schema(responses={200: RateSerializer(many=True)})
     def get(self, request, property_id):
-        room_type_id = request.query_params.get("room_type_id")
-        rates = list_rates(property_id, room_type_id=int(room_type_id) if room_type_id else None)
+        room_id = request.query_params.get("room_id")
+        rates = list_rates(property_id, room_id=int(room_id) if room_id else None)
         return Response(RateSerializer(rates, many=True).data)
 
 

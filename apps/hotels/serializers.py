@@ -120,5 +120,5 @@ class ReviewListSerializer(serializers.Serializer):
     guest_name = serializers.CharField()
     rating = serializers.DecimalField(max_digits=3, decimal_places=2)
     text = serializers.CharField()
-    response = serializers.CharField(allow_null=True)
+    hotel_response = serializers.CharField(allow_null=True)
     created_at = serializers.DateTimeField()

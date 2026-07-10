@@ -85,40 +85,11 @@ class PropertySerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
 
 
-class RoomTypeSerializer(serializers.Serializer):
-    id = serializers.IntegerField(read_only=True)
-    property_id = serializers.IntegerField(read_only=True)
-    preset = serializers.ChoiceField(
-        choices=["standard", "superior", "deluxe", "suite", "studio", "apartment", "family", "dormitory", "custom"],
-        required=False,
-        allow_null=True,
-    )
-    custom_name = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
-    name = serializers.CharField(max_length=100)
-    description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    base_rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
-    currency = serializers.CharField(required=False, default="USD")
-    capacity = serializers.IntegerField(required=False, default=2)
-    amenities = serializers.ListField(child=serializers.CharField(), required=False, default=list)
-    photos = serializers.ListField(child=serializers.CharField(), required=False, default=list)
-    is_active = serializers.BooleanField(read_only=True)
-    created_at = serializers.DateTimeField(read_only=True)
-    updated_at = serializers.DateTimeField(read_only=True)
-
-
-class RoomImageSerializer(serializers.Serializer):
-    id = serializers.IntegerField(read_only=True)
-    room_id = serializers.IntegerField(read_only=True)
-    image_url = serializers.CharField()
-    order = serializers.IntegerField(default=0)
-    created_at = serializers.DateTimeField(read_only=True)
-
-
 class RoomSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     property_id = serializers.IntegerField(read_only=True)
-    room_type_id = serializers.IntegerField(required=False, allow_null=True)
-    room_type = serializers.SerializerMethodField()
+    room_type_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    room_type_preset = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     room_number = serializers.CharField(max_length=20)
     display_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     floor = serializers.IntegerField(required=False, default=1)
@@ -147,15 +118,6 @@ class RoomSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
-    def get_room_type(self, obj):
-        value = obj.get("room_type")
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except (json.JSONDecodeError, TypeError):
-                return value
-        return value
-
 
 class RoomMassUpdateItemSerializer(serializers.Serializer):
     id = serializers.IntegerField()
@@ -177,7 +139,7 @@ class CalendarSlotSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     room_id = serializers.IntegerField(read_only=True)
     room_number = serializers.CharField(read_only=True, allow_null=True)
-    room_type_id = serializers.IntegerField(read_only=True, allow_null=True)
+    room_type_name = serializers.CharField(read_only=True, allow_null=True)
     date = serializers.DateField(read_only=True)
     status = serializers.CharField(read_only=True)
     hold_expires_at = serializers.DateTimeField(read_only=True, allow_null=True)
@@ -272,7 +234,7 @@ class BookingHistorySerializer(serializers.Serializer):
 class RateSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     property_id = serializers.IntegerField(read_only=True)
-    room_type_id = serializers.IntegerField()
+    room_id = serializers.IntegerField()
     date_from = serializers.DateField()
     date_to = serializers.DateField()
     rate = serializers.DecimalField(max_digits=10, decimal_places=2)

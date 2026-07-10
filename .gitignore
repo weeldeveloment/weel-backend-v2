@@ -22,6 +22,12 @@ share/python-wheels/
 *.egg
 MANIFEST
 __pycache__/
+.claude/
+.codegraph/
+.gemini/
+.kiro/
+opencode.jsonc
+
 
 # Virtual Environment
 .venv/
@@ -113,3 +119,13 @@ monitoring/
 design
 
 docs
+
+# AI tool configs (local)
+.claude/
+.gemini/
+.kiro/
+.codegraph/
+
+GEMINI.md
+AGENTS.md
+.mcp.json

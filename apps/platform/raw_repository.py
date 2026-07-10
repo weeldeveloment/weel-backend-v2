@@ -44,6 +44,7 @@ def create_tenant_schema(schema_name: str) -> None:
             CREATE TABLE IF NOT EXISTS pms_property (
                 id BIGSERIAL PRIMARY KEY,
                 organization_id INTEGER NOT NULL,
+                partner_user_id INTEGER,
                 name VARCHAR(200) NOT NULL,
                 description_uz TEXT,
                 description_ru TEXT,
@@ -74,6 +75,7 @@ def create_tenant_schema(schema_name: str) -> None:
                 is_archived BOOLEAN NOT NULL DEFAULT FALSE,
                 is_recommended BOOLEAN NOT NULL DEFAULT FALSE,
                 verification_status VARCHAR(20) DEFAULT 'waiting',
+                guid UUID NOT NULL DEFAULT gen_random_uuid(),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
@@ -91,29 +93,11 @@ def create_tenant_schema(schema_name: str) -> None:
         """)
 
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS pms_room_type (
-                id BIGSERIAL PRIMARY KEY,
-                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
-                preset VARCHAR(20),
-                custom_name VARCHAR(100),
-                name VARCHAR(100) NOT NULL,
-                description TEXT,
-                base_rate NUMERIC(10,2),
-                currency VARCHAR(3) DEFAULT 'USD',
-                capacity INTEGER DEFAULT 2,
-                amenities TEXT[] DEFAULT '{}',
-                photos TEXT[] DEFAULT '{}',
-                is_active BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
-
-        cursor.execute("""
             CREATE TABLE IF NOT EXISTS pms_room (
                 id BIGSERIAL PRIMARY KEY,
                 property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
-                room_type_id BIGINT REFERENCES pms_room_type(id) ON DELETE SET NULL,
+                room_type_name VARCHAR(100),
+                room_type_preset VARCHAR(20),
                 room_number VARCHAR(20) NOT NULL,
                 display_name VARCHAR(200),
                 floor INTEGER DEFAULT 1,
@@ -130,17 +114,6 @@ def create_tenant_schema(schema_name: str) -> None:
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 UNIQUE(property_id, room_number)
-            );
-        """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS pms_room_image (
-                id BIGSERIAL PRIMARY KEY,
-                room_id BIGINT NOT NULL REFERENCES pms_room(id) ON DELETE CASCADE,
-                image_url VARCHAR(500) NOT NULL,
-                "order" INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
 
@@ -221,7 +194,7 @@ def create_tenant_schema(schema_name: str) -> None:
             CREATE TABLE IF NOT EXISTS pms_rate (
                 id BIGSERIAL PRIMARY KEY,
                 property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
-                room_type_id BIGINT NOT NULL REFERENCES pms_room_type(id) ON DELETE CASCADE,
+                room_id BIGINT,
                 date_from DATE NOT NULL,
                 date_to DATE NOT NULL,
                 rate NUMERIC(10,2) NOT NULL,
@@ -253,18 +226,14 @@ def create_tenant_schema(schema_name: str) -> None:
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_property_image_property_id ON pms_property_image (property_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_room_property_id ON pms_room (property_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_room_room_type_id ON pms_room (room_type_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_room_image_room_id ON pms_room_image (room_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_property_id ON pms_booking (property_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_room_id ON pms_booking (room_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_guest_id ON pms_booking (guest_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_created_by ON pms_booking (created_by)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_booking_history_booking_id ON pms_booking_history (booking_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_rate_property_id ON pms_rate (property_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_rate_room_type_id ON pms_rate (room_type_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_review_property_id ON pms_review (property_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_review_booking_id ON pms_review (booking_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_room_type_property_id ON pms_room_type (property_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pms_calendar_slot_status_expires ON pms_calendar_slot (status, hold_expires_at)")
 
         cursor.execute("SET search_path TO public")

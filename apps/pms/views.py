@@ -26,7 +26,6 @@ from apps.shared.permissions import HasOrganization
 from apps.pms.repository import (
     accept_booking,
     add_property_image,
-    add_room_image,
     block_dates,
     cancel_booking,
     change_meal_plan,
@@ -39,12 +38,10 @@ from apps.pms.repository import (
     create_rate,
     create_review,
     create_room,
-    create_room_type,
     delete_property,
     delete_property_image,
     delete_rate,
     delete_room,
-    delete_room_type,
     expire_holds,
     find_or_create_guest,
     get_analytics,
@@ -58,15 +55,12 @@ from apps.pms.repository import (
     get_rate_by_id,
     get_room,
     get_room_availability,
-    get_room_images,
-    get_room_type,
     hold_dates,
     list_bookings,
     list_guests,
     list_properties,
     list_rates,
     list_reviews,
-    list_room_types,
     list_rooms,
     mass_update_rooms,
     move_booking,
@@ -79,7 +73,6 @@ from apps.pms.repository import (
     update_property,
     update_rate,
     update_room,
-    update_room_type,
 )
 from apps.pms.serializers import (
     AnalyticsQuerySerializer,
@@ -99,10 +92,8 @@ from apps.pms.serializers import (
     ReviewRespondSerializer,
     ReviewSerializer,
     RoomIdsSerializer,
-    RoomImageSerializer,
     RoomMassUpdateItemSerializer,
     RoomSerializer,
-    RoomTypeSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -260,69 +251,6 @@ class PropertyImageDeleteView(PMSBaseView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class RoomTypeListCreateView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RoomTypeSerializer(many=True)})
-    def get(self, request, property_id):
-        org_id = _require_org(request)
-        if not org_id:
-            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
-        prop = get_property(property_id, organization_id=int(org_id))
-        if not prop:
-            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
-        types = list_room_types(property_id)
-        return Response(RoomTypeSerializer(types, many=True).data)
-
-    @swagger_auto_schema(responses={201: RoomTypeSerializer()})
-    def post(self, request, property_id):
-        org_id = _require_org(request)
-        if not org_id:
-            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
-        prop = get_property(property_id, organization_id=int(org_id))
-        if not prop:
-            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        serializer = RoomTypeSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            rt = create_room_type(property_id=property_id, **serializer.validated_data)
-        except IntegrityError as e:
-            if "duplicate key" in str(e) and "name" in str(e):
-                return Response({"name": "A room type with this name already exists for this property."}, status=status.HTTP_400_BAD_REQUEST)
-            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not rt:
-            return Response({"detail": "Failed to create room type."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response(RoomTypeSerializer(rt).data, status=status.HTTP_201_CREATED)
-
-
-class RoomTypeRetrieveUpdateDestroyView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RoomTypeSerializer()})
-    def get(self, request, property_id, room_type_id):
-        rt = get_room_type(room_type_id, property_id)
-        if not rt:
-            return Response({"detail": "Room type not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(RoomTypeSerializer(rt).data)
-
-    @swagger_auto_schema(responses={200: RoomTypeSerializer()})
-    def patch(self, request, property_id, room_type_id):
-        serializer = RoomTypeSerializer(data=request.data, partial=True)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        rt = update_room_type(room_type_id, **serializer.validated_data)
-        if not rt:
-            return Response({"detail": "Room type not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(RoomTypeSerializer(rt).data)
-
-    @swagger_auto_schema(responses={204: "Deleted"})
-    def delete(self, request, property_id, room_type_id):
-        if not delete_room_type(room_type_id):
-            return Response({"detail": "Room type not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
 class RoomListCreateView(PMSBaseView):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
@@ -335,8 +263,8 @@ class RoomListCreateView(PMSBaseView):
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        room_type_id = request.query_params.get("room_type_id")
-        rooms = list_rooms(property_id, room_type_id=int(room_type_id) if room_type_id else None)
+        room_type_name = request.query_params.get("room_type_name")
+        rooms = list_rooms(property_id, room_type_name=room_type_name if room_type_name else None)
         return Response(RoomSerializer(rooms, many=True).data)
 
     @swagger_auto_schema(responses={201: RoomSerializer()})
@@ -408,27 +336,6 @@ class RoomMassUpdateView(PMSBaseView):
                 results.append(RoomSerializer(room).data)
 
         return Response(results, status=status.HTTP_200_OK)
-
-
-class RoomImageCreateView(PMSBaseView):
-    parser_classes = [MultiPartParser, FormParser]
-
-    @swagger_auto_schema(responses={201: RoomImageSerializer()})
-    def post(self, request, property_id, room_id):
-        room = get_room(room_id, property_id)
-        if not room:
-            return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        image_file = request.FILES.get("image")
-        if not image_file:
-            return Response({"detail": "No image file provided."}, status=status.HTTP_400_BAD_REQUEST)
-
-        path = default_storage.save(f"pms/rooms/{room_id}/{image_file.name}", image_file)
-        image_url = default_storage.url(path)
-
-        order = request.data.get("order", 0)
-        img = add_room_image(room_id, image_url, int(order))
-        return Response(RoomImageSerializer(img).data, status=status.HTTP_201_CREATED)
 
 
 class CalendarView(PMSBaseView):
@@ -732,8 +639,8 @@ class BookingHistoryView(PMSBaseView):
 class RateListCreateView(PMSBaseView):
     @swagger_auto_schema(responses={200: RateSerializer(many=True)})
     def get(self, request, property_id):
-        room_type_id = request.query_params.get("room_type_id")
-        rates = list_rates(property_id, room_type_id=int(room_type_id) if room_type_id else None)
+        room_id = request.query_params.get("room_id")
+        rates = list_rates(property_id, room_id=int(room_id) if room_id else None)
         return Response(RateSerializer(rates, many=True).data)
 
     @swagger_auto_schema(responses={201: RateSerializer()})

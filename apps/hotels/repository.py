@@ -22,7 +22,7 @@ def _check_room_availability(
           AND NOT EXISTS (
               SELECT 1 FROM pms_booking b
               WHERE b.room_id = r.id
-                AND b.status NOT IN ('cancelled', 'completed')
+                AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
                 AND b.check_in < %s
                 AND b.check_out > %s
           )
@@ -65,28 +65,23 @@ def get_available_rooms(
         """
         SELECT
             r.id, r.room_number, r.floor, r.display_name,
-            r.bedroom_count, rt.base_rate AS price_per_night, r.beds, r.amenities,
+            r.bedroom_count, r.beds, r.amenities,
             r.capacity,
-            rt.name AS room_type_name, rt.preset,
+            r.room_type_name, r.room_type_preset AS preset,
             r.meal_plan,
-            COALESCE(
-                (SELECT json_agg(json_build_object('url', pi.image_url, 'order', pi.order))
-                 FROM pms_room_image pi WHERE pi.room_id = r.id),
-                '[]'::json
-            ) AS images
+            COALESCE(r.photos, '{}'::text[]) AS photos
         FROM pms_room r
-        JOIN pms_room_type rt ON rt.id = r.room_type_id
         WHERE r.property_id = %s
           AND r.is_active = TRUE
           AND r.capacity >= %s
           AND NOT EXISTS (
               SELECT 1 FROM pms_booking b
               WHERE b.room_id = r.id
-                AND b.status NOT IN ('cancelled', 'completed')
+                AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
                 AND b.check_in < %s
                 AND b.check_out > %s
           )
-        ORDER BY COALESCE(rt.base_rate, 0) ASC
+        ORDER BY r.room_number ASC
         """,
         [property_id, guests, check_out, check_in],
     )
@@ -95,10 +90,9 @@ def get_available_rooms(
 def get_room_with_details(room_id: int) -> dict[str, Any] | None:
     return fetch_one(
         """
-        SELECT r.*, rt.name AS room_type_name, rt.preset, rt.base_rate,
-               rt.capacity AS room_type_capacity, rt.base_rate AS price_per_night
+        SELECT r.*, r.room_type_name, r.room_type_preset AS preset,
+               r.capacity AS room_type_capacity
         FROM pms_room r
-        JOIN pms_room_type rt ON rt.id = r.room_type_id
         WHERE r.id = %s AND r.is_active = TRUE
         """,
         [room_id],
@@ -117,18 +111,13 @@ def calculate_stay_price(
         return None
 
     room = fetch_one(
-        """
-        SELECT rt.base_rate AS price_per_night
-        FROM pms_room r
-        JOIN pms_room_type rt ON rt.id = r.room_type_id
-        WHERE r.id = %s
-        """,
+        "SELECT id FROM pms_room WHERE id = %s",
         [room_id],
     )
     if not room:
         return None
 
-    raw_rate = room.get("price_per_night")
+    raw_rate = None
     if raw_rate is None:
         return None
 
@@ -192,7 +181,7 @@ def create_hotel_booking(
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s,
             %s, 'UZS', %s, %s,
-            'pending', %s, NOW(),
+            'new', %s, NOW(),
             'H' || TO_CHAR(NOW(), 'YYMMDD') || LPAD(FLOOR(RANDOM() * 99999)::int::text, 5, '0')
         )
         RETURNING id, property_id, room_id, check_in, check_out, adult_count, child_count,
@@ -261,12 +250,11 @@ def list_client_hotel_bookings(
             b.property_id, b.room_id,
             p.name AS hotel_name, p.city AS hotel_city, p.star_rating AS hotel_star_rating,
             r.room_number, r.display_name AS room_name, r.floor,
-            rt.name AS room_type_name, rt.preset AS room_type_preset,
-            rt.base_rate AS room_price_per_night
+            r.room_type_name, r.room_type_preset,
+            0 AS room_price_per_night
         FROM pms_booking b
         JOIN pms_property p ON p.id = b.property_id
         JOIN pms_room r ON r.id = b.room_id
-        JOIN pms_room_type rt ON rt.id = r.room_type_id
         WHERE {where}
         ORDER BY b.created_at DESC, b.id DESC
         """,
@@ -290,20 +278,15 @@ def get_client_hotel_booking(
             p.check_in_time AS hotel_check_in_time, p.check_out_time AS hotel_check_out_time,
             COALESCE(p.photos, ARRAY[]::text[]) AS hotel_images,
             r.room_number, r.display_name AS room_name, r.floor,
-            rt.base_rate AS room_price_per_night,
+            0 AS room_price_per_night,
             r.bedroom_count, r.beds, r.amenities,
             r.capacity,
-            rt.name AS room_type_name, rt.preset AS room_type_preset,
+            r.room_type_name, r.room_type_preset,
             r.meal_plan,
-            COALESCE(
-                (SELECT json_agg(json_build_object('url', pi.image_url, 'order', pi.order))
-                 FROM pms_room_image pi WHERE pi.room_id = r.id),
-                '[]'::json
-            ) AS room_images
+            COALESCE(r.photos, '{}'::text[]) AS photos
         FROM pms_booking b
         JOIN pms_property p ON p.id = b.property_id
         JOIN pms_room r ON r.id = b.room_id
-        JOIN pms_room_type rt ON rt.id = r.room_type_id
         WHERE b.id = %s AND b.created_by = %s
         """,
         [booking_id, client_user_id],
@@ -396,16 +379,15 @@ def _search_hotels_in_schema(
     if check_in and check_out:
         avail_join = """
             LEFT JOIN LATERAL (
-                SELECT MIN(rt.base_rate) AS min_price, COUNT(*) AS available_rooms
+                SELECT 0 AS min_price, COUNT(*) AS available_rooms
                 FROM pms_room r
-                JOIN pms_room_type rt ON rt.id = r.room_type_id
                 WHERE r.property_id = p.id
                   AND r.is_active = TRUE
                   AND r.capacity >= %s
                   AND NOT EXISTS (
                       SELECT 1 FROM pms_booking b
                       WHERE b.room_id = r.id
-                        AND b.status NOT IN ('cancelled', 'completed')
+                        AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
                         AND b.check_in < %s
                         AND b.check_out > %s
                   )
@@ -416,9 +398,8 @@ def _search_hotels_in_schema(
     else:
         avail_join = """
             LEFT JOIN LATERAL (
-                SELECT MIN(rt.base_rate) AS min_price, COUNT(*) AS available_rooms
+                SELECT 0 AS min_price, COUNT(*) AS available_rooms
                 FROM pms_room r
-                JOIN pms_room_type rt ON rt.id = r.room_type_id
                 WHERE r.property_id = p.id AND r.is_active = TRUE AND r.capacity >= %s
             ) pricing ON TRUE
         """
@@ -617,7 +598,7 @@ def get_hotel_reviews(
 ) -> list[dict[str, Any]]:
     return fetch_all(
         """
-        SELECT id, guest_name, rating, text, response, created_at
+        SELECT id, guest_name, rating, text, hotel_response, created_at
         FROM pms_review
         WHERE property_id = %s AND is_complained = FALSE
         ORDER BY created_at DESC
@@ -637,8 +618,7 @@ def has_eligible_hotel_booking_for_review(
         SELECT 1 FROM pms_booking b
         WHERE b.property_id = %s
           AND b.created_by = %s
-          AND b.status IN ('confirmed', 'completed')
-          AND b.completed_at IS NOT NULL
+          AND b.status IN ('confirmed', 'checked_out')
         LIMIT 1
         """,
         [property_id, client_user_id],
@@ -649,18 +629,17 @@ def has_eligible_hotel_booking_for_review(
 def create_hotel_review(
     *,
     property_id: int,
-    client_user_id: int,
     guest_name: str,
     rating: int,
     text: str = "",
 ) -> dict[str, Any] | None:
     row = fetch_one(
         """
-        INSERT INTO pms_review (property_id, client_user_id, guest_name, rating, text, created_at)
-        VALUES (%s, %s, %s, %s, %s, NOW())
-        RETURNING id, guest_name, rating, text, response, created_at
+        INSERT INTO pms_review (property_id, guest_name, rating, text, created_at)
+        VALUES (%s, %s, %s, %s, NOW())
+        RETURNING id, guest_name, rating, text, hotel_response, created_at
         """,
-        [property_id, client_user_id, guest_name, rating, text],
+        [property_id, guest_name, rating, text],
     )
     return row
 
@@ -682,7 +661,7 @@ def get_hotel_calendar(
         ) d
         LEFT JOIN pms_booking b
             ON b.room_id = r.id
-            AND b.status NOT IN ('cancelled', 'completed')
+            AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
             AND b.check_in < d.date + 1
             AND b.check_out > d.date
         WHERE r.property_id = %s AND r.is_active = TRUE
