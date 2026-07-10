@@ -49,6 +49,7 @@ from apps.b2b.repository import (
     list_employees,
     list_hotel_booking_requests,
     list_hotel_booking_rooms,
+    list_policy_rules,
     list_policy_rules_by_type,
     list_recent_trip_employees,
     list_trip_employees,
@@ -1244,7 +1245,7 @@ class TravelLimitsView(APIView):
         operation_summary="Limit qoidalarini olish",
         operation_description=(
             "`applies_to` orqali qaysi turdagi limitlar qaytarilishini tanlang: "
-            "`all` — kompaniya darajasidagi global limit (target_id yo'q), "
+            "`all` — kompaniyaning barcha limitlari (global, department va employee), "
             "`department` — departmentlar uchun limitlar, "
             "`employee` — xodimlar uchun individual limitlar."
         ),
@@ -1267,7 +1268,7 @@ class TravelLimitsView(APIView):
                 {"detail": "applies_to must be 'all', 'department' or 'employee'."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        rules = list_policy_rules_by_type(company_id, applies_to)
+        rules = list_policy_rules(company_id) if applies_to == "all" else list_policy_rules_by_type(company_id, applies_to)
         return Response(TravelPolicyRuleSerializer(
             [_hydrate_rule_with_target(company_id, r) for r in rules], many=True
         ).data)
