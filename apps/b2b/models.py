@@ -130,9 +130,8 @@ class HotelBookingRequest(HardDeleteBaseModel):
     """One executer action: pick a hotel + dates + N rooms + employees.
 
     Hotels live in per-organization tenant schemas (see
-    apps/property/hotel_repository.py), so this row stores the encoded
-    ``hotel_guid`` ("<schema>:<id>") plus a plain ``tenant_schema``/
-    ``hotel_property_id`` split for convenience — there is no cross-schema
+    apps/property/hotel_repository.py), so this row stores a plain
+    ``tenant_schema``/``hotel_property_id`` split — there is no cross-schema
     FK to ``pms_property``. The actual per-room ``pms_booking`` rows live in
     that hotel's own schema; this table is the "group" that makes the whole
     multi-room request show up as ONE entry in booking history.
@@ -140,7 +139,6 @@ class HotelBookingRequest(HardDeleteBaseModel):
     id: int | None = None
     company_id: int | None = None
     trip_id: int | None = None
-    hotel_guid: str | None = None
     tenant_schema: str | None = None
     hotel_property_id: int | None = None
     hotel_name: str | None = None

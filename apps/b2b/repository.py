@@ -483,7 +483,6 @@ def create_hotel_booking_request(
     *,
     company_id: int,
     trip_id: int | None,
-    hotel_guid: str,
     tenant_schema: str,
     hotel_property_id: int,
     hotel_name: str | None,
@@ -495,13 +494,13 @@ def create_hotel_booking_request(
     return fetch_one(
         f"""
         INSERT INTO {B2B_HOTEL_BOOKING_REQUEST_TABLE}
-            (company_id, trip_id, hotel_guid, tenant_schema, hotel_property_id, hotel_name,
+            (company_id, trip_id, tenant_schema, hotel_property_id, hotel_name,
              check_in, check_out, status, requested_by, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
-            company_id, trip_id, hotel_guid, tenant_schema, hotel_property_id, hotel_name,
+            company_id, trip_id, tenant_schema, hotel_property_id, hotel_name,
             check_in, check_out, HotelBookingRequestStatus.PENDING, requested_by, now, now,
         ],
     )
@@ -927,20 +926,20 @@ def get_top_employees_by_trip_count(company_id: int, limit: int = 5) -> list[dic
 
 def get_top_hotels_by_booking_count(company_id: int, limit: int = 3) -> list[dict[str, Any]]:
     """Return the hotels this company has booked the most, ordered by
-    ``booking_count`` DESC. Grouped by ``hotel_guid`` (a hotel can live in
-    any tenant schema, so the guid — not the plain id — is the stable key).
+    ``booking_count`` DESC. Grouped by ``(tenant_schema, hotel_property_id)``
+    (a hotel can live in any tenant schema, so the plain id alone isn't
+    a stable key).
     """
     return fetch_all(
         f"""
         SELECT
-            hotel_guid,
+            tenant_schema,
+            hotel_property_id,
             MAX(hotel_name) AS hotel_name,
-            MAX(tenant_schema) AS tenant_schema,
-            MAX(hotel_property_id) AS hotel_property_id,
             COUNT(*) AS booking_count
         FROM {B2B_HOTEL_BOOKING_REQUEST_TABLE}
         WHERE company_id = %s
-        GROUP BY hotel_guid
+        GROUP BY tenant_schema, hotel_property_id
         ORDER BY booking_count DESC, MAX(hotel_name) ASC
         LIMIT %s
         """,

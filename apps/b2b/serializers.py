@@ -179,7 +179,8 @@ class HotelBookingRequestSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     company_id = serializers.IntegerField(read_only=True)
     trip_id = serializers.IntegerField(allow_null=True)
-    hotel_guid = serializers.CharField()
+    tenant_schema = serializers.CharField()
+    hotel_property_id = serializers.IntegerField()
     hotel_name = serializers.CharField(allow_null=True)
     check_in = serializers.DateField()
     check_out = serializers.DateField()
@@ -319,7 +320,8 @@ class TopEmployeeByTripsSerializer(serializers.Serializer):
 
 class TopHotelByBookingsSerializer(serializers.Serializer):
     """Serializer for the "top N hotels by booking count" endpoint."""
-    hotel_guid = serializers.CharField(read_only=True)
+    tenant_schema = serializers.CharField(read_only=True)
+    hotel_property_id = serializers.IntegerField(read_only=True)
     hotel_name = serializers.CharField(read_only=True, allow_null=True)
     booking_count = serializers.IntegerField(read_only=True)
 

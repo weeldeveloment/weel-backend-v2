@@ -400,7 +400,6 @@ class B2BHotelBookingListCreateView(APIView):
             booking_request = create_hotel_booking_request(
                 company_id=company_id,
                 trip_id=data["trip_id"],
-                hotel_guid=data["hotel_guid"],
                 tenant_schema=schema_name,
                 hotel_property_id=hotel_id,
                 hotel_name=hotel.get("title") or hotel.get("name"),
