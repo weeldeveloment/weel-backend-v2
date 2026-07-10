@@ -17,3 +17,14 @@ class IsB2BPerformer(BasePermission):
         user = request.user
         role = user.get("role") if isinstance(user, dict) else getattr(user, "role", None)
         return bool(user and getattr(user, "is_authenticated", False) and role == B2BUserRole.PERFORMER)
+
+
+class IsB2BOwner(BasePermission):
+    """Restricts an endpoint to B2B "owner" users — e.g. reviewing (approving/
+    rejecting) budget requests submitted by executers."""
+    message = "Only company owners can perform this action."
+
+    def has_permission(self, request, view) -> bool:
+        user = request.user
+        role = user.get("role") if isinstance(user, dict) else getattr(user, "role", None)
+        return bool(user and getattr(user, "is_authenticated", False) and role == B2BUserRole.OWNER)

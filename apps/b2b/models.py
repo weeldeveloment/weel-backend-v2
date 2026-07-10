@@ -236,6 +236,7 @@ class BudgetRequest(HardDeleteBaseModel):
     status: str = BudgetRequestStatus.PENDING
     reviewed_by: int | None = None
     reviewed_at: datetime | None = None
+    review_description: str | None = None
     _meta = SimpleNamespace(db_table="b2b_budget_request")
 
 
