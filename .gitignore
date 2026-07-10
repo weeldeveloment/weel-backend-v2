@@ -125,3 +125,7 @@ docs
 .gemini/
 .kiro/
 .codegraph/
+
+GEMINI.md
+AGENTS.md
+.mcp.json
