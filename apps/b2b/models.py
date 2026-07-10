@@ -229,9 +229,10 @@ class BudgetRequest(HardDeleteBaseModel):
     id: int | None = None
     trip_id: int | None = None
     employee_id: int | None = None
+    department_id: int | None = None
     requested_by: int | None = None
     amount: Decimal | None = None
-    reason: str | None = None
+    description: str | None = None
     status: str = BudgetRequestStatus.PENDING
     reviewed_by: int | None = None
     reviewed_at: datetime | None = None

@@ -211,17 +211,32 @@ class TravelPolicySerializer(serializers.Serializer):
 
 
 class BudgetRequestSerializer(serializers.Serializer):
+    """Byudjet so'rovi: aynan bittasi berilishi shart — ``employee_id``
+    (bitta xodim uchun) yoki ``department_id`` (butun bo'lim uchun).
+    ``trip_id`` ixtiyoriy — mavjud bo'lsa, so'rov shu komandirovka bilan
+    bog'lanadi."""
     id = serializers.IntegerField(read_only=True)
-    trip_id = serializers.IntegerField()
-    employee_id = serializers.IntegerField()
+    trip_id = serializers.IntegerField(required=False, allow_null=True)
+    employee_id = serializers.IntegerField(required=False, allow_null=True)
+    department_id = serializers.IntegerField(required=False, allow_null=True)
     trip_name = serializers.CharField(read_only=True, allow_null=True)
     employee_name = serializers.CharField(read_only=True, allow_null=True)
+    department_name = serializers.CharField(read_only=True, allow_null=True)
     amount = serializers.DecimalField(max_digits=14, decimal_places=2)
-    reason = serializers.CharField(max_length=500)
+    description = serializers.CharField(max_length=500, required=False, allow_blank=True, allow_null=True)
     status = serializers.CharField(read_only=True)
     reviewed_by = serializers.IntegerField(read_only=True, allow_null=True)
     reviewed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
+
+    def validate(self, data):
+        employee_id = data.get("employee_id")
+        department_id = data.get("department_id")
+        if bool(employee_id) == bool(department_id):
+            raise serializers.ValidationError(
+                "Exactly one of employee_id or department_id is required."
+            )
+        return data
 
 
 class ReviewBudgetRequestSerializer(serializers.Serializer):

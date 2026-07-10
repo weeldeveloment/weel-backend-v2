@@ -395,55 +395,34 @@ def delete_policy_rule(rule_id: int) -> int:
 
 # ─── Budget Requests ──────────────────────────────────────────────────────────
 
-def get_employee_month_spend(employee_id: int, year: int, month: int) -> Decimal:
-    """Sum of this employee's *approved* budget-request amounts for the given
-    calendar month (used to check against ``B2BEmployee.individual_limit``,
-    which is treated as a monthly cap)."""
-    row = fetch_one(
-        f"""
-        SELECT COALESCE(SUM(amount), 0) AS spent
-        FROM {B2B_BUDGET_REQUEST_TABLE}
-        WHERE employee_id = %s AND status = 'approved'
-          AND EXTRACT(YEAR FROM COALESCE(reviewed_at, created_at)) = %s
-          AND EXTRACT(MONTH FROM COALESCE(reviewed_at, created_at)) = %s
-        """,
-        [employee_id, year, month],
-    ) or {}
-    return row.get("spent") or Decimal("0")
-
-
 def create_budget_request(
     *,
-    trip_id: int,
-    employee_id: int,
     requested_by: int,
     amount: Decimal,
-    reason: str,
-    auto_approved: bool = False,
+    trip_id: int | None = None,
+    employee_id: int | None = None,
+    department_id: int | None = None,
+    description: str | None = None,
 ) -> dict[str, Any] | None:
-    """Create a budget request.
+    """Create a budget request, targeting either an employee or a department.
 
-    When ``auto_approved`` is True (the requested amount is within the
-    employee's ``individual_limit``), the request is stored already
-    ``approved`` with ``reviewed_at`` set — no owner action needed. Otherwise
-    it is stored ``pending`` so it shows up for the owner to review.
+    Always stored ``pending`` — the owner reviews and approves/rejects every
+    request via ``POST /budget-requests/<id>/review/``.
     """
     now = timezone.now()
-    req_status = BudgetRequestStatus.APPROVED if auto_approved else BudgetRequestStatus.PENDING
-    reviewed_at = now if auto_approved else None
     return fetch_one(
         f"""
         INSERT INTO {B2B_BUDGET_REQUEST_TABLE}
-            (trip_id, employee_id, requested_by, amount, reason, status, reviewed_at, created_at, updated_at)
+            (trip_id, employee_id, department_id, requested_by, amount, description, status, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [trip_id, employee_id, requested_by, amount, reason, req_status, reviewed_at, now, now],
+        [trip_id, employee_id, department_id, requested_by, amount, description, BudgetRequestStatus.PENDING, now, now],
     )
 
 
 def list_budget_requests(company_id: int, *, status: str | None = None) -> list[dict[str, Any]]:
-    conditions = ["t.company_id = %s"]
+    conditions = ["COALESCE(t.company_id, e.company_id, d.company_id) = %s"]
     params: list[Any] = [company_id]
     if status:
         conditions.append("br.status = %s")
@@ -451,10 +430,11 @@ def list_budget_requests(company_id: int, *, status: str | None = None) -> list[
     where = " AND ".join(conditions)
     return fetch_all(
         f"""
-        SELECT br.*, t.name as trip_name, e.full_name as employee_name
+        SELECT br.*, t.name as trip_name, e.full_name as employee_name, d.name as department_name
         FROM {B2B_BUDGET_REQUEST_TABLE} br
-        JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = br.trip_id
-        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = br.employee_id
+        LEFT JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = br.trip_id
+        LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = br.employee_id
+        LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = br.department_id
         WHERE {where}
         ORDER BY br.created_at DESC
         """,
