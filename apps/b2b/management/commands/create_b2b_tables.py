@@ -159,17 +159,35 @@ class Command(BaseCommand):
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS b2b_budget_request (
                     id BIGSERIAL PRIMARY KEY,
-                    trip_id BIGINT NOT NULL REFERENCES b2b_business_trip(id) ON DELETE CASCADE,
-                    employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                    trip_id BIGINT REFERENCES b2b_business_trip(id) ON DELETE CASCADE,
+                    employee_id BIGINT REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                    department_id BIGINT REFERENCES b2b_department(id) ON DELETE CASCADE,
                     requested_by BIGINT REFERENCES b2b_user(id) ON DELETE SET NULL,
                     amount NUMERIC(14,2) NOT NULL,
-                    reason TEXT,
+                    description TEXT,
                     status VARCHAR(20) NOT NULL DEFAULT 'pending',
                     reviewed_by BIGINT REFERENCES b2b_user(id) ON DELETE SET NULL,
                     reviewed_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+            """)
+            cursor.execute("ALTER TABLE b2b_budget_request ALTER COLUMN trip_id DROP NOT NULL;")
+            cursor.execute("ALTER TABLE b2b_budget_request ALTER COLUMN employee_id DROP NOT NULL;")
+            cursor.execute("ALTER TABLE b2b_budget_request ADD COLUMN IF NOT EXISTS department_id BIGINT REFERENCES b2b_department(id) ON DELETE CASCADE;")
+            cursor.execute("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'b2b_budget_request' AND column_name = 'reason'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'b2b_budget_request' AND column_name = 'description'
+                    ) THEN
+                        ALTER TABLE b2b_budget_request RENAME COLUMN reason TO description;
+                    END IF;
+                END $$;
             """)
             self.stdout.write("  Created b2b_budget_request")
 
