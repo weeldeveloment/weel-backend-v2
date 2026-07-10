@@ -41,6 +41,8 @@ from apps.b2b.repository import (
     get_or_create_travel_policy,
     get_policy_rule,
     get_spending_overview,
+    get_top_employees_by_trip_count,
+    get_top_hotels_by_booking_count,
     get_trip,
     get_voucher,
     list_active_trip_employees,
@@ -94,6 +96,8 @@ from apps.b2b.serializers import (
     HotelBookingRequestSerializer,
     RecentTripEmployeeSerializer,
     ReviewBudgetRequestSerializer,
+    TopEmployeeByTripsSerializer,
+    TopHotelByBookingsSerializer,
     TravelPolicyRuleCreateSerializer,
     TravelPolicyRuleSerializer,
     TravelPolicyRuleUpdateSerializer,
@@ -782,7 +786,21 @@ class BudgetRequestListCreateView(APIView):
                 description="Holat bo'yicha filtr. Owner uchun odatda `pending`.",
             ),
         ],
-        responses={200: BudgetRequestSerializer(many=True)},
+        responses={
+            200: openapi.Response(
+                description="Byudjet so'rovlari + umumiy soni",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "results": openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                        ),
+                    },
+                ),
+            ),
+        },
     )
     def get(self, request):
         company_id = _get_company_id(request)
@@ -790,7 +808,10 @@ class BudgetRequestListCreateView(APIView):
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
         req_status = request.query_params.get("status")
         requests = list_budget_requests(company_id, status=req_status)
-        return Response(BudgetRequestSerializer(requests, many=True).data)
+        return Response({
+            "count": len(requests),
+            "results": BudgetRequestSerializer(requests, many=True).data,
+        })
 
     @swagger_auto_schema(
         operation_summary="Byudjet so'rovi yuborish (oylik limit yetmasa ownerga boradi)",
@@ -1035,6 +1056,96 @@ class RecentTripEmployeesView(APIView):
             limit = 5
         rows = list_recent_trip_employees(company_id, limit=limit)
         return Response(RecentTripEmployeeSerializer(rows, many=True).data)
+
+
+# ─── Top employees by trip count ───────────────────────────────────────────
+
+class TopEmployeesByTripsView(APIView):
+    """GET /api/b2b/employees/top-by-trips/?limit=5
+
+    Returns the employees with the most business-trip (komandirovka)
+    assignments for the company, ordered by trip count descending.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Eng ko'p komandirovkaga borgan xodimlar (top N)",
+        operation_description=(
+            "Kompaniya bo'yicha eng ko'p komandirovkaga (business trip) "
+            "biriktirilgan xodimlarni, `trip_count` bo'yicha kamayish "
+            "tartibida qaytaradi. Default `limit=5`, maksimum 100."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "limit",
+                openapi.IN_QUERY,
+                description="Qaytariladigan xodimlar soni (1-100). Default 5.",
+                type=openapi.TYPE_INTEGER,
+                default=5,
+            ),
+        ],
+        responses={
+            200: TopEmployeeByTripsSerializer(many=True),
+            400: openapi.Response(description="Company context required."),
+        },
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            limit = int(request.query_params.get("limit", 5))
+        except (TypeError, ValueError):
+            limit = 5
+        if limit <= 0 or limit > 100:
+            limit = 5
+        rows = get_top_employees_by_trip_count(company_id, limit=limit)
+        return Response(TopEmployeeByTripsSerializer(rows, many=True).data)
+
+
+# ─── Top hotels by booking count ───────────────────────────────────────────
+
+class TopHotelsByBookingsView(APIView):
+    """GET /api/b2b/hotels/top-by-bookings/?limit=3
+
+    Returns the hotels this company has booked the most, ordered by
+    booking count descending.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Kompaniya eng ko'p bron qilgan hotellar (top N)",
+        operation_description=(
+            "Shu kompaniya tomonidan eng ko'p bron qilingan mehmonxonalarni, "
+            "`booking_count` bo'yicha kamayish tartibida qaytaradi. Default "
+            "`limit=3`, maksimum 100."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "limit",
+                openapi.IN_QUERY,
+                description="Qaytariladigan hotellar soni (1-100). Default 3.",
+                type=openapi.TYPE_INTEGER,
+                default=3,
+            ),
+        ],
+        responses={
+            200: TopHotelByBookingsSerializer(many=True),
+            400: openapi.Response(description="Company context required."),
+        },
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            limit = int(request.query_params.get("limit", 3))
+        except (TypeError, ValueError):
+            limit = 3
+        if limit <= 0 or limit > 100:
+            limit = 3
+        rows = get_top_hotels_by_booking_count(company_id, limit=limit)
+        return Response(TopHotelByBookingsSerializer(rows, many=True).data)
 
 
 # ─── Active / upcoming trip employees (yolda / borgan) ─────────────────────

@@ -286,6 +286,25 @@ class RecentTripEmployeeSerializer(serializers.Serializer):
     assigned_at = serializers.DateTimeField(read_only=True)
 
 
+class TopEmployeeByTripsSerializer(serializers.Serializer):
+    """Serializer for the "top N employees by trip count" endpoint."""
+    employee_id = serializers.IntegerField(read_only=True)
+    full_name = serializers.CharField(read_only=True, allow_null=True)
+    position = serializers.CharField(read_only=True, allow_null=True)
+    email = serializers.CharField(read_only=True, allow_null=True)
+    phone = serializers.CharField(read_only=True, allow_null=True)
+    department_id = serializers.IntegerField(read_only=True, allow_null=True)
+    department_name = serializers.CharField(read_only=True, allow_null=True)
+    trip_count = serializers.IntegerField(read_only=True)
+
+
+class TopHotelByBookingsSerializer(serializers.Serializer):
+    """Serializer for the "top N hotels by booking count" endpoint."""
+    hotel_guid = serializers.CharField(read_only=True)
+    hotel_name = serializers.CharField(read_only=True, allow_null=True)
+    booking_count = serializers.IntegerField(read_only=True)
+
+
 class DepartmentMonthlySpendingSerializer(serializers.Serializer):
     department_id = serializers.IntegerField(read_only=True)
     department_name = serializers.CharField(read_only=True)
