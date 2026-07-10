@@ -168,6 +168,7 @@ class Command(BaseCommand):
                     status VARCHAR(20) NOT NULL DEFAULT 'pending',
                     reviewed_by BIGINT REFERENCES b2b_user(id) ON DELETE SET NULL,
                     reviewed_at TIMESTAMPTZ,
+                    review_description TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
@@ -175,6 +176,7 @@ class Command(BaseCommand):
             cursor.execute("ALTER TABLE b2b_budget_request ALTER COLUMN trip_id DROP NOT NULL;")
             cursor.execute("ALTER TABLE b2b_budget_request ALTER COLUMN employee_id DROP NOT NULL;")
             cursor.execute("ALTER TABLE b2b_budget_request ADD COLUMN IF NOT EXISTS department_id BIGINT REFERENCES b2b_department(id) ON DELETE CASCADE;")
+            cursor.execute("ALTER TABLE b2b_budget_request ADD COLUMN IF NOT EXISTS review_description TEXT;")
             cursor.execute("""
                 DO $$
                 BEGIN

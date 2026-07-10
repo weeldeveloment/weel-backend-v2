@@ -442,10 +442,17 @@ def list_budget_requests(company_id: int, *, status: str | None = None) -> list[
     )
 
 
-def review_budget_request(request_id: int, status: str, reviewed_by: int) -> dict[str, Any] | None:
+def review_budget_request(
+    request_id: int, status: str, reviewed_by: int, review_description: str | None = None
+) -> dict[str, Any] | None:
     return fetch_one(
-        f"UPDATE {B2B_BUDGET_REQUEST_TABLE} SET status = %s, reviewed_by = %s, reviewed_at = %s, updated_at = %s WHERE id = %s RETURNING *",
-        [status, reviewed_by, timezone.now(), timezone.now(), request_id],
+        f"""
+        UPDATE {B2B_BUDGET_REQUEST_TABLE}
+        SET status = %s, reviewed_by = %s, reviewed_at = %s, review_description = %s, updated_at = %s
+        WHERE id = %s
+        RETURNING *
+        """,
+        [status, reviewed_by, timezone.now(), review_description, timezone.now(), request_id],
     )
 
 

@@ -64,7 +64,7 @@ from apps.b2b.repository import (
     update_trip,
 )
 from apps.b2b.models import HotelBookingRequestStatus
-from apps.b2b.permissions import IsB2BPerformer
+from apps.b2b.permissions import IsB2BOwner, IsB2BPerformer
 from apps.property.hotel_repository import _run_in_schema, decode_hotel_guid, get_hotel_for_public
 from apps.hotels.repository import (
     count_hotels,
@@ -865,9 +865,26 @@ class BudgetRequestListCreateView(APIView):
 
 
 class BudgetRequestReviewView(APIView):
-    permission_classes = [IsAuthenticated]
+    """POST /b2b/budget-requests/<id>/review/
 
-    @swagger_auto_schema(request_body=ReviewBudgetRequestSerializer, responses={200: BudgetRequestSerializer()})
+    Owner-only: approve or reject a budget request, optionally with a
+    ``description`` explaining the decision.
+    """
+    permission_classes = [IsAuthenticated, IsB2BOwner]
+
+    @swagger_auto_schema(
+        operation_summary="Byudjet so'rovini tasdiqlash/rad etish (faqat owner)",
+        operation_description=(
+            "Owner byudjet so'rovini `approved` yoki `rejected` qiladi. "
+            "`description` — qarorning sababi, ixtiyoriy."
+        ),
+        request_body=ReviewBudgetRequestSerializer,
+        responses={
+            200: BudgetRequestSerializer(),
+            403: openapi.Response(description="Only company owners can perform this action."),
+            404: openapi.Response(description="Budget request not found."),
+        },
+    )
     def post(self, request, request_id):
         serializer = ReviewBudgetRequestSerializer(data=request.data)
         if not serializer.is_valid():
@@ -876,6 +893,7 @@ class BudgetRequestReviewView(APIView):
             request_id=request_id,
             status=serializer.validated_data["status"],
             reviewed_by=_get_user_id(request),
+            review_description=serializer.validated_data.get("description"),
         )
         if not result:
             return Response({"detail": "Budget request not found."}, status=status.HTTP_404_NOT_FOUND)

@@ -227,6 +227,7 @@ class BudgetRequestSerializer(serializers.Serializer):
     status = serializers.CharField(read_only=True)
     reviewed_by = serializers.IntegerField(read_only=True, allow_null=True)
     reviewed_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    review_description = serializers.CharField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
 
     def validate(self, data):
@@ -240,7 +241,10 @@ class BudgetRequestSerializer(serializers.Serializer):
 
 
 class ReviewBudgetRequestSerializer(serializers.Serializer):
+    """Owner tomonidan byudjet so'rovini tasdiqlash/rad etish. `description`
+    — owner nega tasdiqlagani/rad etganini yozadigan ixtiyoriy izoh."""
     status = serializers.ChoiceField(choices=["approved", "rejected"])
+    description = serializers.CharField(max_length=500, required=False, allow_blank=True, allow_null=True)
 
 
 class TravelVoucherSerializer(serializers.Serializer):
