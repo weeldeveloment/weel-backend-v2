@@ -907,6 +907,60 @@ def get_dashboard_summary(company_id: int) -> dict[str, Any]:
     }
 
 
+# ─── Top employees by trip count ────────────────────────────────────────────
+
+def get_top_employees_by_trip_count(company_id: int, limit: int = 5) -> list[dict[str, Any]]:
+    """Return the employees with the most business-trip assignments for a
+    company, ordered by ``trip_count`` DESC (distinct trips per employee)."""
+    return fetch_all(
+        f"""
+        SELECT
+            e.id              AS employee_id,
+            e.full_name       AS full_name,
+            e.position        AS position,
+            e.email           AS email,
+            e.phone           AS phone,
+            d.id              AS department_id,
+            d.name            AS department_name,
+            COUNT(DISTINCT te.trip_id) AS trip_count
+        FROM {B2B_EMPLOYEE_TABLE} e
+        JOIN {B2B_TRIP_EMPLOYEE_TABLE} te ON te.employee_id = e.id
+        JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = te.trip_id AND t.company_id = %s
+        LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
+        WHERE e.company_id = %s AND e.is_active = TRUE
+        GROUP BY e.id, e.full_name, e.position, e.email, e.phone, d.id, d.name
+        ORDER BY trip_count DESC, e.full_name ASC
+        LIMIT %s
+        """,
+        [company_id, company_id, limit],
+    )
+
+
+# ─── Top hotels by booking count ────────────────────────────────────────────
+
+def get_top_hotels_by_booking_count(company_id: int, limit: int = 3) -> list[dict[str, Any]]:
+    """Return the hotels this company has booked the most, ordered by
+    ``booking_count`` DESC. Grouped by ``hotel_guid`` (a hotel can live in
+    any tenant schema, so the guid — not the plain id — is the stable key).
+    """
+    return fetch_all(
+        f"""
+        SELECT
+            hotel_guid,
+            MAX(hotel_name) AS hotel_name,
+            MAX(tenant_schema) AS tenant_schema,
+            MAX(hotel_property_id) AS hotel_property_id,
+            COUNT(*) AS booking_count
+        FROM {B2B_HOTEL_BOOKING_REQUEST_TABLE}
+        WHERE company_id = %s
+        GROUP BY hotel_guid
+        ORDER BY booking_count DESC, MAX(hotel_name) ASC
+        LIMIT %s
+        """,
+        [company_id, limit],
+    )
+
+
 # ─── Department monthly spending ────────────────────────────────────────────
 
 def get_department_monthly_spending(
