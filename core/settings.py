@@ -351,10 +351,7 @@ SIMPLE_JWT = {
     "JTI_CLAIM": "jti",
 }
 
-_swagger_url = (os.getenv("SWAGGER_URL") or "").strip() or None
-# In local debug, let Swagger use the current origin (localhost) to avoid
-# cross-origin "NetworkError" when SWAGGER_URL points to a remote domain.
-SWAGGER_URL = None if DEBUG else _swagger_url
+SWAGGER_URL = (os.getenv("SWAGGER_URL") or "").strip() or None
 ENABLE_SWAGGER_UI = env_bool("ENABLE_SWAGGER_UI", default=DEBUG)
 SWAGGER_BASIC_AUTH_USERNAME = (os.getenv("SWAGGER_BASIC_AUTH_USERNAME") or "").strip()
 SWAGGER_BASIC_AUTH_PASSWORD = (os.getenv("SWAGGER_BASIC_AUTH_PASSWORD") or "").strip()

@@ -82,11 +82,6 @@ def _serialize_hotel_row(
         payload["guid"] = encode_hotel_guid(tenant_schema, hotel_id)
     payload["title"] = payload.get("name") or payload.get("title") or ""
     payload["img"] = payload.get("photos") or payload.get("img") or []
-    payload["price"] = None
-    payload["guests"] = None
-    payload["rooms"] = None
-    payload["beds"] = None
-    payload["bathrooms"] = None
     raw_legal = payload.get("legal_info")
     if isinstance(raw_legal, str):
         try:
@@ -95,19 +90,13 @@ def _serialize_hotel_row(
             raw_legal = {}
     payload["legal_info"] = raw_legal if isinstance(raw_legal, dict) else {}
     payload["is_allowed_alcohol"] = bool(payload.get("alcohol_allowed", False))
-    payload["is_allowed_corporate"] = False
     payload["is_allowed_pets"] = bool(payload.get("pets_allowed", False))
     payload["is_quiet_hours"] = bool(payload.get("quiet_hours", True))
     payload["is_verified"] = bool(payload.get("is_verified", False))
     payload["is_archived"] = bool(payload.get("is_archived", False))
     payload["is_recommended"] = bool(payload.get("is_recommended", False))
     payload["verification_status"] = payload.get("verification_status") or "waiting"
-    payload["average_rating"] = (
-        float(payload["star_rating"]) if payload.get("star_rating") is not None else None
-    )
     payload["property_kind"] = "hotel"
-    payload["comment_count"] = 0
-    payload["review_count"] = 0
     payload["check_in_time"] = _iso_time(payload.get("check_in_time"))
     payload["check_out_time"] = _iso_time(payload.get("check_out_time"))
     payload["partner_user_id"] = payload.get("partner_user_id")
@@ -200,7 +189,10 @@ def _fetch_hotel_rows_for_schema(
                     COALESCE(p.verification_status, 'waiting') AS verification_status,
                     p.created_at,
                     p.updated_at,
-                    %s AS tenant_schema
+                    %s AS tenant_schema,
+                    (SELECT MIN(rate.rate) FROM pms_rate rate WHERE rate.property_id = p.id AND rate.date_to >= CURRENT_DATE) AS price_from,
+                    (SELECT AVG(rv.rating) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS review_score,
+                    (SELECT COUNT(*) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS review_count
                 FROM pms_property p
                 {where_sql}
                 ORDER BY p.created_at DESC, p.id DESC
@@ -448,6 +440,33 @@ def get_admin_hotel(hotel_guid: str) -> dict[str, Any] | None:
     if not rows:
         return None
     return _serialize_hotel_row(rows[0], organization)
+
+
+def fetch_room_summaries(schema_name: str, property_id: int) -> list[dict[str, Any]]:
+    def _query():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    r.id,
+                    r.display_name,
+                    r.room_type_preset,
+                    r.capacity,
+                    r.bedroom_count,
+                    COALESCE(r.beds, '[]'::jsonb) AS beds,
+                    COALESCE(r.photos, ARRAY[]::text[]) AS photos,
+                    COALESCE(r.amenities, ARRAY[]::text[]) AS amenities,
+                    (SELECT MIN(rate.rate) FROM pms_rate rate
+                     WHERE rate.room_id = r.id AND rate.date_to >= CURRENT_DATE) AS price_from
+                FROM pms_room r
+                WHERE r.property_id = %s AND r.is_active = TRUE
+                ORDER BY r.room_number ASC
+                """,
+                [property_id],
+            )
+            return _fetch_rows(cursor)
+
+    return _run_in_schema(schema_name, _query)
 
 
 def get_hotel_for_public(hotel_guid: str) -> dict[str, Any] | None:

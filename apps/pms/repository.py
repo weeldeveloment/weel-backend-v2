@@ -233,6 +233,8 @@ def create_room(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
         "photos": _to_pg_array,
         "condition": str, "availability": str,
         "capacity": int, "meal_plan": str, "is_active": bool,
+        "base_price": lambda v: v, "currency": str,
+        "cover_photo_index": int,
     }
 
     for key, caster in field_map.items():

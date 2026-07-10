@@ -114,6 +114,9 @@ class RoomSerializer(serializers.Serializer):
         required=False,
         default="BB",
     )
+    base_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    currency = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="USD")
+    cover_photo_index = serializers.IntegerField(required=False, default=0)
     is_active = serializers.BooleanField(required=False)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
@@ -132,6 +135,9 @@ class RoomMassUpdateItemSerializer(serializers.Serializer):
     availability = serializers.ChoiceField(choices=["available", "occupied", "blocked"], required=False)
     capacity = serializers.IntegerField(required=False)
     meal_plan = serializers.ChoiceField(choices=["RO", "BB", "HB", "FB", "AI", "UAI"], required=False)
+    base_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    currency = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    cover_photo_index = serializers.IntegerField(required=False)
     is_active = serializers.BooleanField(required=False)
 
 

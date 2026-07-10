@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from rest_framework import serializers
 
 
@@ -43,7 +45,7 @@ class HotelSearchParamsSerializer(serializers.Serializer):
 
 class HotelCardSerializer(serializers.Serializer):
     id = serializers.IntegerField()
-    hotel_guid = serializers.CharField(allow_null=True, required=False)
+    guid = serializers.CharField(allow_null=True, required=False)
     organization_name = serializers.CharField(allow_null=True, required=False)
     name = serializers.CharField()
     city = serializers.CharField(allow_null=True)
@@ -74,7 +76,7 @@ class HotelDetailSerializer(HotelCardSerializer):
     pets_allowed = serializers.BooleanField(default=False)
     alcohol_allowed = serializers.BooleanField(default=False)
     quiet_hours = serializers.BooleanField(default=False)
-    images = serializers.ListField(child=serializers.DictField(), default=list)
+    images = serializers.ListField(child=serializers.CharField(), default=list)
     reviews = serializers.ListField(child=serializers.DictField(), default=list)
 
 
@@ -85,6 +87,7 @@ class RoomAvailabilitySerializer(serializers.Serializer):
     display_name = serializers.CharField(allow_null=True)
     bedroom_count = serializers.IntegerField(default=1)
     price_per_night = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    currency = serializers.CharField(allow_null=True)
     beds = serializers.JSONField(default=list)
     amenities = serializers.ListField(child=serializers.CharField(), default=list)
     capacity_adults = serializers.IntegerField(allow_null=True)
@@ -97,11 +100,15 @@ class RoomAvailabilitySerializer(serializers.Serializer):
 
 
 class RoomSelectParamsSerializer(serializers.Serializer):
-    check_in = serializers.DateField()
-    check_out = serializers.DateField()
+    check_in = serializers.DateField(required=False)
+    check_out = serializers.DateField(required=False)
     guests = serializers.IntegerField(default=1, min_value=1)
 
     def validate(self, data):
+        if "check_in" not in data:
+            data["check_in"] = date.today()
+        if "check_out" not in data:
+            data["check_out"] = data["check_in"] + timedelta(days=30)
         if data["check_out"] <= data["check_in"]:
             raise serializers.ValidationError({"check_out": "check_out must be after check_in."})
         return data

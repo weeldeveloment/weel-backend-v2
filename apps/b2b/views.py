@@ -138,7 +138,7 @@ class B2BHotelSearchView(APIView):
             "tanlov uchun `lat`/`lon`/`radius_km` (km). Kalendar: "
             "`check_in`/`check_out` + `guests` (necha kishi) berilsa, faqat "
             "shu sanalar oralig'ida va shu odam soniga mos BO'SH xona bor "
-            "mehmonxonalar qaytariladi. Har bir natija `hotel_guid` bilan "
+            "mehmonxonalar qaytariladi. Har bir natija `guid` bilan "
             "keladi — mehmonxona bir nechta tashkilotlar (sxemalar) bo'ylab "
             "qidirilgani uchun bu identifikator raqamli `id`dan ko'ra "
             "ishonchliroq."
