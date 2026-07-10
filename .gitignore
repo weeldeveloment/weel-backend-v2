@@ -26,7 +26,7 @@ __pycache__/
 .codegraph/
 .gemini/
 .kiro/
-
+opencode.jsonc
 
 
 # Virtual Environment
