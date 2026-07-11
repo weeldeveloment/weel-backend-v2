@@ -1008,7 +1008,7 @@ class HotelRoomListView(APIView):
         responses={200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
     )
     def get(self, request, hotel_guid):
-        _schema, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
+        schema_name, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
 
         check_in_str = request.query_params.get("check_in")
         check_out_str = request.query_params.get("check_out")
@@ -1025,7 +1025,14 @@ class HotelRoomListView(APIView):
             raise ValidationError({"detail": _("check_out must be after check_in.")})
 
         from apps.hotels.repository import get_available_rooms
-        rooms = get_available_rooms(hotel_id, check_in=ci, check_out=co, guests=guests)
+        from apps.property.hotel_repository import _run_in_schema
+
+        rooms = _run_in_schema(
+            schema_name,
+            lambda: get_available_rooms(
+                hotel_id, check_in=ci, check_out=co, guests=guests
+            ),
+        )
         return Response(rooms, status=status.HTTP_200_OK)
 
 
@@ -1054,7 +1061,7 @@ class HotelRoomPriceView(APIView):
         )},
     )
     def get(self, request, hotel_guid, room_id):
-        _schema, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
+        schema_name, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
 
         check_in_str = request.query_params.get("check_in")
         check_out_str = request.query_params.get("check_out")
@@ -1067,7 +1074,12 @@ class HotelRoomPriceView(APIView):
             raise ValidationError({"detail": _("Invalid date format. Use YYYY-MM-DD.")})
 
         from apps.hotels.repository import calculate_stay_price
-        pricing = calculate_stay_price(room_id, check_in=ci, check_out=co)
+        from apps.property.hotel_repository import _run_in_schema
+
+        pricing = _run_in_schema(
+            schema_name,
+            lambda: calculate_stay_price(room_id, check_in=ci, check_out=co),
+        )
         if not pricing:
             raise NotFound(_("Room not found or invalid dates."))
         return Response({
@@ -1105,7 +1117,7 @@ class HotelCalendarView(APIView):
         )},
     )
     def get(self, request, hotel_guid):
-        _schema, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
+        schema_name, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
 
         from_date_str = request.query_params.get("from_date")
         to_date_str = request.query_params.get("to_date")
@@ -1118,7 +1130,12 @@ class HotelCalendarView(APIView):
             raise ValidationError({"detail": _("Invalid date format. Use YYYY-MM-DD.")})
 
         from apps.hotels.repository import get_hotel_calendar
-        calendar = get_hotel_calendar(hotel_id, from_date=fd, to_date=td)
+        from apps.property.hotel_repository import _run_in_schema
+
+        calendar = _run_in_schema(
+            schema_name,
+            lambda: get_hotel_calendar(hotel_id, from_date=fd, to_date=td),
+        )
         return Response(calendar, status=status.HTTP_200_OK)
 
 
