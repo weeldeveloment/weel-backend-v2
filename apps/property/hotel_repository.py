@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 
 from django.db import connection
 from django.utils import timezone
+from pydantic import ValidationError
 
 from apps.platform.raw_repository import get_organization_by_schema, list_organizations
 
@@ -401,11 +402,11 @@ def get_admin_hotel(hotel_guid: str) -> dict[str, Any] | None:
         hotel_guid, include_inactive=True, include_unverified=True
     )
     if not resolved:
-        return None
+        raise ValidationError("Unable to resolve the hotel guid")
     schema_name, hotel_id = resolved
     organization = get_organization_by_schema(schema_name)
     if not organization:
-        return None
+        raise ValidationError("Unable to find the organization")
     rows = _fetch_hotel_rows_for_schema(
         schema_name,
         hotel_id=hotel_id,
@@ -560,11 +561,11 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         hotel_guid, include_inactive=True, include_unverified=True
     )
     if not resolved:
-        return None
+        raise ValidationError("Unable to update the hotel")
     schema_name, hotel_id = resolved
     organization = get_organization_by_schema(schema_name)
     if not organization:
-        return None
+        raise ValidationError("Unable to find the organization")
 
     allowed_columns = {
         "name",
@@ -640,7 +641,7 @@ def delete_admin_hotel(*, hotel_guid: str) -> bool:
         hotel_guid, include_inactive=True, include_unverified=True
     )
     if not resolved:
-        return False
+        raise ValidationError("Error on deleting the hotel")
     schema_name, hotel_id = resolved
 
     def _delete() -> bool:
