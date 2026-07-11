@@ -113,7 +113,6 @@ from .hotel_repository import (
     admin_append_hotel_images,
     admin_remove_hotel_image,
     create_admin_hotel,
-    decode_hotel_guid,
     delete_admin_hotel,
     fetch_room_summaries,
     get_admin_hotel,
@@ -2135,10 +2134,11 @@ class HotelPropertyReviewListCreateView(APIView):
         responses={200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
     )
     def get(self, request, hotel_guid):
-        decoded = decode_hotel_guid(str(hotel_guid))
-        if not decoded:
+        from apps.property.hotel_repository import resolve_hotel_guid
+        resolved = resolve_hotel_guid(str(hotel_guid))
+        if not resolved:
             raise NotFound(_("Hotel not found"))
-        _schema, hotel_id = decoded
+        _schema, hotel_id = resolved
         from apps.hotels.repository import get_hotel_reviews
         reviews = get_hotel_reviews(hotel_id)
         return Response(reviews, status=status.HTTP_200_OK)
@@ -2165,10 +2165,11 @@ class HotelPropertyReviewListCreateView(APIView):
         responses={201: openapi.Schema(type=openapi.TYPE_OBJECT), 400: _ERROR_VALIDATION_SCHEMA},
     )
     def post(self, request, hotel_guid):
-        decoded = decode_hotel_guid(str(hotel_guid))
-        if not decoded:
+        from apps.property.hotel_repository import resolve_hotel_guid
+        resolved = resolve_hotel_guid(str(hotel_guid))
+        if not resolved:
             raise NotFound(_("Hotel not found"))
-        schema_name, hotel_id = decoded
+        schema_name, hotel_id = resolved
 
         rating = request.data.get("rating")
         comment = request.data.get("comment", "")

@@ -54,20 +54,20 @@ from apps.pms.serializers import (
 )
 from apps.b2b.repository import list_b2b_users, get_company
 from apps.b2b.serializers import B2BCompanySerializer, B2BUserSerializer
-from property.hotel_repository import decode_hotel_guid, encode_hotel_guid
+from property.hotel_repository import resolve_hotel_guid
 from apps.platform.raw_repository import list_organizations
 
 logger = logging.getLogger(__name__)
 
 
-def _set_from_guid(hotel_guid: str) -> int | None:
-    decoded = decode_hotel_guid(hotel_guid)
-    if not decoded:
+def _set_tenant_from_guid(hotel_guid: str) -> int | None:
+    resolved = resolve_hotel_guid(hotel_guid, include_inactive=True)
+    if not resolved:
         return None
-    schema_name, numeric_id = decoded
+    schema_name, hotel_id = resolved
     with connection.cursor() as cursor:
         cursor.execute("SET search_path TO %s, public", [schema_name])
-    return numeric_id
+    return hotel_id
 
 
 class AdminBaseView(APIView):
@@ -117,7 +117,7 @@ class AdminHotelListView(AdminHotelBaseView):
                 f"SELECT * FROM {schema}.pms_property WHERE is_active = TRUE ORDER BY name ASC"
             )
             for row in rows:
-                row["guid"] = encode_hotel_guid(schema, row["id"])
+                row["guid"] = str(row["guid"])
             all_properties.extend(rows)
         return Response(PropertySerializer(all_properties, many=True).data)
 

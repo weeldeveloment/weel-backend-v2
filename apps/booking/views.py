@@ -983,12 +983,12 @@ class AdminBookingListView(ListAPIView):
 # ---------------------------------------------------------------------------
 
 
-def _decode_hotel_guid_or_404(hotel_guid: str) -> tuple[str, int]:
-    from property.hotel_repository import decode_hotel_guid
-    decoded = decode_hotel_guid(str(hotel_guid))
-    if not decoded:
+def _resolve_hotel_guid_or_404(hotel_guid: str) -> tuple[str, int]:
+    from property.hotel_repository import resolve_hotel_guid
+    resolved = resolve_hotel_guid(str(hotel_guid))
+    if not resolved:
         raise NotFound(_("Hotel not found"))
-    return decoded
+    return resolved
 
 
 class HotelRoomListView(APIView):
@@ -1008,7 +1008,7 @@ class HotelRoomListView(APIView):
         responses={200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
     )
     def get(self, request, hotel_guid):
-        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+        _schema, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
 
         check_in_str = request.query_params.get("check_in")
         check_out_str = request.query_params.get("check_out")
@@ -1054,7 +1054,7 @@ class HotelRoomPriceView(APIView):
         )},
     )
     def get(self, request, hotel_guid, room_id):
-        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+        _schema, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
 
         check_in_str = request.query_params.get("check_in")
         check_out_str = request.query_params.get("check_out")
@@ -1105,7 +1105,7 @@ class HotelCalendarView(APIView):
         )},
     )
     def get(self, request, hotel_guid):
-        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+        _schema, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
 
         from_date_str = request.query_params.get("from_date")
         to_date_str = request.query_params.get("to_date")
@@ -1161,7 +1161,7 @@ class ClientHotelBookingCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        _schema, hotel_id = _decode_hotel_guid_or_404(str(data["hotel_guid"]))
+        _schema, hotel_id = _resolve_hotel_guid_or_404(str(data["hotel_guid"]))
         room_id = data["room_id"]
         ci = data["check_in"]
         co = data["check_out"]
