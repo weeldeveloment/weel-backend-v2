@@ -121,24 +121,13 @@ def calculate_stay_price(
         return None
 
     room = fetch_one(
-        "SELECT id FROM pms_room WHERE id = %s AND is_active = TRUE",
+        "SELECT base_price FROM pms_room WHERE id = %s AND is_active = TRUE",
         [room_id],
     )
     if not room:
         return None
 
-    rate_row = fetch_one(
-        """
-        SELECT MIN(rate) AS rate
-        FROM pms_rate
-        WHERE room_id = %s
-          AND date_from <= %s
-          AND date_to >= %s
-        """,
-        [room_id, check_out, check_in],
-    )
-
-    raw_rate = rate_row.get("rate") if rate_row else None
+    raw_rate = room.get("base_price")
     if raw_rate is None:
         return None
 

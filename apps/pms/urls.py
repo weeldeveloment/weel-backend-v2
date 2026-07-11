@@ -23,8 +23,6 @@ from .views import (
     PropertyImageDeleteView,
     PropertyListCreateView,
     PropertyRetrieveUpdateDestroyView,
-    RateListCreateView,
-    RateRetrieveUpdateDestroyView,
     ReviewComplainView,
     ReviewListCreateView,
     ReviewRespondView,
@@ -66,10 +64,6 @@ urlpatterns = [
     path("properties/<int:property_id>/bookings/<int:booking_id>/move/", BookingMoveView.as_view(), name="pms-booking-move"),
     path("properties/<int:property_id>/bookings/<int:booking_id>/meal-plan/", BookingMealPlanView.as_view(), name="pms-booking-meal-plan"),
     path("properties/<int:property_id>/bookings/<int:booking_id>/history/", BookingHistoryView.as_view(), name="pms-booking-history"),
-
-    # Rates
-    path("properties/<int:property_id>/rates/", RateListCreateView.as_view(), name="pms-rate-list-create"),
-    path("properties/<int:property_id>/rates/<int:rate_id>/", RateRetrieveUpdateDestroyView.as_view(), name="pms-rate-detail"),
 
     # Reviews
     path("properties/<int:property_id>/reviews/", ReviewListCreateView.as_view(), name="pms-review-list-create"),

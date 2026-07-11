@@ -32,7 +32,6 @@ from apps.pms.repository import (
     get_room_availability,
     list_bookings,
     list_properties,
-    list_rates,
     list_reviews,
     list_rooms,
     move_booking,
@@ -46,7 +45,6 @@ from apps.pms.serializers import (
     BookingSerializer,
     MoveBookingSerializer,
     PropertySerializer,
-    RateSerializer,
     ReviewComplainSerializer,
     ReviewRespondSerializer,
     ReviewSerializer,
@@ -342,16 +340,6 @@ class AdminHotelBookingCheckOutView(AdminHotelBaseView):
         if not booking:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(BookingSerializer(booking).data)
-
-
-class AdminHotelRatesView(AdminHotelBaseView):
-    """List rates for a property"""
-
-    @swagger_auto_schema(responses={200: RateSerializer(many=True)})
-    def get(self, request, property_id):
-        room_id = request.query_params.get("room_id")
-        rates = list_rates(property_id, room_id=int(room_id) if room_id else None)
-        return Response(RateSerializer(rates, many=True).data)
 
 
 class AdminHotelReviewsView(AdminHotelBaseView):

@@ -179,23 +179,6 @@ class Command(BaseCommand):
             self.stdout.write("  Created pms_booking_history")
 
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS pms_rate (
-                    id BIGSERIAL PRIMARY KEY,
-                    property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
-                    room_id BIGINT,
-                    date_from DATE NOT NULL,
-                    date_to DATE NOT NULL,
-                    rate NUMERIC(10,2) NOT NULL,
-                    currency VARCHAR(3) DEFAULT 'USD',
-                    min_stay INTEGER DEFAULT 1,
-                    is_weekend_rate BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-            """)
-            self.stdout.write("  Created pms_rate")
-
-            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pms_review (
                     id BIGSERIAL PRIMARY KEY,
                     property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,

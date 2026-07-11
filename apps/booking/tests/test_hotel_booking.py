@@ -61,9 +61,9 @@ def test_room(test_hotel):
     execute(
         """
         INSERT INTO pms_room (property_id, room_type_name, room_number, floor, display_name,
-            capacity, is_active, created_at, updated_at)
+            capacity, base_price, is_active, created_at, updated_at)
         VALUES (%s, 'Test Suite', '101', 1, 'Test Suite 101',
-            2, TRUE, NOW(), NOW())
+            2, 250000, TRUE, NOW(), NOW())
         ON CONFLICT(id) DO NOTHING
         """,
         [test_hotel["id"]],

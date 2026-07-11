@@ -35,31 +35,26 @@ from apps.pms.repository import (
     create_booking,
     create_guest,
     create_property,
-    create_rate,
     create_review,
     create_room,
     delete_property,
     delete_property_image,
-    delete_rate,
     delete_room,
     expire_holds,
     find_or_create_guest,
     get_analytics,
     get_booking,
     get_booking_history,
-    get_effective_rate,
     get_guest,
     get_or_create_calendar_slot,
     get_property,
     get_property_images,
-    get_rate_by_id,
     get_room,
     get_room_availability,
     hold_dates,
     list_bookings,
     list_guests,
     list_properties,
-    list_rates,
     list_reviews,
     list_rooms,
     mass_update_rooms,
@@ -71,7 +66,6 @@ from apps.pms.repository import (
     update_booking_with_guest,
     update_guest,
     update_property,
-    update_rate,
     update_room,
 )
 from apps.pms.serializers import (
@@ -86,7 +80,6 @@ from apps.pms.serializers import (
     MoveBookingSerializer,
     PropertyImageSerializer,
     PropertySerializer,
-    RateSerializer,
     ResizeBookingSerializer,
     ReviewComplainSerializer,
     ReviewRespondSerializer,
@@ -634,55 +627,6 @@ class BookingHistoryView(PMSBaseView):
     def get(self, request, property_id, booking_id):
         history = get_booking_history(booking_id)
         return Response(BookingHistorySerializer(history, many=True).data)
-
-
-class RateListCreateView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RateSerializer(many=True)})
-    def get(self, request, property_id):
-        room_id = request.query_params.get("room_id")
-        rates = list_rates(property_id, room_id=int(room_id) if room_id else None)
-        return Response(RateSerializer(rates, many=True).data)
-
-    @swagger_auto_schema(responses={201: RateSerializer()})
-    def post(self, request, property_id):
-        serializer = RateSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            rate = create_rate(property_id=property_id, **serializer.validated_data)
-        except IntegrityError as e:
-            return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not rate:
-            return Response({"detail": "Failed to create rate."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response(RateSerializer(rate).data, status=status.HTTP_201_CREATED)
-
-
-class RateRetrieveUpdateDestroyView(PMSBaseView):
-    @swagger_auto_schema(responses={200: RateSerializer()})
-    def get(self, request, property_id, rate_id):
-        rate = get_rate_by_id(rate_id)
-        if not rate:
-            return Response({"detail": "Rate not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(RateSerializer(rate).data)
-
-    @swagger_auto_schema(responses={200: RateSerializer()})
-    def patch(self, request, property_id, rate_id):
-        serializer = RateSerializer(data=request.data, partial=True)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        rate = update_rate(rate_id, **serializer.validated_data)
-        if not rate:
-            return Response({"detail": "Rate not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(RateSerializer(rate).data)
-
-    @swagger_auto_schema(responses={204: "Deleted"})
-    def delete(self, request, property_id, rate_id):
-        if not delete_rate(rate_id):
-            return Response({"detail": "Rate not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ReviewListCreateView(PMSBaseView):

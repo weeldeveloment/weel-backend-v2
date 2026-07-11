@@ -237,25 +237,6 @@ class BookingHistorySerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
 
 
-class RateSerializer(serializers.Serializer):
-    id = serializers.IntegerField(read_only=True)
-    property_id = serializers.IntegerField(read_only=True)
-    room_id = serializers.IntegerField()
-    date_from = serializers.DateField()
-    date_to = serializers.DateField()
-    rate = serializers.DecimalField(max_digits=10, decimal_places=2)
-    currency = serializers.CharField(required=False, default="USD")
-    min_stay = serializers.IntegerField(required=False, default=1)
-    is_weekend_rate = serializers.BooleanField(required=False, default=False)
-    created_at = serializers.DateTimeField(read_only=True)
-    updated_at = serializers.DateTimeField(read_only=True)
-
-    def validate(self, data):
-        if data["date_to"] < data["date_from"]:
-            raise serializers.ValidationError({"date_to": "date_to must be >= date_from."})
-        return data
-
-
 class ReviewSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     property_id = serializers.IntegerField(read_only=True)

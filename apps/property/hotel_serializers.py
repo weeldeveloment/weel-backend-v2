@@ -268,6 +268,7 @@ class HotelAdminListSerializer(HotelCardSerializer):
         else:
             row["partner_user"] = None
         data = super().to_representation(row)
+        data["img"] = data.pop("images", [])
         data["is_active"] = bool(row.get("is_active", True))
         data["is_testing"] = bool(row.get("is_testing", False))
         data["is_verified"] = bool(row.get("is_verified", False))

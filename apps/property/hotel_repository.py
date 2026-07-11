@@ -174,7 +174,7 @@ def _fetch_hotel_rows_for_schema(
                     p.created_at,
                     p.updated_at,
                     %s AS tenant_schema,
-                    (SELECT MIN(rate.rate) FROM pms_rate rate WHERE rate.property_id = p.id AND rate.date_to >= CURRENT_DATE) AS price_from,
+                    (SELECT MIN(r.base_price) FROM pms_room r WHERE r.property_id = p.id AND r.is_active = TRUE) AS price_from,
                     (SELECT AVG(rv.rating) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS review_score,
                     (SELECT COUNT(*) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS review_count
                 FROM pms_property p
@@ -432,8 +432,7 @@ def fetch_room_summaries(schema_name: str, property_id: int) -> list[dict[str, A
                     COALESCE(r.beds, '[]'::jsonb) AS beds,
                     COALESCE(r.photos, ARRAY[]::text[]) AS photos,
                     COALESCE(r.amenities, ARRAY[]::text[]) AS amenities,
-                    (SELECT MIN(rate.rate) FROM pms_rate rate
-                     WHERE rate.room_id = r.id AND rate.date_to >= CURRENT_DATE) AS price_from
+                    COALESCE(r.base_price, 0) AS price_from
                 FROM pms_room r
                 WHERE r.property_id = %s AND r.is_active = TRUE
                 ORDER BY r.room_number ASC
