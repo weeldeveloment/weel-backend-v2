@@ -65,7 +65,7 @@ from apps.b2b.repository import (
 )
 from apps.b2b.models import HotelBookingRequestStatus
 from apps.b2b.permissions import IsB2BOwner, IsB2BPerformer
-from apps.property.hotel_repository import _run_in_schema, decode_hotel_guid, get_hotel_for_public
+from apps.property.hotel_repository import _run_in_schema, get_hotel_for_public, resolve_hotel_guid
 from apps.hotels.repository import (
     count_hotels,
     create_hotel_booking,
@@ -210,10 +210,10 @@ class B2BHotelRoomsView(APIView):
         tags=["B2B / Executer"],
     )
     def get(self, request, hotel_guid):
-        decoded = decode_hotel_guid(hotel_guid)
-        if not decoded:
+        resolved = resolve_hotel_guid(hotel_guid)
+        if not resolved:
             return Response({"detail": "Invalid hotel_guid."}, status=status.HTTP_400_BAD_REQUEST)
-        schema_name, hotel_id = decoded
+        schema_name, hotel_id = resolved
 
         params = RoomSelectParamsSerializer(data=request.query_params)
         if not params.is_valid():
@@ -350,10 +350,10 @@ class B2BHotelBookingListCreateView(APIView):
         if not trip:
             return Response({"detail": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        decoded = decode_hotel_guid(data["hotel_guid"])
-        if not decoded:
+        resolved = resolve_hotel_guid(data["hotel_guid"])
+        if not resolved:
             return Response({"detail": "Invalid hotel_guid."}, status=status.HTTP_400_BAD_REQUEST)
-        schema_name, hotel_id = decoded
+        schema_name, hotel_id = resolved
 
         hotel = get_hotel_for_public(data["hotel_guid"])
         if not hotel:
