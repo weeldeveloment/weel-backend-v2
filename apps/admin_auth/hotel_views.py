@@ -60,7 +60,7 @@ from apps.platform.raw_repository import list_organizations
 logger = logging.getLogger(__name__)
 
 
-def _set_tenant_from_guid(hotel_guid: str) -> int | None:
+def _set_from_guid(hotel_guid: str) -> int | None:
     decoded = decode_hotel_guid(hotel_guid)
     if not decoded:
         return None

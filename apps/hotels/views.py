@@ -10,6 +10,11 @@ from rest_framework import status
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
+from apps.property.hotel_repository import (
+    _find_hotel_by_guid_across_schemas,
+    _run_in_schema,
+)
+
 from apps.hotels.repository import (
     calculate_stay_price,
     count_hotels,
@@ -29,6 +34,22 @@ from apps.hotels.serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+_GUID_PARAM = openapi.Parameter(
+    "guid", openapi.IN_PATH,
+    type=openapi.TYPE_STRING,
+    description="Property GUID (pms_property.guid).",
+)
+
+
+def _resolve_hotel(guid: str) -> tuple[str, int] | None:
+    rows = _find_hotel_by_guid_across_schemas(str(guid))
+    if not rows:
+        return None
+    tenant = rows[0].get("tenant_schema")
+    if not tenant:
+        return None
+    return tenant, int(rows[0]["id"])
 
 
 class HotelSearchView(APIView):
@@ -70,62 +91,101 @@ class HotelSearchView(APIView):
 class HotelDetailView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(responses={200: HotelDetailSerializer()})
-    def get(self, request, hotel_id):
-        hotel = get_hotel_card(hotel_id)
-        if not hotel:
-            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+    @swagger_auto_schema(
+        manual_parameters=[_GUID_PARAM],
+        responses={200: HotelDetailSerializer()},
+    )
+    def get(self, request, guid):
+        resolved = _resolve_hotel(guid)
+        if not resolved:
+            return Response({"detail": "Invalid GUID."}, status=status.HTTP_400_BAD_REQUEST)
 
-        reviews = get_hotel_reviews(hotel_id, limit=5)
-        hotel["images"] = hotel.get("photos") or []
-        hotel["reviews"] = reviews
-        return Response(HotelDetailSerializer(hotel).data)
+        schema_name, numeric_id = resolved
+
+        def _query():
+            hotel = get_hotel_card(numeric_id)
+            if not hotel:
+                return None
+            reviews = get_hotel_reviews(numeric_id, limit=5)
+            hotel["images"] = hotel.get("photos") or []
+            hotel["reviews"] = reviews
+            return hotel
+
+        result = _run_in_schema(schema_name, _query)
+        if result is None:
+            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(HotelDetailSerializer(result).data)
 
 
 class HotelRoomSelectView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
+        manual_parameters=[_GUID_PARAM],
         query_serializer=RoomSelectParamsSerializer,
         responses={200: RoomAvailabilitySerializer(many=True)},
     )
-    def get(self, request, hotel_id):
+    def get(self, request, guid):
+        resolved = _resolve_hotel(guid)
+        if not resolved:
+            return Response({"detail": "Invalid GUID."}, status=status.HTTP_400_BAD_REQUEST)
+
+        schema_name, numeric_id = resolved
+
         params = RoomSelectParamsSerializer(data=request.query_params)
         if not params.is_valid():
             return Response(params.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        hotel = get_hotel_card(hotel_id)
-        if not hotel:
-            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        def _query():
+            hotel = get_hotel_card(numeric_id)
+            if not hotel:
+                return None
+            rooms = get_available_rooms(
+                numeric_id,
+                check_in=params.validated_data["check_in"],
+                check_out=params.validated_data["check_out"],
+                guests=params.validated_data["guests"],
+            )
+            return rooms
 
-        rooms = get_available_rooms(
-            hotel_id,
-            check_in=params.validated_data["check_in"],
-            check_out=params.validated_data["check_out"],
-            guests=params.validated_data["guests"],
-        )
-        return Response(RoomAvailabilitySerializer(rooms, many=True).data)
+        result = _run_in_schema(schema_name, _query)
+        if result is None:
+            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(RoomAvailabilitySerializer(result, many=True).data)
 
 
 class HotelRoomPriceView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
+        manual_parameters=[_GUID_PARAM],
         query_serializer=RoomSelectParamsSerializer,
         responses={200: StayPriceSerializer()},
     )
-    def get(self, request, hotel_id, room_id):
+    def get(self, request, guid, room_id):
+        resolved = _resolve_hotel(guid)
+        if not resolved:
+            return Response({"detail": "Invalid GUID."}, status=status.HTTP_400_BAD_REQUEST)
+
+        schema_name, _ = resolved
+
         params = RoomSelectParamsSerializer(data=request.query_params)
         if not params.is_valid():
             return Response(params.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        pricing = calculate_stay_price(
-            room_id,
-            params.validated_data["check_in"],
-            params.validated_data["check_out"],
-        )
+        def _query():
+            return calculate_stay_price(
+                room_id,
+                params.validated_data["check_in"],
+                params.validated_data["check_out"],
+            )
+
+        pricing = _run_in_schema(schema_name, _query)
         if not pricing:
-            return Response({"detail": "Room not found or invalid dates."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Room not found, no rate available, or invalid dates."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(StayPriceSerializer(pricing).data)
 
 
@@ -134,13 +194,24 @@ class HotelReviewsView(APIView):
 
     @swagger_auto_schema(
         manual_parameters=[
+            _GUID_PARAM,
             openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=10),
             openapi.Parameter("offset", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=0),
         ],
         responses={200: ReviewListSerializer(many=True)},
     )
-    def get(self, request, hotel_id):
+    def get(self, request, guid):
+        resolved = _resolve_hotel(guid)
+        if not resolved:
+            return Response({"detail": "Invalid GUID."}, status=status.HTTP_400_BAD_REQUEST)
+
+        schema_name, numeric_id = resolved
+
         limit = int(request.query_params.get("limit", 10))
         offset = int(request.query_params.get("offset", 0))
-        reviews = get_hotel_reviews(hotel_id, limit=limit, offset=offset)
+
+        def _query():
+            return get_hotel_reviews(numeric_id, limit=limit, offset=offset)
+
+        reviews = _run_in_schema(schema_name, _query)
         return Response(ReviewListSerializer(reviews, many=True).data)

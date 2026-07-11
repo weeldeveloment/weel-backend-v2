@@ -66,10 +66,13 @@ def get_available_rooms(
         SELECT
             r.id, r.room_number, r.floor, r.display_name,
             r.bedroom_count, r.beds, r.amenities,
-            r.capacity,
+            r.capacity AS capacity_adults,
             r.room_type_name, r.room_type_preset AS preset,
             r.meal_plan,
-            COALESCE(r.photos, '{}'::text[]) AS photos
+            r.area AS area_sqm,
+            COALESCE(r.base_price, 0) AS price_per_night,
+            COALESCE(r.currency, 'USD') AS currency,
+            COALESCE(r.photos, '{}'::text[]) AS images
         FROM pms_room r
         WHERE r.property_id = %s
           AND r.is_active = TRUE
@@ -81,9 +84,16 @@ def get_available_rooms(
                 AND b.check_in < %s
                 AND b.check_out > %s
           )
+          AND NOT EXISTS (
+              SELECT 1 FROM pms_calendar_slot cs
+              WHERE cs.room_id = r.id
+                AND cs.date >= %s
+                AND cs.date < %s
+                AND cs.status != 'available'
+          )
         ORDER BY r.room_number ASC
         """,
-        [property_id, guests, check_out, check_in],
+        [property_id, guests, check_out, check_in, check_in, check_out],
     )
 
 
@@ -111,13 +121,24 @@ def calculate_stay_price(
         return None
 
     room = fetch_one(
-        "SELECT id FROM pms_room WHERE id = %s",
+        "SELECT id FROM pms_room WHERE id = %s AND is_active = TRUE",
         [room_id],
     )
     if not room:
         return None
 
-    raw_rate = None
+    rate_row = fetch_one(
+        """
+        SELECT MIN(rate) AS rate
+        FROM pms_rate
+        WHERE room_id = %s
+          AND date_from <= %s
+          AND date_to >= %s
+        """,
+        [room_id, check_out, check_in],
+    )
+
+    raw_rate = rate_row.get("rate") if rate_row else None
     if raw_rate is None:
         return None
 
@@ -333,9 +354,6 @@ def update_hotel_booking_status(
 # apps/property/hotel_repository.py). Search/list must loop every hotel
 # organization's schema (via ``_run_in_schema``) and merge the results —
 # there is no single global ``pms_property`` table to query directly.
-# Each result is tagged with a ``hotel_guid`` (``"<schema>:<id>"``, see
-# ``encode_hotel_guid``) since raw numeric ids are only unique per-schema.
-
 def _search_hotels_in_schema(
     schema_name: str,
     organization: dict[str, Any],
@@ -351,7 +369,6 @@ def _search_hotels_in_schema(
     price_min: Decimal | None,
     price_max: Decimal | None,
 ) -> list[dict[str, Any]]:
-    from apps.property.hotel_repository import encode_hotel_guid
 
     conditions = ["p.is_active = TRUE"]
     params: list[Any] = []
@@ -416,7 +433,7 @@ def _search_hotels_in_schema(
 
     sql = f"""
         SELECT
-            p.id, p.name, p.city, p.full_address, p.star_rating,
+            p.id, p.guid, p.name, p.city, p.full_address, p.star_rating,
             p.weel_classification, p.themes, p.description_uz AS description,
             p.photos, p.check_in_time, p.check_out_time,
             p.latitude, p.longitude,
@@ -445,7 +462,7 @@ def _search_hotels_in_schema(
         row["organization_id"] = organization.get("id")
         row["organization_name"] = organization.get("name")
         row["tenant_schema"] = schema_name
-        row["hotel_guid"] = encode_hotel_guid(schema_name, row["id"])
+        row["guid"] = str(row["guid"]) if row.get("guid") else None
     return rows
 
 
