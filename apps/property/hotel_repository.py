@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as _json
+import logging
 import math
 from collections.abc import Callable
 from datetime import date, datetime, time
@@ -8,18 +9,20 @@ from typing import Any, TypeVar
 
 from django.db import connection
 from django.utils import timezone
+from pydantic import ValidationError
 
 from apps.platform.raw_repository import get_organization_by_schema, list_organizations
 
+logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-def _safe_schema_name(schema_name: str | None) -> str | None:
+def _safe_schema_name(schema_name: str | None) -> str:
     raw = str(schema_name or "").strip()
     if not raw:
-        return None
+        raise ValidationError("Schema name is empty")
     if not raw.replace("_", "").isalnum():
-        return None
+        raise ValidationError("Schema name contains invalid characters")
     return raw
 
 
@@ -27,19 +30,19 @@ def encode_hotel_guid(schema_name: str, hotel_id: int | str) -> str:
     return f"{schema_name}:{hotel_id}"
 
 
-def decode_hotel_guid(hotel_guid: str) -> tuple[str | None, str] | None:
+def decode_hotel_guid(hotel_guid: str) -> tuple[str | None, str]:
     raw = str(hotel_guid or "").strip()
     if not raw:
-        return None
+        raise ValidationError("Hotel GUID is empty")
     if ":" in raw:
         schema_name, raw_id = raw.split(":", 1)
         safe_schema = _safe_schema_name(schema_name)
         if not safe_schema:
-            return None
+            raise ValidationError("Invalid schema name in hotel GUID")
         try:
             hotel_id = int(str(raw_id).strip())
         except (TypeError, ValueError):
-            return None
+            raise ValidationError("Invalid hotel ID in GUID")
         return safe_schema, str(hotel_id)
     return None, raw
 
@@ -303,6 +306,10 @@ def _find_hotel_by_guid_across_schemas(
                 limit=1,
             )
         except Exception:
+            logger.warning(
+                "Failed to find hotel by guid=%s across schemas (schema=%s)",
+                guid_value, organization["schema_name"], exc_info=True,
+            )
             continue
         if rows:
             return rows
@@ -312,8 +319,16 @@ def _find_hotel_by_guid_across_schemas(
 def list_hotel_organizations() -> list[dict[str, Any]]:
     organizations = []
     for organization in list_organizations():
-        schema_name = _safe_schema_name(organization.get("schema_name"))
-        if not schema_name:
+        raw_schema = organization.get("schema_name")
+        if not raw_schema:
+            continue
+        try:
+            schema_name = _safe_schema_name(raw_schema)
+        except ValidationError:
+            logger.warning(
+                "Invalid schema_name=%s for organization id=%s",
+                raw_schema, organization.get("id"), exc_info=True,
+            )
             continue
         payload = {
             "id": organization.get("id"),
@@ -347,6 +362,10 @@ def list_hotels(
                 limit=remaining,
             )
         except Exception:
+            logger.warning(
+                "Failed to list hotels from schema=%s (public)",
+                organization["schema_name"], exc_info=True,
+            )
             continue
         serialized = [
             _serialize_hotel_row(row, organization)
@@ -379,7 +398,7 @@ def list_admin_hotels(
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    normalized_schema = _safe_schema_name(tenant_schema)
+    normalized_schema = _safe_schema_name(tenant_schema) if tenant_schema else None
 
     for organization in list_hotel_organizations():
         if organization_id is not None and int(organization["id"]) != int(organization_id):
@@ -394,6 +413,10 @@ def list_admin_hotels(
                 search=search,
             )
         except Exception:
+            logger.warning(
+                "Failed to list admin hotels from schema=%s",
+                organization["schema_name"], exc_info=True,
+            )
             continue
         for row in tenant_rows:
             payload = _serialize_hotel_row(row, organization)

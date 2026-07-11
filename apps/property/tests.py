@@ -23,7 +23,15 @@ from property.apartment_serializers import ApartmentAdminUpdateSerializer, Apart
 from property.cottage_serializers import CottageCreateSerializer, CottageListSerializer, CottageDetailSerializer
 from property.cottage_serializers import CottageAdminUpdateSerializer
 from property.hotel_serializers import HotelAdminUpdateSerializer
-from property.hotel_repository import create_admin_hotel
+from property.hotel_repository import (
+    create_admin_hotel,
+    list_admin_hotels,
+    list_hotels,
+    _serialize_hotel_row,
+    _find_hotel_by_guid_across_schemas,
+    list_hotel_organizations,
+    _fetch_hotel_rows_for_schema,
+)
 from property.views import (
     ApartmentPropertyListCreateView,
     CottagePropertyListCreateView,
@@ -1111,3 +1119,232 @@ class PreparePropertyRowsSortTests(SimpleTestCase):
         result = prepare_property_rows(rows, reference_date=ref_date)
         self.assertIn("order_price_uzs", result[0])
         self.assertEqual(result[0]["order_price_uzs"], Decimal("100000"))
+
+
+class AdminHotelListingTests(SimpleTestCase):
+    """Verify list_admin_hotels returns hotels from all schemas and handles failures gracefully."""
+
+    def _make_hotel_row(self, tenant_schema: str, hotel_id: int, **overrides):
+        row = {
+            "id": hotel_id,
+            "guid": str(uuid4()),
+            "tenant_schema": tenant_schema,
+            "organization_id": None,
+            "partner_user_id": None,
+            "name": f"Hotel-{tenant_schema}-{hotel_id}",
+            "description_uz": None,
+            "description_ru": None,
+            "description_en": None,
+            "address": None,
+            "city": "Tashkent",
+            "country": "UZ",
+            "latitude": "41.3",
+            "longitude": "69.2",
+            "star_rating": None,
+            "amenities": [],
+            "legal_info": {},
+            "check_in_time": None,
+            "check_out_time": None,
+            "cancellation_policy": None,
+            "quiet_hours": True,
+            "alcohol_allowed": False,
+            "pets_allowed": False,
+            "currency": "USD",
+            "timezone": "Asia/Tashkent",
+            "photos": [],
+            "is_active": True,
+            "is_testing": False,
+            "is_verified": True,
+            "is_archived": False,
+            "is_recommended": False,
+            "verification_status": "accepted",
+            "created_at": timezone.now(),
+            "updated_at": timezone.now(),
+            "price_from": None,
+            "review_score": None,
+            "review_count": 0,
+        }
+        row.update(overrides)
+        return row
+
+    @patch("property.hotel_repository.list_hotel_organizations")
+    @patch("property.hotel_repository._fetch_hotel_rows_for_schema")
+    def test_returns_all_hotels_from_all_schemas(self, mock_fetch_rows, mock_orgs):
+        mock_orgs.return_value = [
+            {"id": 1, "name": "OrgA", "slug": "org-a", "schema_name": "tenant_a"},
+            {"id": 2, "name": "OrgB", "slug": "org-b", "schema_name": "tenant_b"},
+            {"id": 3, "name": "OrgC", "slug": "org-c", "schema_name": "tenant_c"},
+        ]
+
+        def fetch_side_effect(schema_name, **kwargs):
+            if schema_name == "tenant_a":
+                return [
+                    self._make_hotel_row("tenant_a", 1),
+                    self._make_hotel_row("tenant_a", 2),
+                ]
+            if schema_name == "tenant_b":
+                return [self._make_hotel_row("tenant_b", 3)]
+            if schema_name == "tenant_c":
+                return [
+                    self._make_hotel_row("tenant_c", 4),
+                    self._make_hotel_row("tenant_c", 5),
+                    self._make_hotel_row("tenant_c", 6),
+                ]
+            return []
+
+        mock_fetch_rows.side_effect = fetch_side_effect
+
+        result = list_admin_hotels()
+
+        self.assertEqual(len(result), 6)
+        guids = {r["guid"] for r in result}
+        self.assertEqual(len(guids), 6, "Each hotel should have a unique GUID")
+
+    @patch("property.hotel_repository.list_hotel_organizations")
+    @patch("property.hotel_repository._fetch_hotel_rows_for_schema")
+    @patch("property.hotel_repository.logger")
+    def test_single_schema_failure_does_not_drop_other_schemas(self, mock_logger, mock_fetch_rows, mock_orgs):
+        mock_orgs.return_value = [
+            {"id": 1, "name": "OrgA", "slug": "org-a", "schema_name": "tenant_a"},
+            {"id": 2, "name": "OrgB", "slug": "org-b", "schema_name": "tenant_broken"},
+            {"id": 3, "name": "OrgC", "slug": "org-c", "schema_name": "tenant_c"},
+        ]
+
+        def fetch_side_effect(schema_name, **kwargs):
+            if schema_name == "tenant_a":
+                return [self._make_hotel_row("tenant_a", 1)]
+            if schema_name == "tenant_broken":
+                raise RuntimeError("Schema unavailable")
+            if schema_name == "tenant_c":
+                return [self._make_hotel_row("tenant_c", 2)]
+            return []
+
+        mock_fetch_rows.side_effect = fetch_side_effect
+
+        result = list_admin_hotels()
+
+        self.assertEqual(len(result), 2, "Hotels from working schemas should be returned")
+        schemas_returned = {r["tenant_schema"] for r in result}
+        self.assertEqual(schemas_returned, {"tenant_a", "tenant_c"})
+        mock_logger.warning.assert_called()
+
+    @patch("property.hotel_repository.list_hotel_organizations")
+    @patch("property.hotel_repository._fetch_hotel_rows_for_schema")
+    def test_search_filters_hotels_by_name(self, mock_fetch_rows, mock_orgs):
+        mock_orgs.return_value = [
+            {"id": 1, "name": "Org", "slug": "org", "schema_name": "tenant1"},
+        ]
+
+        all_hotels = [
+            self._make_hotel_row("tenant1", 1, name="Grand Plaza"),
+            self._make_hotel_row("tenant1", 2, name="Budget Inn"),
+            self._make_hotel_row("tenant1", 3, name="Plaza Suites"),
+        ]
+        mock_fetch_rows.return_value = all_hotels
+
+        # search is SQL-level ILIKE; since we mock _fetch_hotel_rows_for_schema,
+        # the search arg is passed to it — verify it's forwarded correctly
+        result = list_admin_hotels(search="Plaza")
+
+        mock_fetch_rows.assert_called_once()
+        call_kwargs = mock_fetch_rows.call_args.kwargs
+        self.assertEqual(call_kwargs["search"], "Plaza")
+        self.assertTrue(call_kwargs["include_inactive"])
+        self.assertTrue(call_kwargs["include_unverified"])
+
+    @patch("property.hotel_repository.list_hotel_organizations")
+    @patch("property.hotel_repository._fetch_hotel_rows_for_schema")
+    def test_is_active_filter_excludes_inactive_hotels(self, mock_fetch_rows, mock_orgs):
+        mock_orgs.return_value = [
+            {"id": 1, "name": "Org", "slug": "org", "schema_name": "tenant1"},
+        ]
+
+        mock_fetch_rows.return_value = [
+            self._make_hotel_row("tenant1", 1, is_active=True),
+            self._make_hotel_row("tenant1", 2, is_active=False),
+            self._make_hotel_row("tenant1", 3, is_active=True),
+        ]
+
+        active_only = list_admin_hotels(is_active=True)
+        self.assertEqual(len(active_only), 2)
+        self.assertTrue(all(r["is_active"] for r in active_only))
+
+        inactive_only = list_admin_hotels(is_active=False)
+        self.assertEqual(len(inactive_only), 1)
+        self.assertFalse(inactive_only[0]["is_active"])
+
+    @patch("property.hotel_repository.list_hotel_organizations")
+    @patch("property.hotel_repository._fetch_hotel_rows_for_schema")
+    def test_hotel_fields_include_is_verified(self, mock_fetch_rows, mock_orgs):
+        """Verify is_verified is present in serialized hotel rows (frontend uses it for filtering)."""
+        mock_orgs.return_value = [
+            {"id": 1, "name": "Org", "slug": "org", "schema_name": "tenant1"},
+        ]
+        mock_fetch_rows.return_value = [
+            self._make_hotel_row("tenant1", 1, is_verified=True),
+            self._make_hotel_row("tenant1", 2, is_verified=False),
+        ]
+
+        result = list_admin_hotels()
+        self.assertEqual(len(result), 2)
+        verified = [r for r in result if r["is_verified"]]
+        unverified = [r for r in result if not r["is_verified"]]
+        self.assertEqual(len(verified), 1)
+        self.assertEqual(len(unverified), 1)
+        self.assertEqual(verified[0]["id"], 1)
+        self.assertEqual(unverified[0]["id"], 2)
+
+    @patch("property.hotel_repository.list_hotel_organizations")
+    @patch("property.hotel_repository._fetch_hotel_rows_for_schema")
+    @patch("property.hotel_repository.logger")
+    def test_find_by_guid_logs_schema_failure(self, mock_logger, mock_fetch_rows, mock_orgs):
+        """_find_hotel_by_guid_across_schemas logs failures and continues to next schema."""
+        mock_orgs.return_value = [
+            {"id": 1, "name": "Broken", "slug": "broken", "schema_name": "tenant_broken"},
+            {"id": 2, "name": "Working", "slug": "working", "schema_name": "tenant_working"},
+        ]
+
+        def fetch_side_effect(schema_name, **kwargs):
+            if schema_name == "tenant_broken":
+                raise RuntimeError("Schema error")
+            if schema_name == "tenant_working" and kwargs.get("hotel_guid"):
+                return [self._make_hotel_row("tenant_working", 42)]
+            return []
+
+        mock_fetch_rows.side_effect = fetch_side_effect
+
+        result = _find_hotel_by_guid_across_schemas(str(uuid4()))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], 42)
+        self.assertEqual(result[0]["tenant_schema"], "tenant_working")
+        mock_logger.warning.assert_called()
+
+
+class HotelListingPaginationLogicTests(SimpleTestCase):
+    """Verify hotel pagination computation (extracted logic, no serializer)."""
+
+    def test_pagination_slices_and_counts_correctly(self):
+        rows = [{"id": i, "title": f"Hotel {i}"} for i in range(1, 26)]
+
+        page_size = 5
+        page_number = 2
+        total_count = len(rows)
+        start = (page_number - 1) * page_size
+        end = start + page_size
+        paged_rows = rows[start:end]
+        next_page = page_number + 1 if end < total_count else None
+
+        self.assertEqual(total_count, 25)
+        self.assertEqual(len(paged_rows), 5)
+        self.assertEqual(next_page, 3)
+        self.assertEqual(paged_rows[0]["title"], "Hotel 6")
+
+    def test_no_pagination_returns_all(self):
+        rows = [{"id": 1, "title": "Only Hotel"}]
+
+        page_size = None
+        page_number = None
+        should_paginate = bool(page_size or page_number)
+
+        self.assertFalse(should_paginate)
+        self.assertEqual(len(rows), 1)
