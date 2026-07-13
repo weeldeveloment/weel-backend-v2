@@ -114,7 +114,6 @@ from .hotel_repository import (
     admin_remove_hotel_image,
     create_admin_hotel,
     delete_admin_hotel,
-    fetch_room_summaries,
     get_admin_hotel,
     get_hotel_for_public,
     list_admin_hotels,
@@ -127,7 +126,6 @@ from .hotel_serializers import (
     HotelAdminListSerializer,
     HotelAdminUpdateSerializer,
     HotelCardSerializer,
-    HotelDetailSerializer,
 )
 from .serializers import (
     DistrictListSerializer,
@@ -2070,46 +2068,8 @@ class HotelPropertyListView(APIView):
 
 
 # ---------------------------------------------------------------------------
-# Hotel detail, reviews, favorites — encoded-GUID endpoints
+# Hotel reviews, favorites — encoded-GUID endpoints
 # ---------------------------------------------------------------------------
-
-
-class HotelPropertyDetailView(APIView):
-    authentication_classes = [OptionalClientOrPartnerJWTAuthentication]
-    permission_classes = [AllowAny]
-
-    @swagger_auto_schema(
-        operation_id="retrieveHotelProperty",
-        operation_summary="Retrieve a hotel property detail",
-        operation_description="Returns full hotel detail including description, policies, room type summaries, pricing, and review data. Accepts encoded hotel GUID (e.g. `tenant_schema:id`).",
-        tags=["Property / Public"],
-        manual_parameters=[
-            openapi.Parameter(
-                "hotel_guid", openapi.IN_PATH,
-                type=openapi.TYPE_STRING,
-                description="Encoded hotel GUID (schema_name:id).",
-            ),
-        ],
-        responses={200: HotelDetailSerializer(), 404: _ERROR_DETAIL_SCHEMA},
-    )
-    def get(self, request, hotel_guid):
-        row = get_hotel_for_public(str(hotel_guid))
-        if not row:
-            raise NotFound(_("Hotel not found"))
-        ctx = {
-            "request": request,
-            "favorite_guids": _favorite_guids_from_request(request),
-        }
-        schema_name = row.get("tenant_schema")
-        if schema_name:
-            try:
-                room_rows = fetch_room_summaries(schema_name, int(row["id"]))
-                row["room_types"] = room_rows
-            except Exception:
-                row["room_types"] = []
-        else:
-            row["room_types"] = []
-        return Response(HotelDetailSerializer(row, context=ctx).data)
 
 
 class HotelPropertyReviewListCreateView(APIView):

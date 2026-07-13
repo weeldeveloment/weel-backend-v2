@@ -47,10 +47,11 @@ from .views import (
     CategoryPropertyRecommendationView,
     CategoryLatestPropertyListView,
     PropertyListCreateView,
-    HotelPropertyDetailView,
     HotelPropertyReviewListCreateView,
     HotelPropertyFavoriteToggleView,
 )
+
+from apps.hotels.views import HotelDetailView
 
 
 urlpatterns = [
@@ -140,7 +141,7 @@ urlpatterns = [
     ),
     path(
         "hotels/<path:hotel_guid>/",
-        HotelPropertyDetailView.as_view(),
+        HotelDetailView.as_view(),
         name="hotel-property-detail",
     ),
     path(

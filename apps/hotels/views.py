@@ -10,10 +10,15 @@ from rest_framework import status
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
+from apps.platform.raw_repository import get_organization_by_schema
 from apps.property.hotel_repository import (
+    _execute_hotel_query,
     _find_hotel_by_guid_across_schemas,
     _run_in_schema,
+    fetch_room_summaries_raw,
 )
+from apps.property.views import _favorite_guids_from_request
+from users.authentication import OptionalClientOrPartnerJWTAuthentication
 
 from apps.hotels.repository import (
     calculate_stay_price,
@@ -89,6 +94,7 @@ class HotelSearchView(APIView):
 
 
 class HotelDetailView(APIView):
+    authentication_classes = [OptionalClientOrPartnerJWTAuthentication]
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
@@ -101,20 +107,29 @@ class HotelDetailView(APIView):
             return Response({"detail": "Invalid GUID."}, status=status.HTTP_400_BAD_REQUEST)
 
         schema_name, numeric_id = resolved
+        organization = get_organization_by_schema(schema_name)
 
         def _query():
-            hotel = get_hotel_card(numeric_id)
-            if not hotel:
+            rows = _execute_hotel_query(schema_name, hotel_id=numeric_id)
+            if not rows:
                 return None
-            reviews = get_hotel_reviews(numeric_id, limit=5)
-            hotel["images"] = hotel.get("photos") or []
-            hotel["reviews"] = reviews
+            hotel = rows[0]
+            hotel["reviews"] = get_hotel_reviews(numeric_id, limit=5)
+            hotel["room_types"] = fetch_room_summaries_raw(numeric_id)
+            if organization:
+                hotel["organization_id"] = organization.get("id")
+                hotel["organization_name"] = organization.get("name")
             return hotel
 
         result = _run_in_schema(schema_name, _query)
         if result is None:
             return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(HotelDetailSerializer(result).data)
+
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        return Response(HotelDetailSerializer(result, context=ctx).data)
 
 
 class HotelRoomSelectView(APIView):

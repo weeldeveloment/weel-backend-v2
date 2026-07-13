@@ -66,6 +66,8 @@ def _serialize_hotel_row(
         payload["guid"] = str(raw_guid)
     payload["title"] = payload.get("name") or payload.get("title") or ""
     payload["img"] = payload.get("photos") or payload.get("img") or []
+    payload["price_from"] = payload.get("min_price")
+    payload["review_score"] = payload.get("rating")
     raw_legal = payload.get("legal_info")
     if isinstance(raw_legal, str):
         try:
@@ -104,6 +106,94 @@ def _fetch_rows(cursor) -> list[dict[str, Any]]:
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
+def _execute_hotel_query(
+    schema_name: str,
+    *,
+    hotel_id: int | None = None,
+    hotel_guid: str | None = None,
+    include_inactive: bool = False,
+    include_unverified: bool = False,
+    search: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Execute hotel query directly. Caller must set search_path first."""
+    with connection.cursor() as cursor:
+        where = []
+        params: list[Any] = []
+        if hotel_id is not None:
+            where.append("p.id = %s")
+            params.append(hotel_id)
+        elif hotel_guid is not None:
+            where.append("p.guid::text = %s")
+            params.append(hotel_guid)
+        if not include_inactive:
+            where.append("COALESCE(p.is_active, TRUE) = TRUE")
+        if not include_unverified:
+            where.append("COALESCE(p.is_verified, FALSE) = TRUE")
+        if search:
+            raw_search = str(search).strip()
+            where.append(
+                "(p.name ILIKE %s OR COALESCE(p.city, '') ILIKE %s OR COALESCE(p.address, '') ILIKE %s)"
+            )
+            like = f"%{raw_search}%"
+            params.extend([like, like, like])
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        limit_sql = f"LIMIT {int(limit)}" if limit else ""
+        cursor.execute(
+            f"""
+            SELECT
+                p.id,
+                p.guid,
+                p.organization_id,
+                p.partner_user_id,
+                p.name,
+                p.description_uz,
+                p.description_ru,
+                p.description_en,
+                p.address,
+                p.full_address,
+                p.city,
+                p.country,
+                p.latitude::text AS latitude,
+                p.longitude::text AS longitude,
+                p.star_rating,
+                p.weel_classification,
+                p.themes,
+                COALESCE(p.amenities, ARRAY[]::text[]) AS amenities,
+                COALESCE(p.legal_info, '{{}}'::jsonb) AS legal_info,
+                p.check_in_time,
+                p.check_out_time,
+                p.cancellation_policy,
+                COALESCE(p.quiet_hours, TRUE) AS quiet_hours,
+                COALESCE(p.alcohol_allowed, FALSE) AS alcohol_allowed,
+                COALESCE(p.pets_allowed, FALSE) AS pets_allowed,
+                p.currency,
+                p.timezone,
+                COALESCE(p.photos, ARRAY[]::text[]) AS photos,
+                COALESCE(p.is_active, TRUE) AS is_active,
+                COALESCE(p.is_testing, FALSE) AS is_testing,
+                COALESCE(p.is_verified, FALSE) AS is_verified,
+                COALESCE(p.is_archived, FALSE) AS is_archived,
+                COALESCE(p.is_recommended, FALSE) AS is_recommended,
+                COALESCE(p.verification_status, 'waiting') AS verification_status,
+                p.created_at,
+                p.updated_at,
+                %s AS tenant_schema,
+                (SELECT MIN(r.base_price) FROM pms_room r WHERE r.property_id = p.id AND r.is_active = TRUE) AS min_price,
+                (SELECT AVG(rv.rating) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS rating,
+                (SELECT COUNT(*) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS review_count,
+                (SELECT COUNT(*) FROM pms_booking pb WHERE pb.property_id = p.id AND pb.status NOT IN ('cancelled')) AS booking_count,
+                (SELECT COUNT(*) FROM pms_room rm WHERE rm.property_id = p.id AND rm.is_active = TRUE) AS available_rooms
+            FROM pms_property p
+            {where_sql}
+            ORDER BY p.created_at DESC, p.id DESC
+            {limit_sql}
+            """,
+            [schema_name, *params],
+        )
+        return _fetch_rows(cursor)
+
+
 def _fetch_hotel_rows_for_schema(
     schema_name: str,
     *,
@@ -114,79 +204,18 @@ def _fetch_hotel_rows_for_schema(
     search: str | None = None,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    def _query() -> list[dict[str, Any]]:
-        with connection.cursor() as cursor:
-            where = []
-            params: list[Any] = []
-            if hotel_id is not None:
-                where.append("p.id = %s")
-                params.append(hotel_id)
-            elif hotel_guid is not None:
-                where.append("p.guid::text = %s")
-                params.append(hotel_guid)
-            if not include_inactive:
-                where.append("COALESCE(p.is_active, TRUE) = TRUE")
-            if not include_unverified:
-                where.append("COALESCE(p.is_verified, FALSE) = TRUE")
-            if search:
-                raw_search = str(search).strip()
-                where.append(
-                    "(p.name ILIKE %s OR COALESCE(p.city, '') ILIKE %s OR COALESCE(p.address, '') ILIKE %s)"
-                )
-                like = f"%{raw_search}%"
-                params.extend([like, like, like])
-            where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-            limit_sql = f"LIMIT {int(limit)}" if limit else ""
-            cursor.execute(
-                f"""
-                SELECT
-                    p.id,
-                    p.guid,
-                    p.organization_id,
-                    p.partner_user_id,
-                    p.name,
-                    p.description_uz,
-                    p.description_ru,
-                    p.description_en,
-                    p.address,
-                    p.city,
-                    p.country,
-                    p.latitude::text AS latitude,
-                    p.longitude::text AS longitude,
-                    p.star_rating,
-                    COALESCE(p.amenities, ARRAY[]::text[]) AS amenities,
-                    COALESCE(p.legal_info, '{{}}'::jsonb) AS legal_info,
-                    p.check_in_time,
-                    p.check_out_time,
-                    p.cancellation_policy,
-                    COALESCE(p.quiet_hours, TRUE) AS quiet_hours,
-                    COALESCE(p.alcohol_allowed, FALSE) AS alcohol_allowed,
-                    COALESCE(p.pets_allowed, FALSE) AS pets_allowed,
-                    p.currency,
-                    p.timezone,
-                    COALESCE(p.photos, ARRAY[]::text[]) AS photos,
-                    COALESCE(p.is_active, TRUE) AS is_active,
-                    COALESCE(p.is_testing, FALSE) AS is_testing,
-                    COALESCE(p.is_verified, FALSE) AS is_verified,
-                    COALESCE(p.is_archived, FALSE) AS is_archived,
-                    COALESCE(p.is_recommended, FALSE) AS is_recommended,
-                    COALESCE(p.verification_status, 'waiting') AS verification_status,
-                    p.created_at,
-                    p.updated_at,
-                    %s AS tenant_schema,
-                    (SELECT MIN(r.base_price) FROM pms_room r WHERE r.property_id = p.id AND r.is_active = TRUE) AS price_from,
-                    (SELECT AVG(rv.rating) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS review_score,
-                    (SELECT COUNT(*) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS review_count
-                FROM pms_property p
-                {where_sql}
-                ORDER BY p.created_at DESC, p.id DESC
-                {limit_sql}
-                """,
-                [schema_name, *params],
-            )
-            return _fetch_rows(cursor)
-
-    return _run_in_schema(schema_name, _query)
+    return _run_in_schema(
+        schema_name,
+        lambda: _execute_hotel_query(
+            schema_name,
+            hotel_id=hotel_id,
+            hotel_guid=hotel_guid,
+            include_inactive=include_inactive,
+            include_unverified=include_unverified,
+            search=search,
+            limit=limit,
+        ),
+    )
 
 
 def _sort_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -442,6 +471,30 @@ def fetch_room_summaries(schema_name: str, property_id: int) -> list[dict[str, A
             return _fetch_rows(cursor)
 
     return _run_in_schema(schema_name, _query)
+
+
+def fetch_room_summaries_raw(property_id: int) -> list[dict[str, Any]]:
+    """Fetch room summaries directly. Caller must set search_path first."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+                r.id,
+                r.display_name,
+                r.room_type_preset,
+                r.capacity,
+                r.bedroom_count,
+                COALESCE(r.beds, '[]'::jsonb) AS beds,
+                COALESCE(r.photos, ARRAY[]::text[]) AS photos,
+                COALESCE(r.amenities, ARRAY[]::text[]) AS amenities,
+                COALESCE(r.base_price, 0) AS price_from
+            FROM pms_room r
+            WHERE r.property_id = %s AND r.is_active = TRUE
+            ORDER BY r.room_number ASC
+            """,
+            [property_id],
+        )
+        return _fetch_rows(cursor)
 
 
 def get_hotel_for_public(hotel_guid: str) -> dict[str, Any] | None:
