@@ -555,7 +555,8 @@ class B2BDepartmentListCreateView(APIView):
         if not company_id:
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        depts = list_departments_with_budget(company_id)
+        search = request.query_params.get("search")
+        depts = list_departments_with_budget(company_id, search=search)
         employees_by_dept: dict[int, list[dict[str, Any]]] = {}
         for emp in list_employees(company_id):
             employees_by_dept.setdefault(emp["department_id"], []).append(emp)
