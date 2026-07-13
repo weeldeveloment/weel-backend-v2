@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+# Collect static files at runtime (needs SECRET_KEY + ALLOWED_HOSTS from env)
+python manage.py collectstatic --noinput 2>/dev/null || true
+
 WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
 
 # Run webhook setup in background so server starts immediately
