@@ -23,7 +23,7 @@ RUN poetry install --only main --no-root --no-ansi
 
 COPY . .
 
-RUN SECRET_KEY=build-only-dummy python manage.py collectstatic --noinput
+RUN python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
