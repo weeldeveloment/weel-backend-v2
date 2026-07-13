@@ -86,9 +86,8 @@ class AdminHotelBaseView(AdminBaseView):
         try:
             return super().dispatch(request, *args, **kwargs)
         finally:
-            if request.method in ("GET", "HEAD", "OPTIONS"):
-                with connection.cursor() as cursor:
-                    cursor.execute("SET search_path TO public")
+            with connection.cursor() as cursor:
+                cursor.execute("SET search_path TO public")
 
 
 class ClassifyPropertySerializer(serializers.Serializer):

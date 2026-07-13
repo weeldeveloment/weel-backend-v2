@@ -33,6 +33,7 @@ def _check_room_availability(
                 AND cs.date >= %s
                 AND cs.date < %s
           )
+        FOR UPDATE
         """,
         [room_id, check_out, check_in, check_in, check_out],
     )
@@ -145,6 +146,48 @@ def calculate_stay_price(
 
 # ─── Booking CRUD ─────────────────────────────────────────────────────────────
 
+def _insert_hotel_booking_with_retry(
+    *,
+    property_id: int,
+    room_id: int,
+    client_user_id: int,
+    check_in: date,
+    check_out: date,
+    adults: int,
+    children: int,
+    pricing: dict,
+    b2b_company_id: int | None,
+    max_retries: int = 5,
+) -> dict[str, Any] | None:
+    for _ in range(max_retries):
+        row = fetch_one(
+            """
+            INSERT INTO pms_booking (
+                property_id, room_id, created_by,
+                check_in, check_out, adult_count, child_count,
+                rate, currency, total_cost, hold_amount,
+                status, b2b_company_id, created_at, booking_number
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s,
+                %s, 'UZS', %s, %s,
+                'new', %s, NOW(),
+                'H' || TO_CHAR(NOW(), 'YYMMDD') || LPAD(FLOOR(RANDOM() * 99999)::int::text, 5, '0')
+            )
+            RETURNING id, property_id, room_id, check_in, check_out, adult_count, child_count,
+                      total_cost, hold_amount, status, booking_number, created_at, created_by
+            """,
+            [
+                property_id, room_id, client_user_id,
+                check_in, check_out, adults, children,
+                pricing["price_per_night"], pricing["total_price"], pricing["hold_amount"],
+                b2b_company_id,
+            ],
+        )
+        if row is not None:
+            return row
+    return None
+
+
 def create_hotel_booking(
     *,
     property_id: int,
@@ -166,7 +209,6 @@ def create_hotel_booking(
 
     pricing = calculate_stay_price(room_id, check_in, check_out)
     if not pricing:
-        # fallback: use 100000 UZS/night default
         ppn = Decimal("100000")
         base_price = ppn * nights
         hold_amount = (base_price * Decimal("0.30")).quantize(Decimal("0.01"))
@@ -178,33 +220,17 @@ def create_hotel_booking(
             "remaining_on_arrival": base_price - hold_amount,
         }
 
-    total_price = pricing["total_price"]
-    hold_amount = pricing["hold_amount"]
-
-    row = fetch_one(
-        """
-        INSERT INTO pms_booking (
-            property_id, room_id, created_by,
-            check_in, check_out, adult_count, child_count,
-            rate, currency, total_cost, hold_amount,
-            status, b2b_company_id, created_at, booking_number
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s,
-            %s, 'UZS', %s, %s,
-            'new', %s, NOW(),
-            'H' || TO_CHAR(NOW(), 'YYMMDD') || LPAD(FLOOR(RANDOM() * 99999)::int::text, 5, '0')
-        )
-        RETURNING id, property_id, room_id, check_in, check_out, adult_count, child_count,
-                  total_cost, hold_amount, status, booking_number, created_at, created_by
-        """,
-        [
-            property_id, room_id, client_user_id,
-            check_in, check_out, adults, children,
-            pricing["price_per_night"], total_price, hold_amount,
-            b2b_company_id,
-        ],
+    return _insert_hotel_booking_with_retry(
+        property_id=property_id,
+        room_id=room_id,
+        client_user_id=client_user_id,
+        check_in=check_in,
+        check_out=check_out,
+        adults=adults,
+        children=children,
+        pricing=pricing,
+        b2b_company_id=b2b_company_id,
     )
-    return row
 
 
 def create_hotel_booking_calendar_slots(
@@ -261,7 +287,7 @@ def list_client_hotel_bookings(
             p.name AS hotel_name, p.city AS hotel_city, p.star_rating AS hotel_star_rating,
             r.room_number, r.display_name AS room_name, r.floor,
             r.room_type_name, r.room_type_preset,
-            0 AS room_price_per_night
+            COALESCE(r.base_price, 0) AS room_price_per_night
         FROM pms_booking b
         JOIN pms_property p ON p.id = b.property_id
         JOIN pms_room r ON r.id = b.room_id
@@ -288,7 +314,7 @@ def get_client_hotel_booking(
             p.check_in_time AS hotel_check_in_time, p.check_out_time AS hotel_check_out_time,
             COALESCE(p.photos, ARRAY[]::text[]) AS hotel_images,
             r.room_number, r.display_name AS room_name, r.floor,
-            0 AS room_price_per_night,
+            COALESCE(r.base_price, 0) AS room_price_per_night,
             r.bedroom_count, r.beds, r.amenities,
             r.capacity,
             r.room_type_name, r.room_type_preset,
@@ -385,7 +411,7 @@ def _search_hotels_in_schema(
     if check_in and check_out:
         avail_join = """
             LEFT JOIN LATERAL (
-                SELECT 0 AS min_price, COUNT(*) AS available_rooms
+                SELECT COALESCE(MIN(r.base_price), 0) AS min_price, COUNT(*) AS available_rooms
                 FROM pms_room r
                 WHERE r.property_id = p.id
                   AND r.is_active = TRUE
@@ -404,7 +430,7 @@ def _search_hotels_in_schema(
     else:
         avail_join = """
             LEFT JOIN LATERAL (
-                SELECT 0 AS min_price, COUNT(*) AS available_rooms
+                SELECT COALESCE(MIN(r.base_price), 0) AS min_price, COUNT(*) AS available_rooms
                 FROM pms_room r
                 WHERE r.property_id = p.id AND r.is_active = TRUE AND r.capacity >= %s
             ) pricing ON TRUE

@@ -1371,7 +1371,7 @@ class ClientHotelBookingCancelView(APIView):
         if not booking:
             raise NotFound({"detail": _("Hotel booking not found.")})
 
-        if booking["status"] not in ("pending", "confirmed"):
+        if booking["status"] not in ("new", "pending", "confirmed"):
             raise ValidationError({"detail": _("Only pending or confirmed bookings can be cancelled.")})
 
         tx = get_latest_transaction_history_for_booking(int(booking["id"]))

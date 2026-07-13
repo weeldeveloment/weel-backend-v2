@@ -139,13 +139,13 @@ class TestHotelBookingCreate:
             client_user_id=test_client["id"],
             check_in=TOMORROW,
             check_out=DAY_AFTER,
-            guests=2,
+            adults=2,
             card_id=None,
         )
         assert booking is not None
-        assert booking["status"] == "pending"
+        assert booking["status"] == "new"
         assert booking["booking_number"].startswith("H")
-        assert booking["guests"] == 2
+        assert booking["adult_count"] == 2
         assert booking["property_id"] == test_hotel["id"]
         assert booking["room_id"] == test_room["id"]
 
@@ -163,7 +163,7 @@ class TestHotelBookingCreate:
             client_user_id=test_client["id"],
             check_in=TOMORROW + timedelta(days=30),
             check_out=TOMORROW + timedelta(days=32),
-            guests=1,
+            adults=1,
         )
         assert b1 is not None
 
@@ -173,7 +173,7 @@ class TestHotelBookingCreate:
             client_user_id=test_client["id"],
             check_in=TOMORROW + timedelta(days=30),
             check_out=TOMORROW + timedelta(days=32),
-            guests=1,
+            adults=1,
         )
         assert b2 is None  # should fail — room already booked
 
@@ -186,7 +186,7 @@ class TestHotelBookingCreate:
             client_user_id=test_client["id"],
             check_in=TOMORROW + timedelta(days=60),
             check_out=TOMORROW + timedelta(days=62),
-            guests=1,
+            adults=1,
         )
         assert b1 is not None
 
@@ -200,7 +200,7 @@ class TestHotelBookingCreate:
             client_user_id=test_client["id"],
             check_in=TOMORROW + timedelta(days=60),
             check_out=TOMORROW + timedelta(days=62),
-            guests=1,
+            adults=1,
         )
         assert b2 is None  # calendar slots block it
 
@@ -254,7 +254,7 @@ class TestHotelBookingQueries:
             client_user_id=test_client["id"],
             check_in=future,
             check_out=future + timedelta(days=1),
-            guests=1,
+            adults=1,
         )
         assert b is not None
         try:
@@ -263,8 +263,8 @@ class TestHotelBookingQueries:
             ids = [bk["id"] for bk in bookings]
             assert b["id"] in ids
 
-            bookings_pending = list_client_hotel_bookings(test_client["id"], statuses=["pending"])
-            assert b["id"] in [bk["id"] for bk in bookings_pending]
+            bookings_new = list_client_hotel_bookings(test_client["id"], statuses=["new"])
+            assert b["id"] in [bk["id"] for bk in bookings_new]
 
             bookings_cancelled = list_client_hotel_bookings(test_client["id"], statuses=["cancelled"])
             assert b["id"] not in [bk["id"] for bk in bookings_cancelled]
@@ -279,7 +279,7 @@ class TestHotelBookingQueries:
             client_user_id=test_client["id"],
             check_in=future,
             check_out=future + timedelta(days=1),
-            guests=2,
+            adults=2,
         )
         assert b is not None
         try:
@@ -304,13 +304,13 @@ class TestHotelBookingQueries:
             client_user_id=test_client["id"],
             check_in=future,
             check_out=future + timedelta(days=1),
-            guests=1,
+            adults=1,
         )
         assert b is not None
         try:
             found = get_hotel_booking_by_id(b["id"])
             assert found is not None
-            assert found["status"] == "pending"
+            assert found["status"] == "new"
             assert found["room_id"] == test_room["id"]
         finally:
             execute("DELETE FROM pms_booking WHERE id = %s", [b["id"]])
@@ -327,7 +327,7 @@ class TestBookingStatusUpdate:
             client_user_id=test_client["id"],
             check_in=future,
             check_out=future + timedelta(days=1),
-            guests=1,
+            adults=1,
         )
         assert b is not None
         try:
