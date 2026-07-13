@@ -318,7 +318,7 @@ def auto_cancel_hotel_booking(self, booking_id):
             extra={"booking_id": str(booking_id)},
         )
         return
-    if booking["status"] != "pending":
+    if booking["status"] not in ("pending", "new"):
         logger.info(
             "auto_cancel_hotel: skipped",
             extra={"booking_id": str(booking_id), "status": booking["status"]},
