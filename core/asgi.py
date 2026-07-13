@@ -16,6 +16,10 @@ from django.http.request import split_domain_port, validate_host
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 
+# Initialize OpenTelemetry tracing before Django app registry populates.
+from core.telemetry import init_telemetry
+init_telemetry()
+
 # Initialize Django ASGI application early to ensure the AppRegistry
 # is populated before importing code that may import ORM models.
 django_asgi_app = get_asgi_application()

@@ -12,6 +12,10 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 # Ensure .env values are present here too (e.g. REDIS_CONNECTION_STRING).
 load_dotenv(find_dotenv(), override=True)
 
+# Initialize OpenTelemetry for Celery workers (before Django apps import).
+from core.telemetry import init_telemetry
+init_telemetry()
+
 TASK_MODULES = [
     "booking.tasks",
     "property.tasks",

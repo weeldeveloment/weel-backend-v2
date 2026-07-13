@@ -186,6 +186,7 @@ MIDDLEWARE = [
     "core.middleware.tenant.TenantMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
     "request_logging.middleware.LoggingMiddleware",  # django-request-logging
+    "core.middleware.memory_profiling.MemoryProfilingMiddleware",
     "core.middleware.exception_logging.ExceptionLoggingMiddleware",
 ]
 
@@ -361,7 +362,7 @@ SWAGGER_BASIC_AUTH_MAX_ATTEMPTS = int(
 SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS = int(
     (os.getenv("SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS") or "900").strip() or "900"
 )
-PROMETHEUS_ENABLED = env_bool("PROMETHEUS_ENABLED", default=DEBUG)
+PROMETHEUS_ENABLED = env_bool("PROMETHEUS_ENABLED", default=True)
 SWAGGER_SETTINGS = {
     "DEFAULT_INFO": "core.urls.schema_info",
     # Do not require Django session login for docs; everything is viewable anonymously.
@@ -714,11 +715,20 @@ LOGGING = {
             "()": "core.middleware.logging.UnicodeJsonFormatter",
             "format": "%(asctime)s %(name)s %(levelname)s %(message)s %(pathname)s %(lineno)d",
         },
+        "json_stdout": {
+            "()": "core.middleware.logging.UnicodeJsonFormatter",
+            "format": "%(asctime)s %(name)s %(levelname)s %(message)s %(pathname)s %(lineno)d",
+        },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "console",
+        },
+        "stdout_json": {
+            "class": "logging.StreamHandler",
+            "formatter": "json_stdout",
+            "stream": "ext://sys.stdout",
         },
         "file": {
             "level": "INFO",
@@ -747,37 +757,37 @@ LOGGING = {
     },
     "loggers": {
         "django": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "WARNING",
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "INFO",
             "propagate": False,
         },
         "django.server": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "INFO",
             "propagate": False,
         },
         "core": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "DEBUG",
             "propagate": False,
         },
         "users": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "INFO",
             "propagate": False,
         },
         "frontend": {
-            "handlers": ["console", "file_frontend"],
+            "handlers": ["console", "stdout_json", "file_frontend"],
             "level": "INFO",
             "propagate": False,
         },
         "..sanatorium": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "INFO",
             "propagate": False,
         },
