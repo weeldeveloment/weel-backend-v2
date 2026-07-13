@@ -63,6 +63,20 @@ class B2BEmployeeSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
 
 
+class B2BDepartmentSummarySerializer(serializers.Serializer):
+    """GET ``/b2b/departments/`` response: department + its owner-set budget
+    limit, usage, and the employees assigned to it."""
+    id = serializers.IntegerField(read_only=True)
+    company_id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
+    used_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    remaining_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
+    status = serializers.ChoiceField(choices=["no_limit", "high", "low", "empty"], read_only=True)
+    employees = B2BEmployeeSerializer(many=True, read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
 class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
     """POST ``/b2b/employees/`` uchun serializer (multipart/form-data).
 

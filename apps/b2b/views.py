@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import random
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
 from django.core.files.storage import default_storage
@@ -47,6 +48,7 @@ from apps.b2b.repository import (
     list_active_trip_employees,
     list_budget_requests,
     list_departments,
+    list_departments_with_budget,
     list_employees,
     list_hotel_booking_requests,
     list_hotel_booking_rooms,
@@ -63,7 +65,7 @@ from apps.b2b.repository import (
     update_travel_policy,
     update_trip,
 )
-from apps.b2b.models import HotelBookingRequestStatus
+from apps.b2b.models import DepartmentBudgetStatus, HotelBookingRequestStatus
 from apps.b2b.permissions import IsB2BOwner, IsB2BPerformer
 from apps.property.hotel_repository import _run_in_schema, decode_hotel_guid, get_hotel_for_public
 from apps.hotels.repository import (
@@ -83,6 +85,7 @@ from apps.b2b.serializers import (
     ActiveTripEmployeeSerializer,
     B2BCompanySerializer,
     B2BDepartmentSerializer,
+    B2BDepartmentSummarySerializer,
     B2BEmployeeCreateSerializer,
     B2BEmployeeSerializer,
     B2BUserSerializer,
@@ -533,13 +536,57 @@ class B2BCompanyView(APIView):
 class B2BDepartmentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
-    @swagger_auto_schema(responses={200: B2BDepartmentSerializer(many=True)})
+    @swagger_auto_schema(
+        operation_summary="Departmentlar ro'yxati",
+        operation_description=(
+            "Har bir department uchun owner tomonidan berilgan limit "
+            "(`budget_limit`), ishlatilgan summa (`used_amount`), qolgan summa "
+            "(`remaining_amount`), holati (`status`) va unga biriktirilgan "
+            "xodimlar (`employees`) qaytariladi. `status` limitning qolgan "
+            "qismiga qarab hisoblanadi: `high` — qolgan summa limitning 25%"
+            "idan ko'p, `low` — 25% yoki undan kam (lekin 0 emas), "
+            "`empty` — qolmagan (yoki limitdan oshib ketilgan), "
+            "`no_limit` — department uchun limit belgilanmagan."
+        ),
+        responses={200: B2BDepartmentSummarySerializer(many=True)},
+    )
     def get(self, request):
         company_id = _get_company_id(request)
         if not company_id:
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
-        depts = list_departments(company_id)
-        return Response(B2BDepartmentSerializer(depts, many=True).data)
+
+        depts = list_departments_with_budget(company_id)
+        employees_by_dept: dict[int, list[dict[str, Any]]] = {}
+        for emp in list_employees(company_id):
+            employees_by_dept.setdefault(emp["department_id"], []).append(emp)
+
+        payload = []
+        for d in depts:
+            budget_limit = d["budget_limit"]
+            used_amount = d["used_amount"]
+            if budget_limit is None:
+                remaining_amount = None
+                dept_status = DepartmentBudgetStatus.NO_LIMIT
+            else:
+                remaining_amount = budget_limit - used_amount
+                if remaining_amount <= 0:
+                    dept_status = DepartmentBudgetStatus.EMPTY
+                elif remaining_amount <= budget_limit * Decimal("0.25"):
+                    dept_status = DepartmentBudgetStatus.LOW
+                else:
+                    dept_status = DepartmentBudgetStatus.HIGH
+            payload.append({
+                "id": d["department_id"],
+                "company_id": d["company_id"],
+                "name": d["department_name"],
+                "budget_limit": budget_limit,
+                "used_amount": used_amount,
+                "remaining_amount": remaining_amount,
+                "status": dept_status,
+                "employees": employees_by_dept.get(d["department_id"], []),
+                "created_at": d["created_at"],
+            })
+        return Response(B2BDepartmentSummarySerializer(payload, many=True).data)
 
     @swagger_auto_schema(request_body=B2BDepartmentSerializer, responses={201: B2BDepartmentSerializer()})
     def post(self, request):
