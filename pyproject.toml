@@ -47,6 +47,12 @@ boto3 = "^1.35.0"
 python-telegram-bot = "^21.10"
 openpyxl = "^3.1.5"
 pydantic = "^2.12.5"
+opentelemetry-django = "^0.52b0"
+opentelemetry-instrumentation-celery = "^0.52b0"
+opentelemetry-instrumentation-redis = "^0.52b0"
+opentelemetry-instrumentation-psycopg2 = "^0.52b0"
+opentelemetry-exporter-otlp = "^1.31.0"
+pympler = "^1.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.9.0"

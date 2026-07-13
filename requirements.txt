@@ -117,6 +117,14 @@ pycparser==3.0
 pydantic==2.12.5
 pydantic-settings==2.13.1
 pydantic_core==2.41.5
+opentelemetry-api==1.31.0
+opentelemetry-sdk==1.31.0
+opentelemetry-django==0.52b0
+opentelemetry-instrumentation-celery==0.52b0
+opentelemetry-instrumentation-redis==0.52b0
+opentelemetry-instrumentation-psycopg2==0.52b0
+opentelemetry-exporter-otlp==1.31.0
+pympler==1.1
 Pygments==2.19.2
 PyJWT==2.12.1
 pyOpenSSL==26.0.0

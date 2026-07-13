@@ -1,0 +1,113 @@
+"""
+OpenTelemetry initialization for the Weel Django backend.
+Call init_telemetry() once during ASGI/Celery worker startup.
+
+Imports are deferred so the app boots safely before opentelemetry packages
+are installed (e.g. local dev or during container build).
+"""
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+_Initialized = False
+_OtelAvailable = None
+
+
+def _check_otel():
+    global _OtelAvailable
+    if _OtelAvailable is not None:
+        return _OtelAvailable
+    try:
+        import opentelemetry  # noqa: F401
+        _OtelAvailable = True
+    except Exception:
+        _OtelAvailable = False
+    return _OtelAvailable
+
+
+def init_telemetry(service_name: str = "weel-backend"):
+    """
+    Initialize the OpenTelemetry tracer provider and auto-instrument
+    Django, Celery, Redis, and PostgreSQL (psycopg2).
+    Safe to call multiple times (idempotent).
+    Gracefully no-ops if opentelemetry is not installed or endpoint is not set.
+    """
+    global _Initialized
+    if _Initialized:
+        return
+
+    if not _check_otel():
+        logger.info("OpenTelemetry packages not installed. Tracing disabled.")
+        _Initialized = True
+        return
+
+    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    if not otlp_endpoint or otlp_endpoint in {
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "${OTEL_EXPORTER_OTLP_ENDPOINT}",
+    }:
+        logger.info(
+            "OTEL_EXPORTER_OTLP_ENDPOINT not set. Tracing disabled. "
+            "Set it to http://tempo:4317 to enable distributed tracing."
+        )
+        _Initialized = True
+        return
+
+    # Deferred imports — only executed when OTel is actually used
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION, DEPLOYMENT_ENVIRONMENT
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.instrumentation.django import DjangoInstrumentor
+    from opentelemetry.instrumentation.celery import CeleryInstrumentor
+    from opentelemetry.instrumentation.redis import RedisInstrumentor
+    from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+
+    resource = Resource.create(
+        {
+            SERVICE_NAME: os.getenv("OTEL_SERVICE_NAME", service_name),
+            SERVICE_VERSION: os.getenv("OTEL_SERVICE_VERSION", "unknown"),
+            DEPLOYMENT_ENVIRONMENT: os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT", "production"),
+        }
+    )
+
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
+    processor = BatchSpanProcessor(
+        exporter,
+        max_queue_size=2048,
+        max_export_batch_size=512,
+        schedule_delay_millis=5000,
+    )
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+
+    # Auto-instrument libraries
+    DjangoInstrumentor().instrument()
+    CeleryInstrumentor().instrument()
+    RedisInstrumentor().instrument()
+    Psycopg2Instrumentor().instrument()
+
+    _Initialized = True
+    logger.info("OpenTelemetry initialized: endpoint=%s", otlp_endpoint)
+
+
+def get_trace_context() -> dict:
+    """
+    Return the current trace_id and span_id as strings for log injection.
+    Returns empty strings if OTel is not initialized.
+    """
+    if not _check_otel():
+        return {"trace_id": "", "span_id": ""}
+
+    from opentelemetry import trace
+    span = trace.get_current_span()
+    ctx = span.get_span_context()
+    if ctx.is_valid:
+        return {
+            "trace_id": format(ctx.trace_id, "032x"),
+            "span_id": format(ctx.span_id, "016x"),
+        }
+    return {"trace_id": "", "span_id": ""}
