@@ -21,7 +21,7 @@ class Command(BaseCommand):
         try:
             asyncio.run(set_webhook(base_url))
         except Exception as exc:
-            self.stderr.write(self.style.WARNING(
+            self.stdout.write(self.style.WARNING(
                 f"Hotel bot webhook setup failed: {exc}. Continuing startup."
             ))
             if options.get("strict"):
