@@ -3,7 +3,7 @@ set -e
 
 WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
 
-# Run webhook setup in background so daphne starts immediately
+# Run webhook setup in background so server starts immediately
 # (health checks must pass before webhook setup finishes)
 (
   echo "Setting up bot webhooks: $WEBHOOK_BASE"
@@ -12,7 +12,4 @@ WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
   echo "Bot webhook setup complete"
 ) &
 
-# Limit thread pool to cap DB connections per container (sync views each use one thread).
-# With CONN_MAX_AGE=0, connections close after each request so this is a safety net.
-DAPHNE_THREADS="${DAPHNE_THREADS:-10}"
-exec daphne -b 0.0.0.0 -p 8000 -t "$DAPHNE_THREADS" core.asgi:application
+exec uvicorn core.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws websockets

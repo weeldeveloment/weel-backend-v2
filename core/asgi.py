@@ -38,6 +38,53 @@ def _header_value(scope, name: bytes) -> str:
     return ""
 
 
+class TracingASGIMiddleware:
+    """
+    ASGI middleware that wraps HTTP requests with OpenTelemetry spans.
+    Ensures every HTTP request gets a root span named after its method.
+    """
+
+    def __init__(self, app):
+        self.app = app
+        from opentelemetry import trace as _trace
+        self._trace = _trace
+        self.tracer = _trace.get_tracer("asgi")
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return await self.app(scope, receive, send)
+
+        method = scope.get("method", "UNKNOWN")
+        path = scope.get("path", "/")
+        query = scope.get("query_string", b"").decode("utf-8", "replace")
+        target = f"{path}?{query}" if query else path
+
+        with self.tracer.start_as_current_span(
+            f"{method} {target}",
+            kind=self._trace.SpanKind.SERVER,
+        ) as span:
+            span.set_attribute("http.method", method)
+            span.set_attribute("http.target", target)
+            span.set_attribute("http.scheme", scope.get("scheme", "http"))
+            span.set_attribute("http.host", dict(scope.get("headers", [])).get(b"host", b"").decode("latin1"))
+            span.set_attribute("http.flavor", scope.get("http_version", "1.1"))
+
+            async def wrapped_send(message):
+                if message.get("type") == "http.response.start":
+                    status = message.get("status", 0)
+                    span.set_attribute("http.status_code", status)
+                    if status >= 500:
+                        span.set_status(self._trace.Status(self._trace.StatusCode.ERROR))
+                await send(message)
+
+            try:
+                await self.app(scope, receive, wrapped_send)
+            except Exception as exc:
+                span.set_status(self._trace.Status(self._trace.StatusCode.ERROR, str(exc)))
+                span.record_exception(exc)
+                raise
+
+
 class OptionalOriginAllowedHostsValidator:
     """
     Validate websocket Origin when present.
@@ -70,7 +117,7 @@ class OptionalOriginAllowedHostsValidator:
         return await self.app(scope, receive, send)
 
 application = ProtocolTypeRouter({
-    "http": django_asgi_app,
+    "http": TracingASGIMiddleware(django_asgi_app),
     "websocket": OptionalOriginAllowedHostsValidator(
         URLRouter(websocket_urlpatterns)
     ),

@@ -49,7 +49,7 @@ def init_telemetry(service_name: str = "weel-backend"):
     }:
         logger.info(
             "OTEL_EXPORTER_OTLP_ENDPOINT not set. Tracing disabled. "
-            "Set it to http://tempo:4317 to enable distributed tracing."
+            "Set it to http://tempo:4318 to enable distributed tracing."
         )
         _Initialized = True
         return
@@ -74,6 +74,16 @@ def init_telemetry(service_name: str = "weel-backend"):
     )
 
     provider = TracerProvider(resource=resource)
+    # OTLP HTTP exporter needs port :4318, not :4317 (gRPC).
+    if otlp_endpoint.endswith(":4317") or ":4317/" in otlp_endpoint:
+        otlp_endpoint = otlp_endpoint.replace(":4317", ":4318")
+        logger.warning(
+            "OTEL endpoint uses gRPC port :4317; corrected to HTTP port :4318 "
+            "for HTTP exporter. Set OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318."
+        )
+    # OTLP HTTP exporter expects the full traces URL (including /v1/traces).
+    if not otlp_endpoint.endswith("/v1/traces"):
+        otlp_endpoint = otlp_endpoint.rstrip("/") + "/v1/traces"
     exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
     processor = BatchSpanProcessor(
         exporter,
