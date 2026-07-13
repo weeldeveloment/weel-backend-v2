@@ -74,7 +74,7 @@ def init_telemetry(service_name: str = "weel-backend"):
     )
 
     provider = TracerProvider(resource=resource)
-    exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
+    exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
     processor = BatchSpanProcessor(
         exporter,
         max_queue_size=2048,
