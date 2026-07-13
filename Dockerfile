@@ -23,8 +23,6 @@ RUN poetry install --only main --no-root --no-ansi
 
 COPY . .
 
-RUN SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(50))") python manage.py collectstatic --noinput
-
 EXPOSE 8000
 
 COPY entrypoint.sh /entrypoint.sh
