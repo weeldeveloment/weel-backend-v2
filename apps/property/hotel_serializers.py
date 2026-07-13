@@ -97,7 +97,7 @@ class HotelCardSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     guid = serializers.CharField(read_only=True)
     title = serializers.CharField(read_only=True)
-    images = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
+    img = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
     star_rating = serializers.IntegerField(allow_null=True, read_only=True)
     city = serializers.CharField(allow_null=True, read_only=True)
     country = serializers.CharField(allow_null=True, read_only=True)
@@ -115,7 +115,7 @@ class HotelCardSerializer(serializers.Serializer):
     def to_representation(self, instance):
         request = self.context.get("request")
         row = dict(instance)
-        row["images"] = _build_media_url(request, row.get("images") or row.get("img") or row.get("photos") or [])
+        row["img"] = _build_media_url(request, row.get("images") or row.get("img") or row.get("photos") or [])
         row["price_from"] = _convert_price_for_output(row.get("price_from"), row.get("currency"))
         row["amenities_preview"] = (row.get("amenities") or [])[:5]
         row["review_score"] = (
