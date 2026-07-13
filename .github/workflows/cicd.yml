@@ -2,7 +2,7 @@ name: CI/CD to Dokploy (zero downtime)
 
 on:
   push:
-    branches: [deploy-before-otel]
+    branches: [main]
   workflow_dispatch:
 
 env:
