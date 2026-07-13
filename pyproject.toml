@@ -54,7 +54,6 @@ opentelemetry-instrumentation-celery = "^0.64b0"
 opentelemetry-instrumentation-redis = "^0.64b0"
 opentelemetry-instrumentation-psycopg2 = "^0.64b0"
 opentelemetry-exporter-otlp-proto-http = "^1.43.0"
-pympler = "^1.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.9.0"

@@ -2,36 +2,20 @@
 Active Python memory leak detection middleware.
 Uses tracemalloc to measure per-request heap growth and exports
 Prometheus-style metrics for Grafana dashboards.
+
+NOTE: pympler was removed from the per-request path because
+muppy.get_objects() + summary.summarize() takes ~4.7s on a
+fully-loaded Django heap (711k+ objects), causing Daphne worker
+pool exhaustion and 503 timeouts under concurrent load.
 """
 import logging
 import os
-import sys
-import traceback
 import tracemalloc
 
 from django.http import HttpRequest
 from django.utils.deprecation import MiddlewareMixin
 
 logger = logging.getLogger(__name__)
-
-# Lazily imported to avoid heavy startup cost when disabled
-_pympler_available = None
-_pympler_muppy = None
-_pympler_summary = None
-
-
-def _check_pympler():
-    global _pympler_available, _pympler_muppy, _pympler_summary
-    if _pympler_available is not None:
-        return _pympler_available
-    try:
-        from pympler import muppy, summary
-        _pympler_muppy = muppy
-        _pympler_summary = summary
-        _pympler_available = True
-    except Exception:
-        _pympler_available = False
-    return _pympler_available
 
 
 class MemoryProfilingMiddleware(MiddlewareMixin):
@@ -53,29 +37,18 @@ class MemoryProfilingMiddleware(MiddlewareMixin):
                 logger.warning("Failed to start tracemalloc: %s", exc)
                 self._enabled = False
 
-        # Try to register custom prometheus metrics
+        # Register custom prometheus metrics (lazy init)
         self._prom_growth = None
-        self._prom_objects = None
-        self._prom_top = None
         try:
-            from prometheus_client import Counter, Gauge, Histogram
+            from prometheus_client import Histogram
             self._prom_growth = Histogram(
                 "django_request_memory_growth_bytes",
                 "Heap allocation growth per request in bytes",
                 ["method", "path"],
                 buckets=[0, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216],
             )
-            self._prom_objects = Gauge(
-                "django_heap_object_count",
-                "Total tracked Python objects (pympler)",
-            )
-            self._prom_top = Gauge(
-                "django_memory_top_allocations",
-                "Top memory allocation size per module",
-                ["module"],
-            )
         except Exception:
-            pass  # prometheus_client not available or django-prometheus not active
+            pass
 
     def process_request(self, request: HttpRequest):
         if self._enabled:
@@ -108,18 +81,6 @@ class MemoryProfilingMiddleware(MiddlewareMixin):
                     total_growth,
                     "\n".join(lines),
                 )
-
-            # Pympler object count
-            if _check_pympler() and self._prom_objects is not None:
-                all_objects = _pympler_muppy.get_objects()
-                summary = _pympler_summary.summarize(all_objects)
-                total_objects = sum(row[1] for row in summary)
-                self._prom_objects.set(total_objects)
-                # Export top 5 module-level allocations as gauges
-                for row in summary[:5]:
-                    module_name = row[0]
-                    count = row[1]
-                    self._prom_top.labels(module=module_name).set(count)
 
         except Exception:
             logger.exception("Memory profiling failed for %s %s", request.method, request.path)

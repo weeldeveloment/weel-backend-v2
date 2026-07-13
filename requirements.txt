@@ -124,7 +124,6 @@ opentelemetry-instrumentation-celery==0.64b0
 opentelemetry-instrumentation-redis==0.64b0
 opentelemetry-instrumentation-psycopg2==0.64b0
 opentelemetry-exporter-otlp-proto-http==1.43.0
-pympler==1.1
 Pygments==2.19.2
 PyJWT==2.12.1
 pyOpenSSL==26.0.0
