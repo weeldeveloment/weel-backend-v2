@@ -93,6 +93,10 @@ def init_telemetry(service_name: str = "weel-backend"):
     _Initialized = True
     logger.info("OpenTelemetry initialized: endpoint=%s", otlp_endpoint)
 
+    # Suppress noisy retry warnings from the OTLP HTTP exporter
+    # (it retries with exponential backoff and logs every attempt).
+    logging.getLogger("opentelemetry.exporter.otlp.proto.http.trace_exporter").setLevel(logging.ERROR)
+
 
 def get_trace_context() -> dict:
     """
