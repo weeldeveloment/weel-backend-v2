@@ -44,8 +44,7 @@ class Command(BaseCommand):
         try:
             asyncio.run(set_webhook(base_url))
         except Exception as exc:
-            logger.exception("Main bot webhook setup failed: %s", exc)
-            self.stderr.write(self.style.WARNING(
+            self.stdout.write(self.style.WARNING(
                 f"Webhook setup failed: {exc}. Continuing startup."
             ))
             if options.get("strict"):

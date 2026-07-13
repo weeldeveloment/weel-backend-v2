@@ -54,6 +54,18 @@ def init_telemetry(service_name: str = "weel-backend"):
         _Initialized = True
         return
 
+    # OTLPSpanExporter speaks HTTP, not gRPC. Tempo exposes gRPC on 4317 and HTTP on 4318.
+    # Auto-correct the common misconfiguration so batches don't silently time out.
+    if otlp_endpoint.endswith(":4317"):
+        corrected = otlp_endpoint[:-5] + ":4318"
+        logger.warning(
+            "OTEL_EXPORTER_OTLP_ENDPOINT points to gRPC port :4317 but the HTTP "
+            "exporter is in use. Auto-correcting to %s. If you intended gRPC, "
+            "switch core/telemetry.py to OTLPGrpcSpanExporter.",
+            corrected,
+        )
+        otlp_endpoint = corrected
+
     # Deferred imports — only executed when OTel is actually used
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
@@ -102,6 +114,10 @@ def init_telemetry(service_name: str = "weel-backend"):
 
     _Initialized = True
     logger.info("OpenTelemetry initialized: endpoint=%s", otlp_endpoint)
+
+    # Suppress noisy retry warnings from the OTLP HTTP exporter
+    # (it retries with exponential backoff and logs every attempt).
+    logging.getLogger("opentelemetry.exporter.otlp.proto.http.trace_exporter").setLevel(logging.ERROR)
 
 
 def get_trace_context() -> dict:
