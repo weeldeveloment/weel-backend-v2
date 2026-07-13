@@ -1083,8 +1083,9 @@ def _extract_prepare_params(
     limit = _parse_int(_source_get(source, "limit"))
     if limit is None:
         limit = default_limit
-    if limit is not None:
-        limit = max(0, min(limit, 200))
+    if limit is None:
+        limit = _DEFAULT_PUBLIC_LIST_LIMIT
+    limit = max(0, min(limit, 200))
     return {
         "min_price": _parse_decimal(_source_get(source, "min_price")),
         "max_price": _parse_decimal(_source_get(source, "max_price")),
@@ -2306,7 +2307,7 @@ class PropertyListCreateView(APIView):
             rows = _list_cottage_rows(
                 query_params,
                 public_only=True,
-                default_limit=None,
+                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
                 testing_only=testing_only,
             )
             paginator = self.pagination_class()
@@ -2320,7 +2321,7 @@ class PropertyListCreateView(APIView):
             rows = _list_apartment_rows(
                 query_params,
                 public_only=True,
-                default_limit=None,
+                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
                 testing_only=testing_only,
             )
             paginator = self.pagination_class()
@@ -2333,7 +2334,7 @@ class PropertyListCreateView(APIView):
         if requested_kind == PROPERTY_KIND_HOTEL:
             rows = _list_hotel_rows(
                 query_params,
-                default_limit=None,
+                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
                 testing_only=testing_only,
             )
             paginator = self.pagination_class()

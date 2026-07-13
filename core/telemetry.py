@@ -49,10 +49,22 @@ def init_telemetry(service_name: str = "weel-backend"):
     }:
         logger.info(
             "OTEL_EXPORTER_OTLP_ENDPOINT not set. Tracing disabled. "
-            "Set it to http://tempo:4317 to enable distributed tracing."
+            "Set it to http://tempo:4318 to enable distributed tracing."
         )
         _Initialized = True
         return
+
+    # OTLPSpanExporter speaks HTTP, not gRPC. Tempo exposes gRPC on 4317 and HTTP on 4318.
+    # Auto-correct the common misconfiguration so batches don't silently time out.
+    if otlp_endpoint.endswith(":4317"):
+        corrected = otlp_endpoint[:-5] + ":4318"
+        logger.warning(
+            "OTEL_EXPORTER_OTLP_ENDPOINT points to gRPC port :4317 but the HTTP "
+            "exporter is in use. Auto-correcting to %s. If you intended gRPC, "
+            "switch core/telemetry.py to OTLPGrpcSpanExporter.",
+            corrected,
+        )
+        otlp_endpoint = corrected
 
     # Deferred imports — only executed when OTel is actually used
     from opentelemetry import trace
