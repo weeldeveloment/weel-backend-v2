@@ -123,7 +123,7 @@ opentelemetry-django==0.52b0
 opentelemetry-instrumentation-celery==0.52b0
 opentelemetry-instrumentation-redis==0.52b0
 opentelemetry-instrumentation-psycopg2==0.52b0
-opentelemetry-exporter-otlp==1.31.0
+opentelemetry-exporter-otlp-proto-http==1.31.0
 pympler==1.1
 Pygments==2.19.2
 PyJWT==2.12.1
