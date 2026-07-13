@@ -23,6 +23,8 @@ RUN poetry install --only main --no-root --no-ansi
 
 COPY . .
 
+RUN python manage.py collectstatic --noinput
+
 EXPOSE 8000
 
 COPY entrypoint.sh /entrypoint.sh
