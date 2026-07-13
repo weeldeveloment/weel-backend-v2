@@ -54,6 +54,18 @@ def init_telemetry(service_name: str = "weel-backend"):
         _Initialized = True
         return
 
+    # Collapse any internal whitespace (e.g. "http://otel-collector: 4318")
+    # which makes the URL unparseable by the exporter.
+    cleaned = "".join(otlp_endpoint.split())
+    if cleaned != otlp_endpoint:
+        logger.warning(
+            "OTEL_EXPORTER_OTLP_ENDPOINT contained whitespace; "
+            "rewrote %r -> %r",
+            otlp_endpoint,
+            cleaned,
+        )
+        otlp_endpoint = cleaned
+
     # OTLPSpanExporter speaks HTTP, not gRPC. Tempo exposes gRPC on 4317 and HTTP on 4318.
     # Auto-correct the common misconfiguration so batches don't silently time out.
     if otlp_endpoint.endswith(":4317"):

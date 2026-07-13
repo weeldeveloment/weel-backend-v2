@@ -143,7 +143,6 @@ GLOBAL_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.staticfiles",
-    "apps.bot",
 ]
 
 USE_NORM_DATASTORE = False  # Explicitly disable norm_* datastore usage
