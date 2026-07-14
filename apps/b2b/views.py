@@ -840,6 +840,7 @@ class B2BLeadRequestCreateView(APIView):
     sales team's Telegram channel on submission; staff review the request
     and onboard the company manually via ``create_b2b_owner``.
     """
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ResilientScopedRateThrottle]
     throttle_scope = "b2b_lead_request"
