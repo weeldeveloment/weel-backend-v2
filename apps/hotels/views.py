@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -25,10 +26,12 @@ from apps.hotels.repository import (
     count_hotels,
     get_available_rooms,
     get_hotel_card,
+    get_hotel_calendar,
     get_hotel_reviews,
     search_hotels,
 )
 from apps.hotels.serializers import (
+    HotelCalendarSerializer,
     HotelCardSerializer,
     HotelDetailSerializer,
     HotelSearchParamsSerializer,
@@ -230,3 +233,74 @@ class HotelReviewsView(APIView):
 
         reviews = _run_in_schema(schema_name, _query)
         return Response(ReviewListSerializer(reviews, many=True).data)
+
+
+class HotelCalendarView(APIView):
+    """GET /hotels/<guid>/calendar/
+
+    Har bir faol xona uchun kunlik bandlik holati — foydalanuvchi mehmonxona
+    sahifasida taqvim ko'rinishida band/bo'sh sanalarni ko'rishi uchun.
+    """
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="Mehmonxona bandlik taqvimi",
+        operation_description=(
+            "Tanlangan mehmonxona (``guid``) uchun ``from_date`` – "
+            "``to_date`` oralig'idagi kunlik xona bandlik holatini "
+            "qaytaradi.\n\n"
+            "Natija har bir xona × sana juftligi uchun bitta qatordan "
+            "iborat: ``room_id``, ``room_name``, ``date`` (YYYY-MM-DD), "
+            "va ``status`` (``booked`` yoki ``available``)."
+        ),
+        manual_parameters=[
+            _GUID_PARAM,
+            openapi.Parameter(
+                "from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                format=openapi.FORMAT_DATE, required=True,
+                description="Taqvim oralig'i boshlanish sanasi (YYYY-MM-DD).",
+            ),
+            openapi.Parameter(
+                "to_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                format=openapi.FORMAT_DATE, required=True,
+                description="Taqvim oralig'i tugash sanasi (YYYY-MM-DD).",
+            ),
+        ],
+        responses={
+            200: HotelCalendarSerializer(many=True),
+            400: openapi.Response(description="Noto'g'ri GUID yoki sana parametrlari."),
+            404: openapi.Response(description="Mehmonxona topilmadi."),
+        },
+    )
+    def get(self, request, guid):
+        resolved = _resolve_hotel(guid)
+        if not resolved:
+            return Response({"detail": "Invalid GUID."}, status=status.HTTP_400_BAD_REQUEST)
+
+        schema_name, hotel_id = resolved
+
+        from_date_str = request.query_params.get("from_date")
+        to_date_str = request.query_params.get("to_date")
+        if not from_date_str or not to_date_str:
+            return Response(
+                {"detail": "from_date and to_date are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from_date = date.fromisoformat(from_date_str)
+            to_date = date.fromisoformat(to_date_str)
+        except ValueError:
+            return Response(
+                {"detail": "Invalid date format. Use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        def _query():
+            return get_hotel_calendar(hotel_id, from_date=from_date, to_date=to_date)
+
+        try:
+            calendar = _run_in_schema(schema_name, _query)
+        except Exception:
+            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(HotelCalendarSerializer(calendar, many=True).data)

@@ -205,3 +205,10 @@ class ReviewListSerializer(serializers.Serializer):
     text = serializers.CharField()
     hotel_response = serializers.CharField(allow_null=True)
     created_at = serializers.DateTimeField()
+
+
+class HotelCalendarSerializer(serializers.Serializer):
+    room_id = serializers.IntegerField(read_only=True)
+    room_name = serializers.CharField(read_only=True, allow_null=True)
+    date = serializers.DateField(read_only=True)
+    status = serializers.CharField(read_only=True)
