@@ -44,6 +44,27 @@ class PropertyImageSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
 
 
+class RoomTypeSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    property_id = serializers.IntegerField(read_only=True)
+    preset = serializers.ChoiceField(
+        choices=["standard", "superior", "deluxe", "suite", "studio", "apartment", "family", "dormitory", "custom"],
+        required=False,
+        allow_null=True,
+    )
+    custom_name = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=100)
+    name = serializers.CharField(max_length=100)
+    description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    base_rate = LenientDecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    currency = serializers.CharField(required=False, default="USD", min_length=1)
+    capacity = serializers.IntegerField(required=False, default=2)
+    amenities = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    photos = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    is_active = serializers.BooleanField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
 class PropertySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     guid = serializers.CharField(read_only=True, required=False)
@@ -88,6 +109,8 @@ class PropertySerializer(serializers.Serializer):
 class RoomSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     property_id = serializers.IntegerField(read_only=True)
+    room_type_id = serializers.IntegerField(required=False, allow_null=True)
+    room_type = RoomTypeSerializer(read_only=True, required=False)
     room_type_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     room_type_preset = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     room_number = serializers.CharField(max_length=20)

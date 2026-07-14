@@ -37,9 +37,11 @@ from apps.pms.repository import (
     create_property,
     create_review,
     create_room,
+    create_room_type,
     delete_property,
     delete_property_image,
     delete_room,
+    delete_room_type,
     expire_holds,
     find_or_create_guest,
     get_analytics,
@@ -51,11 +53,13 @@ from apps.pms.repository import (
     get_property_images,
     get_room,
     get_room_availability,
+    get_room_type,
     hold_dates,
     list_bookings,
     list_guests,
     list_properties,
     list_reviews,
+    list_room_types,
     list_rooms,
     mass_update_rooms,
     move_booking,
@@ -67,6 +71,7 @@ from apps.pms.repository import (
     update_guest,
     update_property,
     update_room,
+    update_room_type,
 )
 from apps.pms.serializers import (
     AnalyticsQuerySerializer,
@@ -87,6 +92,7 @@ from apps.pms.serializers import (
     RoomIdsSerializer,
     RoomMassUpdateItemSerializer,
     RoomSerializer,
+    RoomTypeSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -329,6 +335,65 @@ class RoomMassUpdateView(PMSBaseView):
                 results.append(RoomSerializer(room).data)
 
         return Response(results, status=status.HTTP_200_OK)
+
+
+class RoomTypeListCreateView(PMSBaseView):
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    @swagger_auto_schema(responses={200: RoomTypeSerializer(many=True)})
+    def get(self, request, property_id):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        prop = get_property(property_id, organization_id=int(org_id))
+        if not prop:
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
+        room_types = list_room_types(property_id)
+        return Response(RoomTypeSerializer(room_types, many=True).data)
+
+    @swagger_auto_schema(responses={201: RoomTypeSerializer()})
+    def post(self, request, property_id):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        prop = get_property(property_id, organization_id=int(org_id))
+        if not prop:
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = RoomTypeSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        room_type = create_room_type(property_id=property_id, **serializer.validated_data)
+        if not room_type:
+            return Response({"detail": "Failed to create room type."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(RoomTypeSerializer(room_type).data, status=status.HTTP_201_CREATED)
+
+
+class RoomTypeRetrieveUpdateDestroyView(PMSBaseView):
+    @swagger_auto_schema(responses={200: RoomTypeSerializer()})
+    def get(self, request, property_id, room_type_id):
+        room_type = get_room_type(room_type_id, property_id)
+        if not room_type:
+            return Response({"detail": "Room type not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(RoomTypeSerializer(room_type).data)
+
+    @swagger_auto_schema(responses={200: RoomTypeSerializer()})
+    def patch(self, request, property_id, room_type_id):
+        serializer = RoomTypeSerializer(data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        room_type = update_room_type(room_type_id, **serializer.validated_data)
+        if not room_type:
+            return Response({"detail": "Room type not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(RoomTypeSerializer(room_type).data)
+
+    @swagger_auto_schema(responses={204: "Deleted"})
+    def delete(self, request, property_id, room_type_id):
+        if not delete_room_type(room_type_id):
+            return Response({"detail": "Room type not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CalendarView(PMSBaseView):

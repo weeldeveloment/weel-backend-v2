@@ -17,6 +17,26 @@ class Command(BaseCommand):
             cursor.execute(f"SET search_path TO {schema_name}, public;")
 
             migrations = [
+                # pms_room_type — new table
+                ("pms_room_type", "table", """
+                    CREATE TABLE IF NOT EXISTS pms_room_type (
+                        id BIGSERIAL PRIMARY KEY,
+                        property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                        preset VARCHAR(20),
+                        custom_name VARCHAR(100),
+                        name VARCHAR(100) NOT NULL,
+                        description TEXT,
+                        base_rate NUMERIC(12,2),
+                        currency VARCHAR(3) DEFAULT 'USD',
+                        capacity INTEGER DEFAULT 2,
+                        amenities TEXT[] DEFAULT '{}',
+                        photos TEXT[] DEFAULT '{}',
+                        is_active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """),
+                ("pms_room", "room_type_id", "ALTER TABLE pms_room ADD COLUMN IF NOT EXISTS room_type_id BIGINT REFERENCES pms_room_type(id) ON DELETE SET NULL"),
                 # pms_property — new columns
                 ("pms_property", "full_address", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS full_address TEXT"),
                 ("pms_property", "weel_classification", "ALTER TABLE pms_property ADD COLUMN IF NOT EXISTS weel_classification VARCHAR(20)"),

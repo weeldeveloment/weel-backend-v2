@@ -52,6 +52,23 @@ class RoomTypePreset:
     CHOICES = [STANDARD, SUPERIOR, DELUXE, SUITE, STUDIO, APARTMENT, FAMILY, DORMITORY, CUSTOM]
 
 
+@dataclass(slots=True)
+class RoomType(HardDeleteBaseModel):
+    id: int | None = None
+    property_id: int | None = None
+    preset: str | None = None
+    custom_name: str | None = None
+    name: str | None = None
+    description: str | None = None
+    base_rate: Decimal | None = None
+    currency: str = "USD"
+    capacity: int = 2
+    amenities: list = field(default_factory=list)
+    photos: list = field(default_factory=list)
+    is_active: bool = True
+    _meta = SimpleNamespace(db_table="pms_room_type")
+
+
 class BedType:
     SINGLE = "single"
     TWIN = "twin"
@@ -180,6 +197,7 @@ class PropertyImage(HardDeleteBaseModel):
 class Room(HardDeleteBaseModel):
     id: int | None = None
     property_id: int | None = None
+    room_type_id: int | None = None
     room_type_name: str | None = None
     room_type_preset: str | None = None
     room_number: str | None = None

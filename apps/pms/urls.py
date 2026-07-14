@@ -29,6 +29,8 @@ from .views import (
     RoomListCreateView,
     RoomMassUpdateView,
     RoomRetrieveUpdateDestroyView,
+    RoomTypeListCreateView,
+    RoomTypeRetrieveUpdateDestroyView,
 )
 
 urlpatterns = [
@@ -42,6 +44,10 @@ urlpatterns = [
     path("properties/<int:property_id>/rooms/", RoomListCreateView.as_view(), name="pms-room-list-create"),
     path("properties/<int:property_id>/rooms/mass-update/", RoomMassUpdateView.as_view(), name="pms-room-mass-update"),
     path("properties/<int:property_id>/rooms/<int:room_id>/", RoomRetrieveUpdateDestroyView.as_view(), name="pms-room-detail"),
+
+    # Room Types
+    path("properties/<int:property_id>/room-types/", RoomTypeListCreateView.as_view(), name="pms-room-type-list-create"),
+    path("properties/<int:property_id>/room-types/<int:room_type_id>/", RoomTypeRetrieveUpdateDestroyView.as_view(), name="pms-room-type-detail"),
 
     # Calendar
     path("properties/<int:property_id>/calendar/", CalendarView.as_view(), name="pms-calendar"),

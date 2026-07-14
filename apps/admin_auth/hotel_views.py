@@ -15,6 +15,8 @@ from drf_yasg import openapi
 
 from shared.raw.db import fetch_all
 
+from rest_framework.pagination import PageNumberPagination
+
 from .authentication import AdminJWTAuthentication
 from .permissions import IsAdminUser
 
@@ -52,8 +54,10 @@ from apps.pms.serializers import (
 )
 from apps.b2b.repository import list_b2b_users, get_company
 from apps.b2b.serializers import B2BCompanySerializer, B2BUserSerializer
-from property.hotel_repository import resolve_hotel_guid
+from property.hotel_repository import resolve_hotel_guid, _fetch_hotel_rows_for_schema
 from apps.platform.raw_repository import list_organizations
+from apps.property.hotel_serializers import HotelCardSerializer
+from apps.property.views import _favorite_guids_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +106,7 @@ class ClassifyPropertySerializer(serializers.Serializer):
 class AdminHotelListView(AdminHotelBaseView):
     """List all hotels across all organizations — admin view"""
 
-    @swagger_auto_schema(responses={200: PropertySerializer(many=True)})
+    @swagger_auto_schema(responses={200: HotelCardSerializer(many=True)})
     def get(self, request):
         orgs = list_organizations()
         all_properties: list[dict[str, Any]] = []
@@ -110,13 +114,33 @@ class AdminHotelListView(AdminHotelBaseView):
             schema = org.get("schema_name")
             if not schema:
                 continue
-            rows = fetch_all(
-                f"SELECT * FROM {schema}.pms_property WHERE is_active = TRUE ORDER BY name ASC"
-            )
-            for row in rows:
-                row["guid"] = str(row["guid"])
+            try:
+                rows = _fetch_hotel_rows_for_schema(
+                    schema,
+                    include_inactive=True,
+                    include_unverified=True,
+                )
+                for row in rows:
+                    row["organization_id"] = org.get("id")
+                    row["organization_name"] = org.get("name")
+                    row["organization_slug"] = org.get("slug")
+                    row["tenant_schema"] = schema
+            except Exception:
+                continue
             all_properties.extend(rows)
-        return Response(PropertySerializer(all_properties, many=True).data)
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        paginator = PageNumberPagination()
+        paginator.page_size = 20
+        paginator.page_size_query_param = "limit"
+        paginator.max_page_size = 100
+        paginated_data = paginator.paginate_queryset(all_properties, request)
+        if paginated_data is not None:
+            serializer = HotelCardSerializer(paginated_data, many=True, context=ctx)
+            return paginator.get_paginated_response(serializer.data)
+        return Response(HotelCardSerializer(all_properties, many=True, context=ctx).data)
 
 
 class AdminHotelDetailView(AdminHotelBaseView):

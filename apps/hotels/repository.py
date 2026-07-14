@@ -448,11 +448,42 @@ def _search_hotels_in_schema(
 
     sql = f"""
         SELECT
-            p.id, p.guid, p.name, p.city, p.full_address, p.star_rating,
-            p.weel_classification, p.themes, p.description_uz AS description,
-            p.photos, p.check_in_time, p.check_out_time,
-            p.latitude, p.longitude,
+            p.id,
+            p.guid,
+            p.organization_id,
+            p.partner_user_id,
+            p.name,
+            p.description_uz,
+            p.description_ru,
+            p.description_en,
+            p.address,
+            p.full_address,
+            p.city,
+            p.country,
+            p.latitude::text AS latitude,
+            p.longitude::text AS longitude,
+            p.star_rating,
+            p.weel_classification,
+            p.themes,
+            COALESCE(p.amenities, ARRAY[]::text[]) AS amenities,
+            COALESCE(p.legal_info, '{{}}'::jsonb) AS legal_info,
+            p.check_in_time,
+            p.check_out_time,
+            p.cancellation_policy,
+            COALESCE(p.quiet_hours, TRUE) AS quiet_hours,
+            COALESCE(p.alcohol_allowed, FALSE) AS alcohol_allowed,
+            COALESCE(p.pets_allowed, FALSE) AS pets_allowed,
+            p.currency,
+            p.timezone,
+            COALESCE(p.photos, ARRAY[]::text[]) AS photos,
+            COALESCE(p.is_active, TRUE) AS is_active,
+            COALESCE(p.is_testing, FALSE) AS is_testing,
+            COALESCE(p.is_verified, FALSE) AS is_verified,
+            COALESCE(p.is_archived, FALSE) AS is_archived,
             COALESCE(p.is_recommended, FALSE) AS is_recommended,
+            COALESCE(p.verification_status, 'waiting') AS verification_status,
+            p.created_at,
+            p.updated_at,
             pricing.min_price,
             COALESCE(pricing.available_rooms, 0) AS available_rooms,
             (
@@ -473,11 +504,22 @@ def _search_hotels_in_schema(
     """
     all_params = avail_params + params
     rows = fetch_all(sql, all_params)
+    import json as _json
+
     for row in rows:
         row["organization_id"] = organization.get("id")
         row["organization_name"] = organization.get("name")
+        row["organization_slug"] = organization.get("slug")
         row["tenant_schema"] = schema_name
         row["guid"] = str(row["guid"]) if row.get("guid") else None
+        raw_legal = row.get("legal_info")
+        if isinstance(raw_legal, str):
+            try:
+                row["legal_info"] = _json.loads(raw_legal)
+            except Exception:
+                row["legal_info"] = {}
+        elif not isinstance(raw_legal, dict):
+            row["legal_info"] = {}
     return rows
 
 

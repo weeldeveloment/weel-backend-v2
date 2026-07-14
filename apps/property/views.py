@@ -4128,6 +4128,40 @@ class AdminHotelListCreateView(APIView):
 
     @swagger_auto_schema(
         tags=["Admin / Property"],
+        operation_summary="List hotels (admin)",
+        operation_description="Admin-only list of hotels across all tenant schemas.",
+        manual_parameters=[
+            openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter("organization_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter("tenant_schema", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter("is_active", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN),
+            openapi.Parameter("created_from", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
+            openapi.Parameter("created_to", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
+            openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+        ],
+        responses={200: HotelAdminListSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        ctx = {"request": request}
+        rows = list_admin_hotels(
+            search=request.query_params.get("search"),
+            organization_id=_parse_int(request.query_params.get("organization_id")),
+            tenant_schema=request.query_params.get("tenant_schema"),
+            is_active=_parse_bool(request.query_params.get("is_active")),
+            created_from=_parse_date(request.query_params.get("created_from")),
+            created_to=_parse_date(request.query_params.get("created_to")),
+        )
+        rows = _attach_partner_users(rows)
+        paginator = _OptionalLimitPagePagination()
+        paginated_data = paginator.paginate_queryset(rows, request)
+        if paginated_data is not None:
+            serializer = HotelAdminListSerializer(paginated_data, many=True, context=ctx)
+            return paginator.get_paginated_response(serializer.data)
+        return Response(HotelAdminListSerializer(rows, many=True, context=ctx).data)
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
         operation_summary="Create hotel (admin)",
         operation_description="Admin-only hotel creation endpoint targeting a PMS tenant schema.",
         request_body=HotelAdminUpdateSerializer,

@@ -97,17 +97,51 @@ class HotelCardSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     guid = serializers.CharField(read_only=True)
     title = serializers.CharField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    description = serializers.CharField(allow_null=True, read_only=True)
+    description_uz = serializers.CharField(allow_null=True, read_only=True)
+    description_ru = serializers.CharField(allow_null=True, read_only=True)
+    description_en = serializers.CharField(allow_null=True, read_only=True)
+    address = serializers.CharField(allow_null=True, read_only=True)
+    full_address = serializers.CharField(allow_null=True, read_only=True)
     img = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
+    images = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
     star_rating = serializers.IntegerField(allow_null=True, read_only=True)
+    weel_classification = serializers.CharField(allow_null=True, read_only=True)
+    themes = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
     city = serializers.CharField(allow_null=True, read_only=True)
     country = serializers.CharField(allow_null=True, read_only=True)
+    latitude = serializers.FloatField(allow_null=True, read_only=True)
+    longitude = serializers.FloatField(allow_null=True, read_only=True)
     price_from = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, read_only=True)
+    min_price = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, read_only=True)
     currency = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    timezone = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
     review_score = serializers.FloatField(allow_null=True, read_only=True)
+    rating = serializers.DecimalField(max_digits=3, decimal_places=2, allow_null=True, read_only=True)
     review_count = serializers.IntegerField(read_only=True, default=0)
+    booking_count = serializers.IntegerField(read_only=True, default=0)
+    available_rooms = serializers.IntegerField(read_only=True, default=0)
+    amenities = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
     amenities_preview = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
+    legal_info = serializers.DictField(read_only=True, default=dict)
+    check_in_time = serializers.CharField(allow_null=True, read_only=True)
+    check_out_time = serializers.CharField(allow_null=True, read_only=True)
+    cancellation_policy = serializers.CharField(allow_null=True, read_only=True)
+    policies = serializers.DictField(read_only=True, default=dict)
     is_favorite = serializers.BooleanField(read_only=True)
     is_verified = serializers.BooleanField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    is_testing = serializers.BooleanField(read_only=True)
+    is_archived = serializers.BooleanField(read_only=True)
+    is_recommended = serializers.BooleanField(read_only=True)
+    verification_status = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    tenant_schema = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
+    organization = serializers.DictField(read_only=True, default=dict)
+    partner_user = serializers.DictField(read_only=True, default=dict)
+    property_detail = serializers.DictField(read_only=True, default=dict)
+    created_at = serializers.DateTimeField(allow_null=True, read_only=True)
+    updated_at = serializers.DateTimeField(allow_null=True, read_only=True)
 
     class Meta:
         ref_name = "PropertyHotelCard"
@@ -115,42 +149,9 @@ class HotelCardSerializer(serializers.Serializer):
     def to_representation(self, instance):
         request = self.context.get("request")
         row = dict(instance)
-        row["img"] = _build_media_url(request, row.get("images") or row.get("img") or row.get("photos") or [])
-        row["price_from"] = _convert_price_for_output(row.get("price_from"), row.get("currency"))
-        row["amenities_preview"] = (row.get("amenities") or [])[:5]
-        row["review_score"] = (
-            float(row["review_score"])
-            if row.get("review_score") is not None
-            else None
-        )
-        row["review_count"] = int(row.get("review_count") or 0)
-        row["star_rating"] = row.get("star_rating")
-        row["is_verified"] = bool(row.get("is_verified", False))
-        favorites = _favorite_guid_set(self.context)
-        row["is_favorite"] = str(row.get("guid")) in favorites
-        return super().to_representation(row)
-
-
-class HotelDetailSerializer(HotelCardSerializer):
-    description = serializers.CharField(allow_null=True, read_only=True)
-    full_address = serializers.CharField(allow_null=True, read_only=True)
-    latitude = serializers.FloatField(allow_null=True, read_only=True)
-    longitude = serializers.FloatField(allow_null=True, read_only=True)
-    amenities = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
-    check_in_time = serializers.CharField(allow_null=True, read_only=True)
-    check_out_time = serializers.CharField(allow_null=True, read_only=True)
-    cancellation_policy = serializers.CharField(allow_null=True, read_only=True)
-    policies = serializers.DictField(read_only=True, default=dict)
-    room_types = RoomTypeSummarySerializer(many=True, read_only=True, default=list)
-    created_at = serializers.DateTimeField(read_only=True)
-
-    class Meta:
-        ref_name = "PropertyHotelDetail"
-
-    def to_representation(self, instance):
-        request = self.context.get("request")
-        row = dict(instance)
         lang = _preferred_language(request)
+        row["title"] = row.get("name") or row.get("title") or ""
+        row["name"] = row.get("name") or row.get("title") or ""
         row["description"] = (
             row.get(f"description_{lang}")
             or row.get("description_uz")
@@ -166,7 +167,32 @@ class HotelDetailSerializer(HotelCardSerializer):
             row["longitude"] = float(row.get("longitude") or 0)
         except (TypeError, ValueError):
             row["longitude"] = None
+        row["img"] = _build_media_url(request, row.get("images") or row.get("img") or row.get("photos") or [])
+        row["images"] = _build_media_url(request, row.get("photos") or row.get("images") or row.get("img") or [])
+        row["price_from"] = _convert_price_for_output(row.get("price_from") or row.get("min_price"), row.get("currency"))
+        row["min_price"] = _convert_price_for_output(row.get("min_price"), row.get("currency"))
         row["amenities"] = row.get("amenities") or []
+        row["amenities_preview"] = (row.get("amenities") or [])[:5]
+        row["review_score"] = (
+            float(row["review_score"] or row.get("rating") or 0)
+            if (row.get("review_score") is not None or row.get("rating") is not None)
+            else None
+        )
+        row["rating"] = row.get("rating") or row.get("review_score")
+        row["review_count"] = int(row.get("review_count") or 0)
+        row["booking_count"] = int(row.get("booking_count") or 0)
+        row["available_rooms"] = int(row.get("available_rooms") or 0)
+        row["star_rating"] = row.get("star_rating")
+        row["weel_classification"] = row.get("weel_classification")
+        row["themes"] = row.get("themes") or []
+        row["is_verified"] = bool(row.get("is_verified", False))
+        row["is_active"] = bool(row.get("is_active", True))
+        row["is_testing"] = bool(row.get("is_testing", False))
+        row["is_archived"] = bool(row.get("is_archived", False))
+        row["is_recommended"] = bool(row.get("is_recommended", False))
+        row["verification_status"] = row.get("verification_status") or "waiting"
+        raw_legal = row.get("legal_info")
+        row["legal_info"] = raw_legal if isinstance(raw_legal, dict) else {}
         row["check_in_time"] = _iso_time_str(row.get("check_in_time"))
         row["check_out_time"] = _iso_time_str(row.get("check_out_time"))
         row["cancellation_policy"] = row.get("cancellation_policy")
@@ -175,11 +201,51 @@ class HotelDetailSerializer(HotelCardSerializer):
             "pets_allowed": bool(row.get("pets_allowed", False)),
             "quiet_hours": bool(row.get("quiet_hours", True)),
         }
+        row["tenant_schema"] = row.get("tenant_schema")
+        row["organization"] = {
+            "id": row.get("organization_id"),
+            "name": row.get("organization_name"),
+            "slug": row.get("organization_slug"),
+            "schema_name": row.get("tenant_schema"),
+        }
+        partner_payload = row.get("partner_user")
+        row["partner_user"] = partner_payload if isinstance(partner_payload, dict) else None
+        row["property_detail"] = {
+            "description_ru": row.get("description_ru") or None,
+            "description_uz": row.get("description_uz") or None,
+            "description_en": row.get("description_en") or None,
+            "address": row.get("address") or None,
+            "check_in_time": row.get("check_in_time") or None,
+            "check_out_time": row.get("check_out_time") or None,
+            "cancellation_policy": row.get("cancellation_policy") or None,
+            "timezone": row.get("timezone") or None,
+            "amenities": row.get("amenities") or [],
+            "is_allowed_alcohol": bool(row.get("alcohol_allowed", False)),
+            "is_allowed_pets": bool(row.get("pets_allowed", False)),
+            "is_quiet_hours": bool(row.get("quiet_hours", True)),
+            "star_rating": row.get("star_rating"),
+        }
+        favorites = _favorite_guid_set(self.context)
+        row["is_favorite"] = str(row.get("guid")) in favorites
+        return super().to_representation(row)
+
+
+class HotelDetailSerializer(HotelCardSerializer):
+    room_types = RoomTypeSummarySerializer(many=True, read_only=True, default=list)
+    reviews = serializers.ListField(child=serializers.DictField(), read_only=True, default=list)
+
+    class Meta:
+        ref_name = "PropertyHotelDetail"
+
+    def to_representation(self, instance):
+        request = self.context.get("request")
+        row = dict(instance)
         row["room_types"] = row.get("room_types") or []
         if row["room_types"]:
             row["room_types"] = [
                 self._build_room_summary(r, request) for r in row["room_types"]
             ]
+        row["reviews"] = row.get("reviews") or []
         return super().to_representation(row)
 
     @staticmethod
@@ -244,60 +310,14 @@ class HotelAdminPropertyDetailSerializer(serializers.Serializer):
 
 
 class HotelAdminListSerializer(HotelCardSerializer):
-    is_active = serializers.BooleanField(read_only=True)
-    is_testing = serializers.BooleanField(read_only=True)
-    is_verified = serializers.BooleanField(read_only=True)
-    is_archived = serializers.BooleanField(read_only=True)
-    is_recommended = serializers.BooleanField(read_only=True)
-    verification_status = serializers.CharField(
-        allow_blank=True, allow_null=True, read_only=True
-    )
-    organization = HotelAdminOrganizationSerializer(read_only=True)
-    property_detail = HotelAdminPropertyDetailSerializer(source="*", read_only=True)
-    tenant_schema = serializers.CharField(allow_blank=True, allow_null=True)
-    legal_info = serializers.DictField(
-        child=serializers.CharField(allow_blank=True, allow_null=True), read_only=True
-    )
-    partner_user = HotelPartnerUserSerializer(allow_null=True, read_only=True)
+
+    class Meta:
+        ref_name = "PropertyHotelAdminList"
 
     def to_representation(self, instance):
         row = dict(instance)
-        partner_payload = row.get("partner_user")
-        if isinstance(partner_payload, dict):
-            row["partner_user"] = partner_payload
-        else:
-            row["partner_user"] = None
+        row["partner_user"] = row.get("partner_user") if isinstance(row.get("partner_user"), dict) else None
         data = super().to_representation(row)
-        data["is_active"] = bool(row.get("is_active", True))
-        data["is_testing"] = bool(row.get("is_testing", False))
-        data["is_verified"] = bool(row.get("is_verified", False))
-        data["is_archived"] = bool(row.get("is_archived", False))
-        data["is_recommended"] = bool(row.get("is_recommended", False))
-        data["verification_status"] = row.get("verification_status") or "waiting"
-        data["tenant_schema"] = row.get("tenant_schema")
-        data["organization"] = {
-            "id": row.get("organization_id"),
-            "name": row.get("organization_name"),
-            "slug": row.get("organization_slug"),
-            "schema_name": row.get("tenant_schema"),
-        }
-        data["property_detail"] = {
-            "description_ru": row.get("description_ru") or None,
-            "description_uz": row.get("description_uz") or None,
-            "description_en": row.get("description_en") or None,
-            "address": row.get("address") or None,
-            "check_in_time": row.get("check_in_time") or None,
-            "check_out_time": row.get("check_out_time") or None,
-            "cancellation_policy": row.get("cancellation_policy") or None,
-            "timezone": row.get("timezone") or None,
-            "amenities": row.get("amenities") or [],
-            "is_allowed_alcohol": bool(row.get("is_allowed_alcohol", False)),
-            "is_allowed_pets": bool(row.get("is_allowed_pets", False)),
-            "is_quiet_hours": bool(row.get("is_quiet_hours", True)),
-            "star_rating": row.get("star_rating"),
-        }
-        raw_legal = row.get("legal_info")
-        data["legal_info"] = raw_legal if isinstance(raw_legal, dict) else {}
         return data
 
 

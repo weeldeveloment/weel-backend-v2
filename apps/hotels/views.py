@@ -32,7 +32,6 @@ from apps.hotels.repository import (
 )
 from apps.hotels.serializers import (
     HotelCalendarSerializer,
-    HotelCardSerializer,
     HotelDetailSerializer,
     HotelSearchParamsSerializer,
     ReviewListSerializer,
@@ -40,6 +39,7 @@ from apps.hotels.serializers import (
     RoomSelectParamsSerializer,
     StayPriceSerializer,
 )
+from apps.property.hotel_serializers import HotelCardSerializer as HotelCardFullSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -88,11 +88,15 @@ class HotelSearchView(APIView):
 
         hotels = search_hotels(**d, limit=page_size, offset=offset)
         count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"})
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
         return Response({
             "count": count,
             "page": page,
             "page_size": page_size,
-            "results": HotelCardSerializer(hotels, many=True).data,
+            "results": HotelCardFullSerializer(hotels, many=True, context=ctx).data,
         })
 
 
