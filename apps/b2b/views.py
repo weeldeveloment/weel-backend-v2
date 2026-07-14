@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import random
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -77,6 +77,7 @@ from apps.hotels.repository import (
     create_hotel_booking,
     get_available_rooms,
     get_bookings_status,
+    get_hotel_calendar,
     search_hotels,
 )
 from apps.hotels.serializers import (
@@ -92,6 +93,7 @@ from apps.b2b.serializers import (
     B2BDepartmentSummarySerializer,
     B2BEmployeeCreateSerializer,
     B2BEmployeeSerializer,
+    B2BHotelCalendarSerializer,
     B2BUserSerializer,
     BudgetRequestSerializer,
     BusinessTripSerializer,
@@ -149,7 +151,7 @@ class B2BHotelSearchView(APIView):
             "tanlov uchun `lat`/`lon`/`radius_km` (km). Kalendar: "
             "`check_in`/`check_out` + `guests` (necha kishi) berilsa, faqat "
             "shu sanalar oralig'ida va shu odam soniga mos BO'SH xona bor "
-            "mehmonxonalar qaytariladi. Har bir natija `hotel_guid` bilan "
+            "mehmonxonalar qaytariladi. Har bir natija `guid` bilan "
             "keladi — mehmonxona bir nechta tashkilotlar (sxemalar) bo'ylab "
             "qidirilgani uchun bu identifikator raqamli `id`dan ko'ra "
             "ishonchliroq."
@@ -218,10 +220,10 @@ class B2BHotelRoomsView(APIView):
         tags=["B2B / Executer"],
     )
     def get(self, request, hotel_guid):
-        decoded = decode_hotel_guid(hotel_guid)
-        if not decoded:
+        resolved = resolve_hotel_guid(hotel_guid)
+        if not resolved:
             return Response({"detail": "Invalid hotel_guid."}, status=status.HTTP_400_BAD_REQUEST)
-        schema_name, hotel_id = decoded
+        schema_name, hotel_id = resolved
 
         params = RoomSelectParamsSerializer(data=request.query_params)
         if not params.is_valid():
@@ -358,10 +360,10 @@ class B2BHotelBookingListCreateView(APIView):
         if not trip:
             return Response({"detail": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        decoded = decode_hotel_guid(data["hotel_guid"])
-        if not decoded:
+        resolved = resolve_hotel_guid(data["hotel_guid"])
+        if not resolved:
             return Response({"detail": "Invalid hotel_guid."}, status=status.HTTP_400_BAD_REQUEST)
-        schema_name, hotel_id = decoded
+        schema_name, hotel_id = resolved
 
         hotel = get_hotel_for_public(data["hotel_guid"])
         if not hotel:
@@ -509,6 +511,84 @@ class B2BHotelBookingDetailView(APIView):
         booking_request["room_count"] = len(rooms)
         booking_request["employee_count"] = sum(len(r["employees"]) for r in rooms)
         return Response(HotelBookingRequestDetailSerializer(booking_request).data)
+
+
+class B2BHotelCalendarView(APIView):
+    """GET /b2b/hotels/<hotel_guid>/calendar/
+
+    Mehmonxonaning butun taqvimidagi band/bo'sh holatini ko'rsatadi — har bir
+    xona uchun har bir sana ``booked`` yoki ``available`` sifatida qaytariladi.
+    Executer komandirovka uchun bo'sh sanalarni shu yerdan ko'rib tanlaydi.
+    """
+    permission_classes = [IsAuthenticated, IsB2BPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Mehmonxona bandlik taqvimi",
+        operation_description=(
+            "Tanlangan mehmonxona (``hotel_guid``) uchun ``from_date`` – "
+            "``to_date`` oralig'idagi har bir faol xonaning kunlik bandlik "
+            "holatini qaytaradi.\n\n"
+            "Har bir qator: ``room_id``, ``room_name``, ``date`` va "
+            "``status`` (``booked`` yoki ``available``). Bu yerda nafaqat "
+            "B2B orqali qilingan bronlar, balki mehmonxonaning o'z sayti "
+            "orqali qilingan bandliklar ham aks etadi — shuning uchun "
+            "executer haqiqiy bandlik holatini ko'rib, xodimlarni "
+            "joylashtirish uchun bo'sh sanalarni aniq tanlay oladi."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "hotel_guid", openapi.IN_PATH, type=openapi.TYPE_STRING,
+                required=True, description="Mehmonxona GUID identifikatori.",
+            ),
+            openapi.Parameter(
+                "from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                format=openapi.FORMAT_DATE, required=True,
+                description="Taqvim oralig'i boshlanish sanasi (YYYY-MM-DD).",
+            ),
+            openapi.Parameter(
+                "to_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                format=openapi.FORMAT_DATE, required=True,
+                description="Taqvim oralig'i tugash sanasi (YYYY-MM-DD).",
+            ),
+        ],
+        responses={
+            200: B2BHotelCalendarSerializer(many=True),
+            400: openapi.Response(description="Noto'g'ri hotel_guid yoki sana parametrlari."),
+            404: openapi.Response(description="Mehmonxona topilmadi."),
+        },
+        tags=["B2B / Executer"],
+    )
+    def get(self, request, hotel_guid):
+        resolved = resolve_hotel_guid(hotel_guid)
+        if not resolved:
+            return Response({"detail": "Invalid hotel_guid."}, status=status.HTTP_400_BAD_REQUEST)
+        schema_name, hotel_id = resolved
+
+        from_date_str = request.query_params.get("from_date")
+        to_date_str = request.query_params.get("to_date")
+        if not from_date_str or not to_date_str:
+            return Response(
+                {"detail": "from_date and to_date are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from_date = date.fromisoformat(from_date_str)
+            to_date = date.fromisoformat(to_date_str)
+        except ValueError:
+            return Response(
+                {"detail": "Invalid date format. Use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            calendar = _run_in_schema(
+                schema_name,
+                lambda: get_hotel_calendar(hotel_id, from_date=from_date, to_date=to_date),
+            )
+        except Exception:
+            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(B2BHotelCalendarSerializer(calendar, many=True).data)
 
 
 class B2BCompanyView(APIView):

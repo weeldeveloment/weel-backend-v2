@@ -263,20 +263,6 @@ class BookingHistory(HardDeleteBaseModel):
 
 
 @dataclass(slots=True)
-class Rate(HardDeleteBaseModel):
-    id: int | None = None
-    property_id: int | None = None
-    room_id: int | None = None
-    date_from: date | None = None
-    date_to: date | None = None
-    rate: Decimal | None = None
-    currency: str = "USD"
-    min_stay: int = 1
-    is_weekend_rate: bool = False
-    _meta = SimpleNamespace(db_table="pms_rate")
-
-
-@dataclass(slots=True)
 class Review(HardDeleteBaseModel):
     id: int | None = None
     property_id: int | None = None

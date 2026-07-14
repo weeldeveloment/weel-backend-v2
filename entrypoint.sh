@@ -1,18 +1,17 @@
 #!/bin/sh
 set -e
 
+# Collect static files at runtime (needs SECRET_KEY + ALLOWED_HOSTS from env)
+python manage.py collectstatic --noinput 2>/dev/null || true
+
 WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
 
-# Run webhook setup in background so daphne starts immediately
+# Run webhook setup in background so server starts immediately
 # (health checks must pass before webhook setup finishes)
 (
-  echo "Setting up bot webhooks: $WEBHOOK_BASE"
-  python manage.py setup_bot_webhook --base-url "$WEBHOOK_BASE" || echo "Warning: main bot webhook setup failed"
-  python manage.py setup_hotel_bot_webhook "$WEBHOOK_BASE" || echo "Warning: hotel bot webhook setup failed"
-  echo "Bot webhook setup complete"
+  echo "Setting up hotel bot webhook: $WEBHOOK_BASE"
+  python manage.py setup_hotel_bot_webhook "$WEBHOOK_BASE" 2>/dev/null || echo "Warning: hotel bot webhook setup failed"
+  echo "Hotel bot webhook setup complete"
 ) &
 
-# Limit thread pool to cap DB connections per container (sync views each use one thread).
-# With CONN_MAX_AGE=0, connections close after each request so this is a safety net.
-DAPHNE_THREADS="${DAPHNE_THREADS:-10}"
-exec daphne -b 0.0.0.0 -p 8000 -t "$DAPHNE_THREADS" core.asgi:application
+exec uvicorn core.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws websockets

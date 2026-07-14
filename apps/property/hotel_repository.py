@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 
 from django.db import connection
 from django.utils import timezone
+from pydantic import ValidationError
 
 from apps.platform.raw_repository import get_organization_by_schema, list_organizations
 
@@ -23,38 +24,23 @@ def _safe_schema_name(schema_name: str | None) -> str | None:
     return raw
 
 
-def encode_hotel_guid(schema_name: str, hotel_id: int | str) -> str:
-    return f"{schema_name}:{hotel_id}"
-
-
-def decode_hotel_guid(hotel_guid: str) -> tuple[str | None, str] | None:
-    raw = str(hotel_guid or "").strip()
-    if not raw:
+def resolve_hotel_guid(
+    hotel_guid: str,
+    *,
+    include_inactive: bool = False,
+    include_unverified: bool = False,
+) -> tuple[str, int] | None:
+    """Resolve a UUID hotel_guid to (schema_name, hotel_id) by searching
+    across all tenant schemas. Returns None if not found."""
+    rows = _find_hotel_by_guid_across_schemas(
+        str(hotel_guid).strip(),
+        include_inactive=include_inactive,
+        include_unverified=include_unverified,
+    )
+    if not rows:
         return None
-    if ":" in raw:
-        schema_name, raw_id = raw.split(":", 1)
-        safe_schema = _safe_schema_name(schema_name)
-        if not safe_schema:
-            return None
-        try:
-            hotel_id = int(str(raw_id).strip())
-        except (TypeError, ValueError):
-            return None
-        return safe_schema, str(hotel_id)
-    return None, raw
-
-
-def _resolve_hotel_from_guid(hotel_guid: str) -> tuple[str, int | str] | None:
-    """Resolve a hotel GUID to (schema_name, hotel_identifier) for querying.
-    Returns None if the GUID cannot be resolved.
-    Accepts both legacy composite format (schema:id) and new UUID format."""
-    decoded = decode_hotel_guid(hotel_guid)
-    if decoded is None:
-        return None
-    schema_name, identifier = decoded
-    if schema_name is not None:
-        return schema_name, int(identifier)
-    return None, identifier
+    row = rows[0]
+    return row["tenant_schema"], int(row["id"])
 
 
 
@@ -78,15 +64,10 @@ def _serialize_hotel_row(
     raw_guid = payload.get("guid")
     if raw_guid is not None:
         payload["guid"] = str(raw_guid)
-    else:
-        payload["guid"] = encode_hotel_guid(tenant_schema, hotel_id)
     payload["title"] = payload.get("name") or payload.get("title") or ""
     payload["img"] = payload.get("photos") or payload.get("img") or []
-    payload["price"] = None
-    payload["guests"] = None
-    payload["rooms"] = None
-    payload["beds"] = None
-    payload["bathrooms"] = None
+    payload["price_from"] = payload.get("min_price")
+    payload["review_score"] = payload.get("rating")
     raw_legal = payload.get("legal_info")
     if isinstance(raw_legal, str):
         try:
@@ -95,19 +76,13 @@ def _serialize_hotel_row(
             raw_legal = {}
     payload["legal_info"] = raw_legal if isinstance(raw_legal, dict) else {}
     payload["is_allowed_alcohol"] = bool(payload.get("alcohol_allowed", False))
-    payload["is_allowed_corporate"] = False
     payload["is_allowed_pets"] = bool(payload.get("pets_allowed", False))
     payload["is_quiet_hours"] = bool(payload.get("quiet_hours", True))
     payload["is_verified"] = bool(payload.get("is_verified", False))
     payload["is_archived"] = bool(payload.get("is_archived", False))
     payload["is_recommended"] = bool(payload.get("is_recommended", False))
     payload["verification_status"] = payload.get("verification_status") or "waiting"
-    payload["average_rating"] = (
-        float(payload["star_rating"]) if payload.get("star_rating") is not None else None
-    )
     payload["property_kind"] = "hotel"
-    payload["comment_count"] = 0
-    payload["review_count"] = 0
     payload["check_in_time"] = _iso_time(payload.get("check_in_time"))
     payload["check_out_time"] = _iso_time(payload.get("check_out_time"))
     payload["partner_user_id"] = payload.get("partner_user_id")
@@ -131,6 +106,94 @@ def _fetch_rows(cursor) -> list[dict[str, Any]]:
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
+def _execute_hotel_query(
+    schema_name: str,
+    *,
+    hotel_id: int | None = None,
+    hotel_guid: str | None = None,
+    include_inactive: bool = False,
+    include_unverified: bool = False,
+    search: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Execute hotel query directly. Caller must set search_path first."""
+    with connection.cursor() as cursor:
+        where = []
+        params: list[Any] = []
+        if hotel_id is not None:
+            where.append("p.id = %s")
+            params.append(hotel_id)
+        elif hotel_guid is not None:
+            where.append("p.guid::text = %s")
+            params.append(hotel_guid)
+        if not include_inactive:
+            where.append("COALESCE(p.is_active, TRUE) = TRUE")
+        if not include_unverified:
+            where.append("COALESCE(p.is_verified, FALSE) = TRUE")
+        if search:
+            raw_search = str(search).strip()
+            where.append(
+                "(p.name ILIKE %s OR COALESCE(p.city, '') ILIKE %s OR COALESCE(p.address, '') ILIKE %s)"
+            )
+            like = f"%{raw_search}%"
+            params.extend([like, like, like])
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        limit_sql = f"LIMIT {int(limit)}" if limit else ""
+        cursor.execute(
+            f"""
+            SELECT
+                p.id,
+                p.guid,
+                p.organization_id,
+                p.partner_user_id,
+                p.name,
+                p.description_uz,
+                p.description_ru,
+                p.description_en,
+                p.address,
+                p.full_address,
+                p.city,
+                p.country,
+                p.latitude::text AS latitude,
+                p.longitude::text AS longitude,
+                p.star_rating,
+                p.weel_classification,
+                p.themes,
+                COALESCE(p.amenities, ARRAY[]::text[]) AS amenities,
+                COALESCE(p.legal_info, '{{}}'::jsonb) AS legal_info,
+                p.check_in_time,
+                p.check_out_time,
+                p.cancellation_policy,
+                COALESCE(p.quiet_hours, TRUE) AS quiet_hours,
+                COALESCE(p.alcohol_allowed, FALSE) AS alcohol_allowed,
+                COALESCE(p.pets_allowed, FALSE) AS pets_allowed,
+                p.currency,
+                p.timezone,
+                COALESCE(p.photos, ARRAY[]::text[]) AS photos,
+                COALESCE(p.is_active, TRUE) AS is_active,
+                COALESCE(p.is_testing, FALSE) AS is_testing,
+                COALESCE(p.is_verified, FALSE) AS is_verified,
+                COALESCE(p.is_archived, FALSE) AS is_archived,
+                COALESCE(p.is_recommended, FALSE) AS is_recommended,
+                COALESCE(p.verification_status, 'waiting') AS verification_status,
+                p.created_at,
+                p.updated_at,
+                %s AS tenant_schema,
+                (SELECT MIN(r.base_price) FROM pms_room r WHERE r.property_id = p.id AND r.is_active = TRUE) AS min_price,
+                (SELECT AVG(rv.rating) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS rating,
+                (SELECT COUNT(*) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS review_count,
+                (SELECT COUNT(*) FROM pms_booking pb WHERE pb.property_id = p.id AND pb.status NOT IN ('cancelled')) AS booking_count,
+                (SELECT COUNT(*) FROM pms_room rm WHERE rm.property_id = p.id AND rm.is_active = TRUE) AS available_rooms
+            FROM pms_property p
+            {where_sql}
+            ORDER BY p.created_at DESC, p.id DESC
+            {limit_sql}
+            """,
+            [schema_name, *params],
+        )
+        return _fetch_rows(cursor)
+
+
 def _fetch_hotel_rows_for_schema(
     schema_name: str,
     *,
@@ -141,76 +204,18 @@ def _fetch_hotel_rows_for_schema(
     search: str | None = None,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    def _query() -> list[dict[str, Any]]:
-        with connection.cursor() as cursor:
-            where = []
-            params: list[Any] = []
-            if hotel_id is not None:
-                where.append("p.id = %s")
-                params.append(hotel_id)
-            elif hotel_guid is not None:
-                where.append("p.guid::text = %s")
-                params.append(hotel_guid)
-            if not include_inactive:
-                where.append("COALESCE(p.is_active, TRUE) = TRUE")
-            if not include_unverified:
-                where.append("COALESCE(p.is_verified, FALSE) = TRUE")
-            if search:
-                raw_search = str(search).strip()
-                where.append(
-                    "(p.name ILIKE %s OR COALESCE(p.city, '') ILIKE %s OR COALESCE(p.address, '') ILIKE %s)"
-                )
-                like = f"%{raw_search}%"
-                params.extend([like, like, like])
-            where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-            limit_sql = f"LIMIT {int(limit)}" if limit else ""
-            cursor.execute(
-                f"""
-                SELECT
-                    p.id,
-                    p.guid,
-                    p.organization_id,
-                    p.partner_user_id,
-                    p.name,
-                    p.description_uz,
-                    p.description_ru,
-                    p.description_en,
-                    p.address,
-                    p.city,
-                    p.country,
-                    p.latitude::text AS latitude,
-                    p.longitude::text AS longitude,
-                    p.star_rating,
-                    COALESCE(p.amenities, ARRAY[]::text[]) AS amenities,
-                    COALESCE(p.legal_info, '{{}}'::jsonb) AS legal_info,
-                    p.check_in_time,
-                    p.check_out_time,
-                    p.cancellation_policy,
-                    COALESCE(p.quiet_hours, TRUE) AS quiet_hours,
-                    COALESCE(p.alcohol_allowed, FALSE) AS alcohol_allowed,
-                    COALESCE(p.pets_allowed, FALSE) AS pets_allowed,
-                    p.currency,
-                    p.timezone,
-                    COALESCE(p.photos, ARRAY[]::text[]) AS photos,
-                    COALESCE(p.is_active, TRUE) AS is_active,
-                    COALESCE(p.is_testing, FALSE) AS is_testing,
-                    COALESCE(p.is_verified, FALSE) AS is_verified,
-                    COALESCE(p.is_archived, FALSE) AS is_archived,
-                    COALESCE(p.is_recommended, FALSE) AS is_recommended,
-                    COALESCE(p.verification_status, 'waiting') AS verification_status,
-                    p.created_at,
-                    p.updated_at,
-                    %s AS tenant_schema
-                FROM pms_property p
-                {where_sql}
-                ORDER BY p.created_at DESC, p.id DESC
-                {limit_sql}
-                """,
-                [schema_name, *params],
-            )
-            return _fetch_rows(cursor)
-
-    return _run_in_schema(schema_name, _query)
+    return _run_in_schema(
+        schema_name,
+        lambda: _execute_hotel_query(
+            schema_name,
+            hotel_id=hotel_id,
+            hotel_guid=hotel_guid,
+            include_inactive=include_inactive,
+            include_unverified=include_unverified,
+            search=search,
+            limit=limit,
+        ),
+    )
 
 
 def _sort_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -422,50 +427,86 @@ def list_admin_hotels(
 
 
 def get_admin_hotel(hotel_guid: str) -> dict[str, Any] | None:
-    decoded = decode_hotel_guid(hotel_guid)
-    if not decoded:
-        return None
-    schema_name, identifier = decoded
-    if schema_name is not None:
-        organization = get_organization_by_schema(schema_name)
-        if not organization:
-            return None
-        rows = _fetch_hotel_rows_for_schema(
-            schema_name,
-            hotel_id=int(identifier),
-            include_inactive=True,
-            include_unverified=True,
-        )
-    else:
-        rows = _find_hotel_by_guid_across_schemas(
-            identifier,
-            include_inactive=True,
-            include_unverified=True,
-        )
-        if not rows:
-            return None
-        organization = get_organization_by_schema(rows[0].get("tenant_schema") or "")
+    resolved = resolve_hotel_guid(
+        hotel_guid, include_inactive=True, include_unverified=True
+    )
+    if not resolved:
+        raise ValidationError("Unable to resolve the hotel guid")
+    schema_name, hotel_id = resolved
+    organization = get_organization_by_schema(schema_name)
+    if not organization:
+        raise ValidationError("Unable to find the organization")
+    rows = _fetch_hotel_rows_for_schema(
+        schema_name,
+        hotel_id=hotel_id,
+        include_inactive=True,
+        include_unverified=True,
+    )
     if not rows:
         return None
     return _serialize_hotel_row(rows[0], organization)
 
 
+def fetch_room_summaries(schema_name: str, property_id: int) -> list[dict[str, Any]]:
+    def _query():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    r.id,
+                    r.display_name,
+                    r.room_type_preset,
+                    r.capacity,
+                    r.bedroom_count,
+                    COALESCE(r.beds, '[]'::jsonb) AS beds,
+                    COALESCE(r.photos, ARRAY[]::text[]) AS photos,
+                    COALESCE(r.amenities, ARRAY[]::text[]) AS amenities,
+                    COALESCE(r.base_price, 0) AS price_from
+                FROM pms_room r
+                WHERE r.property_id = %s AND r.is_active = TRUE
+                ORDER BY r.room_number ASC
+                """,
+                [property_id],
+            )
+            return _fetch_rows(cursor)
+
+    return _run_in_schema(schema_name, _query)
+
+
+def fetch_room_summaries_raw(property_id: int) -> list[dict[str, Any]]:
+    """Fetch room summaries directly. Caller must set search_path first."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+                r.id,
+                r.display_name,
+                r.room_type_preset,
+                r.capacity,
+                r.bedroom_count,
+                COALESCE(r.beds, '[]'::jsonb) AS beds,
+                COALESCE(r.photos, ARRAY[]::text[]) AS photos,
+                COALESCE(r.amenities, ARRAY[]::text[]) AS amenities,
+                COALESCE(r.base_price, 0) AS price_from
+            FROM pms_room r
+            WHERE r.property_id = %s AND r.is_active = TRUE
+            ORDER BY r.room_number ASC
+            """,
+            [property_id],
+        )
+        return _fetch_rows(cursor)
+
+
 def get_hotel_for_public(hotel_guid: str) -> dict[str, Any] | None:
-    """Fetch a single active AND verified hotel by encoded GUID."""
-    decoded = decode_hotel_guid(hotel_guid)
-    if not decoded:
+    """Fetch a single active AND verified hotel by UUID GUID."""
+    resolved = resolve_hotel_guid(hotel_guid)
+    if not resolved:
         return None
-    schema_name, identifier = decoded
-    if schema_name is not None:
-        organization = get_organization_by_schema(schema_name)
-        if not organization:
-            return None
-        rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=int(identifier))
-    else:
-        rows = _find_hotel_by_guid_across_schemas(identifier)
-        if not rows:
-            return None
-        organization = get_organization_by_schema(rows[0].get("tenant_schema") or "")
+    schema_name, hotel_id = resolved
+    organization = get_organization_by_schema(schema_name)
+    if not organization:
+        return None
+    rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hotel_id)
     if not rows:
         return None
     return _serialize_hotel_row(rows[0], organization)
@@ -568,23 +609,16 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
 
 
 def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, Any] | None:
-    resolved = _resolve_hotel_from_guid(hotel_guid)
+    resolved = resolve_hotel_guid(
+        hotel_guid, include_inactive=True, include_unverified=True
+    )
     if not resolved:
-        return None
-    schema_name, identifier = resolved
-
-    if isinstance(identifier, int):
-        organization = get_organization_by_schema(schema_name)
-    else:
-        rows = _find_hotel_by_guid_across_schemas(
-            identifier, include_inactive=True, include_unverified=True
-        )
-        if not rows:
-            return None
-        schema_name = rows[0].get("tenant_schema") or ""
-        organization = get_organization_by_schema(schema_name)
+        raise ValidationError("Unable to update the hotel")
+    schema_name, hotel_id = resolved
+    organization = get_organization_by_schema(schema_name)
     if not organization:
-        return None
+        raise ValidationError("Unable to find the organization")
+
     allowed_columns = {
         "name",
         "description_uz",
@@ -634,8 +668,7 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         params.append(value)
     set_parts.append("updated_at = %s")
     params.append(timezone.now())
-    params.append(identifier)
-    where_clause = "id = %s" if isinstance(identifier, int) else "guid::text = %s"
+    params.append(hotel_id)
 
     def _update() -> bool:
         with connection.cursor() as cursor:
@@ -643,7 +676,7 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
                 f"""
                 UPDATE pms_property
                 SET {", ".join(set_parts)}
-                WHERE {where_clause}
+                WHERE id = %s
                 """,
                 params,
             )
@@ -656,25 +689,18 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
 
 
 def delete_admin_hotel(*, hotel_guid: str) -> bool:
-    resolved = _resolve_hotel_from_guid(hotel_guid)
+    resolved = resolve_hotel_guid(
+        hotel_guid, include_inactive=True, include_unverified=True
+    )
     if not resolved:
-        return False
-    schema_name, identifier = resolved
-
-    if isinstance(identifier, str):
-        rows = _find_hotel_by_guid_across_schemas(
-            identifier, include_inactive=True, include_unverified=True
-        )
-        if not rows:
-            return False
-        schema_name = rows[0].get("tenant_schema") or ""
-    where_clause = "id = %s" if isinstance(identifier, int) else "guid::text = %s"
+        raise ValidationError("Error on deleting the hotel")
+    schema_name, hotel_id = resolved
 
     def _delete() -> bool:
         with connection.cursor() as cursor:
             cursor.execute(
-                f"DELETE FROM pms_property WHERE {where_clause}",
-                [identifier],
+                "DELETE FROM pms_property WHERE id = %s",
+                [hotel_id],
             )
             return cursor.rowcount > 0
 
@@ -705,47 +731,27 @@ def admin_remove_hotel_image(*, hotel_guid: str, image_path: str) -> dict[str, A
 def list_hotel_favorites(
     favorite_guids: set[str],
 ) -> list[dict[str, Any]]:
-    """Fetch full hotel rows for a set of encoded hotel GUIDs."""
-    by_schema: dict[str, list[int]] = {}
-    uuid_guids: list[str] = []
-
-    for guid in favorite_guids:
-        decoded = decode_hotel_guid(guid)
-        if not decoded:
-            continue
-        schema_name, identifier = decoded
-        if schema_name is not None:
-            by_schema.setdefault(schema_name, []).append(int(identifier))
-        else:
-            uuid_guids.append(identifier)
+    """Fetch full hotel rows for a set of UUID hotel GUIDs."""
     results: list[dict[str, Any]] = []
     org_cache: dict[str, dict[str, Any] | None] = {}
 
-    for schema_name, hotel_ids in by_schema.items():
-        org = org_cache.get(schema_name)
-        if org is None:
-            org = get_organization_by_schema(schema_name)
-            org_cache[schema_name] = org
-        if not org:
-            continue
-        for hid in hotel_ids:
-            try:
-                rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hid)
-                if rows:
-                    results.append(_serialize_hotel_row(rows[0], org))
-            except Exception:
-                continue
-
-    for uuid_guid in uuid_guids:
+    for guid in favorite_guids:
         try:
-            rows = _find_hotel_by_guid_across_schemas(
-                uuid_guid, include_inactive=True, include_unverified=True
+            resolved = resolve_hotel_guid(
+                guid, include_inactive=True, include_unverified=True
             )
-            if rows:
-                row = rows[0]
-                schema_name = row.get("tenant_schema") or ""
+            if not resolved:
+                continue
+            schema_name, hotel_id = resolved
+            org = org_cache.get(schema_name)
+            if org is None:
                 org = get_organization_by_schema(schema_name)
-                results.append(_serialize_hotel_row(row, org))
+                org_cache[schema_name] = org
+            if not org:
+                continue
+            rows = _fetch_hotel_rows_for_schema(schema_name, hotel_id=hotel_id)
+            if rows:
+                results.append(_serialize_hotel_row(rows[0], org))
         except Exception:
             continue
     return results
