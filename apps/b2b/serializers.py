@@ -58,6 +58,7 @@ class B2BEmployeeSerializer(serializers.Serializer):
     passport_upload = serializers.CharField(read_only=True, allow_null=True)
     passport_upload_front = serializers.CharField(read_only=True, allow_null=True)
     passport_upload_back = serializers.CharField(read_only=True, allow_null=True)
+    photo = serializers.CharField(read_only=True, allow_null=True)
     pinfl = serializers.CharField(max_length=20, required=True)
     individual_limit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     status = serializers.ChoiceField(choices=["available", "on_trip", "blocked"], required=False, default="available")
@@ -88,12 +89,14 @@ class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
     ham majburiy fayl. ``full_name``, ``date_of_birth``, ``passport_series``,
     ``passport_number`` va ``pinfl`` shu rasmlardan avtomatik o'qib olinadi
     (``apps.b2b.passport_ocr``), shuning uchun bu yerda ular majburiy emas —
-    view darajasida OCR natijasi bilan qayta yoziladi.
+    view darajasida OCR natijasi bilan qayta yoziladi. ``photo`` — xodimning
+    shaxsiy (profil) fotosurati, ixtiyoriy.
     """
     full_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
     pinfl = serializers.CharField(max_length=20, required=False, allow_blank=True)
     passport_upload_front = serializers.FileField(required=True)
     passport_upload_back = serializers.FileField(required=True)
+    photo = serializers.FileField(required=False)
 
     def _validate_image_file(self, file):
         max_size = 5 * 1024 * 1024  # 5MB
@@ -105,6 +108,9 @@ class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
         return self._validate_image_file(file)
 
     def validate_passport_upload_back(self, file):
+        return self._validate_image_file(file)
+
+    def validate_photo(self, file):
         return self._validate_image_file(file)
 
 

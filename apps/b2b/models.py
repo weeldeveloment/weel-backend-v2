@@ -150,6 +150,7 @@ class B2BEmployee(HardDeleteBaseModel):
     passport_upload: str | None = None
     passport_upload_front: str | None = None
     passport_upload_back: str | None = None
+    photo: str | None = None
     pinfl: str | None = None
     individual_limit: Decimal | None = None
     status: str = EmployeeStatus.AVAILABLE
