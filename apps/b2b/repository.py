@@ -25,6 +25,7 @@ from apps.b2b.raw.tables import (
     B2B_HOTEL_BOOKING_REQUEST_TABLE,
     B2B_HOTEL_BOOKING_ROOM_TABLE,
     B2B_HOTEL_BOOKING_ROOM_EMPLOYEE_TABLE,
+    B2B_LEAD_REQUEST_TABLE,
 )
 
 logger = logging.getLogger(__name__)
@@ -457,6 +458,28 @@ def delete_policy_rule(rule_id: int) -> int:
     return execute(
         f"DELETE FROM {B2B_TRAVEL_POLICY_RULE_TABLE} WHERE id = %s",
         [rule_id],
+    )
+
+
+# ─── Lead Requests ────────────────────────────────────────────────────────────
+
+def create_lead_request(
+    *,
+    full_name: str,
+    company_name: str,
+    email: str,
+    phone_number: str,
+) -> dict[str, Any] | None:
+    """A prospective business owner's public 'become a partner' application."""
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_LEAD_REQUEST_TABLE}
+            (full_name, company_name, email, phone_number, created_at)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [full_name, company_name, email, phone_number, now],
     )
 
 

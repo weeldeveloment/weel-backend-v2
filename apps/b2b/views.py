@@ -10,9 +10,11 @@ from django.core.files.storage import default_storage
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from shared.throttles import ResilientScopedRateThrottle
 
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -28,6 +30,7 @@ from apps.b2b.repository import (
     create_department,
     create_employee,
     create_hotel_booking_request,
+    create_lead_request,
     create_policy_rule,
     create_trip,
     create_voucher,
@@ -67,6 +70,7 @@ from apps.b2b.repository import (
 )
 from apps.b2b.models import DepartmentBudgetStatus, HotelBookingRequestStatus
 from apps.b2b.permissions import IsB2BOwner, IsB2BPerformer
+from apps.b2b.tasks import send_b2b_lead_telegram_msg
 from apps.property.hotel_repository import _run_in_schema, decode_hotel_guid, get_hotel_for_public
 from apps.hotels.repository import (
     count_hotels,
@@ -96,6 +100,7 @@ from apps.b2b.serializers import (
     HotelBookingRequestCreateSerializer,
     HotelBookingRequestDetailSerializer,
     HotelBookingRequestSerializer,
+    B2BLeadRequestSerializer,
     RecentTripEmployeeSerializer,
     ReviewBudgetRequestSerializer,
     TopEmployeeByTripsSerializer,
@@ -817,6 +822,53 @@ class TravelPolicyView(APIView):
         if not policy:
             return Response({"detail": "Failed to update policy."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(TravelPolicySerializer(policy).data)
+
+
+class B2BLeadRequestCreateView(APIView):
+    """POST /b2b/lead-requests/
+
+    Public 'become a partner' application form — a prospective business
+    owner submits their name, company and contact details to request
+    onboarding. Unauthenticated (no B2B account exists yet). Notifies the
+    sales team's Telegram channel on submission; staff review the request
+    and onboard the company manually via ``create_b2b_owner``.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [ResilientScopedRateThrottle]
+    throttle_scope = "b2b_lead_request"
+
+    @swagger_auto_schema(
+        operation_summary="Hamkorlik uchun ariza yuborish (yangi biznes egalari uchun)",
+        operation_description=(
+            "Hali B2B mijozi bo'lmagan biznes egasi ism, kompaniya nomi, "
+            "email va telefon raqamini yuborib, hamkorlikka ariza qoldiradi. "
+            "Autentifikatsiya talab qilinmaydi."
+        ),
+        request_body=B2BLeadRequestSerializer,
+        responses={
+            201: B2BLeadRequestSerializer(),
+            400: openapi.Response(description="Validation error."),
+        },
+    )
+    def post(self, request):
+        serializer = B2BLeadRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        validated = serializer.validated_data
+
+        lead = create_lead_request(
+            full_name=validated["full_name"],
+            company_name=validated["company_name"],
+            email=validated["email"],
+            phone_number=validated["phone_number"],
+        )
+        if not lead:
+            return Response({"detail": "Failed to create lead request."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        send_b2b_lead_telegram_msg.delay(
+            lead["id"], lead["full_name"], lead["company_name"], lead["email"], lead["phone_number"],
+        )
+        return Response(B2BLeadRequestSerializer(lead).data, status=status.HTTP_201_CREATED)
 
 
 class BudgetRequestListCreateView(APIView):

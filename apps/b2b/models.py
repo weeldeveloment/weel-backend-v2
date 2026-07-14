@@ -78,6 +78,19 @@ class HotelBookingRequestStatus:
 
 
 @dataclass(slots=True)
+class B2BLeadRequest(HardDeleteBaseModel):
+    """A public 'become a partner' application submitted by a prospective
+    business owner — not yet a B2BCompany. Reviewed manually by staff, who
+    onboard the company via ``create_b2b_owner`` once approved."""
+    id: int | None = None
+    full_name: str | None = None
+    company_name: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+    _meta = SimpleNamespace(db_table="b2b_lead_request")
+
+
+@dataclass(slots=True)
 class B2BCompany(HardDeleteBaseModel):
     id: int | None = None
     name: str | None = None

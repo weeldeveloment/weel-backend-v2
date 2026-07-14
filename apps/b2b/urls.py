@@ -10,6 +10,7 @@ from apps.b2b.views import (
     B2BHotelBookingListCreateView,
     B2BHotelRoomsView,
     B2BHotelSearchView,
+    B2BLeadRequestCreateView,
     B2BStatisticsView,
     BusinessTripListCreateView,
     BusinessTripRetrieveUpdateView,
@@ -30,6 +31,7 @@ from apps.b2b.views import (
 urlpatterns = [
     path("auth/login/", B2BLoginSendOTPView.as_view(), name="b2b-login"),
     path("auth/login/verify/", B2BLoginVerifyView.as_view(), name="b2b-login-verify"),
+    path("lead-requests/", B2BLeadRequestCreateView.as_view(), name="b2b-lead-requests"),
     path("company/", B2BCompanyView.as_view(), name="b2b-company"),
     path("hotels/search/", B2BHotelSearchView.as_view(), name="b2b-hotel-search"),
     path("hotels/bookings/", B2BHotelBookingListCreateView.as_view(), name="b2b-hotel-bookings"),

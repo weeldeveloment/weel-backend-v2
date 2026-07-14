@@ -239,6 +239,25 @@ class TravelPolicySerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
 
 
+class B2BLeadRequestSerializer(serializers.Serializer):
+    """Public 'become a partner' application submitted by a prospective
+    business owner (not yet a B2B client)."""
+    id = serializers.IntegerField(read_only=True)
+    full_name = serializers.CharField(max_length=200)
+    company_name = serializers.CharField(max_length=200)
+    email = serializers.EmailField()
+    phone_number = serializers.CharField(max_length=20)
+    created_at = serializers.DateTimeField(read_only=True)
+
+    def validate_phone_number(self, value: str) -> str:
+        value = value.replace(" ", "").strip()
+        if not value.startswith("+"):
+            value = "+" + value
+        if not value.startswith("+998") or not value[1:].isdigit() or len(value) != 13:
+            raise serializers.ValidationError("Phone number must be in the format +998XXXXXXXXX.")
+        return value
+
+
 class BudgetRequestSerializer(serializers.Serializer):
     """Byudjet so'rovi: aynan bittasi berilishi shart — ``employee_id``
     (bitta xodim uchun) yoki ``department_id`` (butun bo'lim uchun).
