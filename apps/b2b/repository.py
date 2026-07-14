@@ -25,6 +25,7 @@ from apps.b2b.raw.tables import (
     B2B_HOTEL_BOOKING_REQUEST_TABLE,
     B2B_HOTEL_BOOKING_ROOM_TABLE,
     B2B_HOTEL_BOOKING_ROOM_EMPLOYEE_TABLE,
+    B2B_LEAD_REQUEST_TABLE,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,72 @@ def list_departments(company_id: int) -> list[dict[str, Any]]:
     )
 
 
+def list_departments_with_budget(company_id: int, *, search: str | None = None) -> list[dict[str, Any]]:
+    """Return every department of *company_id* together with its owner-set
+    budget limit and how much of it has been used.
+
+    - ``budget_limit`` – taken from the department's ``b2b_travel_policy_rule``
+      row (``applies_to='department'``), or ``None`` if the owner hasn't set
+      one for this department.
+    - ``used_amount``  – sum of approved budget-request amounts for the
+      department's employees (scalar subquery, so it isn't inflated by
+      unrelated joins).
+    """
+    if search:
+        return fetch_all(
+            f"""
+            SELECT
+                d.id AS department_id,
+                d.company_id AS company_id,
+                d.name AS department_name,
+                d.created_at AS created_at,
+                (
+                    SELECT r.budget_limit
+                    FROM {B2B_TRAVEL_POLICY_RULE_TABLE} r
+                    WHERE r.target_id = d.id AND r.applies_to = 'department'
+                    ORDER BY r.id DESC
+                    LIMIT 1
+                ) AS budget_limit,
+                (
+                    SELECT COALESCE(SUM(br.amount), 0)
+                    FROM {B2B_BUDGET_REQUEST_TABLE} br
+                    JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = br.employee_id
+                    WHERE e.department_id = d.id AND br.status = 'approved'
+                ) AS used_amount
+            FROM {B2B_DEPARTMENT_TABLE} d
+            WHERE d.company_id = %s AND d.name ILIKE %s
+            ORDER BY d.name ASC
+            """,
+            [company_id, f"%{search}%"],
+        )
+    return fetch_all(
+        f"""
+        SELECT
+            d.id AS department_id,
+            d.company_id AS company_id,
+            d.name AS department_name,
+            d.created_at AS created_at,
+            (
+                SELECT r.budget_limit
+                FROM {B2B_TRAVEL_POLICY_RULE_TABLE} r
+                WHERE r.target_id = d.id AND r.applies_to = 'department'
+                ORDER BY r.id DESC
+                LIMIT 1
+            ) AS budget_limit,
+            (
+                SELECT COALESCE(SUM(br.amount), 0)
+                FROM {B2B_BUDGET_REQUEST_TABLE} br
+                JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = br.employee_id
+                WHERE e.department_id = d.id AND br.status = 'approved'
+            ) AS used_amount
+        FROM {B2B_DEPARTMENT_TABLE} d
+        WHERE d.company_id = %s
+        ORDER BY d.name ASC
+        """,
+        [company_id],
+    )
+
+
 # ─── Employees ────────────────────────────────────────────────────────────────
 
 def create_employee(*, company_id: int, full_name: str, **kwargs: Any) -> dict[str, Any] | None:
@@ -133,7 +200,8 @@ def create_employee(*, company_id: int, full_name: str, **kwargs: Any) -> dict[s
     field_map = {
         "department_id": int, "position": str, "email": str, "phone": str,
         "date_of_birth": lambda v: v, "passport_series": str, "passport_number": str,
-        "passport_upload": str, "pinfl": str, "individual_limit": lambda v: v, "status": str,
+        "passport_upload": str, "passport_upload_front": str, "passport_upload_back": str,
+        "pinfl": str, "individual_limit": lambda v: v, "status": str,
     }
     for key, caster in field_map.items():
         if key in kwargs and kwargs[key] is not None:
@@ -390,6 +458,28 @@ def delete_policy_rule(rule_id: int) -> int:
     return execute(
         f"DELETE FROM {B2B_TRAVEL_POLICY_RULE_TABLE} WHERE id = %s",
         [rule_id],
+    )
+
+
+# ─── Lead Requests ────────────────────────────────────────────────────────────
+
+def create_lead_request(
+    *,
+    full_name: str,
+    company_name: str,
+    email: str,
+    phone_number: str,
+) -> dict[str, Any] | None:
+    """A prospective business owner's public 'become a partner' application."""
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_LEAD_REQUEST_TABLE}
+            (full_name, company_name, email, phone_number, created_at)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [full_name, company_name, email, phone_number, now],
     )
 
 

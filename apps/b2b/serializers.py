@@ -56,6 +56,8 @@ class B2BEmployeeSerializer(serializers.Serializer):
     passport_series = serializers.CharField(max_length=10, required=False, allow_blank=True, allow_null=True)
     passport_number = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
     passport_upload = serializers.CharField(read_only=True, allow_null=True)
+    passport_upload_front = serializers.CharField(read_only=True, allow_null=True)
+    passport_upload_back = serializers.CharField(read_only=True, allow_null=True)
     pinfl = serializers.CharField(max_length=20, required=True)
     individual_limit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     status = serializers.ChoiceField(choices=["available", "on_trip", "blocked"], required=False, default="available")
@@ -63,21 +65,47 @@ class B2BEmployeeSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
 
 
+class B2BDepartmentSummarySerializer(serializers.Serializer):
+    """GET ``/b2b/departments/`` response: department + its owner-set budget
+    limit, usage, and the employees assigned to it."""
+    id = serializers.IntegerField(read_only=True)
+    company_id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
+    used_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    remaining_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
+    status = serializers.ChoiceField(choices=["no_limit", "high", "low", "empty"], read_only=True)
+    employees = B2BEmployeeSerializer(many=True, read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
 class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
     """POST ``/b2b/employees/`` uchun serializer (multipart/form-data).
 
-    ``pinfl``, ``email``, ``phone``, ``department_id`` — xodim yaratishning
-    asosiy majburiy maydonlari. ``passport_upload`` fayl sifatida shu yerda
-    validatsiya qilinadi (view uni ``request.FILES`` orqali o'qiydi, chunki
-    u B2BEmployeeSerializer'da faqat o'qish uchun CharField).
+    ``email``, ``phone``, ``department_id`` — xodim yaratishning asosiy
+    majburiy maydonlari. ``passport_upload_front`` (SHAXS GUVOHNOMASI old
+    tomoni) va ``passport_upload_back`` (orqa tomoni, MRZ bilan) — ikkalasi
+    ham majburiy fayl. ``full_name``, ``date_of_birth``, ``passport_series``,
+    ``passport_number`` va ``pinfl`` shu rasmlardan avtomatik o'qib olinadi
+    (``apps.b2b.passport_ocr``), shuning uchun bu yerda ular majburiy emas —
+    view darajasida OCR natijasi bilan qayta yoziladi.
     """
-    passport_upload = serializers.FileField(required=True)
+    full_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    pinfl = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    passport_upload_front = serializers.FileField(required=True)
+    passport_upload_back = serializers.FileField(required=True)
 
-    def validate_passport_upload(self, file):
+    def _validate_image_file(self, file):
         max_size = 5 * 1024 * 1024  # 5MB
         if file.size > max_size:
             raise serializers.ValidationError("Fayl hajmi 5MB dan oshmasligi kerak.")
         return file
+
+    def validate_passport_upload_front(self, file):
+        return self._validate_image_file(file)
+
+    def validate_passport_upload_back(self, file):
+        return self._validate_image_file(file)
 
 
 class BusinessTripSerializer(serializers.Serializer):
@@ -209,6 +237,25 @@ class TravelPolicySerializer(serializers.Serializer):
     blacklisted_properties = serializers.ListField(child=serializers.IntegerField(), required=False, default=list)
     preferred_properties = serializers.ListField(child=serializers.IntegerField(), required=False, default=list)
     updated_at = serializers.DateTimeField(read_only=True)
+
+
+class B2BLeadRequestSerializer(serializers.Serializer):
+    """Public 'become a partner' application submitted by a prospective
+    business owner (not yet a B2B client)."""
+    id = serializers.IntegerField(read_only=True)
+    full_name = serializers.CharField(max_length=200)
+    company_name = serializers.CharField(max_length=200)
+    email = serializers.EmailField()
+    phone_number = serializers.CharField(max_length=20)
+    created_at = serializers.DateTimeField(read_only=True)
+
+    def validate_phone_number(self, value: str) -> str:
+        value = value.replace(" ", "").strip()
+        if not value.startswith("+"):
+            value = "+" + value
+        if not value.startswith("+998") or not value[1:].isdigit() or len(value) != 13:
+            raise serializers.ValidationError("Phone number must be in the format +998XXXXXXXXX.")
+        return value
 
 
 class BudgetRequestSerializer(serializers.Serializer):
@@ -362,3 +409,10 @@ class TravelPolicyRuleCreateSerializer(serializers.Serializer):
 
 class TravelPolicyRuleUpdateSerializer(serializers.Serializer):
     budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+
+
+class B2BHotelCalendarSerializer(serializers.Serializer):
+    room_id = serializers.IntegerField(read_only=True)
+    room_name = serializers.CharField(read_only=True, allow_null=True)
+    date = serializers.DateField(read_only=True)
+    status = serializers.CharField(read_only=True)

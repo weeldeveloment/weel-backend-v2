@@ -96,6 +96,7 @@ for _origin in (
     "https://dev.weel.uz",
     "https://partners.weel.uz",
     "https://pms.weel.uz",
+    "https://dashboard.weel.uz",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -143,7 +144,6 @@ GLOBAL_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.staticfiles",
-    "apps.bot",
 ]
 
 USE_NORM_DATASTORE = False  # Explicitly disable norm_* datastore usage
@@ -186,6 +186,7 @@ MIDDLEWARE = [
     "core.middleware.tenant.TenantMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
     "request_logging.middleware.LoggingMiddleware",  # django-request-logging
+    "core.middleware.memory_profiling.MemoryProfilingMiddleware",
     "core.middleware.exception_logging.ExceptionLoggingMiddleware",
 ]
 
@@ -329,6 +330,7 @@ REST_FRAMEWORK = {
         # POST /api/user/refresh/ has no Bearer; without this it shares anon+user IP limits with all AllowAny traffic.
         "token_refresh": os.environ.get("API_TOKEN_REFRESH_RATE", "120/minute"),
         "frontend_log": "2000/hour",
+        "b2b_lead_request": os.environ.get("API_B2B_LEAD_REQUEST_RATE", "5/hour"),
     },
     "UNAUTHENTICATED_USER": None,
 }
@@ -351,10 +353,7 @@ SIMPLE_JWT = {
     "JTI_CLAIM": "jti",
 }
 
-_swagger_url = (os.getenv("SWAGGER_URL") or "").strip() or None
-# In local debug, let Swagger use the current origin (localhost) to avoid
-# cross-origin "NetworkError" when SWAGGER_URL points to a remote domain.
-SWAGGER_URL = None if DEBUG else _swagger_url
+SWAGGER_URL = (os.getenv("SWAGGER_URL") or "").strip() or None
 ENABLE_SWAGGER_UI = env_bool("ENABLE_SWAGGER_UI", default=DEBUG)
 SWAGGER_BASIC_AUTH_USERNAME = (os.getenv("SWAGGER_BASIC_AUTH_USERNAME") or "").strip()
 SWAGGER_BASIC_AUTH_PASSWORD = (os.getenv("SWAGGER_BASIC_AUTH_PASSWORD") or "").strip()
@@ -364,7 +363,7 @@ SWAGGER_BASIC_AUTH_MAX_ATTEMPTS = int(
 SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS = int(
     (os.getenv("SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS") or "900").strip() or "900"
 )
-PROMETHEUS_ENABLED = env_bool("PROMETHEUS_ENABLED", default=DEBUG)
+PROMETHEUS_ENABLED = env_bool("PROMETHEUS_ENABLED", default=True)
 SWAGGER_SETTINGS = {
     "DEFAULT_INFO": "core.urls.schema_info",
     # Do not require Django session login for docs; everything is viewable anonymously.
@@ -630,6 +629,8 @@ TELEGRAM_BOT_TOKEN_APP = os.getenv("TELEGRAM_BOT_TOKEN_APP")
 BOT_TOKEN = TELEGRAM_BOT_TOKEN_APP
 MINIAPP_URL = os.getenv("MINIAPP_URL", "https://partners.weel.uz/")
 HOTEL_BOT_TOKEN = os.getenv("HOTEL_BOT_TOKEN")
+B2B_LEAD_BOT_TOKEN = os.getenv("B2B_LEAD_BOT_TOKEN")
+B2B_LEAD_TELEGRAM_CHAT_ID = os.getenv("B2B_LEAD_TELEGRAM_CHAT_ID")
 PMS_MINIAPP_URL = os.getenv("PMS_MINIAPP_URL", "https://pms.weel.uz")
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL") or "https://dev.weel.uz"
 FRONTEND_LOG_TOKEN = (os.getenv("FRONTEND_LOG_TOKEN") or "").strip()
@@ -717,11 +718,20 @@ LOGGING = {
             "()": "core.middleware.logging.UnicodeJsonFormatter",
             "format": "%(asctime)s %(name)s %(levelname)s %(message)s %(pathname)s %(lineno)d",
         },
+        "json_stdout": {
+            "()": "core.middleware.logging.UnicodeJsonFormatter",
+            "format": "%(asctime)s %(name)s %(levelname)s %(message)s %(pathname)s %(lineno)d",
+        },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "console",
+        },
+        "stdout_json": {
+            "class": "logging.StreamHandler",
+            "formatter": "json_stdout",
+            "stream": "ext://sys.stdout",
         },
         "file": {
             "level": "INFO",
@@ -750,37 +760,37 @@ LOGGING = {
     },
     "loggers": {
         "django": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "WARNING",
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "INFO",
             "propagate": False,
         },
         "django.server": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "INFO",
             "propagate": False,
         },
         "core": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "DEBUG",
             "propagate": False,
         },
         "users": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "INFO",
             "propagate": False,
         },
         "frontend": {
-            "handlers": ["console", "file_frontend"],
+            "handlers": ["console", "stdout_json", "file_frontend"],
             "level": "INFO",
             "propagate": False,
         },
         "..sanatorium": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "stdout_json", "file"],
             "level": "INFO",
             "propagate": False,
         },

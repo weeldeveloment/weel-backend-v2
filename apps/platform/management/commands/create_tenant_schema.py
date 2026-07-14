@@ -90,6 +90,9 @@ class Command(BaseCommand):
                     availability VARCHAR(20) DEFAULT 'available',
                     capacity INTEGER DEFAULT 2,
                     meal_plan VARCHAR(3) DEFAULT 'BB',
+                    base_price NUMERIC(10,2),
+                    currency VARCHAR(3) DEFAULT 'USD',
+                    cover_photo_index INTEGER DEFAULT 0,
                     is_active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -174,23 +177,6 @@ class Command(BaseCommand):
                 );
             """)
             self.stdout.write("  Created pms_booking_history")
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS pms_rate (
-                    id BIGSERIAL PRIMARY KEY,
-                    property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
-                    room_id BIGINT,
-                    date_from DATE NOT NULL,
-                    date_to DATE NOT NULL,
-                    rate NUMERIC(10,2) NOT NULL,
-                    currency VARCHAR(3) DEFAULT 'USD',
-                    min_stay INTEGER DEFAULT 1,
-                    is_weekend_rate BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-            """)
-            self.stdout.write("  Created pms_rate")
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pms_review (
