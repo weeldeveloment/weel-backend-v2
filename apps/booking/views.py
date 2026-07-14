@@ -1227,6 +1227,7 @@ class ClientHotelBookingCreateView(APIView):
             get_room_with_details,
         )
         from apps.property.hotel_repository import _run_in_schema
+        from shared.raw.db import fetch_one
 
         def _create_booking():
             room = get_room_with_details(room_id)
@@ -1247,6 +1248,12 @@ class ClientHotelBookingCreateView(APIView):
             )
             if not booking:
                 raise ValidationError({"detail": _("Booking could not be created. Room is not available for the selected dates.")})
+
+            partner = fetch_one(
+                "SELECT partner_user_id FROM pms_property WHERE id = %s",
+                [hotel_id],
+            )
+            booking["partner_user_id"] = partner["partner_user_id"] if partner else None
 
             create_hotel_booking_calendar_slots(
                 booking_id=int(booking["id"]),
@@ -1277,7 +1284,7 @@ class ClientHotelBookingCreateView(APIView):
             create_hold_transaction(
                 booking_id=int(booking["id"]),
                 client_user_id=int(request.user.id),
-                partner_user_id=None,
+                partner_user_id=int(booking["partner_user_id"]) if booking.get("partner_user_id") else None,
                 amount=hold_result.get("totalAmount") or hold_amount,
                 transaction_id=hold_result.get("transactionId"),
                 hold_id=hold_result.get("holdId"),
