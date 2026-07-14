@@ -40,9 +40,10 @@ class B2BDepartmentSerializer(serializers.Serializer):
 class B2BEmployeeSerializer(serializers.Serializer):
     """Xodimni ko'rsatish (GET) hamda yangilash (PATCH, partial) uchun serializer.
 
-    ``passport_upload`` bu yerda faqat o'qish uchun (saqlangan fayl URL manzili) —
-    xodim yaratishda fayl ``B2BEmployeeCreateSerializer`` orqali qabul qilinadi va
-    view darajasida ``default_storage`` ga yuklanadi.
+    ``passport_upload_front``/``passport_upload_back`` bu yerda faqat o'qish uchun
+    (saqlangan fayl URL manzillari) — xodim yaratishda fayllar
+    ``B2BEmployeeCreateSerializer`` orqali qabul qilinadi va view darajasida
+    ``default_storage`` ga yuklanadi.
     """
     id = serializers.IntegerField(read_only=True)
     company_id = serializers.IntegerField(read_only=True)
@@ -54,7 +55,6 @@ class B2BEmployeeSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20, required=True)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     passport_series = serializers.CharField(max_length=10, required=False, allow_blank=True, allow_null=True)
-    passport_upload = serializers.CharField(read_only=True, allow_null=True)
     passport_upload_front = serializers.CharField(read_only=True, allow_null=True)
     passport_upload_back = serializers.CharField(read_only=True, allow_null=True)
     photo = serializers.CharField(read_only=True, allow_null=True)

@@ -200,7 +200,7 @@ def create_employee(*, company_id: int, full_name: str, **kwargs: Any) -> dict[s
     field_map = {
         "department_id": int, "position": str, "email": str, "phone": str,
         "date_of_birth": lambda v: v, "passport_series": str, "passport_pinfl": str,
-        "passport_upload": str, "passport_upload_front": str, "passport_upload_back": str,
+        "passport_upload_front": str, "passport_upload_back": str,
         "photo": str, "individual_limit": lambda v: v, "status": str,
     }
     for key, caster in field_map.items():

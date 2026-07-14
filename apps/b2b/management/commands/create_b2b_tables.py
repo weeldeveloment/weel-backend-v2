@@ -78,16 +78,12 @@ class Command(BaseCommand):
                     date_of_birth DATE,
                     passport_series VARCHAR(10),
                     passport_pinfl VARCHAR(20),
-                    passport_upload VARCHAR(500),
                     individual_limit NUMERIC(12,2),
                     status VARCHAR(20) DEFAULT 'available',
                     is_active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
-            """)
-            cursor.execute("""
-                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_upload VARCHAR(500);
             """)
             cursor.execute("""
                 ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_upload_front VARCHAR(500);
@@ -120,6 +116,9 @@ class Command(BaseCommand):
             """)
             cursor.execute("""
                 ALTER TABLE b2b_employee DROP COLUMN IF EXISTS pinfl;
+            """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee DROP COLUMN IF EXISTS passport_upload;
             """)
             self.stdout.write("  Created b2b_employee")
 
