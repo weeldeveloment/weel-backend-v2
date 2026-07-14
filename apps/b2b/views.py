@@ -70,7 +70,7 @@ from apps.b2b.repository import (
 )
 from apps.b2b.models import DepartmentBudgetStatus, HotelBookingRequestStatus
 from apps.b2b.permissions import IsB2BOwner, IsB2BPerformer
-from apps.b2b.tasks import send_b2b_lead_telegram_msg
+from apps.b2b.tasks import _send_b2b_lead_telegram_notification
 from apps.property.hotel_repository import _run_in_schema, decode_hotel_guid, get_hotel_for_public
 from apps.hotels.repository import (
     count_hotels,
@@ -626,7 +626,7 @@ class B2BEmployeeListCreateView(APIView):
             "Kompaniyaga yangi xodim qo'shadi. `department_id`, `email`, `phone`, "
             "`passport_upload_front` va `passport_upload_back` (SHAXS GUVOHNOMASI old va "
             "orqa tomoni) — barchasi majburiy. `full_name`, `date_of_birth`, "
-            "`passport_series`, `passport_number` va `pinfl` klientdan qabul qilinmaydi — "
+            "`passport_series` va `passport_pinfl` klientdan qabul qilinmaydi — "
             "ular yuklangan rasmlardan avtomatik OCR orqali o'qib olinadi."
         ),
         consumes=["multipart/form-data"],
@@ -636,6 +636,7 @@ class B2BEmployeeListCreateView(APIView):
             openapi.Parameter("phone", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Telefon raqami (majburiy)"),
             openapi.Parameter("passport_upload_front", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="SHAXS GUVOHNOMASI old tomoni (jpg, png; maksimum 5MB)"),
             openapi.Parameter("passport_upload_back", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="SHAXS GUVOHNOMASI orqa tomoni, MRZ kodi bilan (jpg, png; maksimum 5MB)"),
+            openapi.Parameter("photo", openapi.IN_FORM, type=openapi.TYPE_FILE, required=False, description="Xodimning shaxsiy (profil) fotosurati (jpg, png; maksimum 5MB, ixtiyoriy)"),
             openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Lavozimi"),
             openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Xodim uchun individual limit"),
             openapi.Parameter("status", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["available", "on_trip", "blocked"], required=False, description="Xodim holati (default: available)"),
@@ -667,17 +668,23 @@ class B2BEmployeeListCreateView(APIView):
         front_path = default_storage.save(f"b2b/employees/passports/{front_file.name}", front_file)
         back_path = default_storage.save(f"b2b/employees/passports/{back_file.name}", back_file)
 
-        for field in ("full_name", "pinfl", "date_of_birth", "passport_series", "passport_number"):
+        photo_file = validated.pop("photo", None)
+        photo_url = None
+        if photo_file:
+            photo_path = default_storage.save(f"b2b/employees/photos/{photo_file.name}", photo_file)
+            photo_url = default_storage.url(photo_path)
+
+        for field in ("full_name", "passport_pinfl", "date_of_birth", "passport_series"):
             validated.pop(field, None)
         employee = create_employee(
             company_id=company_id,
             full_name=passport_data["full_name"],
             date_of_birth=passport_data["date_of_birth"],
             passport_series=passport_data["passport_series"],
-            passport_number=passport_data["passport_number"],
-            pinfl=passport_data["pinfl"],
+            passport_pinfl=passport_data["passport_pinfl"],
             passport_upload_front=default_storage.url(front_path),
             passport_upload_back=default_storage.url(back_path),
+            photo=photo_url,
             **{k: v for k, v in validated.items() if k not in ("company_id", "department_name")},
         )
         if not employee:
@@ -865,9 +872,13 @@ class B2BLeadRequestCreateView(APIView):
         if not lead:
             return Response({"detail": "Failed to create lead request."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        send_b2b_lead_telegram_msg.delay(
-            lead["id"], lead["full_name"], lead["company_name"], lead["email"], lead["phone_number"],
-        )
+        try:
+            _send_b2b_lead_telegram_notification(
+                lead["id"], lead["full_name"], lead["company_name"], lead["email"], lead["phone_number"],
+            )
+        except Exception:
+            logger.exception("Failed to send B2B lead Telegram notification for lead #%s", lead["id"])
+
         return Response(B2BLeadRequestSerializer(lead).data, status=status.HTTP_201_CREATED)
 
 

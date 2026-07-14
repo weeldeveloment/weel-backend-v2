@@ -122,8 +122,7 @@ def extract_back_data(back_file) -> dict:
         "full_name": f"{surname} {given_names}".strip(),
         "date_of_birth": date_of_birth,
         "passport_series": document_number[:2],
-        "passport_number": document_number[2:],
-        "pinfl": pinfl,
+        "passport_pinfl": pinfl,
     }
 
 
