@@ -10,12 +10,23 @@ pool exhaustion and 503 timeouts under concurrent load.
 """
 import logging
 import os
+import random
 import tracemalloc
 
 from django.http import HttpRequest
 from django.utils.deprecation import MiddlewareMixin
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_sample_rate() -> float:
+    raw = os.getenv("MEMORY_PROFILING_SAMPLE_RATE", "0.01").strip()
+    try:
+        rate = float(raw)
+        return max(0.0, min(rate, 1.0))
+    except ValueError:
+        logger.warning("Invalid MEMORY_PROFILING_SAMPLE_RATE=%r, falling back to 0.01", raw)
+        return 0.01
 
 
 class MemoryProfilingMiddleware(MiddlewareMixin):
@@ -27,6 +38,7 @@ class MemoryProfilingMiddleware(MiddlewareMixin):
     def __init__(self, get_response=None):
         super().__init__(get_response)
         self._enabled = os.getenv("MEMORY_PROFILING_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+        self._sample_rate = _parse_sample_rate()
         self._trace_started = False
         if self._enabled and not tracemalloc.is_tracing():
             try:
@@ -50,8 +62,11 @@ class MemoryProfilingMiddleware(MiddlewareMixin):
         except Exception:
             pass
 
+    def _should_sample(self) -> bool:
+        return random.random() < self._sample_rate
+
     def process_request(self, request: HttpRequest):
-        if self._enabled:
+        if self._enabled and self._should_sample():
             request._mem_snapshot_before = tracemalloc.take_snapshot()
 
     def process_response(self, request, response):
@@ -101,6 +116,7 @@ class CeleryMemoryProfiler:
     def __init__(self, task_func):
         self.task_func = task_func
         self._enabled = os.getenv("MEMORY_PROFILING_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+        self._sample_rate = _parse_sample_rate()
         self._prom_growth = None
         try:
             from prometheus_client import Histogram
@@ -113,8 +129,11 @@ class CeleryMemoryProfiler:
         except Exception:
             pass
 
+    def _should_sample(self) -> bool:
+        return random.random() < self._sample_rate
+
     def __call__(self, *args, **kwargs):
-        if not self._enabled or not tracemalloc.is_tracing():
+        if not self._enabled or not tracemalloc.is_tracing() or not self._should_sample():
             return self.task_func(*args, **kwargs)
 
         before = tracemalloc.take_snapshot()
