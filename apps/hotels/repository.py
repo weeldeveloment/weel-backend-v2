@@ -33,6 +33,7 @@ def _check_room_availability(
                 AND cs.date >= %s
                 AND cs.date < %s
           )
+        FOR UPDATE
         """,
         [room_id, check_out, check_in, check_in, check_out],
     )
@@ -66,10 +67,13 @@ def get_available_rooms(
         SELECT
             r.id, r.room_number, r.floor, r.display_name,
             r.bedroom_count, r.beds, r.amenities,
-            r.capacity,
+            r.capacity AS capacity_adults,
             r.room_type_name, r.room_type_preset AS preset,
             r.meal_plan,
-            COALESCE(r.photos, '{}'::text[]) AS photos
+            r.area AS area_sqm,
+            COALESCE(r.base_price, 0) AS price_per_night,
+            COALESCE(r.currency, 'USD') AS currency,
+            COALESCE(r.photos, '{}'::text[]) AS images
         FROM pms_room r
         WHERE r.property_id = %s
           AND r.is_active = TRUE
@@ -81,9 +85,16 @@ def get_available_rooms(
                 AND b.check_in < %s
                 AND b.check_out > %s
           )
+          AND NOT EXISTS (
+              SELECT 1 FROM pms_calendar_slot cs
+              WHERE cs.room_id = r.id
+                AND cs.date >= %s
+                AND cs.date < %s
+                AND cs.status != 'available'
+          )
         ORDER BY r.room_number ASC
         """,
-        [property_id, guests, check_out, check_in],
+        [property_id, guests, check_out, check_in, check_in, check_out],
     )
 
 
@@ -111,13 +122,13 @@ def calculate_stay_price(
         return None
 
     room = fetch_one(
-        "SELECT id FROM pms_room WHERE id = %s",
+        "SELECT base_price FROM pms_room WHERE id = %s AND is_active = TRUE",
         [room_id],
     )
     if not room:
         return None
 
-    raw_rate = None
+    raw_rate = room.get("base_price")
     if raw_rate is None:
         return None
 
@@ -134,6 +145,48 @@ def calculate_stay_price(
 
 
 # ─── Booking CRUD ─────────────────────────────────────────────────────────────
+
+def _insert_hotel_booking_with_retry(
+    *,
+    property_id: int,
+    room_id: int,
+    client_user_id: int,
+    check_in: date,
+    check_out: date,
+    adults: int,
+    children: int,
+    pricing: dict,
+    b2b_company_id: int | None,
+    max_retries: int = 5,
+) -> dict[str, Any] | None:
+    for _ in range(max_retries):
+        row = fetch_one(
+            """
+            INSERT INTO pms_booking (
+                property_id, room_id, created_by,
+                check_in, check_out, adult_count, child_count,
+                rate, currency, total_cost, hold_amount,
+                status, b2b_company_id, created_at, booking_number
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s,
+                %s, 'UZS', %s, %s,
+                'new', %s, NOW(),
+                'H' || TO_CHAR(NOW(), 'YYMMDD') || LPAD(FLOOR(RANDOM() * 99999)::int::text, 5, '0')
+            )
+            RETURNING id, property_id, room_id, check_in, check_out, adult_count, child_count,
+                      total_cost, hold_amount, status, booking_number, created_at, created_by
+            """,
+            [
+                property_id, room_id, client_user_id,
+                check_in, check_out, adults, children,
+                pricing["price_per_night"], pricing["total_price"], pricing["hold_amount"],
+                b2b_company_id,
+            ],
+        )
+        if row is not None:
+            return row
+    return None
+
 
 def create_hotel_booking(
     *,
@@ -156,7 +209,6 @@ def create_hotel_booking(
 
     pricing = calculate_stay_price(room_id, check_in, check_out)
     if not pricing:
-        # fallback: use 100000 UZS/night default
         ppn = Decimal("100000")
         base_price = ppn * nights
         hold_amount = (base_price * Decimal("0.30")).quantize(Decimal("0.01"))
@@ -168,33 +220,17 @@ def create_hotel_booking(
             "remaining_on_arrival": base_price - hold_amount,
         }
 
-    total_price = pricing["total_price"]
-    hold_amount = pricing["hold_amount"]
-
-    row = fetch_one(
-        """
-        INSERT INTO pms_booking (
-            property_id, room_id, created_by,
-            check_in, check_out, adult_count, child_count,
-            rate, currency, total_cost, hold_amount,
-            status, b2b_company_id, created_at, booking_number
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s,
-            %s, 'UZS', %s, %s,
-            'new', %s, NOW(),
-            'H' || TO_CHAR(NOW(), 'YYMMDD') || LPAD(FLOOR(RANDOM() * 99999)::int::text, 5, '0')
-        )
-        RETURNING id, property_id, room_id, check_in, check_out, adult_count, child_count,
-                  total_cost, hold_amount, status, booking_number, created_at, created_by
-        """,
-        [
-            property_id, room_id, client_user_id,
-            check_in, check_out, adults, children,
-            pricing["price_per_night"], total_price, hold_amount,
-            b2b_company_id,
-        ],
+    return _insert_hotel_booking_with_retry(
+        property_id=property_id,
+        room_id=room_id,
+        client_user_id=client_user_id,
+        check_in=check_in,
+        check_out=check_out,
+        adults=adults,
+        children=children,
+        pricing=pricing,
+        b2b_company_id=b2b_company_id,
     )
-    return row
 
 
 def create_hotel_booking_calendar_slots(
@@ -251,7 +287,7 @@ def list_client_hotel_bookings(
             p.name AS hotel_name, p.city AS hotel_city, p.star_rating AS hotel_star_rating,
             r.room_number, r.display_name AS room_name, r.floor,
             r.room_type_name, r.room_type_preset,
-            0 AS room_price_per_night
+            COALESCE(r.base_price, 0) AS room_price_per_night
         FROM pms_booking b
         JOIN pms_property p ON p.id = b.property_id
         JOIN pms_room r ON r.id = b.room_id
@@ -278,7 +314,7 @@ def get_client_hotel_booking(
             p.check_in_time AS hotel_check_in_time, p.check_out_time AS hotel_check_out_time,
             COALESCE(p.photos, ARRAY[]::text[]) AS hotel_images,
             r.room_number, r.display_name AS room_name, r.floor,
-            0 AS room_price_per_night,
+            COALESCE(r.base_price, 0) AS room_price_per_night,
             r.bedroom_count, r.beds, r.amenities,
             r.capacity,
             r.room_type_name, r.room_type_preset,
@@ -333,9 +369,6 @@ def update_hotel_booking_status(
 # apps/property/hotel_repository.py). Search/list must loop every hotel
 # organization's schema (via ``_run_in_schema``) and merge the results —
 # there is no single global ``pms_property`` table to query directly.
-# Each result is tagged with a ``hotel_guid`` (``"<schema>:<id>"``, see
-# ``encode_hotel_guid``) since raw numeric ids are only unique per-schema.
-
 def _search_hotels_in_schema(
     schema_name: str,
     organization: dict[str, Any],
@@ -351,7 +384,6 @@ def _search_hotels_in_schema(
     price_min: Decimal | None,
     price_max: Decimal | None,
 ) -> list[dict[str, Any]]:
-    from apps.property.hotel_repository import encode_hotel_guid
 
     conditions = ["p.is_active = TRUE"]
     params: list[Any] = []
@@ -379,7 +411,7 @@ def _search_hotels_in_schema(
     if check_in and check_out:
         avail_join = """
             LEFT JOIN LATERAL (
-                SELECT 0 AS min_price, COUNT(*) AS available_rooms
+                SELECT COALESCE(MIN(r.base_price), 0) AS min_price, COUNT(*) AS available_rooms
                 FROM pms_room r
                 WHERE r.property_id = p.id
                   AND r.is_active = TRUE
@@ -398,7 +430,7 @@ def _search_hotels_in_schema(
     else:
         avail_join = """
             LEFT JOIN LATERAL (
-                SELECT 0 AS min_price, COUNT(*) AS available_rooms
+                SELECT COALESCE(MIN(r.base_price), 0) AS min_price, COUNT(*) AS available_rooms
                 FROM pms_room r
                 WHERE r.property_id = p.id AND r.is_active = TRUE AND r.capacity >= %s
             ) pricing ON TRUE
@@ -416,11 +448,42 @@ def _search_hotels_in_schema(
 
     sql = f"""
         SELECT
-            p.id, p.name, p.city, p.full_address, p.star_rating,
-            p.weel_classification, p.themes, p.description_uz AS description,
-            p.photos, p.check_in_time, p.check_out_time,
-            p.latitude, p.longitude,
+            p.id,
+            p.guid,
+            p.organization_id,
+            p.partner_user_id,
+            p.name,
+            p.description_uz,
+            p.description_ru,
+            p.description_en,
+            p.address,
+            p.full_address,
+            p.city,
+            p.country,
+            p.latitude::text AS latitude,
+            p.longitude::text AS longitude,
+            p.star_rating,
+            p.weel_classification,
+            p.themes,
+            COALESCE(p.amenities, ARRAY[]::text[]) AS amenities,
+            COALESCE(p.legal_info, '{{}}'::jsonb) AS legal_info,
+            p.check_in_time,
+            p.check_out_time,
+            p.cancellation_policy,
+            COALESCE(p.quiet_hours, TRUE) AS quiet_hours,
+            COALESCE(p.alcohol_allowed, FALSE) AS alcohol_allowed,
+            COALESCE(p.pets_allowed, FALSE) AS pets_allowed,
+            p.currency,
+            p.timezone,
+            COALESCE(p.photos, ARRAY[]::text[]) AS photos,
+            COALESCE(p.is_active, TRUE) AS is_active,
+            COALESCE(p.is_testing, FALSE) AS is_testing,
+            COALESCE(p.is_verified, FALSE) AS is_verified,
+            COALESCE(p.is_archived, FALSE) AS is_archived,
             COALESCE(p.is_recommended, FALSE) AS is_recommended,
+            COALESCE(p.verification_status, 'waiting') AS verification_status,
+            p.created_at,
+            p.updated_at,
             pricing.min_price,
             COALESCE(pricing.available_rooms, 0) AS available_rooms,
             (
@@ -441,11 +504,22 @@ def _search_hotels_in_schema(
     """
     all_params = avail_params + params
     rows = fetch_all(sql, all_params)
+    import json as _json
+
     for row in rows:
         row["organization_id"] = organization.get("id")
         row["organization_name"] = organization.get("name")
+        row["organization_slug"] = organization.get("slug")
         row["tenant_schema"] = schema_name
-        row["hotel_guid"] = encode_hotel_guid(schema_name, row["id"])
+        row["guid"] = str(row["guid"]) if row.get("guid") else None
+        raw_legal = row.get("legal_info")
+        if isinstance(raw_legal, str):
+            try:
+                row["legal_info"] = _json.loads(raw_legal)
+            except Exception:
+                row["legal_info"] = {}
+        elif not isinstance(raw_legal, dict):
+            row["legal_info"] = {}
     return rows
 
 

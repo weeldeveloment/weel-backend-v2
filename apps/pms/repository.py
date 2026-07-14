@@ -13,11 +13,11 @@ from apps.pms.raw.tables import (
     PMS_PROPERTY_TABLE,
     PMS_PROPERTY_IMAGE_TABLE,
     PMS_ROOM_TABLE,
+    PMS_ROOM_TYPE_TABLE,
     PMS_CALENDAR_SLOT_TABLE,
     PMS_GUEST_TABLE,
     PMS_BOOKING_TABLE,
     PMS_BOOKING_HISTORY_TABLE,
-    PMS_RATE_TABLE,
     PMS_REVIEW_TABLE,
 )
 
@@ -225,6 +225,7 @@ def create_room(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
     vals = [property_id, now, now]
 
     field_map = {
+        "room_type_id": int,
         "room_type_name": str, "room_type_preset": str,
         "room_number": str, "display_name": str,
         "floor": int, "area": lambda v: v, "bedroom_count": int,
@@ -233,6 +234,8 @@ def create_room(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
         "photos": _to_pg_array,
         "condition": str, "availability": str,
         "capacity": int, "meal_plan": str, "is_active": bool,
+        "base_price": lambda v: v, "currency": str,
+        "cover_photo_index": int,
     }
 
     for key, caster in field_map.items():
@@ -308,6 +311,82 @@ def delete_room(room_id: int) -> bool:
     return execute(
         f"UPDATE {_t(PMS_ROOM_TABLE)} SET is_active = FALSE, updated_at = %s WHERE id = %s",
         [timezone.now(), room_id],
+    ) > 0
+
+
+def list_room_types(property_id: int) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"SELECT * FROM {_t(PMS_ROOM_TYPE_TABLE)} WHERE property_id = %s AND is_active = TRUE ORDER BY name ASC",
+        [property_id],
+    )
+
+
+def create_room_type(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
+    now = timezone.now()
+    cols = ["property_id", "created_at", "updated_at"]
+    vals = [property_id, now, now]
+
+    field_map = {
+        "preset": str, "custom_name": str, "name": str,
+        "description": str, "base_rate": lambda v: v,
+        "currency": str, "capacity": int,
+        "amenities": _to_pg_array, "photos": _to_pg_array,
+        "is_active": bool,
+    }
+
+    for key, caster in field_map.items():
+        if key in kwargs and kwargs[key] is not None:
+            cols.append(key)
+            vals.append(caster(kwargs[key]))
+
+    placeholders = ", ".join(["%s"] * len(cols))
+    col_names = ", ".join(cols)
+
+    return fetch_one(
+        f"INSERT INTO {_t(PMS_ROOM_TYPE_TABLE)} ({col_names}) VALUES ({placeholders}) RETURNING *",
+        vals,
+    )
+
+
+def get_room_type(room_type_id: int, property_id: int | None = None) -> dict[str, Any] | None:
+    if property_id:
+        return fetch_one(
+            f"SELECT * FROM {_t(PMS_ROOM_TYPE_TABLE)} WHERE id = %s AND property_id = %s",
+            [room_type_id, property_id],
+        )
+    return fetch_one(
+        f"SELECT * FROM {_t(PMS_ROOM_TYPE_TABLE)} WHERE id = %s",
+        [room_type_id],
+    )
+
+
+def update_room_type(room_type_id: int, **kwargs: Any) -> dict[str, Any] | None:
+    if not kwargs:
+        return None
+
+    pg_array_fields = {"amenities", "photos"}
+    sanitized = {}
+    for k, v in kwargs.items():
+        if k in pg_array_fields and isinstance(v, list):
+            sanitized[k] = _to_pg_array(v)
+        else:
+            sanitized[k] = v
+
+    sets = ", ".join(f"{k} = %s" for k in sanitized)
+    values = list(sanitized.values())
+    values.append(timezone.now())
+    values.append(room_type_id)
+
+    return fetch_one(
+        f"UPDATE {_t(PMS_ROOM_TYPE_TABLE)} SET {sets}, updated_at = %s WHERE id = %s RETURNING *",
+        values,
+    )
+
+
+def delete_room_type(room_type_id: int) -> bool:
+    return execute(
+        f"UPDATE {_t(PMS_ROOM_TYPE_TABLE)} SET is_active = FALSE, updated_at = %s WHERE id = %s",
+        [timezone.now(), room_type_id],
     ) > 0
 
 
@@ -998,88 +1077,6 @@ def _add_booking_history(
         """,
         [booking_id, action, pv, nv, user_id, timezone.now(), timezone.now()],
     )
-
-
-# ─── Rates ───────────────────────────────────────────────────────────────────
-
-
-def create_rate(*, property_id: int, room_id: int, date_from: date, date_to: date, rate: Decimal, **kwargs: Any) -> dict[str, Any] | None:
-    now = timezone.now()
-    return fetch_one(
-        f"""
-        INSERT INTO {_t(PMS_RATE_TABLE)}
-            (id, property_id, room_id, date_from, date_to, rate, currency, min_stay, is_weekend_rate, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING *
-        """,
-        [
-            None, property_id, room_id, date_from, date_to, rate,
-            kwargs.get("currency", "USD"), kwargs.get("min_stay", 1),
-            kwargs.get("is_weekend_rate", False), now, now,
-        ],
-    )
-
-
-def get_rate_by_id(rate_id: int) -> dict[str, Any] | None:
-    return fetch_one(
-        f"SELECT * FROM {_t(PMS_RATE_TABLE)} WHERE id = %s",
-        [rate_id],
-    )
-
-
-def list_rates(property_id: int, *, room_id: int | None = None) -> list[dict[str, Any]]:
-    if room_id:
-        return fetch_all(
-            f"SELECT * FROM {_t(PMS_RATE_TABLE)} WHERE property_id = %s AND room_id = %s ORDER BY date_from ASC",
-            [property_id, room_id],
-        )
-    return fetch_all(
-        f"SELECT * FROM {_t(PMS_RATE_TABLE)} WHERE property_id = %s ORDER BY date_from ASC",
-        [property_id],
-    )
-
-
-def update_rate(rate_id: int, **kwargs: Any) -> dict[str, Any] | None:
-    if not kwargs:
-        return None
-
-    sets = ", ".join(f"{k} = %s" for k in kwargs)
-    values = list(kwargs.values())
-    values.append(timezone.now())
-    values.append(rate_id)
-
-    return fetch_one(
-        f"UPDATE {_t(PMS_RATE_TABLE)} SET {sets}, updated_at = %s WHERE id = %s RETURNING *",
-        values,
-    )
-
-
-def delete_rate(rate_id: int) -> bool:
-    return execute(
-        f"DELETE FROM {_t(PMS_RATE_TABLE)} WHERE id = %s",
-        [rate_id],
-    ) > 0
-
-
-def get_effective_rate(
-    *,
-    property_id: int,
-    room_id: int,
-    check_date: date,
-) -> Decimal | None:
-    rate = fetch_one(
-        f"""
-        SELECT rate FROM {_t(PMS_RATE_TABLE)}
-        WHERE property_id = %s AND room_id = %s
-        AND date_from <= %s AND date_to >= %s
-        ORDER BY date_from DESC
-        LIMIT 1
-        """,
-        [property_id, room_id, check_date, check_date],
-    )
-    if rate:
-        return rate["rate"]
-    return None
 
 
 # ─── Reviews ─────────────────────────────────────────────────────────────────

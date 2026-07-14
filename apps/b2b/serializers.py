@@ -414,3 +414,10 @@ class TravelPolicyRuleCreateSerializer(serializers.Serializer):
 
 class TravelPolicyRuleUpdateSerializer(serializers.Serializer):
     budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+
+
+class B2BHotelCalendarSerializer(serializers.Serializer):
+    room_id = serializers.IntegerField(read_only=True)
+    room_name = serializers.CharField(read_only=True, allow_null=True)
+    date = serializers.DateField(read_only=True)
+    status = serializers.CharField(read_only=True)

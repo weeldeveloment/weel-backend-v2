@@ -120,8 +120,6 @@ class AllAPIEndpointsSmokeTests(TestCase):
                 "message": "smoke-test",
                 "extra": {"suite": "api-smoke"},
             }, "json"
-        if method == "post" and path == "/api/bot/webhook/invalid-smoke-secret/":
-            return {"update_id": 1}, "json"
         if method == "post" and path.endswith("/refresh/"):
             return {"refresh": "invalid-refresh-token"}, "json"
         if method == "post" and path.endswith("/chat/read/"):
