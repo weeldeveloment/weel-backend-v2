@@ -460,8 +460,8 @@ class ClientBookingListCreateView(ListCreateAPIView):
     def get_property(self, property_id):
         property_row = get_verified_property_for_booking(str(property_id))
         if not property_row:
-            raise NotFound(
-                _("Property not found or is not a verified property"))
+            raise ValidationError(
+                {"property_id": _("Property not found or is not a verified property")})
         return property_row
 
     def create(self, request, *args, **kwargs):
@@ -511,6 +511,9 @@ class ClientBookingListCreateView(ListCreateAPIView):
         operation_summary="List client bookings",
         operation_description="Return a list of booking related to the authenticated client",
         manual_parameters=[status_query_param],
+        responses={
+            200: openapi.Response("List of bookings", RawClientBookingListSerializer(many=True)),
+        },
     )
     def get(self, request, *args, **kwargs):
         statuses = _parse_statuses_from_query(request.query_params.get("status"))
@@ -527,6 +530,39 @@ class ClientBookingListCreateView(ListCreateAPIView):
         operation_summary="Create booking and payment hold",
         operation_description="Creates a **PENDING booking** and places a **payment hold (UZS)**",
         request_body=RawClientBookingCreateSerializer,
+        responses={
+            201: openapi.Response(
+                "Booking created successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "booking_id": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_UUID),
+                        "partner": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                "username": openapi.Schema(type=openapi.TYPE_STRING),
+                                "first_name": openapi.Schema(type=openapi.TYPE_STRING),
+                                "last_name": openapi.Schema(type=openapi.TYPE_STRING),
+                                "phone_number": openapi.Schema(type=openapi.TYPE_STRING),
+                            },
+                        ),
+                        "check_in": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_DATE),
+                        "check_out": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_DATE),
+                        "property_location": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                "latitude": openapi.Schema(type=openapi.TYPE_NUMBER),
+                                "longitude": openapi.Schema(type=openapi.TYPE_NUMBER),
+                            },
+                        ),
+                        "status": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            400: openapi.Response(
+                "Invalid property_id (e.g. property not found / not verified)",
+            ),
+        },
     )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
