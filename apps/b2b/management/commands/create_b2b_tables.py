@@ -90,6 +90,12 @@ class Command(BaseCommand):
             cursor.execute("""
                 ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_upload VARCHAR(500);
             """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_upload_front VARCHAR(500);
+            """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_upload_back VARCHAR(500);
+            """)
             self.stdout.write("  Created b2b_employee")
 
             cursor.execute("""

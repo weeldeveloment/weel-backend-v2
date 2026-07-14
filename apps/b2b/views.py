@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 
-
+from apps.b2b.passport_ocr import PassportOCRError, extract_passport_data
 from apps.b2b.repository import (
     add_hotel_booking_room,
     add_hotel_booking_room_employee,
@@ -571,26 +571,25 @@ class B2BEmployeeListCreateView(APIView):
         operation_summary="Yangi xodim qo'shish",
         operation_description=(
             "Kompaniyaga yangi xodim qo'shadi. `department_id`, `email`, `phone`, "
-            "`pinfl` va `passport_upload` (passport rasmi/fayli) — barchasi majburiy."
+            "`passport_upload_front` va `passport_upload_back` (SHAXS GUVOHNOMASI old va "
+            "orqa tomoni) — barchasi majburiy. `full_name`, `date_of_birth`, "
+            "`passport_series`, `passport_number` va `pinfl` klientdan qabul qilinmaydi — "
+            "ular yuklangan rasmlardan avtomatik OCR orqali o'qib olinadi."
         ),
         consumes=["multipart/form-data"],
         manual_parameters=[
-            openapi.Parameter("full_name", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Xodimning to'liq ismi"),
             openapi.Parameter("department_id", openapi.IN_FORM, type=openapi.TYPE_INTEGER, required=True, description="Bo'lim ID (majburiy)"),
             openapi.Parameter("email", openapi.IN_FORM, type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, required=True, description="Email (majburiy)"),
             openapi.Parameter("phone", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Telefon raqami (majburiy)"),
-            openapi.Parameter("pinfl", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="PINFL (majburiy)"),
-            openapi.Parameter("passport_upload", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Passport fayli/rasmi (pdf, jpg, png; maksimum 5MB)"),
+            openapi.Parameter("passport_upload_front", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="SHAXS GUVOHNOMASI old tomoni (jpg, png; maksimum 5MB)"),
+            openapi.Parameter("passport_upload_back", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="SHAXS GUVOHNOMASI orqa tomoni, MRZ kodi bilan (jpg, png; maksimum 5MB)"),
             openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Lavozimi"),
-            openapi.Parameter("date_of_birth", openapi.IN_FORM, type=openapi.TYPE_STRING, format=openapi.FORMAT_DATE, required=False, description="Tug'ilgan sana (YYYY-MM-DD)"),
-            openapi.Parameter("passport_series", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Passport seriyasi"),
-            openapi.Parameter("passport_number", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Passport raqami"),
             openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Xodim uchun individual limit"),
             openapi.Parameter("status", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["available", "on_trip", "blocked"], required=False, description="Xodim holati (default: available)"),
         ],
         responses={
             201: B2BEmployeeSerializer(),
-            400: openapi.Response(description="Validation error / Company context required."),
+            400: openapi.Response(description="Validation error / Company context required / passport rasmi shablonga mos emas."),
         },
     )
     def post(self, request):
@@ -604,12 +603,28 @@ class B2BEmployeeListCreateView(APIView):
         department_id = validated.get("department_id")
         if department_id and not any(d["id"] == department_id for d in list_departments(company_id)):
             return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
-        passport_file = validated.pop("passport_upload")
-        saved_path = default_storage.save(f"b2b/employees/passports/{passport_file.name}", passport_file)
+
+        front_file = validated.pop("passport_upload_front")
+        back_file = validated.pop("passport_upload_back")
+        try:
+            passport_data = extract_passport_data(front_file, back_file)
+        except PassportOCRError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        front_path = default_storage.save(f"b2b/employees/passports/{front_file.name}", front_file)
+        back_path = default_storage.save(f"b2b/employees/passports/{back_file.name}", back_file)
+
+        for field in ("full_name", "pinfl", "date_of_birth", "passport_series", "passport_number"):
+            validated.pop(field, None)
         employee = create_employee(
             company_id=company_id,
-            full_name=validated.pop("full_name"),
-            passport_upload=default_storage.url(saved_path),
+            full_name=passport_data["full_name"],
+            date_of_birth=passport_data["date_of_birth"],
+            passport_series=passport_data["passport_series"],
+            passport_number=passport_data["passport_number"],
+            pinfl=passport_data["pinfl"],
+            passport_upload_front=default_storage.url(front_path),
+            passport_upload_back=default_storage.url(back_path),
             **{k: v for k, v in validated.items() if k not in ("company_id", "department_name")},
         )
         if not employee:

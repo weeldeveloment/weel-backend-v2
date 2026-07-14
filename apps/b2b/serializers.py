@@ -56,6 +56,8 @@ class B2BEmployeeSerializer(serializers.Serializer):
     passport_series = serializers.CharField(max_length=10, required=False, allow_blank=True, allow_null=True)
     passport_number = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
     passport_upload = serializers.CharField(read_only=True, allow_null=True)
+    passport_upload_front = serializers.CharField(read_only=True, allow_null=True)
+    passport_upload_back = serializers.CharField(read_only=True, allow_null=True)
     pinfl = serializers.CharField(max_length=20, required=True)
     individual_limit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     status = serializers.ChoiceField(choices=["available", "on_trip", "blocked"], required=False, default="available")
@@ -66,18 +68,30 @@ class B2BEmployeeSerializer(serializers.Serializer):
 class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
     """POST ``/b2b/employees/`` uchun serializer (multipart/form-data).
 
-    ``pinfl``, ``email``, ``phone``, ``department_id`` — xodim yaratishning
-    asosiy majburiy maydonlari. ``passport_upload`` fayl sifatida shu yerda
-    validatsiya qilinadi (view uni ``request.FILES`` orqali o'qiydi, chunki
-    u B2BEmployeeSerializer'da faqat o'qish uchun CharField).
+    ``email``, ``phone``, ``department_id`` — xodim yaratishning asosiy
+    majburiy maydonlari. ``passport_upload_front`` (SHAXS GUVOHNOMASI old
+    tomoni) va ``passport_upload_back`` (orqa tomoni, MRZ bilan) — ikkalasi
+    ham majburiy fayl. ``full_name``, ``date_of_birth``, ``passport_series``,
+    ``passport_number`` va ``pinfl`` shu rasmlardan avtomatik o'qib olinadi
+    (``apps.b2b.passport_ocr``), shuning uchun bu yerda ular majburiy emas —
+    view darajasida OCR natijasi bilan qayta yoziladi.
     """
-    passport_upload = serializers.FileField(required=True)
+    full_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    pinfl = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    passport_upload_front = serializers.FileField(required=True)
+    passport_upload_back = serializers.FileField(required=True)
 
-    def validate_passport_upload(self, file):
+    def _validate_image_file(self, file):
         max_size = 5 * 1024 * 1024  # 5MB
         if file.size > max_size:
             raise serializers.ValidationError("Fayl hajmi 5MB dan oshmasligi kerak.")
         return file
+
+    def validate_passport_upload_front(self, file):
+        return self._validate_image_file(file)
+
+    def validate_passport_upload_back(self, file):
+        return self._validate_image_file(file)
 
 
 class BusinessTripSerializer(serializers.Serializer):
