@@ -70,7 +70,7 @@ from apps.b2b.repository import (
 )
 from apps.b2b.models import DepartmentBudgetStatus, HotelBookingRequestStatus
 from apps.b2b.permissions import IsB2BOwner, IsB2BPerformer
-from apps.b2b.tasks import send_b2b_lead_telegram_msg
+from apps.b2b.tasks import _send_b2b_lead_telegram_notification
 from apps.property.hotel_repository import _run_in_schema, decode_hotel_guid, get_hotel_for_public
 from apps.hotels.repository import (
     count_hotels,
@@ -872,9 +872,13 @@ class B2BLeadRequestCreateView(APIView):
         if not lead:
             return Response({"detail": "Failed to create lead request."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        send_b2b_lead_telegram_msg.delay(
-            lead["id"], lead["full_name"], lead["company_name"], lead["email"], lead["phone_number"],
-        )
+        try:
+            _send_b2b_lead_telegram_notification(
+                lead["id"], lead["full_name"], lead["company_name"], lead["email"], lead["phone_number"],
+            )
+        except Exception:
+            logger.exception("Failed to send B2B lead Telegram notification for lead #%s", lead["id"])
+
         return Response(B2BLeadRequestSerializer(lead).data, status=status.HTTP_201_CREATED)
 
 
