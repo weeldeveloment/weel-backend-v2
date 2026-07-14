@@ -11,6 +11,7 @@ from django.utils import timezone
 from pydantic import ValidationError
 
 from apps.platform.raw_repository import get_organization_by_schema, list_organizations
+from shared.raw.db import pop_schema_context, push_schema_context
 
 T = TypeVar("T")
 
@@ -93,12 +94,16 @@ def _serialize_hotel_row(
 
 
 def _run_in_schema(schema_name: str, fn: Callable[[], T]) -> T:
-    with connection.cursor() as cursor:
-        cursor.execute("SET search_path TO %s, public", [schema_name])
-        try:
-            return fn()
-        finally:
-            cursor.execute("SET search_path TO public")
+    push_schema_context(schema_name)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SET search_path TO %s, public", [schema_name])
+            try:
+                return fn()
+            finally:
+                cursor.execute("SET search_path TO public")
+    finally:
+        pop_schema_context()
 
 
 def _fetch_rows(cursor) -> list[dict[str, Any]]:
@@ -389,8 +394,9 @@ def list_admin_hotels(
     is_active: bool | None = None,
     created_from: date | None = None,
     created_to: date | None = None,
+    page: int | None = None,
     limit: int | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], int]:
     rows: list[dict[str, Any]] = []
     normalized_schema = _safe_schema_name(tenant_schema)
 
@@ -421,9 +427,15 @@ def list_admin_hotels(
             rows.append(payload)
 
     _sort_rows(rows)
-    if limit is not None:
+    total = len(rows)
+
+    if page is not None and limit is not None and limit > 0:
+        page = max(1, page)
+        start = (page - 1) * limit
+        rows = rows[start:start + limit]
+    elif limit is not None:
         rows = rows[:limit]
-    return rows
+    return rows, total
 
 
 def get_admin_hotel(hotel_guid: str) -> dict[str, Any] | None:
