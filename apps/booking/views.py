@@ -1226,25 +1226,37 @@ class ClientHotelBookingCreateView(APIView):
             create_hotel_booking_calendar_slots,
             get_room_with_details,
         )
+        from apps.property.hotel_repository import _run_in_schema
 
-        room = get_room_with_details(room_id)
-        if not room:
-            raise ValidationError({"detail": _("Room not found or inactive.")})
-        if guests > (room.get("capacity") or 0):
-            raise ValidationError({"detail": _("Guest count exceeds room capacity.")})
+        def _create_booking():
+            room = get_room_with_details(room_id)
+            if not room:
+                raise ValidationError({"detail": _("Room not found or inactive.")})
+            if guests > (room.get("capacity") or 0):
+                raise ValidationError({"detail": _("Guest count exceeds room capacity.")})
 
-        booking = create_hotel_booking(
-            property_id=hotel_id,
-            room_id=room_id,
-            client_user_id=int(request.user.id),
-            check_in=ci,
-            check_out=co,
-            adults=guests,
-            children=0,
-            card_id=str(card_id) if card_id else None,
-        )
-        if not booking:
-            raise ValidationError({"detail": _("Booking could not be created. Room is not available for the selected dates.")})
+            booking = create_hotel_booking(
+                property_id=hotel_id,
+                room_id=room_id,
+                client_user_id=int(request.user.id),
+                check_in=ci,
+                check_out=co,
+                adults=guests,
+                children=0,
+                card_id=str(card_id) if card_id else None,
+            )
+            if not booking:
+                raise ValidationError({"detail": _("Booking could not be created. Room is not available for the selected dates.")})
+
+            create_hotel_booking_calendar_slots(
+                booking_id=int(booking["id"]),
+                room_id=room_id,
+                check_in=ci,
+                check_out=co,
+            )
+            return booking
+
+        booking = _run_in_schema(_schema, _create_booking)
 
         hold_amount = booking["hold_amount"]
 
@@ -1272,13 +1284,6 @@ class ClientHotelBookingCreateView(APIView):
                 card_id=hold_result.get("cardId") or str(card_id),
                 extra_id=hold_result.get("extraId"),
             )
-
-        create_hotel_booking_calendar_slots(
-            booking_id=int(booking["id"]),
-            room_id=room_id,
-            check_in=ci,
-            check_out=co,
-        )
 
         NotificationService.send_to_client(
             client=SimpleNamespace(id=int(request.user.id)),
