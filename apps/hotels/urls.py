@@ -1,5 +1,6 @@
 from django.urls import path
 from apps.hotels.views import (
+    HotelCalendarView,
     HotelSearchView,
     HotelDetailView,
     HotelRoomSelectView,
@@ -9,6 +10,7 @@ from apps.hotels.views import (
 
 urlpatterns = [
     path("search/", HotelSearchView.as_view(), name="hotel-search"),
+    path("<str:guid>/calendar/", HotelCalendarView.as_view(), name="hotel-calendar"),
     path("<str:guid>/rooms/", HotelRoomSelectView.as_view(), name="hotel-room-select"),
     path("<str:guid>/rooms/<int:room_id>/price/", HotelRoomPriceView.as_view(), name="hotel-room-price"),
     path("<str:guid>/reviews/", HotelReviewsView.as_view(), name="hotel-reviews"),
