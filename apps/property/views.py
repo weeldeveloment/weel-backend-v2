@@ -717,6 +717,26 @@ def _parse_int(value) -> int | None:
         return None
 
 
+def _paginated_envelope(request, results: list, total: int, page: int, limit: int) -> dict:
+    total_pages = max(1, (total + limit - 1) // limit) if limit > 0 else 1
+    base_url = request.build_absolute_uri(request.path)
+    qp = request.query_params.copy()
+
+    def _page_url(p: int | None) -> str | None:
+        if p is None or p < 1 or p > total_pages:
+            return None
+        qp["page"] = str(p)
+        qp["limit"] = str(limit)
+        return f"{base_url}?{urlencode(sorted(qp.items()))}"
+
+    return {
+        "results": results,
+        "count": total,
+        "next": _page_url(page + 1 if page < total_pages else None),
+        "previous": _page_url(page - 1 if page > 1 else None),
+    }
+
+
 def _parse_region_id_or_guid(value) -> int | None:
     parsed = _parse_int(value)
     if parsed is not None:
@@ -3987,25 +4007,30 @@ class AdminAllPropertiesListView(APIView):
                 CottageAdminListSerializer(rows, many=True, context=ctx).data
             )
         if requested_kind == PROPERTY_KIND_HOTEL:
-            rows = list_admin_hotels(
+            raw_page = _parse_int(request.query_params.get("page"))
+            raw_limit = _parse_int(request.query_params.get("limit"))
+            page = raw_page if raw_page and raw_page >= 1 else 1
+            limit = raw_limit if raw_limit and raw_limit >= 1 else 12
+            rows, total = list_admin_hotels(
                 search=request.query_params.get("search"),
                 organization_id=_parse_int(request.query_params.get("organization_id")),
                 tenant_schema=request.query_params.get("tenant_schema"),
                 is_active=_parse_bool(request.query_params.get("is_active")),
                 created_from=_parse_date(request.query_params.get("created_from")),
                 created_to=_parse_date(request.query_params.get("created_to")),
+                page=page,
+                limit=limit,
             )
             rows = _attach_partner_users(rows)
-            return Response(
-                HotelAdminListSerializer(rows, many=True, context=ctx).data
-            )
+            serialized = HotelAdminListSerializer(rows, many=True, context=ctx).data
+            return Response(_paginated_envelope(request, serialized, total, page, limit))
         apt_rows = _attach_partner_users(
             _list_apartment_rows(request.query_params, **list_kwargs)
         )
         cot_rows = _attach_partner_users(
             _list_cottage_rows(request.query_params, **list_kwargs)
         )
-        hotel_rows = list_admin_hotels(
+        hotel_rows, _total = list_admin_hotels(
             search=request.query_params.get("search"),
             organization_id=_parse_int(request.query_params.get("organization_id")),
             tenant_schema=request.query_params.get("tenant_schema"),
