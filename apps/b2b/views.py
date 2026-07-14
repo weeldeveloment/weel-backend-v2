@@ -3,20 +3,23 @@ from __future__ import annotations
 import logging
 import random
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
 from django.core.files.storage import default_storage
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from shared.throttles import ResilientScopedRateThrottle
 
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 
-
+from apps.b2b.passport_ocr import PassportOCRError, extract_passport_data
 from apps.b2b.repository import (
     add_hotel_booking_room,
     add_hotel_booking_room_employee,
@@ -27,6 +30,7 @@ from apps.b2b.repository import (
     create_department,
     create_employee,
     create_hotel_booking_request,
+    create_lead_request,
     create_policy_rule,
     create_trip,
     create_voucher,
@@ -47,6 +51,7 @@ from apps.b2b.repository import (
     list_active_trip_employees,
     list_budget_requests,
     list_departments,
+    list_departments_with_budget,
     list_employees,
     list_hotel_booking_requests,
     list_hotel_booking_rooms,
@@ -63,8 +68,9 @@ from apps.b2b.repository import (
     update_travel_policy,
     update_trip,
 )
-from apps.b2b.models import HotelBookingRequestStatus
+from apps.b2b.models import DepartmentBudgetStatus, HotelBookingRequestStatus
 from apps.b2b.permissions import IsB2BOwner, IsB2BPerformer
+from apps.b2b.tasks import send_b2b_lead_telegram_msg
 from apps.property.hotel_repository import _run_in_schema, decode_hotel_guid, get_hotel_for_public
 from apps.hotels.repository import (
     count_hotels,
@@ -83,6 +89,7 @@ from apps.b2b.serializers import (
     ActiveTripEmployeeSerializer,
     B2BCompanySerializer,
     B2BDepartmentSerializer,
+    B2BDepartmentSummarySerializer,
     B2BEmployeeCreateSerializer,
     B2BEmployeeSerializer,
     B2BUserSerializer,
@@ -93,6 +100,7 @@ from apps.b2b.serializers import (
     HotelBookingRequestCreateSerializer,
     HotelBookingRequestDetailSerializer,
     HotelBookingRequestSerializer,
+    B2BLeadRequestSerializer,
     RecentTripEmployeeSerializer,
     ReviewBudgetRequestSerializer,
     TopEmployeeByTripsSerializer,
@@ -533,13 +541,58 @@ class B2BCompanyView(APIView):
 class B2BDepartmentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
-    @swagger_auto_schema(responses={200: B2BDepartmentSerializer(many=True)})
+    @swagger_auto_schema(
+        operation_summary="Departmentlar ro'yxati",
+        operation_description=(
+            "Har bir department uchun owner tomonidan berilgan limit "
+            "(`budget_limit`), ishlatilgan summa (`used_amount`), qolgan summa "
+            "(`remaining_amount`), holati (`status`) va unga biriktirilgan "
+            "xodimlar (`employees`) qaytariladi. `status` limitning qolgan "
+            "qismiga qarab hisoblanadi: `high` — qolgan summa limitning 25%"
+            "idan ko'p, `low` — 25% yoki undan kam (lekin 0 emas), "
+            "`empty` — qolmagan (yoki limitdan oshib ketilgan), "
+            "`no_limit` — department uchun limit belgilanmagan."
+        ),
+        responses={200: B2BDepartmentSummarySerializer(many=True)},
+    )
     def get(self, request):
         company_id = _get_company_id(request)
         if not company_id:
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
-        depts = list_departments(company_id)
-        return Response(B2BDepartmentSerializer(depts, many=True).data)
+
+        search = request.query_params.get("search")
+        depts = list_departments_with_budget(company_id, search=search)
+        employees_by_dept: dict[int, list[dict[str, Any]]] = {}
+        for emp in list_employees(company_id):
+            employees_by_dept.setdefault(emp["department_id"], []).append(emp)
+
+        payload = []
+        for d in depts:
+            budget_limit = d["budget_limit"]
+            used_amount = d["used_amount"]
+            if budget_limit is None:
+                remaining_amount = None
+                dept_status = DepartmentBudgetStatus.NO_LIMIT
+            else:
+                remaining_amount = budget_limit - used_amount
+                if remaining_amount <= 0:
+                    dept_status = DepartmentBudgetStatus.EMPTY
+                elif remaining_amount <= budget_limit * Decimal("0.25"):
+                    dept_status = DepartmentBudgetStatus.LOW
+                else:
+                    dept_status = DepartmentBudgetStatus.HIGH
+            payload.append({
+                "id": d["department_id"],
+                "company_id": d["company_id"],
+                "name": d["department_name"],
+                "budget_limit": budget_limit,
+                "used_amount": used_amount,
+                "remaining_amount": remaining_amount,
+                "status": dept_status,
+                "employees": employees_by_dept.get(d["department_id"], []),
+                "created_at": d["created_at"],
+            })
+        return Response(B2BDepartmentSummarySerializer(payload, many=True).data)
 
     @swagger_auto_schema(request_body=B2BDepartmentSerializer, responses={201: B2BDepartmentSerializer()})
     def post(self, request):
@@ -571,26 +624,25 @@ class B2BEmployeeListCreateView(APIView):
         operation_summary="Yangi xodim qo'shish",
         operation_description=(
             "Kompaniyaga yangi xodim qo'shadi. `department_id`, `email`, `phone`, "
-            "`pinfl` va `passport_upload` (passport rasmi/fayli) — barchasi majburiy."
+            "`passport_upload_front` va `passport_upload_back` (SHAXS GUVOHNOMASI old va "
+            "orqa tomoni) — barchasi majburiy. `full_name`, `date_of_birth`, "
+            "`passport_series`, `passport_number` va `pinfl` klientdan qabul qilinmaydi — "
+            "ular yuklangan rasmlardan avtomatik OCR orqali o'qib olinadi."
         ),
         consumes=["multipart/form-data"],
         manual_parameters=[
-            openapi.Parameter("full_name", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Xodimning to'liq ismi"),
             openapi.Parameter("department_id", openapi.IN_FORM, type=openapi.TYPE_INTEGER, required=True, description="Bo'lim ID (majburiy)"),
             openapi.Parameter("email", openapi.IN_FORM, type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, required=True, description="Email (majburiy)"),
             openapi.Parameter("phone", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Telefon raqami (majburiy)"),
-            openapi.Parameter("pinfl", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="PINFL (majburiy)"),
-            openapi.Parameter("passport_upload", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Passport fayli/rasmi (pdf, jpg, png; maksimum 5MB)"),
+            openapi.Parameter("passport_upload_front", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="SHAXS GUVOHNOMASI old tomoni (jpg, png; maksimum 5MB)"),
+            openapi.Parameter("passport_upload_back", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="SHAXS GUVOHNOMASI orqa tomoni, MRZ kodi bilan (jpg, png; maksimum 5MB)"),
             openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Lavozimi"),
-            openapi.Parameter("date_of_birth", openapi.IN_FORM, type=openapi.TYPE_STRING, format=openapi.FORMAT_DATE, required=False, description="Tug'ilgan sana (YYYY-MM-DD)"),
-            openapi.Parameter("passport_series", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Passport seriyasi"),
-            openapi.Parameter("passport_number", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Passport raqami"),
             openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Xodim uchun individual limit"),
             openapi.Parameter("status", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["available", "on_trip", "blocked"], required=False, description="Xodim holati (default: available)"),
         ],
         responses={
             201: B2BEmployeeSerializer(),
-            400: openapi.Response(description="Validation error / Company context required."),
+            400: openapi.Response(description="Validation error / Company context required / passport rasmi shablonga mos emas."),
         },
     )
     def post(self, request):
@@ -604,12 +656,28 @@ class B2BEmployeeListCreateView(APIView):
         department_id = validated.get("department_id")
         if department_id and not any(d["id"] == department_id for d in list_departments(company_id)):
             return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
-        passport_file = validated.pop("passport_upload")
-        saved_path = default_storage.save(f"b2b/employees/passports/{passport_file.name}", passport_file)
+
+        front_file = validated.pop("passport_upload_front")
+        back_file = validated.pop("passport_upload_back")
+        try:
+            passport_data = extract_passport_data(front_file, back_file)
+        except PassportOCRError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        front_path = default_storage.save(f"b2b/employees/passports/{front_file.name}", front_file)
+        back_path = default_storage.save(f"b2b/employees/passports/{back_file.name}", back_file)
+
+        for field in ("full_name", "pinfl", "date_of_birth", "passport_series", "passport_number"):
+            validated.pop(field, None)
         employee = create_employee(
             company_id=company_id,
-            full_name=validated.pop("full_name"),
-            passport_upload=default_storage.url(saved_path),
+            full_name=passport_data["full_name"],
+            date_of_birth=passport_data["date_of_birth"],
+            passport_series=passport_data["passport_series"],
+            passport_number=passport_data["passport_number"],
+            pinfl=passport_data["pinfl"],
+            passport_upload_front=default_storage.url(front_path),
+            passport_upload_back=default_storage.url(back_path),
             **{k: v for k, v in validated.items() if k not in ("company_id", "department_name")},
         )
         if not employee:
@@ -754,6 +822,53 @@ class TravelPolicyView(APIView):
         if not policy:
             return Response({"detail": "Failed to update policy."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(TravelPolicySerializer(policy).data)
+
+
+class B2BLeadRequestCreateView(APIView):
+    """POST /b2b/lead-requests/
+
+    Public 'become a partner' application form — a prospective business
+    owner submits their name, company and contact details to request
+    onboarding. Unauthenticated (no B2B account exists yet). Notifies the
+    sales team's Telegram channel on submission; staff review the request
+    and onboard the company manually via ``create_b2b_owner``.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [ResilientScopedRateThrottle]
+    throttle_scope = "b2b_lead_request"
+
+    @swagger_auto_schema(
+        operation_summary="Hamkorlik uchun ariza yuborish (yangi biznes egalari uchun)",
+        operation_description=(
+            "Hali B2B mijozi bo'lmagan biznes egasi ism, kompaniya nomi, "
+            "email va telefon raqamini yuborib, hamkorlikka ariza qoldiradi. "
+            "Autentifikatsiya talab qilinmaydi."
+        ),
+        request_body=B2BLeadRequestSerializer,
+        responses={
+            201: B2BLeadRequestSerializer(),
+            400: openapi.Response(description="Validation error."),
+        },
+    )
+    def post(self, request):
+        serializer = B2BLeadRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        validated = serializer.validated_data
+
+        lead = create_lead_request(
+            full_name=validated["full_name"],
+            company_name=validated["company_name"],
+            email=validated["email"],
+            phone_number=validated["phone_number"],
+        )
+        if not lead:
+            return Response({"detail": "Failed to create lead request."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        send_b2b_lead_telegram_msg.delay(
+            lead["id"], lead["full_name"], lead["company_name"], lead["email"], lead["phone_number"],
+        )
+        return Response(B2BLeadRequestSerializer(lead).data, status=status.HTTP_201_CREATED)
 
 
 class BudgetRequestListCreateView(APIView):

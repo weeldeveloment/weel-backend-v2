@@ -90,6 +90,12 @@ class Command(BaseCommand):
             cursor.execute("""
                 ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_upload VARCHAR(500);
             """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_upload_front VARCHAR(500);
+            """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_upload_back VARCHAR(500);
+            """)
             self.stdout.write("  Created b2b_employee")
 
             cursor.execute("""
@@ -250,5 +256,17 @@ class Command(BaseCommand):
                 );
             """)
             self.stdout.write("  Created b2b_hotel_booking_room_employee")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS b2b_lead_request (
+                    id BIGSERIAL PRIMARY KEY,
+                    full_name VARCHAR(200) NOT NULL,
+                    company_name VARCHAR(200) NOT NULL,
+                    email VARCHAR(254) NOT NULL,
+                    phone_number VARCHAR(20) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            self.stdout.write("  Created b2b_lead_request")
 
         self.stdout.write(self.style.SUCCESS("B2B tables created successfully."))

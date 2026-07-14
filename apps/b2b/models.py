@@ -51,6 +51,23 @@ class EmployeeStatus:
     CHOICES = [AVAILABLE, ON_TRIP, BLOCKED]
 
 
+class DepartmentBudgetStatus:
+    """Where a department stands against its owner-set budget limit,
+    based on how much of ``budget_limit`` remains unspent.
+
+    - ``HIGH``     – remaining amount is more than 25% of the limit.
+    - ``LOW``      – remaining amount is at or below 25% of the limit (but > 0).
+    - ``EMPTY``    – remaining amount is 0 (or the limit has been exceeded).
+    - ``NO_LIMIT`` – the owner hasn't set a limit for this department.
+    """
+    NO_LIMIT = "no_limit"
+    HIGH = "high"
+    LOW = "low"
+    EMPTY = "empty"
+
+    CHOICES = [NO_LIMIT, HIGH, LOW, EMPTY]
+
+
 class HotelBookingRequestStatus:
     """Status of a whole multi-room hotel booking request (the group)."""
     PENDING = "pending"
@@ -58,6 +75,19 @@ class HotelBookingRequestStatus:
     REJECTED = "rejected"
 
     CHOICES = [PENDING, CONFIRMED, REJECTED]
+
+
+@dataclass(slots=True)
+class B2BLeadRequest(HardDeleteBaseModel):
+    """A public 'become a partner' application submitted by a prospective
+    business owner — not yet a B2BCompany. Reviewed manually by staff, who
+    onboard the company via ``create_b2b_owner`` once approved."""
+    id: int | None = None
+    full_name: str | None = None
+    company_name: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+    _meta = SimpleNamespace(db_table="b2b_lead_request")
 
 
 @dataclass(slots=True)
@@ -118,6 +148,8 @@ class B2BEmployee(HardDeleteBaseModel):
     passport_series: str | None = None
     passport_number: str | None = None
     passport_upload: str | None = None
+    passport_upload_front: str | None = None
+    passport_upload_back: str | None = None
     pinfl: str | None = None
     individual_limit: Decimal | None = None
     status: str = EmployeeStatus.AVAILABLE

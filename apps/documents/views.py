@@ -61,11 +61,19 @@ class DocumentListCreateView(APIView):
         trip_id = request.query_params.get("trip_id")
         search = request.query_params.get("search")
 
+        if trip_id:
+            try:
+                trip_id = int(trip_id)
+            except (TypeError, ValueError):
+                return Response({"detail": "trip_id must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            trip_id = None
+
         docs = list_documents(
             **context,
             doc_type=doc_type,
             status=status_filter,
-            trip_id=int(trip_id) if trip_id else None,
+            trip_id=trip_id,
             search=search,
         )
         return Response(DocumentSerializer(docs, many=True).data)

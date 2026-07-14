@@ -96,6 +96,7 @@ for _origin in (
     "https://dev.weel.uz",
     "https://partners.weel.uz",
     "https://pms.weel.uz",
+    "https://dashboard.weel.uz",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -329,6 +330,7 @@ REST_FRAMEWORK = {
         # POST /api/user/refresh/ has no Bearer; without this it shares anon+user IP limits with all AllowAny traffic.
         "token_refresh": os.environ.get("API_TOKEN_REFRESH_RATE", "120/minute"),
         "frontend_log": "2000/hour",
+        "b2b_lead_request": os.environ.get("API_B2B_LEAD_REQUEST_RATE", "5/hour"),
     },
     "UNAUTHENTICATED_USER": None,
 }
@@ -630,6 +632,8 @@ TELEGRAM_BOT_TOKEN_APP = os.getenv("TELEGRAM_BOT_TOKEN_APP")
 BOT_TOKEN = TELEGRAM_BOT_TOKEN_APP
 MINIAPP_URL = os.getenv("MINIAPP_URL", "https://partners.weel.uz/")
 HOTEL_BOT_TOKEN = os.getenv("HOTEL_BOT_TOKEN")
+B2B_LEAD_BOT_TOKEN = os.getenv("B2B_LEAD_BOT_TOKEN")
+B2B_LEAD_TELEGRAM_CHAT_ID = os.getenv("B2B_LEAD_TELEGRAM_CHAT_ID")
 PMS_MINIAPP_URL = os.getenv("PMS_MINIAPP_URL", "https://pms.weel.uz")
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL") or "https://dev.weel.uz"
 FRONTEND_LOG_TOKEN = (os.getenv("FRONTEND_LOG_TOKEN") or "").strip()
