@@ -626,7 +626,7 @@ class B2BEmployeeListCreateView(APIView):
             "Kompaniyaga yangi xodim qo'shadi. `department_id`, `email`, `phone`, "
             "`passport_upload_front` va `passport_upload_back` (SHAXS GUVOHNOMASI old va "
             "orqa tomoni) — barchasi majburiy. `full_name`, `date_of_birth`, "
-            "`passport_series`, `passport_number` va `pinfl` klientdan qabul qilinmaydi — "
+            "`passport_series` va `passport_pinfl` klientdan qabul qilinmaydi — "
             "ular yuklangan rasmlardan avtomatik OCR orqali o'qib olinadi."
         ),
         consumes=["multipart/form-data"],
@@ -674,15 +674,14 @@ class B2BEmployeeListCreateView(APIView):
             photo_path = default_storage.save(f"b2b/employees/photos/{photo_file.name}", photo_file)
             photo_url = default_storage.url(photo_path)
 
-        for field in ("full_name", "pinfl", "date_of_birth", "passport_series", "passport_number"):
+        for field in ("full_name", "passport_pinfl", "date_of_birth", "passport_series"):
             validated.pop(field, None)
         employee = create_employee(
             company_id=company_id,
             full_name=passport_data["full_name"],
             date_of_birth=passport_data["date_of_birth"],
             passport_series=passport_data["passport_series"],
-            passport_number=passport_data["passport_number"],
-            pinfl=passport_data["pinfl"],
+            passport_pinfl=passport_data["passport_pinfl"],
             passport_upload_front=default_storage.url(front_path),
             passport_upload_back=default_storage.url(back_path),
             photo=photo_url,

@@ -146,12 +146,11 @@ class B2BEmployee(HardDeleteBaseModel):
     phone: str | None = None
     date_of_birth: date | None = None
     passport_series: str | None = None
-    passport_number: str | None = None
+    passport_pinfl: str | None = None
     passport_upload: str | None = None
     passport_upload_front: str | None = None
     passport_upload_back: str | None = None
     photo: str | None = None
-    pinfl: str | None = None
     individual_limit: Decimal | None = None
     status: str = EmployeeStatus.AVAILABLE
     is_active: bool = True

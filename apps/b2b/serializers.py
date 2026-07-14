@@ -54,12 +54,11 @@ class B2BEmployeeSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20, required=True)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     passport_series = serializers.CharField(max_length=10, required=False, allow_blank=True, allow_null=True)
-    passport_number = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
     passport_upload = serializers.CharField(read_only=True, allow_null=True)
     passport_upload_front = serializers.CharField(read_only=True, allow_null=True)
     passport_upload_back = serializers.CharField(read_only=True, allow_null=True)
     photo = serializers.CharField(read_only=True, allow_null=True)
-    pinfl = serializers.CharField(max_length=20, required=True)
+    passport_pinfl = serializers.CharField(max_length=20, required=True)
     individual_limit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     status = serializers.ChoiceField(choices=["available", "on_trip", "blocked"], required=False, default="available")
     is_active = serializers.BooleanField(read_only=True)
@@ -86,14 +85,14 @@ class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
     ``email``, ``phone``, ``department_id`` — xodim yaratishning asosiy
     majburiy maydonlari. ``passport_upload_front`` (SHAXS GUVOHNOMASI old
     tomoni) va ``passport_upload_back`` (orqa tomoni, MRZ bilan) — ikkalasi
-    ham majburiy fayl. ``full_name``, ``date_of_birth``, ``passport_series``,
-    ``passport_number`` va ``pinfl`` shu rasmlardan avtomatik o'qib olinadi
+    ham majburiy fayl. ``full_name``, ``date_of_birth``, ``passport_series``
+    va ``passport_pinfl`` shu rasmlardan avtomatik o'qib olinadi
     (``apps.b2b.passport_ocr``), shuning uchun bu yerda ular majburiy emas —
     view darajasida OCR natijasi bilan qayta yoziladi. ``photo`` — xodimning
     shaxsiy (profil) fotosurati, ixtiyoriy.
     """
     full_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    pinfl = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    passport_pinfl = serializers.CharField(max_length=20, required=False, allow_blank=True)
     passport_upload_front = serializers.FileField(required=True)
     passport_upload_back = serializers.FileField(required=True)
     photo = serializers.FileField(required=False)

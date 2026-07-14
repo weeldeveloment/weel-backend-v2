@@ -77,9 +77,8 @@ class Command(BaseCommand):
                     phone VARCHAR(20),
                     date_of_birth DATE,
                     passport_series VARCHAR(10),
-                    passport_number VARCHAR(20),
+                    passport_pinfl VARCHAR(20),
                     passport_upload VARCHAR(500),
-                    pinfl VARCHAR(20),
                     individual_limit NUMERIC(12,2),
                     status VARCHAR(20) DEFAULT 'available',
                     is_active BOOLEAN DEFAULT TRUE,
@@ -98,6 +97,29 @@ class Command(BaseCommand):
             """)
             cursor.execute("""
                 ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS photo VARCHAR(500);
+            """)
+            cursor.execute("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'b2b_employee' AND column_name = 'pinfl'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'b2b_employee' AND column_name = 'passport_pinfl'
+                    ) THEN
+                        ALTER TABLE b2b_employee RENAME COLUMN pinfl TO passport_pinfl;
+                    END IF;
+                END $$;
+            """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS passport_pinfl VARCHAR(20);
+            """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee DROP COLUMN IF EXISTS passport_number;
+            """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee DROP COLUMN IF EXISTS pinfl;
             """)
             self.stdout.write("  Created b2b_employee")
 
