@@ -113,7 +113,6 @@ from .hotel_repository import (
     admin_append_hotel_images,
     admin_remove_hotel_image,
     create_admin_hotel,
-    decode_hotel_guid,
     delete_admin_hotel,
     get_admin_hotel,
     get_hotel_for_public,
@@ -126,7 +125,7 @@ from .hotel_repository import (
 from .hotel_serializers import (
     HotelAdminListSerializer,
     HotelAdminUpdateSerializer,
-    HotelListSerializer,
+    HotelCardSerializer,
 )
 from .serializers import (
     DistrictListSerializer,
@@ -718,6 +717,26 @@ def _parse_int(value) -> int | None:
         return None
 
 
+def _paginated_envelope(request, results: list, total: int, page: int, limit: int) -> dict:
+    total_pages = max(1, (total + limit - 1) // limit) if limit > 0 else 1
+    base_url = request.build_absolute_uri(request.path)
+    qp = request.query_params.copy()
+
+    def _page_url(p: int | None) -> str | None:
+        if p is None or p < 1 or p > total_pages:
+            return None
+        qp["page"] = str(p)
+        qp["limit"] = str(limit)
+        return f"{base_url}?{urlencode(sorted(qp.items()))}"
+
+    return {
+        "results": results,
+        "count": total,
+        "next": _page_url(page + 1 if page < total_pages else None),
+        "previous": _page_url(page - 1 if page > 1 else None),
+    }
+
+
 def _parse_region_id_or_guid(value) -> int | None:
     parsed = _parse_int(value)
     if parsed is not None:
@@ -1082,8 +1101,9 @@ def _extract_prepare_params(
     limit = _parse_int(_source_get(source, "limit"))
     if limit is None:
         limit = default_limit
-    if limit is not None:
-        limit = max(0, min(limit, 200))
+    if limit is None:
+        limit = _DEFAULT_PUBLIC_LIST_LIMIT
+    limit = max(0, min(limit, 200))
     return {
         "min_price": _parse_decimal(_source_get(source, "min_price")),
         "max_price": _parse_decimal(_source_get(source, "max_price")),
@@ -1805,7 +1825,7 @@ class UnifiedRecommendationsListView(APIView):
                     default_limit=15,
                     testing_only=testing_only,
                 )
-                return HotelListSerializer(rows, many=True, context=ctx).data
+                return HotelCardSerializer(rows, many=True, context=ctx).data
 
             apt_rows = _list_apartment_rows(
                 source_params,
@@ -2039,11 +2059,11 @@ class HotelPropertyListView(APIView):
     @swagger_auto_schema(
         operation_id="listHotels",
         operation_summary="List hotels",
-        operation_description="Returns active public hotels from PMS. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated. `X-Testing-Mode: true` returns only testing hotels; otherwise testing hotels are excluded.",
+        operation_description="Returns active public hotels with pricing, rating, and amenity previews. Without `limit` and `page`, all matching rows are returned; with either query param, results are paginated. `X-Testing-Mode: true` returns only testing hotels; otherwise testing hotels are excluded.",
         tags=["Property / Public"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS + [TESTING_MODE_HEADER_PARAM],
         responses={
-            200: HotelListSerializer(many=True),
+            200: HotelCardSerializer(many=True),
             500: _ERROR_DETAIL_SCHEMA,
         },
     )
@@ -2062,43 +2082,14 @@ class HotelPropertyListView(APIView):
         paginator = self.pagination_class()
         paginated_data = paginator.paginate_queryset(rows, request)
         if paginated_data is not None:
-            serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
+            serializer = HotelCardSerializer(paginated_data, many=True, context=ctx)
             return paginator.get_paginated_response(serializer.data)
-        return Response(HotelListSerializer(rows, many=True, context=ctx).data)
+        return Response(HotelCardSerializer(rows, many=True, context=ctx).data)
 
 
 # ---------------------------------------------------------------------------
-# Hotel detail, reviews, favorites — encoded-GUID endpoints
+# Hotel reviews, favorites — encoded-GUID endpoints
 # ---------------------------------------------------------------------------
-
-
-class HotelPropertyDetailView(APIView):
-    authentication_classes = [OptionalClientOrPartnerJWTAuthentication]
-    permission_classes = [AllowAny]
-
-    @swagger_auto_schema(
-        operation_id="retrieveHotelProperty",
-        operation_summary="Retrieve a hotel property detail",
-        operation_description="Returns full hotel detail including images, amenities, and recent reviews. Accepts encoded hotel GUID (e.g. `tenant_schema:id`).",
-        tags=["Property / Public"],
-        manual_parameters=[
-            openapi.Parameter(
-                "hotel_guid", openapi.IN_PATH,
-                type=openapi.TYPE_STRING,
-                description="Encoded hotel GUID (schema_name:id).",
-            ),
-        ],
-        responses={200: HotelListSerializer(), 404: _ERROR_DETAIL_SCHEMA},
-    )
-    def get(self, request, hotel_guid):
-        row = get_hotel_for_public(str(hotel_guid))
-        if not row:
-            raise NotFound(_("Hotel not found"))
-        ctx = {
-            "request": request,
-            "favorite_guids": _favorite_guids_from_request(request),
-        }
-        return Response(HotelListSerializer(row, context=ctx).data)
 
 
 class HotelPropertyReviewListCreateView(APIView):
@@ -2124,10 +2115,11 @@ class HotelPropertyReviewListCreateView(APIView):
         responses={200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
     )
     def get(self, request, hotel_guid):
-        decoded = decode_hotel_guid(str(hotel_guid))
-        if not decoded:
+        from apps.property.hotel_repository import resolve_hotel_guid
+        resolved = resolve_hotel_guid(str(hotel_guid))
+        if not resolved:
             raise NotFound(_("Hotel not found"))
-        _schema, hotel_id = decoded
+        _schema, hotel_id = resolved
         from apps.hotels.repository import get_hotel_reviews
         reviews = get_hotel_reviews(hotel_id)
         return Response(reviews, status=status.HTTP_200_OK)
@@ -2154,10 +2146,11 @@ class HotelPropertyReviewListCreateView(APIView):
         responses={201: openapi.Schema(type=openapi.TYPE_OBJECT), 400: _ERROR_VALIDATION_SCHEMA},
     )
     def post(self, request, hotel_guid):
-        decoded = decode_hotel_guid(str(hotel_guid))
-        if not decoded:
+        from apps.property.hotel_repository import resolve_hotel_guid
+        resolved = resolve_hotel_guid(str(hotel_guid))
+        if not resolved:
             raise NotFound(_("Hotel not found"))
-        schema_name, hotel_id = decoded
+        schema_name, hotel_id = resolved
 
         rating = request.data.get("rating")
         comment = request.data.get("comment", "")
@@ -2294,7 +2287,7 @@ class PropertyListCreateView(APIView):
             rows = _list_cottage_rows(
                 query_params,
                 public_only=True,
-                default_limit=None,
+                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
                 testing_only=testing_only,
             )
             paginator = self.pagination_class()
@@ -2308,7 +2301,7 @@ class PropertyListCreateView(APIView):
             rows = _list_apartment_rows(
                 query_params,
                 public_only=True,
-                default_limit=None,
+                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
                 testing_only=testing_only,
             )
             paginator = self.pagination_class()
@@ -2321,15 +2314,15 @@ class PropertyListCreateView(APIView):
         if requested_kind == PROPERTY_KIND_HOTEL:
             rows = _list_hotel_rows(
                 query_params,
-                default_limit=None,
+                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
                 testing_only=testing_only,
             )
             paginator = self.pagination_class()
             paginated_data = paginator.paginate_queryset(rows, request)
             if paginated_data is not None:
-                serializer = HotelListSerializer(paginated_data, many=True, context=ctx)
+                serializer = HotelCardSerializer(paginated_data, many=True, context=ctx)
                 return paginator.get_paginated_response(serializer.data)
-            return Response(HotelListSerializer(rows, many=True, context=ctx).data)
+            return Response(HotelCardSerializer(rows, many=True, context=ctx).data)
 
         # Default: return apartments, cottages, and hotels (mixed list)
         apt_rows = _list_apartment_rows(
@@ -4014,25 +4007,30 @@ class AdminAllPropertiesListView(APIView):
                 CottageAdminListSerializer(rows, many=True, context=ctx).data
             )
         if requested_kind == PROPERTY_KIND_HOTEL:
-            rows = list_admin_hotels(
+            raw_page = _parse_int(request.query_params.get("page"))
+            raw_limit = _parse_int(request.query_params.get("limit"))
+            page = raw_page if raw_page and raw_page >= 1 else 1
+            limit = raw_limit if raw_limit and raw_limit >= 1 else 12
+            rows, total = list_admin_hotels(
                 search=request.query_params.get("search"),
                 organization_id=_parse_int(request.query_params.get("organization_id")),
                 tenant_schema=request.query_params.get("tenant_schema"),
                 is_active=_parse_bool(request.query_params.get("is_active")),
                 created_from=_parse_date(request.query_params.get("created_from")),
                 created_to=_parse_date(request.query_params.get("created_to")),
+                page=page,
+                limit=limit,
             )
             rows = _attach_partner_users(rows)
-            return Response(
-                HotelAdminListSerializer(rows, many=True, context=ctx).data
-            )
+            serialized = HotelAdminListSerializer(rows, many=True, context=ctx).data
+            return Response(_paginated_envelope(request, serialized, total, page, limit))
         apt_rows = _attach_partner_users(
             _list_apartment_rows(request.query_params, **list_kwargs)
         )
         cot_rows = _attach_partner_users(
             _list_cottage_rows(request.query_params, **list_kwargs)
         )
-        hotel_rows = list_admin_hotels(
+        hotel_rows, _total = list_admin_hotels(
             search=request.query_params.get("search"),
             organization_id=_parse_int(request.query_params.get("organization_id")),
             tenant_schema=request.query_params.get("tenant_schema"),
@@ -4152,6 +4150,40 @@ class AdminHotelOrganizationListView(APIView):
 class AdminHotelListCreateView(APIView):
     authentication_classes = [AdminJWTAuthentication]
     permission_classes = [IsAdminUser]
+
+    @swagger_auto_schema(
+        tags=["Admin / Property"],
+        operation_summary="List hotels (admin)",
+        operation_description="Admin-only list of hotels across all tenant schemas.",
+        manual_parameters=[
+            openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter("organization_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter("tenant_schema", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter("is_active", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN),
+            openapi.Parameter("created_from", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
+            openapi.Parameter("created_to", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
+            openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+        ],
+        responses={200: HotelAdminListSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        ctx = {"request": request}
+        rows = list_admin_hotels(
+            search=request.query_params.get("search"),
+            organization_id=_parse_int(request.query_params.get("organization_id")),
+            tenant_schema=request.query_params.get("tenant_schema"),
+            is_active=_parse_bool(request.query_params.get("is_active")),
+            created_from=_parse_date(request.query_params.get("created_from")),
+            created_to=_parse_date(request.query_params.get("created_to")),
+        )
+        rows = _attach_partner_users(rows)
+        paginator = _OptionalLimitPagePagination()
+        paginated_data = paginator.paginate_queryset(rows, request)
+        if paginated_data is not None:
+            serializer = HotelAdminListSerializer(paginated_data, many=True, context=ctx)
+            return paginator.get_paginated_response(serializer.data)
+        return Response(HotelAdminListSerializer(rows, many=True, context=ctx).data)
 
     @swagger_auto_schema(
         tags=["Admin / Property"],
@@ -4676,7 +4708,7 @@ class SavedPropertyListView(APIView):
         data = (
             ApartmentListSerializer(apt_rows, many=True, context=ctx).data
             + CottageListSerializer(cot_rows, many=True, context=ctx).data
-            + HotelListSerializer(hotel_rows, many=True, context=ctx).data
+            + HotelCardSerializer(hotel_rows, many=True, context=ctx).data
         )
         return Response(data, status=status.HTTP_200_OK)
 

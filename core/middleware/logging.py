@@ -5,6 +5,8 @@ import logging
 from pythonjsonlogger import json as jsonlogger, core
 from pythonjsonlogger.core import LogData
 
+from core.telemetry import get_trace_context
+
 
 # UTF-8 cyrillic bytes decoded as Latin-1 produce these characters
 MOJIBAKE_MARKERS = "\xd0\xd1"
@@ -46,7 +48,7 @@ def decode_bytes_string(message):
 
 
 class UnicodeJsonFormatter(jsonlogger.JsonFormatter):
-    """JSON formatter with proper UTF-8 support"""
+    """JSON formatter with proper UTF-8 support and trace context injection."""
 
     def __init__(self, *args, **kwargs):
         kwargs["json_ensure_ascii"] = False
@@ -56,6 +58,12 @@ class UnicodeJsonFormatter(jsonlogger.JsonFormatter):
         for key, value in log_data.items():
             if isinstance(value, str):
                 log_data[key] = decode_bytes_string(value)
+        # Inject trace_id / span_id from OpenTelemetry when available
+        trace_ctx = get_trace_context()
+        if trace_ctx.get("trace_id"):
+            log_data.setdefault("trace_id", trace_ctx["trace_id"])
+        if trace_ctx.get("span_id"):
+            log_data.setdefault("span_id", trace_ctx["span_id"])
         return super().process_log_record(log_data)
 
     def jsonify_log_record(self, log_data: core.LogData) -> str:

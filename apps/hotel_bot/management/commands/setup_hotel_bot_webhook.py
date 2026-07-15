@@ -1,6 +1,7 @@
 import asyncio
 import sys
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 
 
@@ -21,8 +22,12 @@ class Command(BaseCommand):
         try:
             asyncio.run(set_webhook(base_url))
         except Exception as exc:
-            self.stderr.write(self.style.WARNING(
-                f"Hotel bot webhook setup failed: {exc}. Continuing startup."
+            msg = str(exc)
+            token = getattr(settings, "HOTEL_BOT_TOKEN", "") or ""
+            if token:
+                msg = msg.replace(token, "<REDACTED>")
+            self.stdout.write(self.style.WARNING(
+                f"Hotel bot webhook setup failed: {msg}. Continuing startup."
             ))
             if options.get("strict"):
                 sys.exit(1)

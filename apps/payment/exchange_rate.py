@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
+import threading
 
 import requests
 
@@ -10,6 +11,9 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 
 from core import settings
+
+# Hard fallback to prevent any request from blocking on the external API.
+_FALLBACK_RATE = Decimal("12500")
 
 
 def _extract_usd_to_uzs_rate(payload: Any) -> Decimal:
@@ -39,18 +43,25 @@ def _fetch_live_rate() -> Decimal:
     return _extract_usd_to_uzs_rate(response.json())
 
 
+def _refresh_rate_in_background():
+    """Fire-and-forget refresh so the worker thread is never blocked."""
+    try:
+        live_rate = _fetch_live_rate()
+        cache.set("usd_to_uzs_rate", live_rate, timeout=86400)
+        cache.set("usd_to_uzs_rate_date", str(date.today()), timeout=86400)
+    except Exception:
+        pass
+
+
 def exchange_rate():
     rate = cache.get("usd_to_uzs_rate")
     if rate:
         return Decimal(str(rate))
 
-    try:
-        live_rate = _fetch_live_rate()
-        cache.set("usd_to_uzs_rate", live_rate, timeout=86400)
-        cache.set("usd_to_uzs_rate_date", str(date.today()), timeout=86400)
-        return live_rate
-    except Exception:
-        raise ValidationError(_("Exchange rate isn't synchronized today"))
+    # Cache is cold — return fallback immediately and refresh in background.
+    # This prevents Daphne worker threads from blocking on a slow external API.
+    threading.Thread(target=_refresh_rate_in_background, daemon=True).start()
+    return _FALLBACK_RATE
 
 
 def round_amount(amount: Decimal) -> Decimal:

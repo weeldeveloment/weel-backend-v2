@@ -23,14 +23,14 @@ from .views import (
     PropertyImageDeleteView,
     PropertyListCreateView,
     PropertyRetrieveUpdateDestroyView,
-    RateListCreateView,
-    RateRetrieveUpdateDestroyView,
     ReviewComplainView,
     ReviewListCreateView,
     ReviewRespondView,
     RoomListCreateView,
     RoomMassUpdateView,
     RoomRetrieveUpdateDestroyView,
+    RoomTypeListCreateView,
+    RoomTypeRetrieveUpdateDestroyView,
 )
 
 urlpatterns = [
@@ -44,6 +44,10 @@ urlpatterns = [
     path("properties/<int:property_id>/rooms/", RoomListCreateView.as_view(), name="pms-room-list-create"),
     path("properties/<int:property_id>/rooms/mass-update/", RoomMassUpdateView.as_view(), name="pms-room-mass-update"),
     path("properties/<int:property_id>/rooms/<int:room_id>/", RoomRetrieveUpdateDestroyView.as_view(), name="pms-room-detail"),
+
+    # Room Types
+    path("properties/<int:property_id>/room-types/", RoomTypeListCreateView.as_view(), name="pms-room-type-list-create"),
+    path("properties/<int:property_id>/room-types/<int:room_type_id>/", RoomTypeRetrieveUpdateDestroyView.as_view(), name="pms-room-type-detail"),
 
     # Calendar
     path("properties/<int:property_id>/calendar/", CalendarView.as_view(), name="pms-calendar"),
@@ -66,10 +70,6 @@ urlpatterns = [
     path("properties/<int:property_id>/bookings/<int:booking_id>/move/", BookingMoveView.as_view(), name="pms-booking-move"),
     path("properties/<int:property_id>/bookings/<int:booking_id>/meal-plan/", BookingMealPlanView.as_view(), name="pms-booking-meal-plan"),
     path("properties/<int:property_id>/bookings/<int:booking_id>/history/", BookingHistoryView.as_view(), name="pms-booking-history"),
-
-    # Rates
-    path("properties/<int:property_id>/rates/", RateListCreateView.as_view(), name="pms-rate-list-create"),
-    path("properties/<int:property_id>/rates/<int:rate_id>/", RateRetrieveUpdateDestroyView.as_view(), name="pms-rate-detail"),
 
     # Reviews
     path("properties/<int:property_id>/reviews/", ReviewListCreateView.as_view(), name="pms-review-list-create"),

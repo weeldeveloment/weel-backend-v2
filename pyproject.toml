@@ -28,6 +28,7 @@ django-import-export = "^4.3.10"
 django-unfold = "^0.66.0"
 channels = "^4.3.2"
 daphne = "^4.2.1"
+uvicorn = {extras = ["standard"], version = "^0.51.0"}
 channels-redis = "^4.2.0"
 gunicorn = "^23.0.0"
 whitenoise = "^6.11.0"
@@ -47,6 +48,14 @@ boto3 = "^1.35.0"
 python-telegram-bot = "^21.10"
 openpyxl = "^3.1.5"
 pytesseract = "^0.3.13"
+pydantic = "^2.12.5"
+opentelemetry-api = "^1.43.0"
+opentelemetry-sdk = "^1.43.0"
+opentelemetry-instrumentation-django = "^0.64b0"
+opentelemetry-instrumentation-celery = "^0.64b0"
+opentelemetry-instrumentation-redis = "^0.64b0"
+opentelemetry-instrumentation-psycopg2 = "^0.64b0"
+opentelemetry-exporter-otlp-proto-http = "^1.43.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.9.0"
@@ -58,4 +67,4 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.dokploy]
-start = "poetry run gunicorn core.wsgi:application --bind 0.0.0.0:8000"
+start = "poetry run uvicorn core.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws websockets"
