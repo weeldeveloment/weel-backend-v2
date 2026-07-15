@@ -82,7 +82,7 @@ if "host.docker.internal" not in ALLOWED_HOSTS:
 ALLOWED_HOSTS.append("0.0.0.0")
 
 # CORS
-CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
+CORS_ALLOWED_ORIGINS = [origin.rstrip("/") for origin in env_list("CORS_ALLOWED_ORIGINS")]
 if DEBUG and not CORS_ALLOWED_ORIGINS:
     CORS_ALLOWED_ORIGINS = [
         "http://localhost:3000",
