@@ -6,7 +6,9 @@ python manage.py collectstatic --noinput 2>/dev/null || true
 
 WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
 
-# Run webhook setup in background so server starts immediately
+python manage.py create_b2b_tables
+
+# Run webhook setup in background so daphne starts immediately
 # (health checks must pass before webhook setup finishes)
 (
   echo "Setting up hotel bot webhook: $WEBHOOK_BASE"
