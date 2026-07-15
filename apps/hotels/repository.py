@@ -130,7 +130,7 @@ def calculate_stay_price(
 
     raw_rate = room.get("base_price")
     if raw_rate is None:
-        return None
+        raw_rate = 0
 
     ppn = Decimal(str(raw_rate))
     base_price = ppn * nights
