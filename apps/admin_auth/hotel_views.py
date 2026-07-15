@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from shared.raw.db import fetch_all
+from shared.raw.db import fetch_all, push_schema_context, pop_schema_context
 
 from rest_framework.pagination import PageNumberPagination
 
@@ -35,6 +35,7 @@ from apps.pms.repository import (
     list_bookings,
     list_properties,
     list_reviews,
+    list_room_types,
     list_rooms,
     move_booking,
     respond_to_review,
@@ -51,6 +52,7 @@ from apps.pms.serializers import (
     ReviewRespondSerializer,
     ReviewSerializer,
     RoomSerializer,
+    RoomTypeSerializer,
 )
 from apps.b2b.repository import list_b2b_users, get_company
 from apps.b2b.serializers import B2BCompanySerializer, B2BUserSerializer
@@ -67,6 +69,7 @@ def _set_tenant_from_guid(hotel_guid: str) -> int | None:
     if not resolved:
         return None
     schema_name, hotel_id = resolved
+    push_schema_context(schema_name)
     with connection.cursor() as cursor:
         cursor.execute("SET search_path TO %s, public", [schema_name])
     return hotel_id
@@ -90,6 +93,7 @@ class AdminHotelBaseView(AdminBaseView):
         try:
             return super().dispatch(request, *args, **kwargs)
         finally:
+            pop_schema_context()
             with connection.cursor() as cursor:
                 cursor.execute("SET search_path TO public")
 
@@ -147,6 +151,8 @@ class AdminHotelDetailView(AdminHotelBaseView):
 
     @swagger_auto_schema(responses={200: PropertySerializer()})
     def get(self, request, property_id):
+        if not isinstance(property_id, int):
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         prop = get_property(property_id)
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -154,6 +160,8 @@ class AdminHotelDetailView(AdminHotelBaseView):
 
     @swagger_auto_schema(request_body=PropertySerializer, responses={200: PropertySerializer()})
     def patch(self, request, property_id):
+        if not isinstance(property_id, int):
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = PropertySerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -189,6 +197,15 @@ class AdminHotelRoomInventoryView(AdminHotelBaseView):
         room_type_name = request.query_params.get("room_type_name")
         rooms = list_rooms(property_id, room_type_name=room_type_name if room_type_name else None)
         return Response(RoomSerializer(rooms, many=True).data)
+
+
+class AdminHotelRoomTypeView(AdminHotelBaseView):
+    """Room type listing for a hotel"""
+
+    @swagger_auto_schema(responses={200: RoomTypeSerializer(many=True)})
+    def get(self, request, property_id):
+        room_types = list_room_types(property_id)
+        return Response(RoomTypeSerializer(room_types, many=True).data)
 
 
 class AdminHotelCalendarView(AdminHotelBaseView):
