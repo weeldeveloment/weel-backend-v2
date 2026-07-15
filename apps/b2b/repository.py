@@ -1023,14 +1023,16 @@ def get_top_hotels_by_booking_count(company_id: int, limit: int = 3) -> list[dic
     return fetch_all(
         f"""
         SELECT
-            tenant_schema,
-            hotel_property_id,
-            MAX(hotel_name) AS hotel_name,
-            COUNT(*) AS booking_count
-        FROM {B2B_HOTEL_BOOKING_REQUEST_TABLE}
-        WHERE company_id = %s
-        GROUP BY tenant_schema, hotel_property_id
-        ORDER BY booking_count DESC, MAX(hotel_name) ASC
+            br.tenant_schema,
+            br.hotel_property_id,
+            MAX(br.hotel_name) AS hotel_name,
+            COUNT(DISTINCT br.id) AS booking_count,
+            COALESCE(SUM(room.total_price), 0) AS total_spend
+        FROM {B2B_HOTEL_BOOKING_REQUEST_TABLE} br
+        LEFT JOIN {B2B_HOTEL_BOOKING_ROOM_TABLE} room ON room.booking_request_id = br.id
+        WHERE br.company_id = %s
+        GROUP BY br.tenant_schema, br.hotel_property_id
+        ORDER BY booking_count DESC, MAX(br.hotel_name) ASC
         LIMIT %s
         """,
         [company_id, limit],

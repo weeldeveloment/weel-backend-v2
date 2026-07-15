@@ -376,6 +376,7 @@ class TopHotelByBookingsSerializer(serializers.Serializer):
     hotel_property_id = serializers.IntegerField(read_only=True)
     hotel_name = serializers.CharField(read_only=True, allow_null=True)
     booking_count = serializers.IntegerField(read_only=True)
+    total_spend = serializers.DecimalField(read_only=True, max_digits=14, decimal_places=2)
 
 
 class DepartmentMonthlySpendingSerializer(serializers.Serializer):
