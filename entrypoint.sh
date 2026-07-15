@@ -3,6 +3,8 @@ set -e
 
 WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
 
+python manage.py create_b2b_tables
+
 # Run webhook setup in background so daphne starts immediately
 # (health checks must pass before webhook setup finishes)
 (
