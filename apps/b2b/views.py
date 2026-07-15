@@ -1333,8 +1333,10 @@ class TopHotelsByBookingsView(APIView):
         operation_summary="Kompaniya eng ko'p bron qilgan hotellar (top N)",
         operation_description=(
             "Shu kompaniya tomonidan eng ko'p bron qilingan mehmonxonalarni, "
-            "`booking_count` bo'yicha kamayish tartibida qaytaradi. Default "
-            "`limit=3`, maksimum 100."
+            "`booking_count` bo'yicha kamayish tartibida qaytaradi. Har bir "
+            "hotel uchun `total_spend` — shu hotelga qilingan barcha "
+            "bronlarning umumiy narxi ham qaytariladi. Default `limit=3`, "
+            "maksimum 100."
         ),
         manual_parameters=[
             openapi.Parameter(
