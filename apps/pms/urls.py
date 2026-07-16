@@ -26,6 +26,7 @@ from .views import (
     ReviewComplainView,
     ReviewListCreateView,
     ReviewRespondView,
+    RoomImageCreateView,
     RoomListCreateView,
     RoomMassUpdateView,
     RoomRetrieveUpdateDestroyView,
@@ -44,6 +45,7 @@ urlpatterns = [
     path("properties/<int:property_id>/rooms/", RoomListCreateView.as_view(), name="pms-room-list-create"),
     path("properties/<int:property_id>/rooms/mass-update/", RoomMassUpdateView.as_view(), name="pms-room-mass-update"),
     path("properties/<int:property_id>/rooms/<int:room_id>/", RoomRetrieveUpdateDestroyView.as_view(), name="pms-room-detail"),
+    path("properties/<int:property_id>/rooms/<int:room_id>/images/", RoomImageCreateView.as_view(), name="pms-room-image-create"),
 
     # Room Types
     path("properties/<int:property_id>/room-types/", RoomTypeListCreateView.as_view(), name="pms-room-type-list-create"),

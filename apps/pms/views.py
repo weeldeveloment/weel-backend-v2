@@ -250,6 +250,33 @@ class PropertyImageDeleteView(PMSBaseView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class RoomImageCreateView(PMSBaseView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    @swagger_auto_schema(
+        responses={201: openapi.Response("Image uploaded", schema=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={"image_url": openapi.Schema(type=openapi.TYPE_STRING)},
+        ))},
+        manual_parameters=[openapi.Parameter("image", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True)],
+    )
+    def post(self, request, property_id, room_id):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+        room = get_room(room_id, property_id)
+        if not room:
+            return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        image_file = request.FILES.get("image")
+        if not image_file:
+            return Response({"detail": "No image file provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        path = default_storage.save(f"pms/properties/{property_id}/rooms/{room_id}/{image_file.name}", image_file)
+        image_url = default_storage.url(path)
+        return Response({"image_url": image_url}, status=status.HTTP_201_CREATED)
+
+
 class RoomListCreateView(PMSBaseView):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
