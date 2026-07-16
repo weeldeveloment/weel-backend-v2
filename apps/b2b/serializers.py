@@ -109,9 +109,6 @@ class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
     def validate_passport_upload_back(self, file):
         return self._validate_image_file(file)
 
-    def validate_photo(self, file):
-        return self._validate_image_file(file)
-
 
 class BusinessTripSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
