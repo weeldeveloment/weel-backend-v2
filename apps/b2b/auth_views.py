@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
@@ -14,6 +16,8 @@ from apps.b2b.tokens import create_b2b_tokens
 from users.models.logs import SmsPurpose
 from users.services import OTPRedisService
 from users.tasks import send_otp_sms_eskiz
+
+logger = logging.getLogger(__name__)
 
 
 class B2BLoginSendOTPSerializer(serializers.Serializer):
@@ -112,7 +116,10 @@ class B2BLoginSendOTPView(APIView):
         otp_code = OTPRedisService.create_otp(phone, SmsPurpose.B2B_LOGIN)
         OTPRedisService.mark_resend(phone, SmsPurpose.B2B_LOGIN)
 
-        send_otp_sms_eskiz.delay(phone, SmsPurpose.B2B_LOGIN, otp_code)
+        try:
+            send_otp_sms_eskiz.delay(phone, SmsPurpose.B2B_LOGIN, otp_code)
+        except Exception:
+            logger.warning("Failed to queue SMS task (Redis/Celery unavailable), OTP: %s", otp_code)
 
         return Response(
             {
