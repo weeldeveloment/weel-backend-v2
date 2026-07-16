@@ -8,12 +8,24 @@ WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
 
 python manage.py create_b2b_tables
 
-# Run webhook setup in background so daphne starts immediately
-# (health checks must pass before webhook setup finishes)
+# Run webhook setup in background so the web server starts immediately
 (
   echo "Setting up hotel bot webhook: $WEBHOOK_BASE"
   python manage.py setup_hotel_bot_webhook "$WEBHOOK_BASE" 2>/dev/null || echo "Warning: hotel bot webhook setup failed"
   echo "Hotel bot webhook setup complete"
 ) &
+
+# Start Celery worker in background for async task processing (SMS, notifications, etc.)
+celery -A core worker \
+  --loglevel="${CELERY_LOG_LEVEL:-info}" \
+  --concurrency="${CELERY_CONCURRENCY:-2}" \
+  --max-tasks-per-child="${CELERY_MAX_TASKS_PER_CHILD:-1000}" \
+  &
+CELERY_PID=$!
+
+stop_all() {
+  kill "$CELERY_PID" 2>/dev/null || true
+}
+trap stop_all TERM INT
 
 exec uvicorn core.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws websockets

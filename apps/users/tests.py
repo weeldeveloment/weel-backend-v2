@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from django.urls import resolve
 from django.utils import timezone
 
@@ -18,6 +19,7 @@ from users.serializers import (
     ClientOTPLoginVerifySerializer,
     ClientOTPRegistrationVerifySerializer,
 )
+from users.services import EskizService
 from users.tasks import send_otp_sms_eskiz, send_partner_telegram_msg
 from users.views import (
     ClientSendOTPLoginView,
@@ -300,3 +302,157 @@ class UsersUrlsTests(SimpleTestCase):
     def test_token_refresh_url_resolves_to_correct_view(self):
         match = resolve("/api/user/refresh/")
         self.assertEqual(match.func.view_class.__name__, "UserTokenRefreshView")
+
+
+class EskizServiceTests(SimpleTestCase):
+    def _make_response(self, status_code, json_data=None, ok=True):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.ok = ok
+        if json_data is not None:
+            resp.json.return_value = json_data
+        else:
+            resp.json.side_effect = ValueError("no json")
+        return resp
+
+    @override_settings(
+        ESKIZ_EMAIL="test@weel.uz",
+        ESKIZ_PASSWORD="secret",
+        ESKIZ_LOGIN_URL="https://notify.eskiz.uz/api/auth/login",
+        ESKIZ_SMS_SEND_URL="https://notify.eskiz.uz/api/message/sms/send",
+    )
+    @patch("users.services.cache")
+    @patch("users.services.requests.post")
+    def test_send_sms_success_on_first_try(self, mock_post, mock_cache):
+        mock_cache.get.return_value = "cached-token"
+        mock_post.side_effect = [
+            self._make_response(200, {"id": "msg-123", "status": "success"}),
+        ]
+
+        service = EskizService()
+        result = service.send_sms("+998901234567", "1234")
+
+        self.assertEqual(result["status_code"], 200)
+        self.assertEqual(result["provider_message_id"], "msg-123")
+        mock_post.assert_called_once()
+
+    @override_settings(
+        ESKIZ_EMAIL="test@weel.uz",
+        ESKIZ_PASSWORD="secret",
+        ESKIZ_LOGIN_URL="https://notify.eskiz.uz/api/auth/login",
+        ESKIZ_SMS_SEND_URL="https://notify.eskiz.uz/api/message/sms/send",
+    )
+    @patch("users.services.cache")
+    @patch("users.services.requests.post")
+    def test_send_sms_retries_on_401_and_succeeds(self, mock_post, mock_cache):
+        mock_cache.get.return_value = "stale-token"
+        mock_post.side_effect = [
+            self._make_response(401, {"error": "unauthorized"}, ok=False),
+            self._make_response(200, {"id": "msg-456", "status": "waiting"}),
+        ]
+
+        service = EskizService()
+        result = service.send_sms("+998901234567", "5678")
+
+        self.assertEqual(result["provider_message_id"], "msg-456")
+        self.assertEqual(mock_post.call_count, 2)
+        mock_cache.delete.assert_called_once_with(EskizService.ESKIZ_TOKEN_KEY)
+
+    @override_settings(
+        ESKIZ_EMAIL="test@weel.uz",
+        ESKIZ_PASSWORD="secret",
+        ESKIZ_LOGIN_URL="https://notify.eskiz.uz/api/auth/login",
+        ESKIZ_SMS_SEND_URL="https://notify.eskiz.uz/api/message/sms/send",
+    )
+    @patch("users.services.cache")
+    @patch("users.services.requests.post")
+    def test_send_sms_double_401_raises_value_error(self, mock_post, mock_cache):
+        mock_cache.get.return_value = "stale-token"
+        mock_post.side_effect = [
+            self._make_response(401, {"error": "unauthorized"}, ok=False),
+            self._make_response(401, {"error": "still bad"}, ok=False),
+        ]
+
+        service = EskizService()
+        with self.assertRaises(ValueError):
+            service.send_sms("+998901234567", "9999")
+
+    @override_settings(
+        ESKIZ_EMAIL="test@weel.uz",
+        ESKIZ_PASSWORD="secret",
+        ESKIZ_LOGIN_URL="https://notify.eskiz.uz/api/auth/login",
+        ESKIZ_SMS_SEND_URL="https://notify.eskiz.uz/api/message/sms/send",
+        ESKIZ_SENDER="WEEL",
+    )
+    @patch("users.services.cache")
+    @patch("users.services.requests.post")
+    def test_send_sms_includes_sender_in_payload(self, mock_post, mock_cache):
+        mock_cache.get.return_value = "cached-token"
+        mock_post.side_effect = [
+            self._make_response(200, {"id": "msg-789"}),
+        ]
+
+        service = EskizService()
+        service.send_sms("+998901234567", "0000")
+
+        call_kwargs = mock_post.call_args
+        sent_data = call_kwargs[1]["data"] if "data" in call_kwargs[1] else call_kwargs[0][1]
+        self.assertEqual(sent_data["from"], "WEEL")
+
+    @override_settings(
+        ESKIZ_EMAIL="test@weel.uz",
+        ESKIZ_PASSWORD="secret",
+        ESKIZ_LOGIN_URL="https://notify.eskiz.uz/api/auth/login",
+        ESKIZ_SMS_SEND_URL="https://notify.eskiz.uz/api/message/sms/send",
+    )
+    @patch("users.services.cache")
+    @patch("users.services.requests.post")
+    def test_send_sms_adds_unicode_flag_for_non_ascii(self, mock_post, mock_cache):
+        mock_cache.get.return_value = "cached-token"
+        mock_post.side_effect = [
+            self._make_response(200, {"id": "msg-abc"}),
+        ]
+
+        service = EskizService()
+        service.send_sms("+998901234567", "1234")
+
+        call_kwargs = mock_post.call_args
+        sent_data = call_kwargs[1]["data"] if "data" in call_kwargs[1] else call_kwargs[0][1]
+        self.assertEqual(sent_data["unicode"], "1")
+
+    @override_settings(
+        ESKIZ_EMAIL="test@weel.uz",
+        ESKIZ_PASSWORD="secret",
+        ESKIZ_LOGIN_URL="https://notify.eskiz.uz/api/auth/login",
+        ESKIZ_SMS_SEND_URL="https://notify.eskiz.uz/api/message/sms/send",
+    )
+    @patch("users.services.cache")
+    @patch("users.services.requests.post")
+    def test_send_text_sms_reuses_send_sms_with_empty_code(self, mock_post, mock_cache):
+        mock_cache.get.return_value = "cached-token"
+        mock_post.side_effect = [
+            self._make_response(200, {"id": "msg-def"}),
+        ]
+
+        service = EskizService()
+        result = service.send_text_sms("+998901234567", "Hello plain text")
+
+        self.assertEqual(result["provider_message_id"], "msg-def")
+        call_kwargs = mock_post.call_args
+        sent_data = call_kwargs[1]["data"] if "data" in call_kwargs[1] else call_kwargs[0][1]
+        self.assertEqual(sent_data["message"], "Hello plain text")
+
+    def test_provider_accepts_message_with_id(self):
+        self.assertTrue(EskizService._provider_accepts_message({"id": "abc"}))
+
+    def test_provider_accepts_message_with_success_status(self):
+        self.assertTrue(EskizService._provider_accepts_message({"status": "success"}))
+
+    def test_provider_accepts_message_with_data_id(self):
+        self.assertTrue(EskizService._provider_accepts_message({"data": {"id": "xyz"}}))
+
+    def test_provider_rejects_empty_body(self):
+        self.assertFalse(EskizService._provider_accepts_message({}))
+
+    def test_provider_rejects_none(self):
+        self.assertFalse(EskizService._provider_accepts_message(None))
