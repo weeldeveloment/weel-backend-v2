@@ -216,8 +216,15 @@ class EskizService:
                 response = requests.post(
                     self.send_sms_url, data=payload, headers=headers, timeout=10
                 )
-
                 elapsed_ms = int((time.monotonic() - retry_started_at) * 1000)
+
+                if response.status_code == 401:
+                    logger.error(
+                        "Eskiz SMS retry also returned 401. Token refresh failed. phone=%s body=%s",
+                        masked_phone,
+                        self._response_excerpt(response),
+                    )
+                    raise ValueError("Eskiz token refresh failed — retry returned 401")
 
             if not response.ok:
                 logger.error(

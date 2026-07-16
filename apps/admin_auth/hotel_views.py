@@ -13,7 +13,9 @@ from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from shared.raw.db import fetch_all
+from shared.raw.db import fetch_all, push_schema_context, pop_schema_context
+
+from rest_framework.pagination import PageNumberPagination
 
 from .authentication import AdminJWTAuthentication
 from .permissions import IsAdminUser
@@ -32,8 +34,8 @@ from apps.pms.repository import (
     get_room_availability,
     list_bookings,
     list_properties,
-    list_rates,
     list_reviews,
+    list_room_types,
     list_rooms,
     move_booking,
     respond_to_review,
@@ -46,28 +48,31 @@ from apps.pms.serializers import (
     BookingSerializer,
     MoveBookingSerializer,
     PropertySerializer,
-    RateSerializer,
     ReviewComplainSerializer,
     ReviewRespondSerializer,
     ReviewSerializer,
     RoomSerializer,
+    RoomTypeSerializer,
 )
 from apps.b2b.repository import list_b2b_users, get_company
 from apps.b2b.serializers import B2BCompanySerializer, B2BUserSerializer
-from property.hotel_repository import decode_hotel_guid, encode_hotel_guid
+from property.hotel_repository import resolve_hotel_guid, _fetch_hotel_rows_for_schema
 from apps.platform.raw_repository import list_organizations
+from apps.property.hotel_serializers import HotelCardSerializer
+from apps.property.views import _favorite_guids_from_request
 
 logger = logging.getLogger(__name__)
 
 
 def _set_tenant_from_guid(hotel_guid: str) -> int | None:
-    decoded = decode_hotel_guid(hotel_guid)
-    if not decoded:
+    resolved = resolve_hotel_guid(hotel_guid, include_inactive=True)
+    if not resolved:
         return None
-    schema_name, numeric_id = decoded
+    schema_name, hotel_id = resolved
+    push_schema_context(schema_name)
     with connection.cursor() as cursor:
         cursor.execute("SET search_path TO %s, public", [schema_name])
-    return numeric_id
+    return hotel_id
 
 
 class AdminBaseView(APIView):
@@ -88,9 +93,9 @@ class AdminHotelBaseView(AdminBaseView):
         try:
             return super().dispatch(request, *args, **kwargs)
         finally:
-            if request.method in ("GET", "HEAD", "OPTIONS"):
-                with connection.cursor() as cursor:
-                    cursor.execute("SET search_path TO public")
+            pop_schema_context()
+            with connection.cursor() as cursor:
+                cursor.execute("SET search_path TO public")
 
 
 class ClassifyPropertySerializer(serializers.Serializer):
@@ -105,7 +110,7 @@ class ClassifyPropertySerializer(serializers.Serializer):
 class AdminHotelListView(AdminHotelBaseView):
     """List all hotels across all organizations — admin view"""
 
-    @swagger_auto_schema(responses={200: PropertySerializer(many=True)})
+    @swagger_auto_schema(responses={200: HotelCardSerializer(many=True)})
     def get(self, request):
         orgs = list_organizations()
         all_properties: list[dict[str, Any]] = []
@@ -113,19 +118,41 @@ class AdminHotelListView(AdminHotelBaseView):
             schema = org.get("schema_name")
             if not schema:
                 continue
-            rows = fetch_all(
-                f"SELECT * FROM {schema}.pms_property WHERE is_active = TRUE ORDER BY name ASC"
-            )
-            for row in rows:
-                row["guid"] = encode_hotel_guid(schema, row["id"])
+            try:
+                rows = _fetch_hotel_rows_for_schema(
+                    schema,
+                    include_inactive=True,
+                    include_unverified=True,
+                )
+                for row in rows:
+                    row["organization_id"] = org.get("id")
+                    row["organization_name"] = org.get("name")
+                    row["organization_slug"] = org.get("slug")
+                    row["tenant_schema"] = schema
+            except Exception:
+                continue
             all_properties.extend(rows)
-        return Response(PropertySerializer(all_properties, many=True).data)
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        paginator = PageNumberPagination()
+        paginator.page_size = 20
+        paginator.page_size_query_param = "limit"
+        paginator.max_page_size = 100
+        paginated_data = paginator.paginate_queryset(all_properties, request)
+        if paginated_data is not None:
+            serializer = HotelCardSerializer(paginated_data, many=True, context=ctx)
+            return paginator.get_paginated_response(serializer.data)
+        return Response(HotelCardSerializer(all_properties, many=True, context=ctx).data)
 
 
 class AdminHotelDetailView(AdminHotelBaseView):
 
     @swagger_auto_schema(responses={200: PropertySerializer()})
     def get(self, request, property_id):
+        if not isinstance(property_id, int):
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         prop = get_property(property_id)
         if not prop:
             return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -133,6 +160,8 @@ class AdminHotelDetailView(AdminHotelBaseView):
 
     @swagger_auto_schema(request_body=PropertySerializer, responses={200: PropertySerializer()})
     def patch(self, request, property_id):
+        if not isinstance(property_id, int):
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = PropertySerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -168,6 +197,15 @@ class AdminHotelRoomInventoryView(AdminHotelBaseView):
         room_type_name = request.query_params.get("room_type_name")
         rooms = list_rooms(property_id, room_type_name=room_type_name if room_type_name else None)
         return Response(RoomSerializer(rooms, many=True).data)
+
+
+class AdminHotelRoomTypeView(AdminHotelBaseView):
+    """Room type listing for a hotel"""
+
+    @swagger_auto_schema(responses={200: RoomTypeSerializer(many=True)})
+    def get(self, request, property_id):
+        room_types = list_room_types(property_id)
+        return Response(RoomTypeSerializer(room_types, many=True).data)
 
 
 class AdminHotelCalendarView(AdminHotelBaseView):
@@ -342,16 +380,6 @@ class AdminHotelBookingCheckOutView(AdminHotelBaseView):
         if not booking:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(BookingSerializer(booking).data)
-
-
-class AdminHotelRatesView(AdminHotelBaseView):
-    """List rates for a property"""
-
-    @swagger_auto_schema(responses={200: RateSerializer(many=True)})
-    def get(self, request, property_id):
-        room_id = request.query_params.get("room_id")
-        rates = list_rates(property_id, room_id=int(room_id) if room_id else None)
-        return Response(RateSerializer(rates, many=True).data)
 
 
 class AdminHotelReviewsView(AdminHotelBaseView):

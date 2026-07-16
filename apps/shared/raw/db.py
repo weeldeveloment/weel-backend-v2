@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 import json
 import re
+import threading
 from collections.abc import Iterable
 from typing import Any
 
@@ -15,6 +16,29 @@ from shared.raw.compat import is_postgresql, return_star
 # instead of dicts/lists. Decode them ourselves using the OIDs psycopg2
 # reports for the builtin json (114) and jsonb (3802) types.
 _JSON_TYPE_CODES = {114, 3802}
+
+_schema_ctx = threading.local()
+
+
+def push_schema_context(schema_name: str) -> None:
+    stack = getattr(_schema_ctx, 'stack', None)
+    if stack is None:
+        stack = []
+        _schema_ctx.stack = stack
+    stack.append(schema_name)
+
+
+def pop_schema_context() -> None:
+    stack = getattr(_schema_ctx, 'stack', None)
+    if stack:
+        stack.pop()
+
+
+def _get_schema_context() -> str | None:
+    stack = getattr(_schema_ctx, 'stack', None)
+    if stack:
+        return stack[-1]
+    return None
 
 
 def _row_to_dict(cursor, row: tuple[Any, ...]) -> dict[str, Any]:
@@ -81,8 +105,15 @@ def _compile_sql(
     return "".join(chunks), compiled_params
 
 
+def _apply_schema_context(cursor) -> None:
+    schema = _get_schema_context()
+    if schema:
+        cursor.execute("SET search_path TO %s, public", [schema])
+
+
 def fetch_one(sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> dict[str, Any] | None:
     with connection.cursor() as cursor:
+        _apply_schema_context(cursor)
         compiled_sql, compiled_params = _compile_sql(sql, params)
         cursor.execute(compiled_sql, compiled_params)
         row = cursor.fetchone()
@@ -93,6 +124,7 @@ def fetch_one(sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> di
 
 def fetch_all(sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
     with connection.cursor() as cursor:
+        _apply_schema_context(cursor)
         compiled_sql, compiled_params = _compile_sql(sql, params)
         cursor.execute(compiled_sql, compiled_params)
         rows = cursor.fetchall()
@@ -101,6 +133,7 @@ def fetch_all(sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> li
 
 def execute(sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> int:
     with connection.cursor() as cursor:
+        _apply_schema_context(cursor)
         compiled_sql, compiled_params = _compile_sql(sql, params)
         cursor.execute(compiled_sql, compiled_params)
         return cursor.rowcount

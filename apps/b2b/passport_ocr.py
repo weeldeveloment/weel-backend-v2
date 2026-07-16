@@ -1,10 +1,10 @@
 """O'zbekiston biometrik shaxs guvohnomasi (ID karta) rasmlaridan ma'lumot olish.
 
-Old tomon rasm faqat shablon tekshiruvi uchun ishlatiladi (bu haqiqatan ham
-"SHAXS GUVOHNOMASI" ekanini OCR matnidan tasdiqlaydi) — ism-familiya, tug'ilgan
-sana va passport seriya/raqami esa orqa tomondagi MRZ (machine-readable zone)
-qatoridan olinadi, chunki u qat'iy pozitsion format va checksum'ga ega bo'lib,
-erkin OCR matnidan ancha ishonchli.
+Old tomon rasmidan (bosma matn OCR orqali) ism-familiya, otasining ismi,
+tug'ilgan sana va karta seriya/raqami olinadi — bu maydonlar aynan shu tomonda
+bosilgan bo'ladi. Orqa tomondagi MRZ (machine-readable zone) esa faqat PNFL
+manbai sifatida ishlatiladi, chunki PNFL boshqa hech qayerda ochiq matn
+sifatida bosilmagan, faqat MRZ'ning 1-qatoridagi optional maydonida kodlangan.
 
 MRZ format (ICAO 9303, TD1, 3 qator x 30 belgi):
   1-qator: hujjat kodi(2) + davlat(3) + hujjat raqami(9) + check(1) + optional(15)
@@ -29,19 +29,57 @@ _MRZ_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
 _MRZ_LINE_RE = re.compile(r"^[A-Z0-9<]{28,30}$")
 _MRZ_WEIGHTS = (7, 3, 1)
 
-_FRONT_TEMPLATE_MARKERS = ("GUVOHNOMASI", "IDENTITY CARD")
+_FRONT_STRONG_MARKERS = ("GUVOHNOMASI",)
+_FRONT_WEAK_MARKERS = ("IDENTITY CARD",)
 _FRONT_COUNTRY_MARKERS = ("UZBEKISTON", "OZBEKISTON")
 
+# Rasm kamera bilan olinganda karta ko'pincha tekis emas, hatto 90/180 gradusga
+# burilgan holda tushishi mumkin — EXIF faqat qurilma sensorining aylanishini
+# to'g'rilaydi, kartaning qo'lda qanday tutilganini emas. Shu sababli barcha
+# asosiy burilishlarni sinab ko'ramiz.
+_ROTATIONS = (0, 90, 180, 270)
+_PSM_MODES = (6, 11, 4)
+# None = faqat autocontrast. Kartadagi guilloche/gologramma fon naqshlari OCR
+# matnini shovqinlashtiradi — qattiq threshold (binarizatsiya) fonni bosib,
+# qalin qora matnni ajratib beradi, lekin yorug'lik sharoitiga qarab optimal
+# qiymat farq qilishi mumkin, shuning uchun bir nechtasi sinab ko'riladi.
+_THRESHOLDS = (None, 100, 120, 140)
 
-def _ocr_text(image_file, *, whitelist: str | None = None) -> str:
+_FRONT_FIELD_LABELS = {
+    "surname": ("SURNAME", "FAMILIYASI"),
+    "given_names": ("GIVEN NAME",),
+    "patronymic": ("PATR",),  # "PATRONYMIC" OCR'da ko'pincha "PATRANYMIC" bo'lib o'qiladi
+    "date_of_birth": ("DATE OF BIRTH", "TUGILGAN SANASI"),
+    "card_number": ("CARD NUMBER", "KARTA RAQAMI"),
+}
+_ALL_FRONT_LABEL_KEYWORDS = tuple(kw for labels in _FRONT_FIELD_LABELS.values() for kw in labels)
+
+
+def _preprocess_for_ocr(image: Image.Image, *, threshold: int | None = None) -> Image.Image:
+    """Kichik/kontrastsiz/fon-naqshli telefon kamera suratlarida OCR aniqligini oshiradi."""
+    image = image.convert("L")
+    if threshold is not None:
+        image = image.point(lambda x: 255 if x > threshold else 0)
+    else:
+        image = ImageOps.autocontrast(image)
+    if image.width < 1800:
+        scale = 1800 / image.width
+        image = image.resize((int(image.width * scale), int(image.height * scale)), Image.LANCZOS)
+    return image
+
+
+def _load_raw_image(image_file) -> Image.Image:
     image_file.seek(0)
     image = ImageOps.exif_transpose(Image.open(image_file))
-    config = "--psm 6"
+    image_file.seek(0)
+    return image
+
+
+def _ocr_image(image: Image.Image, *, whitelist: str | None = None, psm: int = 6) -> str:
+    config = f"--psm {psm}"
     if whitelist:
         config += f" -c tessedit_char_whitelist={whitelist}"
-    text = pytesseract.image_to_string(image, config=config)
-    image_file.seek(0)
-    return text
+    return pytesseract.image_to_string(image, config=config)
 
 
 def _char_value(c: str) -> int:
@@ -54,13 +92,6 @@ def _char_value(c: str) -> int:
 
 def _check_digit(field: str) -> int:
     return sum(_char_value(c) * _MRZ_WEIGHTS[i % 3] for i, c in enumerate(field)) % 10
-
-
-def _mrz_birth_date(yymmdd: str) -> date:
-    yy, mm, dd = int(yymmdd[0:2]), int(yymmdd[2:4]), int(yymmdd[4:6])
-    current_yy = date.today().year % 100
-    century = 1900 if yy > current_yy else 2000
-    return date(century + yy, mm, dd)
 
 
 def _find_mrz_lines(text: str) -> list[str]:
@@ -108,26 +139,34 @@ def extract_back_data(back_file) -> dict:
     pinfl = line1[15:30].replace("<", "")
     if not re.fullmatch(r"\d{14}", pinfl):
         raise PassportOCRError("PNFL (14 xonali raqam) orqa tomondan aniqlanmadi.")
+    return pinfl
 
-    names_field = line3.rstrip("<")
-    if "<<" not in names_field:
-        raise PassportOCRError("Ism-familiyani orqa tomondan aniqlab bo'lmadi.")
-    surname_part, given_part = names_field.split("<<", 1)
-    surname = surname_part.replace("<", " ").strip()
-    given_names = given_part.replace("<", " ").strip()
-    if not surname or not given_names:
-        raise PassportOCRError("Ism-familiyani orqa tomondan aniqlab bo'lmadi.")
 
-    return {
-        "full_name": f"{surname} {given_names}".strip(),
-        "date_of_birth": date_of_birth,
-        "passport_series": document_number[:2],
-        "passport_number": document_number[2:],
-        "pinfl": pinfl,
-    }
+def extract_back_pinfl(back_file) -> str:
+    """Orqa tomondagi MRZ'dan faqat PNFL'ni oladi (bu maydon boshqa joyda ochiq bosilmagan).
+
+    Old tomondagi kabi, kamera burilishi va fon naqshlariga chidamli bo'lish
+    uchun bir nechta burilish/threshold/segmentatsiya kombinatsiyasi sinaladi.
+    """
+    raw_image = _load_raw_image(back_file)
+
+    last_error: PassportOCRError | None = None
+    for degrees in _rotations_to_try(raw_image):
+        rotated = raw_image.rotate(-degrees, expand=True) if degrees else raw_image
+        for threshold in _THRESHOLDS:
+            image = _preprocess_for_ocr(rotated, threshold=threshold)
+            for psm in _PSM_MODES:
+                text = _ocr_image(image, whitelist=_MRZ_CHARSET, psm=psm)
+                try:
+                    return _parse_mrz_pinfl(text)
+                except PassportOCRError as exc:
+                    last_error = exc
+
+    raise last_error
 
 
 def extract_passport_data(front_file, back_file) -> dict:
-    """Old tomonni shablon bo'yicha tekshiradi, so'ng orqa tomondagi MRZ'dan xodim ma'lumotlarini oladi."""
-    verify_front_template(front_file)
-    return extract_back_data(back_file)
+    """Old tomondan ism-familiya/tug'ilgan sana/karta raqamini, orqa tomondan PNFL'ni oladi."""
+    passport_data = extract_front_data(front_file)
+    passport_data["passport_pinfl"] = extract_back_pinfl(back_file)
+    return passport_data

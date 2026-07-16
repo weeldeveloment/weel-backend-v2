@@ -460,8 +460,8 @@ class ClientBookingListCreateView(ListCreateAPIView):
     def get_property(self, property_id):
         property_row = get_verified_property_for_booking(str(property_id))
         if not property_row:
-            raise NotFound(
-                _("Property not found or is not a verified property"))
+            raise ValidationError(
+                {"property_id": _("Property not found or is not a verified property")})
         return property_row
 
     def create(self, request, *args, **kwargs):
@@ -511,6 +511,9 @@ class ClientBookingListCreateView(ListCreateAPIView):
         operation_summary="List client bookings",
         operation_description="Return a list of booking related to the authenticated client",
         manual_parameters=[status_query_param],
+        responses={
+            200: openapi.Response("List of bookings", RawClientBookingListSerializer(many=True)),
+        },
     )
     def get(self, request, *args, **kwargs):
         statuses = _parse_statuses_from_query(request.query_params.get("status"))
@@ -527,6 +530,39 @@ class ClientBookingListCreateView(ListCreateAPIView):
         operation_summary="Create booking and payment hold",
         operation_description="Creates a **PENDING booking** and places a **payment hold (UZS)**",
         request_body=RawClientBookingCreateSerializer,
+        responses={
+            201: openapi.Response(
+                "Booking created successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "booking_id": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_UUID),
+                        "partner": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                "username": openapi.Schema(type=openapi.TYPE_STRING),
+                                "first_name": openapi.Schema(type=openapi.TYPE_STRING),
+                                "last_name": openapi.Schema(type=openapi.TYPE_STRING),
+                                "phone_number": openapi.Schema(type=openapi.TYPE_STRING),
+                            },
+                        ),
+                        "check_in": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_DATE),
+                        "check_out": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_DATE),
+                        "property_location": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                "latitude": openapi.Schema(type=openapi.TYPE_NUMBER),
+                                "longitude": openapi.Schema(type=openapi.TYPE_NUMBER),
+                            },
+                        ),
+                        "status": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            400: openapi.Response(
+                "Invalid property_id (e.g. property not found / not verified)",
+            ),
+        },
     )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
@@ -983,12 +1019,12 @@ class AdminBookingListView(ListAPIView):
 # ---------------------------------------------------------------------------
 
 
-def _decode_hotel_guid_or_404(hotel_guid: str) -> tuple[str, int]:
-    from property.hotel_repository import decode_hotel_guid
-    decoded = decode_hotel_guid(str(hotel_guid))
-    if not decoded:
+def _resolve_hotel_guid_or_404(hotel_guid: str) -> tuple[str, int]:
+    from property.hotel_repository import resolve_hotel_guid
+    resolved = resolve_hotel_guid(str(hotel_guid))
+    if not resolved:
         raise NotFound(_("Hotel not found"))
-    return decoded
+    return resolved
 
 
 class HotelRoomListView(APIView):
@@ -1008,7 +1044,7 @@ class HotelRoomListView(APIView):
         responses={200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
     )
     def get(self, request, hotel_guid):
-        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+        schema_name, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
 
         check_in_str = request.query_params.get("check_in")
         check_out_str = request.query_params.get("check_out")
@@ -1025,7 +1061,14 @@ class HotelRoomListView(APIView):
             raise ValidationError({"detail": _("check_out must be after check_in.")})
 
         from apps.hotels.repository import get_available_rooms
-        rooms = get_available_rooms(hotel_id, check_in=ci, check_out=co, guests=guests)
+        from apps.property.hotel_repository import _run_in_schema
+
+        rooms = _run_in_schema(
+            schema_name,
+            lambda: get_available_rooms(
+                hotel_id, check_in=ci, check_out=co, guests=guests
+            ),
+        )
         return Response(rooms, status=status.HTTP_200_OK)
 
 
@@ -1054,7 +1097,7 @@ class HotelRoomPriceView(APIView):
         )},
     )
     def get(self, request, hotel_guid, room_id):
-        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+        schema_name, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
 
         check_in_str = request.query_params.get("check_in")
         check_out_str = request.query_params.get("check_out")
@@ -1067,7 +1110,12 @@ class HotelRoomPriceView(APIView):
             raise ValidationError({"detail": _("Invalid date format. Use YYYY-MM-DD.")})
 
         from apps.hotels.repository import calculate_stay_price
-        pricing = calculate_stay_price(room_id, check_in=ci, check_out=co)
+        from apps.property.hotel_repository import _run_in_schema
+
+        pricing = _run_in_schema(
+            schema_name,
+            lambda: calculate_stay_price(room_id, check_in=ci, check_out=co),
+        )
         if not pricing:
             raise NotFound(_("Room not found or invalid dates."))
         return Response({
@@ -1105,7 +1153,7 @@ class HotelCalendarView(APIView):
         )},
     )
     def get(self, request, hotel_guid):
-        _schema, hotel_id = _decode_hotel_guid_or_404(str(hotel_guid))
+        schema_name, hotel_id = _resolve_hotel_guid_or_404(str(hotel_guid))
 
         from_date_str = request.query_params.get("from_date")
         to_date_str = request.query_params.get("to_date")
@@ -1118,7 +1166,12 @@ class HotelCalendarView(APIView):
             raise ValidationError({"detail": _("Invalid date format. Use YYYY-MM-DD.")})
 
         from apps.hotels.repository import get_hotel_calendar
-        calendar = get_hotel_calendar(hotel_id, from_date=fd, to_date=td)
+        from apps.property.hotel_repository import _run_in_schema
+
+        calendar = _run_in_schema(
+            schema_name,
+            lambda: get_hotel_calendar(hotel_id, from_date=fd, to_date=td),
+        )
         return Response(calendar, status=status.HTTP_200_OK)
 
 
@@ -1161,7 +1214,7 @@ class ClientHotelBookingCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        _schema, hotel_id = _decode_hotel_guid_or_404(str(data["hotel_guid"]))
+        _schema, hotel_id = _resolve_hotel_guid_or_404(str(data["hotel_guid"]))
         room_id = data["room_id"]
         ci = data["check_in"]
         co = data["check_out"]
@@ -1173,25 +1226,44 @@ class ClientHotelBookingCreateView(APIView):
             create_hotel_booking_calendar_slots,
             get_room_with_details,
         )
+        from apps.property.hotel_repository import _run_in_schema
+        from shared.raw.db import fetch_one
 
-        room = get_room_with_details(room_id)
-        if not room:
-            raise ValidationError({"detail": _("Room not found or inactive.")})
-        if guests > (room.get("capacity") or 0):
-            raise ValidationError({"detail": _("Guest count exceeds room capacity.")})
+        def _create_booking():
+            room = get_room_with_details(room_id)
+            if not room:
+                raise ValidationError({"detail": _("Room not found or inactive.")})
+            if guests > (room.get("capacity") or 0):
+                raise ValidationError({"detail": _("Guest count exceeds room capacity.")})
 
-        booking = create_hotel_booking(
-            property_id=hotel_id,
-            room_id=room_id,
-            client_user_id=int(request.user.id),
-            check_in=ci,
-            check_out=co,
-            adults=guests,
-            children=0,
-            card_id=str(card_id) if card_id else None,
-        )
-        if not booking:
-            raise ValidationError({"detail": _("Booking could not be created. Room is not available for the selected dates.")})
+            booking = create_hotel_booking(
+                property_id=hotel_id,
+                room_id=room_id,
+                client_user_id=int(request.user.id),
+                check_in=ci,
+                check_out=co,
+                adults=guests,
+                children=0,
+                card_id=str(card_id) if card_id else None,
+            )
+            if not booking:
+                raise ValidationError({"detail": _("Booking could not be created. Room is not available for the selected dates.")})
+
+            partner = fetch_one(
+                "SELECT partner_user_id FROM pms_property WHERE id = %s",
+                [hotel_id],
+            )
+            booking["partner_user_id"] = partner["partner_user_id"] if partner else None
+
+            create_hotel_booking_calendar_slots(
+                booking_id=int(booking["id"]),
+                room_id=room_id,
+                check_in=ci,
+                check_out=co,
+            )
+            return booking
+
+        booking = _run_in_schema(_schema, _create_booking)
 
         hold_amount = booking["hold_amount"]
 
@@ -1212,20 +1284,13 @@ class ClientHotelBookingCreateView(APIView):
             create_hold_transaction(
                 booking_id=int(booking["id"]),
                 client_user_id=int(request.user.id),
-                partner_user_id=None,
+                partner_user_id=int(booking["partner_user_id"]) if booking.get("partner_user_id") else None,
                 amount=hold_result.get("totalAmount") or hold_amount,
                 transaction_id=hold_result.get("transactionId"),
                 hold_id=hold_result.get("holdId"),
                 card_id=hold_result.get("cardId") or str(card_id),
                 extra_id=hold_result.get("extraId"),
             )
-
-        create_hotel_booking_calendar_slots(
-            booking_id=int(booking["id"]),
-            room_id=room_id,
-            check_in=ci,
-            check_out=co,
-        )
 
         NotificationService.send_to_client(
             client=SimpleNamespace(id=int(request.user.id)),
@@ -1354,7 +1419,7 @@ class ClientHotelBookingCancelView(APIView):
         if not booking:
             raise NotFound({"detail": _("Hotel booking not found.")})
 
-        if booking["status"] not in ("pending", "confirmed"):
+        if booking["status"] not in ("new", "pending", "confirmed"):
             raise ValidationError({"detail": _("Only pending or confirmed bookings can be cancelled.")})
 
         tx = get_latest_transaction_history_for_booking(int(booking["id"]))

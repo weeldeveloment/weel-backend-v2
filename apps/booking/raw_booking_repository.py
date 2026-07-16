@@ -418,7 +418,7 @@ def list_pending_bookings_for_payment_reminders() -> list[dict[str, Any]]:
 
 def update_booking_payment_reminder_stage(booking_id: int, stage: str) -> int:
     return execute(
-        """
+        f"""
         UPDATE {get_table_name("booking")}
         SET payment_reminder_stage = %s,
             updated_at = %s
