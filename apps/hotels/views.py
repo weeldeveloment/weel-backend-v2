@@ -243,32 +243,31 @@ class HotelReviewsView(APIView):
 class HotelCalendarView(APIView):
     """GET /hotels/<guid>/calendar/
 
-    Har bir faol xona uchun kunlik bandlik holati — foydalanuvchi mehmonxona
-    sahifasida taqvim ko'rinishida band/bo'sh sanalarni ko'rishi uchun.
+    Daily occupancy status for every active room, so users can view booked
+    and free dates in a calendar layout on the hotel page.
     """
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        operation_summary="Mehmonxona bandlik taqvimi",
+        operation_summary="Hotel occupancy calendar",
         operation_description=(
-            "Tanlangan mehmonxona (``guid``) uchun ``from_date`` – "
-            "``to_date`` oralig'idagi kunlik xona bandlik holatini "
-            "qaytaradi.\n\n"
-            "Natija har bir xona × sana juftligi uchun bitta qatordan "
-            "iborat: ``room_id``, ``room_name``, ``date`` (YYYY-MM-DD), "
-            "va ``status`` (``booked`` yoki ``available``)."
+            "Return the daily occupancy status for each room in the selected "
+            "hotel (`guid`) over the `from_date` to `to_date` range.\n\n"
+            "The result contains one row per room × date pair: `room_id`, "
+            "`room_name`, `date` (YYYY-MM-DD), and `status` (`booked` or "
+            "`available`)."
         ),
         manual_parameters=[
             _GUID_PARAM,
             openapi.Parameter(
                 "from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                 format=openapi.FORMAT_DATE, required=True,
-                description="Taqvim oralig'i boshlanish sanasi (YYYY-MM-DD).",
+                description="Start date for the calendar range (YYYY-MM-DD).",
             ),
             openapi.Parameter(
                 "to_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                 format=openapi.FORMAT_DATE, required=True,
-                description="Taqvim oralig'i tugash sanasi (YYYY-MM-DD).",
+                description="End date for the calendar range (YYYY-MM-DD).",
             ),
             openapi.Parameter("room_types", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Comma-separated room type names."),
             openapi.Parameter("room_type_presets", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Comma-separated room type presets."),
@@ -276,8 +275,8 @@ class HotelCalendarView(APIView):
         ],
         responses={
             200: HotelCalendarSerializer(many=True),
-            400: openapi.Response(description="Noto'g'ri GUID yoki sana parametrlari."),
-            404: openapi.Response(description="Mehmonxona topilmadi."),
+            400: openapi.Response(description="Invalid GUID or date parameters."),
+            404: openapi.Response(description="Hotel not found."),
         },
     )
     def get(self, request, guid):
