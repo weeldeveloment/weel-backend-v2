@@ -810,9 +810,7 @@ class B2BEmployeeRetrieveUpdateView(APIView):
     @swagger_auto_schema(
         request_body=B2BEmployeeSerializer,
         operation_description=(
-            "`role`: `owner` hech qachon berilmaydi (400 xatolik). `performer` qilib "
-            "belgilansa, kompaniyadagi joriy performer avtomatik `employee` roliga "
-            "o'tkaziladi va shu xodim yangi performer bo'lib qoladi."
+            """The 'owner' role is never assigned (resulting in a 400 error). If a user is designated as the 'performer', the company's current performer is automatically reassigned to the 'employee' role, and the new user becomes the performer."""
         ),
         responses={200: B2BEmployeeSerializer()},
     )
