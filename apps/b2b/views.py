@@ -68,8 +68,8 @@ from apps.b2b.repository import (
     update_travel_policy,
     update_trip,
 )
-from apps.b2b.models import DepartmentBudgetStatus, EmployeeRole, HotelBookingRequestStatus
-from apps.b2b.permissions import IsB2BOwner, IsB2BPerformer
+from apps.b2b.models import DepartmentBudgetStatus, HotelBookingRequestStatus
+from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer, IsB2BPerformer
 from apps.b2b.tasks import _send_b2b_lead_telegram_notification
 from apps.property.hotel_repository import _run_in_schema, get_hotel_for_public, resolve_hotel_guid
 from apps.hotels.repository import (
@@ -83,6 +83,7 @@ from apps.hotels.repository import (
 from apps.hotels.serializers import (
     HotelCardSerializer,
     HotelSearchParamsSerializer,
+    HotelSearchPageSerializer,
     RoomAvailabilitySerializer,
     RoomSelectParamsSerializer,
 )
@@ -135,43 +136,30 @@ def _get_user_id(request) -> int | None:
 class B2BHotelSearchView(APIView):
     """GET /b2b/hotels/search/
 
-    Executer (performer) uchun mehmonxona qidiruv/filterlash — komandirovkaga
-    xodim jo'natish uchun mos hotel tanlashda ishlatiladi. Faqat B2B
-    "executer" (performer) rolidagi foydalanuvchilar uchun ochiq — owner bu
-    endpointdan foydalana olmaydi.
+    Hotel search and filtering for B2B owners and performers. Used to choose
+    a suitable hotel for sending employees on a business trip.
     """
-    permission_classes = [IsAuthenticated, IsB2BPerformer]
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
 
     @swagger_auto_schema(
-        operation_summary="Mehmonxonalarni qidirish/filterlash (executer uchun)",
+        operation_summary="Search and filter hotels (owner or performer)",
         operation_description=(
-            "Komandirovka uchun mehmonxona tanlash. `sort_by` orqali: "
-            "`popular` (mashhur), `weel_recommended` (weel-tavsiya), "
-            "`cheap` (eng arzon), `expensive` (eng qimmat). Xarita bo'yicha "
-            "tanlov uchun `lat`/`lon`/`radius_km` (km). Kalendar: "
-            "`check_in`/`check_out` + `guests` (necha kishi) berilsa, faqat "
-            "shu sanalar oralig'ida va shu odam soniga mos BO'SH xona bor "
-            "mehmonxonalar qaytariladi. Har bir natija `guid` bilan "
-            "keladi — mehmonxona bir nechta tashkilotlar (sxemalar) bo'ylab "
-            "qidirilgani uchun bu identifikator raqamli `id`dan ko'ra "
-            "ishonchliroq."
+            "Choose a hotel for a business trip. Use `sort_by` for sorting: "
+            "`popular`, `weel_recommended`, `cheap`, or `expensive`. For map-"
+            "based selection, provide `lat`, `lon`, and `radius_km`. If "
+            "`check_in`, `check_out`, and `guests` are provided, only hotels "
+            "that can accommodate the stay are returned. If one room is not "
+            "enough, the response includes the best matching room combination "
+            "for that hotel as `matching_rooms` (for example, two rooms with "
+            "capacities 3 and 4 for 7 guests). If `budget_max` is provided, "
+            "the hotel and matching room selection must stay within the total "
+            "estimated price for the selected dates. Each result includes "
+            "`total_estimated_price`. `guid` is more reliable than the numeric "
+            "`id` because the hotel can be searched across multiple tenant "
+            "schemas."
         ),
         query_serializer=HotelSearchParamsSerializer,
-        responses={200: openapi.Response(
-            "Paginated hotel list",
-            openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "count": openapi.Schema(type=openapi.TYPE_INTEGER),
-                    "page": openapi.Schema(type=openapi.TYPE_INTEGER),
-                    "page_size": openapi.Schema(type=openapi.TYPE_INTEGER),
-                    "results": openapi.Schema(
-                        type=openapi.TYPE_ARRAY,
-                        items=openapi.Schema(type=openapi.TYPE_OBJECT),
-                    ),
-                },
-            ),
-        )},
+        responses={200: HotelSearchPageSerializer()},
         tags=["B2B / Executer"],
     )
     def get(self, request):
@@ -183,9 +171,12 @@ class B2BHotelSearchView(APIView):
         page = d.pop("page")
         page_size = d.pop("page_size")
         offset = (page - 1) * page_size
+        d.pop("adults", None)
+        d.pop("children", None)
+        d.pop("babies", None)
 
-        hotels = search_hotels(**d, limit=page_size, offset=offset)
-        count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"})
+        hotels = search_hotels(**d, limit=page_size, offset=offset, allow_multi_room=True)
+        count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"}, allow_multi_room=True)
         return Response({
             "count": count,
             "page": page,
@@ -197,19 +188,19 @@ class B2BHotelSearchView(APIView):
 class B2BHotelRoomsView(APIView):
     """GET /b2b/hotels/<hotel_guid>/rooms/
 
-    Bosqich 2 (1-qadam): bosqich-1'da tanlangan mehmonxona + sanalarga mos
-    bo'sh xonalar ro'yxati — har bir xonaning sig'imi (`capacity`) qancha
-    xodim joylashtirish mumkinligini ko'rsatadi.
+    Step 2, part 1: list the available rooms for the hotel and dates chosen
+    in step 1. Each room's `capacity` shows how many employees can be placed
+    there.
     """
     permission_classes = [IsAuthenticated, IsB2BPerformer]
 
     @swagger_auto_schema(
-        operation_summary="Mehmonxona xonalarini olish (executer, bosqich 2)",
+        operation_summary="List hotel rooms (performer, step 2)",
         operation_description=(
-            "Bosqich-1'da tanlangan `hotel_guid` uchun, xuddi shu "
-            "`check_in`/`check_out`/`guests` bilan bo'sh xonalarni qaytaradi. "
-            "Har bir xonaning `capacity`si — unga nechta xodim biriktirish "
-            "mumkinligini bildiradi (odatda 1 yoki 2)."
+            "For the selected `hotel_guid`, return the available rooms for the "
+            "same `check_in`/`check_out`/`guests` values chosen in step 1. "
+            "Each room's `capacity` indicates how many employees can be "
+            "assigned to it, usually 1 or 2."
         ),
         query_serializer=RoomSelectParamsSerializer,
         responses={
@@ -237,6 +228,12 @@ class B2BHotelRoomsView(APIView):
                     check_in=params.validated_data["check_in"],
                     check_out=params.validated_data["check_out"],
                     guests=params.validated_data["guests"],
+                    room_types=params.validated_data.get("room_types"),
+                    room_type_presets=params.validated_data.get("room_type_presets"),
+                    rate_plans=params.validated_data.get("rate_plans"),
+                    meal_plans=params.validated_data.get("meal_plans"),
+                    min_capacity=params.validated_data.get("min_capacity"),
+                    max_capacity=params.validated_data.get("max_capacity"),
                 ),
             )
         except Exception:
@@ -283,28 +280,27 @@ def _refresh_booking_request_status(booking_request: dict) -> dict:
 class B2BHotelBookingListCreateView(APIView):
     """GET/POST /b2b/hotels/bookings/
 
-    Bosqich 2 (2-qadam) yakuni: tanlangan xonalar + har biriga biriktirilgan
-    xodimlar bilan BITTA bron so'rovi yuboriladi. Bitta so'rov ichida bir
-    nechta xona (va shu orqali bir nechta `pms_booking` yozuvi) bo'lishi
-    mumkin, lekin bularning barchasi bronlash tarixida BITTA yozuv sifatida
-    ko'rinadi.
+    Step 2, part 2: submit one booking request containing the selected rooms
+    and assigned employees. A single request may contain multiple rooms and
+    therefore multiple `pms_booking` rows, but they are shown as one entry in
+    booking history.
     """
     permission_classes = [IsAuthenticated, IsB2BPerformer]
 
     @swagger_auto_schema(
-        operation_summary="Bron so'rovlari tarixini olish (executer)",
+        operation_summary="List booking requests (performer)",
         operation_description=(
-            "Har bir bron so'rovi (bir nechta xona/xodimni o'z ichiga olgan "
-            "guruh) shu yerda BITTA qator sifatida ko'rinadi — "
-            "`room_count`/`employee_count` bilan qisqacha. To'liq tafsilot "
-            "uchun `GET /b2b/hotels/bookings/<id>/` ga o'ting."
+            "Each booking request, including requests with multiple rooms and "
+            "employees, appears here as a single row with `room_count` and "
+            "`employee_count`. For the full details, use "
+            "`GET /b2b/hotels/bookings/<id>/`."
         ),
         manual_parameters=[
-            openapi.Parameter("trip_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Komandirovka bo'yicha filtr"),
+            openapi.Parameter("trip_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Filter by business trip."),
             openapi.Parameter(
                 "status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                 enum=["pending", "confirmed", "rejected"],
-                description="Holat bo'yicha filtr",
+                description="Filter by status.",
             ),
         ],
         responses={200: HotelBookingRequestSerializer(many=True)},
@@ -325,18 +321,18 @@ class B2BHotelBookingListCreateView(APIView):
         return Response(HotelBookingRequestSerializer(rows, many=True).data)
 
     @swagger_auto_schema(
-        operation_summary="Bron so'rovini yuborish (xonalar + xodimlar, executer)",
+        operation_summary="Submit a booking request (rooms + employees, performer)",
         operation_description=(
-            "Bosqich-2 yakuni: `hotel_guid`, sanalar va har bir xonaga "
-            "biriktirilgan xodimlar (`employee_ids`, xonaga qarab 1 yoki 2 "
-            "kishi) yuboriladi. Server: (1) har bir xonani qayta "
-            "mavjudligini tekshiradi, (2) har bir xona uchun mehmonxonaning "
-            "o'z sxemasida `pms_booking` yaratadi, (3) xodimlarni shu "
-            "tripning `TripEmployee` yozuvlariga biriktiradi. Butun jarayon "
-            "bitta tranzaksiya — birorta xona band bo'lib chiqsa, hech narsa "
-            "yaratilmaydi. Natijada mehmonxona holati `pending` bo'ladi — "
-            "mehmonxona qabul qilsa `confirmed` (\"qabul qilindi\"), rad "
-            "etsa `rejected` (\"bekor bo'ldi\") ga o'zgaradi."
+            "Final step 2 submission: send `hotel_guid`, dates, and the "
+            "employees assigned to each room (`employee_ids`, 1 or 2 people "
+            "per room depending on capacity). The server will: (1) re-check "
+            "availability for each room, (2) create a `pms_booking` for each "
+            "room in the hotel's tenant schema, and (3) attach employees to "
+            "the trip's `TripEmployee` rows. The whole process runs in a "
+            "single transaction, so if any room is unavailable nothing is "
+            "created. The resulting hotel booking request starts in "
+            "`pending`; if the hotel accepts it becomes `confirmed`, and if "
+            "it is rejected it becomes `rejected`."
         ),
         request_body=HotelBookingRequestCreateSerializer,
         responses={
@@ -491,7 +487,7 @@ class B2BHotelBookingDetailView(APIView):
     permission_classes = [IsAuthenticated, IsB2BPerformer]
 
     @swagger_auto_schema(
-        operation_summary="Bron so'rovi tafsilotini olish (executer)",
+        operation_summary="Get booking request details (performer)",
         responses={
             200: HotelBookingRequestDetailSerializer(),
             404: openapi.Response(description="Booking not found."),
@@ -516,45 +512,43 @@ class B2BHotelBookingDetailView(APIView):
 class B2BHotelCalendarView(APIView):
     """GET /b2b/hotels/<hotel_guid>/calendar/
 
-    Mehmonxonaning butun taqvimidagi band/bo'sh holatini ko'rsatadi — har bir
-    xona uchun har bir sana ``booked`` yoki ``available`` sifatida qaytariladi.
-    Executer komandirovka uchun bo'sh sanalarni shu yerdan ko'rib tanlaydi.
+    Shows the full occupancy calendar for the hotel. Each date for each room
+    is returned as ``booked`` or ``available``. Performers use this view to
+    inspect free dates before arranging a business trip.
     """
     permission_classes = [IsAuthenticated, IsB2BPerformer]
 
     @swagger_auto_schema(
-        operation_summary="Mehmonxona bandlik taqvimi",
+        operation_summary="Hotel occupancy calendar",
         operation_description=(
-            "Tanlangan mehmonxona (``hotel_guid``) uchun ``from_date`` – "
-            "``to_date`` oralig'idagi har bir faol xonaning kunlik bandlik "
-            "holatini qaytaradi.\n\n"
-            "Har bir qator: ``room_id``, ``room_name``, ``date`` va "
-            "``status`` (``booked`` yoki ``available``). Bu yerda nafaqat "
-            "B2B orqali qilingan bronlar, balki mehmonxonaning o'z sayti "
-            "orqali qilingan bandliklar ham aks etadi — shuning uchun "
-            "executer haqiqiy bandlik holatini ko'rib, xodimlarni "
-            "joylashtirish uchun bo'sh sanalarni aniq tanlay oladi."
+            "Return the daily occupancy status for each active room in the "
+            "selected hotel (`hotel_guid`) over the `from_date` to `to_date` "
+            "range.\n\n"
+            "Each row contains `room_id`, `room_name`, `date`, and `status` "
+            "(`booked` or `available`). This includes both B2B bookings and "
+            "bookings made through the hotel's own site, so performers can "
+            "see the real occupancy state and choose free dates accurately."
         ),
         manual_parameters=[
             openapi.Parameter(
                 "hotel_guid", openapi.IN_PATH, type=openapi.TYPE_STRING,
-                required=True, description="Mehmonxona GUID identifikatori.",
+                required=True, description="Hotel GUID identifier.",
             ),
             openapi.Parameter(
                 "from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                 format=openapi.FORMAT_DATE, required=True,
-                description="Taqvim oralig'i boshlanish sanasi (YYYY-MM-DD).",
+                description="Start date for the calendar range (YYYY-MM-DD).",
             ),
             openapi.Parameter(
                 "to_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                 format=openapi.FORMAT_DATE, required=True,
-                description="Taqvim oralig'i tugash sanasi (YYYY-MM-DD).",
+                description="End date for the calendar range (YYYY-MM-DD).",
             ),
         ],
         responses={
             200: B2BHotelCalendarSerializer(many=True),
-            400: openapi.Response(description="Noto'g'ri hotel_guid yoki sana parametrlari."),
-            404: openapi.Response(description="Mehmonxona topilmadi."),
+            400: openapi.Response(description="Invalid hotel_guid or date parameters."),
+            404: openapi.Response(description="Hotel not found."),
         },
         tags=["B2B / Executer"],
     )
@@ -581,13 +575,29 @@ class B2BHotelCalendarView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        room_types = [v.strip() for v in (request.query_params.get("room_types") or "").split(",") if v.strip()]
+        room_type_presets = [v.strip() for v in (request.query_params.get("room_type_presets") or "").split(",") if v.strip()]
+        include_summary = str(request.query_params.get("include_summary", "")).lower() in {"1", "true", "yes"}
+
         try:
             calendar = _run_in_schema(
                 schema_name,
-                lambda: get_hotel_calendar(hotel_id, from_date=from_date, to_date=to_date),
+                lambda: get_hotel_calendar(
+                    hotel_id,
+                    from_date=from_date,
+                    to_date=to_date,
+                    room_types=room_types or None,
+                    room_type_presets=room_type_presets or None,
+                    include_summary=include_summary,
+                ),
             )
         except Exception:
             return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        if include_summary:
+            return Response({
+                "rows": B2BHotelCalendarSerializer(calendar["rows"], many=True).data,
+                "summary": calendar["summary"],
+            })
         return Response(B2BHotelCalendarSerializer(calendar, many=True).data)
 
 
@@ -622,16 +632,15 @@ class B2BDepartmentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Departmentlar ro'yxati",
+        operation_summary="List departments",
         operation_description=(
-            "Har bir department uchun owner tomonidan berilgan limit "
-            "(`budget_limit`), ishlatilgan summa (`used_amount`), qolgan summa "
-            "(`remaining_amount`), holati (`status`) va unga biriktirilgan "
-            "xodimlar (`employees`) qaytariladi. `status` limitning qolgan "
-            "qismiga qarab hisoblanadi: `high` — qolgan summa limitning 25%"
-            "idan ko'p, `low` — 25% yoki undan kam (lekin 0 emas), "
-            "`empty` — qolmagan (yoki limitdan oshib ketilgan), "
-            "`no_limit` — department uchun limit belgilanmagan."
+            "Return each department's owner-defined budget limit "
+            "(`budget_limit`), used amount (`used_amount`), remaining amount "
+            "(`remaining_amount`), status (`status`), and assigned employees "
+            "(`employees`). `status` is derived from the remaining budget: "
+            "`high` means more than 25% remains, `low` means 25% or less "
+            "(but not zero), `empty` means nothing remains or the limit was "
+            "exceeded, and `no_limit` means no limit is set for the department."
         ),
         responses={200: B2BDepartmentSummarySerializer(many=True)},
     )
@@ -701,16 +710,14 @@ class B2BEmployeeListCreateView(APIView):
         return Response(B2BEmployeeSerializer(employees, many=True).data)
 
     @swagger_auto_schema(
-        operation_summary="Yangi xodim qo'shish",
+        operation_summary="Add a new employee",
         operation_description=(
-            "Kompaniyaga yangi xodim qo'shadi. `department_id`, `email`, `phone`, "
-            "`passport_upload_front` va `passport_upload_back` (SHAXS GUVOHNOMASI old va "
-            "orqa tomoni) — barchasi majburiy. `full_name`, `date_of_birth`, "
-            "`passport_series` va `passport_pinfl` klientdan qabul qilinmaydi — "
-            "ular yuklangan rasmlardan avtomatik OCR orqali o'qib olinadi. "
-            "`role`: `owner` hech qachon berilmaydi (400 xatolik); `performer` "
-            "kompaniyada bir vaqtning o'zida faqat bitta xodimda bo'lishi mumkin — "
-            "agar allaqachon performer mavjud bo'lsa, yangisini shu rolda yaratib bo'lmaydi."
+            "Adds a new employee to the company. `department_id`, `email`, "
+            "`phone`, `passport_upload_front`, and `passport_upload_back` "
+            "(front and back of the ID document) are required. `full_name`, "
+            "`date_of_birth`, `passport_series`, and `passport_pinfl` are not "
+            "accepted from the client; they are extracted automatically from "
+            "the uploaded images using OCR."
         ),
         consumes=["multipart/form-data"],
         manual_parameters=[
@@ -727,7 +734,7 @@ class B2BEmployeeListCreateView(APIView):
         ],
         responses={
             201: B2BEmployeeSerializer(),
-            400: openapi.Response(description="Validation error / Company context required / passport rasmi shablonga mos emas."),
+            400: openapi.Response(description="Validation error / Company context required / passport image does not match the template."),
         },
     )
     def post(self, request):
@@ -967,11 +974,11 @@ class B2BLeadRequestCreateView(APIView):
     throttle_scope = "b2b_lead_request"
 
     @swagger_auto_schema(
-        operation_summary="Hamkorlik uchun ariza yuborish (yangi biznes egalari uchun)",
+        operation_summary="Submit a partnership request (new business owners)",
         operation_description=(
-            "Hali B2B mijozi bo'lmagan biznes egasi ism, kompaniya nomi, "
-            "email va telefon raqamini yuborib, hamkorlikka ariza qoldiradi. "
-            "Autentifikatsiya talab qilinmaydi."
+            "A business owner who is not yet a B2B client can submit their "
+            "name, company name, email, and phone number to request "
+            "partnership. Authentication is not required."
         ),
         request_body=B2BLeadRequestSerializer,
         responses={
@@ -1019,23 +1026,22 @@ class BudgetRequestListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Byudjet so'rovlarini olish (owner uchun)",
+        operation_summary="List budget requests (owner)",
         operation_description=(
-            "Kompaniyaning barcha byudjet so'rovlarini qaytaradi. "
-            "`status=pending` bilan filtrlab, owner tasdig'ini kutayotgan — "
-            "executer tomonidan (xodim yoki bo'lim uchun) yuborilgan "
-            "so'rovlarni ko'rish mumkin."
+            "Return all budget requests for the company. Filter with "
+            "`status=pending` to see requests submitted by performers "
+            "for an employee or department and waiting for owner approval."
         ),
         manual_parameters=[
             openapi.Parameter(
                 "status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                 enum=["pending", "approved", "rejected"],
-                description="Holat bo'yicha filtr. Owner uchun odatda `pending`.",
+                description="Filter by status. For owners this is usually `pending`.",
             ),
         ],
         responses={
             200: openapi.Response(
-                description="Byudjet so'rovlari + umumiy soni",
+                description="Budget requests plus total count",
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
@@ -1061,15 +1067,15 @@ class BudgetRequestListCreateView(APIView):
         })
 
     @swagger_auto_schema(
-        operation_summary="Byudjet so'rovi yuborish (xodim yoki bo'lim uchun)",
+        operation_summary="Submit a budget request (employee or department)",
         operation_description=(
-            "Executer bitta xodim (`employee_id`) yoki butun bo'lim "
-            "(`department_id`) uchun qo'shimcha summa so'raydi — aynan "
-            "bittasi yuborilishi shart. `trip_id` ixtiyoriy — mavjud bo'lsa, "
-            "so'rov shu komandirovka bilan bog'lanadi. Har bir so'rov "
-            "`pending` holatda saqlanadi va owner uni "
-            "`GET ?status=pending` orqali ko'rib, "
-            "`POST /budget-requests/<id>/review/` bilan tasdiqlaydi/rad etadi."
+            "A performer can request additional budget for either a single "
+            "employee (`employee_id`) or an entire department "
+            "(`department_id`), but exactly one of them must be provided. "
+            "`trip_id` is optional; if present, the request is linked to that "
+            "business trip. Every request is saved as `pending`, then the "
+            "owner reviews it via `GET ?status=pending` and approves or "
+            "rejects it with `POST /budget-requests/<id>/review/`."
         ),
         request_body=BudgetRequestSerializer,
         responses={
@@ -1120,10 +1126,10 @@ class BudgetRequestReviewView(APIView):
     permission_classes = [IsAuthenticated, IsB2BOwner]
 
     @swagger_auto_schema(
-        operation_summary="Byudjet so'rovini tasdiqlash/rad etish (faqat owner)",
+        operation_summary="Approve or reject a budget request (owner only)",
         operation_description=(
-            "Owner byudjet so'rovini `approved` yoki `rejected` qiladi. "
-            "`description` — qarorning sababi, ixtiyoriy."
+            "The owner marks the budget request as `approved` or `rejected`. "
+            "`description` is an optional reason for the decision."
         ),
         request_body=ReviewBudgetRequestSerializer,
         responses={
@@ -1250,13 +1256,13 @@ class DashboardSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Dashboard uchun 4 ta asosiy statistika",
+        operation_summary="Four main dashboard statistics",
         operation_description=(
-            "Umumiy oylik limit (`monthly_limit`), shu oy sarflangan summa "
-            "(`spent_this_month`), komandirovkada yoki rejada turgan xodimlar "
-            "soni (`active_employees`) va owner tomonidan ko'rib chiqilishi "
-            "kutilayotgan limit oshirish so'rovlari sonini (`pending_limit_requests`) "
-            "qaytaradi."
+            "Return the overall monthly limit (`monthly_limit`), amount spent "
+            "this month (`spent_this_month`), number of employees on or about "
+            "to go on a business trip (`active_employees`), and the number of "
+            "limit increase requests waiting for owner review "
+            "(`pending_limit_requests`)."
         ),
         responses={
             200: DashboardSummarySerializer(),
@@ -1282,16 +1288,16 @@ class RecentTripEmployeesView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Oxirgi komandirovkaga biriktirilgan employee lar",
+        operation_summary="Employees assigned to the most recent trips",
         operation_description=(
-            "Kompaniya bo'yicha eng so'nggi komandirovkalarga biriktirilgan "
-            "employee larni qaytaradi. Default `limit=5`, maksimum 100."
+            "Return the employees assigned to the company's most recent "
+            "business trips. Default `limit=5`, maximum 100."
         ),
         manual_parameters=[
             openapi.Parameter(
                 "limit",
                 openapi.IN_QUERY,
-                description="Qaytariladigan employee lar soni (1-100). Default 5.",
+                description="Number of employees to return (1-100). Default 5.",
                 type=openapi.TYPE_INTEGER,
                 default=5,
             ),
@@ -1326,17 +1332,17 @@ class TopEmployeesByTripsView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Eng ko'p komandirovkaga borgan xodimlar (top N)",
+        operation_summary="Top employees by trip count",
         operation_description=(
-            "Kompaniya bo'yicha eng ko'p komandirovkaga (business trip) "
-            "biriktirilgan xodimlarni, `trip_count` bo'yicha kamayish "
-            "tartibida qaytaradi. Default `limit=5`, maksimum 100."
+            "Return the employees with the highest number of business-trip "
+            "assignments for the company, ordered by `trip_count` descending. "
+            "Default `limit=5`, maximum 100."
         ),
         manual_parameters=[
             openapi.Parameter(
                 "limit",
                 openapi.IN_QUERY,
-                description="Qaytariladigan xodimlar soni (1-100). Default 5.",
+                description="Number of employees to return (1-100). Default 5.",
                 type=openapi.TYPE_INTEGER,
                 default=5,
             ),
@@ -1371,19 +1377,18 @@ class TopHotelsByBookingsView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Kompaniya eng ko'p bron qilgan hotellar (top N)",
+        operation_summary="Top hotels by company booking count",
         operation_description=(
-            "Shu kompaniya tomonidan eng ko'p bron qilingan mehmonxonalarni, "
-            "`booking_count` bo'yicha kamayish tartibida qaytaradi. Har bir "
-            "hotel uchun `total_spend` — shu hotelga qilingan barcha "
-            "bronlarning umumiy narxi ham qaytariladi. Default `limit=3`, "
-            "maksimum 100."
+            "Return the hotels most frequently booked by the company, ordered "
+            "by `booking_count` descending. For each hotel, `total_spend` is "
+            "also returned as the total price of all bookings for that hotel. "
+            "Default `limit=3`, maximum 100."
         ),
         manual_parameters=[
             openapi.Parameter(
                 "limit",
                 openapi.IN_QUERY,
-                description="Qaytariladigan hotellar soni (1-100). Default 3.",
+                description="Number of hotels to return (1-100). Default 3.",
                 type=openapi.TYPE_INTEGER,
                 default=3,
             ),
@@ -1430,19 +1435,19 @@ class ActiveTripEmployeesView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Komandirovkada yoki ketayotgan xodimlar",
+        operation_summary="Employees on a trip or about to depart",
         operation_description=(
-            "Faol (``active`` yoki ``pending``) tripga biriktirilgan va "
-            "``cancelled``/``checked_out`` bo'lmagan xodimlarni qaytaradi. "
-            "`type=yolda` bugun ``start_date`` va ``end_date`` orasida "
-            "bo'lganlarni, `type=borgan` esa ``start_date`` kelajakda "
-            "bo'lganlarni qaytaradi. `type=all` (default) ikkalasini birlashtiradi."
+            "Return employees attached to active (`active` or `pending`) trips "
+            "whose assignments are not `cancelled` or `checked_out`. "
+            "`type=yolda` returns employees whose trip dates include today, "
+            "`type=borgan` returns employees whose trip starts in the future, "
+            "and `type=all` (default) combines both groups."
         ),
         manual_parameters=[
             openapi.Parameter(
                 "type",
                 openapi.IN_QUERY,
-                description="Filtr turi: yolda | borgan | all (default: all)",
+                description="Filter type: yolda | borgan | all (default: all)",
                 type=openapi.TYPE_STRING,
                 enum=["yolda", "borgan", "all"],
                 default="all",
@@ -1502,17 +1507,17 @@ class DepartmentMonthlySpendingView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Har bir department bo'yicha oylik xarajatlar",
+        operation_summary="Monthly spending by department",
         operation_description=(
-            "Tanlangan oy uchun har bir department ning approved "
-            "budget_request summalari va trip sonini qaytaradi. "
-            "`month` ko'rsatilmasa joriy oy ishlatiladi."
+            "Return each department's approved budget-request totals and trip "
+            "count for the selected month. If `month` is omitted, the current "
+            "month is used."
         ),
         manual_parameters=[
             openapi.Parameter(
                 "month",
                 openapi.IN_QUERY,
-                description="YYYY-MM formatidagi oy. Bo'sh qoldirilsa, joriy oy.",
+                description="Month in YYYY-MM format. Defaults to the current month.",
                 type=openapi.TYPE_STRING,
                 format=openapi.FORMAT_DATE,
                 example="2026-06",
@@ -1520,7 +1525,7 @@ class DepartmentMonthlySpendingView(APIView):
         ],
         responses={
             200: openapi.Response(
-                description="Har bir department uchun oylik xarajatlar",
+                description="Monthly spending for each department",
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
@@ -1612,18 +1617,18 @@ class TravelLimitsView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Limit qoidalarini olish",
+        operation_summary="List limit rules",
         operation_description=(
-            "`applies_to` orqali qaysi turdagi limitlar qaytarilishini tanlang: "
-            "`all` — kompaniyaning barcha limitlari (global, department va employee), "
-            "`department` — departmentlar uchun limitlar, "
-            "`employee` — xodimlar uchun individual limitlar."
+            "Use `applies_to` to choose which limit rules to return: `all` for "
+            "all company limits (global, department, and employee), "
+            "`department` for department rules, and `employee` for individual "
+            "employee rules."
         ),
         manual_parameters=[
             openapi.Parameter(
                 "applies_to", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                 enum=["all", "department", "employee"], required=True,
-                description="Qaysi turdagi limitlarni olish kerak.",
+                description="Which type of limit rules to return.",
             ),
         ],
         responses={200: TravelPolicyRuleSerializer(many=True)},
@@ -1644,12 +1649,12 @@ class TravelLimitsView(APIView):
         ).data)
 
     @swagger_auto_schema(
-        operation_summary="Yangi limit qoidasi qo'shish",
+        operation_summary="Add a new limit rule",
         operation_description=(
-            "`applies_to`: `all` — kompaniya darajasidagi global limit (bitta "
-            "kompaniyada faqat bitta bo'lishi mumkin, `target_id` yubormang); "
-            "`department`/`employee` — mos `target_id` (department_id / "
-            "employee_id) bilan."
+            "`applies_to`: `all` for a company-wide global limit (only one "
+            "per company; do not send `target_id`); `department` or "
+            "`employee` with the matching `target_id` (`department_id` or "
+            "`employee_id`)."
         ),
         request_body=TravelPolicyRuleCreateSerializer,
         responses={
@@ -1698,7 +1703,7 @@ class TravelLimitDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Limit qoidasini tahrirlash",
+        operation_summary="Update a limit rule",
         request_body=TravelPolicyRuleUpdateSerializer,
         responses={
             200: TravelPolicyRuleSerializer(),
@@ -1723,7 +1728,7 @@ class TravelLimitDetailView(APIView):
         )
 
     @swagger_auto_schema(
-        operation_summary="Limit qoidasini o'chirish",
+        operation_summary="Delete a limit rule",
         responses={
             204: openapi.Response(description="Deleted"),
             404: openapi.Response(description="Limit rule not found"),

@@ -33,6 +33,7 @@ from apps.hotels.repository import (
 from apps.hotels.serializers import (
     HotelCalendarSerializer,
     HotelDetailSerializer,
+    HotelSearchPageSerializer,
     HotelSearchParamsSerializer,
     ReviewListSerializer,
     RoomAvailabilitySerializer,
@@ -65,16 +66,7 @@ class HotelSearchView(APIView):
 
     @swagger_auto_schema(
         query_serializer=HotelSearchParamsSerializer,
-        responses={200: openapi.Response(
-            "Paginated hotel list",
-            openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "count": openapi.Schema(type=openapi.TYPE_INTEGER),
-                    "results": openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)),
-                },
-            ),
-        )},
+        responses={200: HotelSearchPageSerializer()},
     )
     def get(self, request):
         params = HotelSearchParamsSerializer(data=request.query_params)
@@ -85,6 +77,9 @@ class HotelSearchView(APIView):
         page = d.pop("page")
         page_size = d.pop("page_size")
         offset = (page - 1) * page_size
+        d.pop("adults", None)
+        d.pop("children", None)
+        d.pop("babies", None)
 
         hotels = search_hotels(**d, limit=page_size, offset=offset)
         count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"})
@@ -167,6 +162,12 @@ class HotelRoomSelectView(APIView):
                 check_in=params.validated_data["check_in"],
                 check_out=params.validated_data["check_out"],
                 guests=params.validated_data["guests"],
+                room_types=params.validated_data.get("room_types"),
+                room_type_presets=params.validated_data.get("room_type_presets"),
+                rate_plans=params.validated_data.get("rate_plans"),
+                meal_plans=params.validated_data.get("meal_plans"),
+                min_capacity=params.validated_data.get("min_capacity"),
+                max_capacity=params.validated_data.get("max_capacity"),
             )
             return rooms
 
@@ -242,38 +243,40 @@ class HotelReviewsView(APIView):
 class HotelCalendarView(APIView):
     """GET /hotels/<guid>/calendar/
 
-    Har bir faol xona uchun kunlik bandlik holati — foydalanuvchi mehmonxona
-    sahifasida taqvim ko'rinishida band/bo'sh sanalarni ko'rishi uchun.
+    Daily occupancy status for every active room, so users can view booked
+    and free dates in a calendar layout on the hotel page.
     """
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        operation_summary="Mehmonxona bandlik taqvimi",
+        operation_summary="Hotel occupancy calendar",
         operation_description=(
-            "Tanlangan mehmonxona (``guid``) uchun ``from_date`` – "
-            "``to_date`` oralig'idagi kunlik xona bandlik holatini "
-            "qaytaradi.\n\n"
-            "Natija har bir xona × sana juftligi uchun bitta qatordan "
-            "iborat: ``room_id``, ``room_name``, ``date`` (YYYY-MM-DD), "
-            "va ``status`` (``booked`` yoki ``available``)."
+            "Return the daily occupancy status for each room in the selected "
+            "hotel (`guid`) over the `from_date` to `to_date` range.\n\n"
+            "The result contains one row per room × date pair: `room_id`, "
+            "`room_name`, `date` (YYYY-MM-DD), and `status` (`booked` or "
+            "`available`)."
         ),
         manual_parameters=[
             _GUID_PARAM,
             openapi.Parameter(
                 "from_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                 format=openapi.FORMAT_DATE, required=True,
-                description="Taqvim oralig'i boshlanish sanasi (YYYY-MM-DD).",
+                description="Start date for the calendar range (YYYY-MM-DD).",
             ),
             openapi.Parameter(
                 "to_date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                 format=openapi.FORMAT_DATE, required=True,
-                description="Taqvim oralig'i tugash sanasi (YYYY-MM-DD).",
+                description="End date for the calendar range (YYYY-MM-DD).",
             ),
+            openapi.Parameter("room_types", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Comma-separated room type names."),
+            openapi.Parameter("room_type_presets", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Comma-separated room type presets."),
+            openapi.Parameter("include_summary", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False, description="Return a dense matrix summary grouped by date."),
         ],
         responses={
             200: HotelCalendarSerializer(many=True),
-            400: openapi.Response(description="Noto'g'ri GUID yoki sana parametrlari."),
-            404: openapi.Response(description="Mehmonxona topilmadi."),
+            400: openapi.Response(description="Invalid GUID or date parameters."),
+            404: openapi.Response(description="Hotel not found."),
         },
     )
     def get(self, request, guid):
@@ -300,11 +303,27 @@ class HotelCalendarView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        room_types = [v.strip() for v in (request.query_params.get("room_types") or "").split(",") if v.strip()]
+        room_type_presets = [v.strip() for v in (request.query_params.get("room_type_presets") or "").split(",") if v.strip()]
+        include_summary = str(request.query_params.get("include_summary", "")).lower() in {"1", "true", "yes"}
+
         def _query():
-            return get_hotel_calendar(hotel_id, from_date=from_date, to_date=to_date)
+            return get_hotel_calendar(
+                hotel_id,
+                from_date=from_date,
+                to_date=to_date,
+                room_types=room_types or None,
+                room_type_presets=room_type_presets or None,
+                include_summary=include_summary,
+            )
 
         try:
             calendar = _run_in_schema(schema_name, _query)
         except Exception:
             return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        if include_summary:
+            return Response({
+                "rows": HotelCalendarSerializer(calendar["rows"], many=True).data,
+                "summary": calendar["summary"],
+            })
         return Response(HotelCalendarSerializer(calendar, many=True).data)
