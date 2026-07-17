@@ -138,7 +138,23 @@ class PlumAPIService:
         err_code = data.get("errorCode")
         if isinstance(err_code, dict) and err_code.get("message"):
             return str(err_code["message"]).strip()
-        return data.get("error") or data.get("message") or "Plum API error"
+        raw_error = data.get("error") or data.get("message")
+        if raw_error:
+            if isinstance(raw_error, (str, int, float)):
+                value = str(raw_error).strip()
+                if value.isdigit():
+                    return f"Plum API error (code {value})"
+                return value
+            return str(raw_error)
+
+        if isinstance(err_code, dict):
+            code = err_code.get("code") or err_code.get("value")
+            if code is not None:
+                return f"Plum API error (code {code})"
+        elif err_code is not None:
+            return f"Plum API error (code {err_code})"
+
+        return "Plum API error"
 
     def get_client_cards(self, client: RawUser):
         try:

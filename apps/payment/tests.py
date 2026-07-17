@@ -165,3 +165,14 @@ class PlumServiceTests(SimpleTestCase):
             service._handle_response(response)
         self.assertEqual(exc.exception.status_code, 403)
 
+    def test_numeric_plum_error_is_returned_as_a_labeled_code(self):
+        self.assertEqual(
+            PlumAPIService._get_plum_error_message({"error": 116}),
+            "Plum API error (code 116)",
+        )
+
+    def test_nested_plum_error_code_is_returned_as_a_labeled_code(self):
+        self.assertEqual(
+            PlumAPIService._get_plum_error_message({"errorCode": {"code": 116}}),
+            "Plum API error (code 116)",
+        )
