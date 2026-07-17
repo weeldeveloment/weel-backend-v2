@@ -85,9 +85,7 @@ class RoomTypeSummarySerializer(serializers.Serializer):
     capacity = serializers.IntegerField(read_only=True, default=2)
     bedroom_count = serializers.IntegerField(read_only=True, default=1)
     beds = serializers.ListField(read_only=True, default=list)
-    price_from = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, read_only=True)
-    photos = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
-    amenities_snippet = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
+    img = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
 
     class Meta:
         ref_name = "PropertyRoomTypeSummary"
@@ -96,16 +94,13 @@ class RoomTypeSummarySerializer(serializers.Serializer):
 class HotelCardSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     guid = serializers.CharField(read_only=True)
-    title = serializers.CharField(read_only=True)
     name = serializers.CharField(read_only=True)
     description = serializers.CharField(allow_null=True, read_only=True)
     description_uz = serializers.CharField(allow_null=True, read_only=True)
     description_ru = serializers.CharField(allow_null=True, read_only=True)
     description_en = serializers.CharField(allow_null=True, read_only=True)
     address = serializers.CharField(allow_null=True, read_only=True)
-    full_address = serializers.CharField(allow_null=True, read_only=True)
     img = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
-    images = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
     star_rating = serializers.IntegerField(allow_null=True, read_only=True)
     weel_classification = serializers.CharField(allow_null=True, read_only=True)
     themes = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
@@ -113,17 +108,14 @@ class HotelCardSerializer(serializers.Serializer):
     country = serializers.CharField(allow_null=True, read_only=True)
     latitude = serializers.FloatField(allow_null=True, read_only=True)
     longitude = serializers.FloatField(allow_null=True, read_only=True)
-    price_from = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, read_only=True)
     min_price = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, read_only=True)
     currency = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
     timezone = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
-    review_score = serializers.FloatField(allow_null=True, read_only=True)
     rating = serializers.DecimalField(max_digits=3, decimal_places=2, allow_null=True, read_only=True)
     review_count = serializers.IntegerField(read_only=True, default=0)
     booking_count = serializers.IntegerField(read_only=True, default=0)
     available_rooms = serializers.IntegerField(read_only=True, default=0)
     amenities = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
-    amenities_preview = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
     legal_info = serializers.DictField(read_only=True, default=dict)
     check_in_time = serializers.CharField(allow_null=True, read_only=True)
     check_out_time = serializers.CharField(allow_null=True, read_only=True)
@@ -150,15 +142,13 @@ class HotelCardSerializer(serializers.Serializer):
         request = self.context.get("request")
         row = dict(instance)
         lang = _preferred_language(request)
-        row["title"] = row.get("name") or row.get("title") or ""
-        row["name"] = row.get("name") or row.get("title") or ""
+        row["name"] = row.get("name") or ""
         row["description"] = (
             row.get(f"description_{lang}")
             or row.get("description_uz")
             or row.get("description_en")
             or row.get("description_ru")
         )
-        row["full_address"] = row.get("full_address") or row.get("address")
         try:
             row["latitude"] = float(row.get("latitude") or 0)
         except (TypeError, ValueError):
@@ -167,18 +157,10 @@ class HotelCardSerializer(serializers.Serializer):
             row["longitude"] = float(row.get("longitude") or 0)
         except (TypeError, ValueError):
             row["longitude"] = None
-        row["img"] = _build_media_url(request, row.get("images") or row.get("img") or row.get("photos") or [])
-        row["images"] = _build_media_url(request, row.get("photos") or row.get("images") or row.get("img") or [])
-        row["price_from"] = _convert_price_for_output(row.get("price_from") or row.get("min_price"), row.get("currency"))
+        row["img"] = _build_media_url(request, row.get("img") or [])
         row["min_price"] = _convert_price_for_output(row.get("min_price"), row.get("currency"))
         row["amenities"] = row.get("amenities") or []
-        row["amenities_preview"] = (row.get("amenities") or [])[:5]
-        row["review_score"] = (
-            float(row["review_score"] or row.get("rating") or 0)
-            if (row.get("review_score") is not None or row.get("rating") is not None)
-            else None
-        )
-        row["rating"] = row.get("rating") or row.get("review_score")
+        row["rating"] = row.get("rating")
         row["review_count"] = int(row.get("review_count") or 0)
         row["booking_count"] = int(row.get("booking_count") or 0)
         row["available_rooms"] = int(row.get("available_rooms") or 0)
@@ -250,9 +232,7 @@ class HotelDetailSerializer(HotelCardSerializer):
 
     @staticmethod
     def _build_room_summary(room: dict, request):
-        room["photos"] = _build_media_url(request, room.get("photos") or [])
-        room["amenities_snippet"] = (room.get("amenities") or [])[:4]
-        room["price_from"] = _convert_price_for_output(room.get("price_from"), room.get("currency"))
+        room["img"] = _build_media_url(request, room.get("img") or [])
         return room
 
 
