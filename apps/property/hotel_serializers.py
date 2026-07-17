@@ -85,6 +85,7 @@ class RoomTypeSummarySerializer(serializers.Serializer):
     capacity = serializers.IntegerField(read_only=True, default=2)
     bedroom_count = serializers.IntegerField(read_only=True, default=1)
     beds = serializers.ListField(read_only=True, default=list)
+    amenities = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
     img = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
 
     class Meta:
