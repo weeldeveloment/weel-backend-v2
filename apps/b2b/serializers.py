@@ -216,7 +216,7 @@ class HotelBookingRequestSerializer(serializers.Serializer):
     check_in = serializers.DateField()
     check_out = serializers.DateField()
     status = serializers.ChoiceField(
-        choices=["pending", "confirmed", "rejected"], read_only=True,
+        choices=["pending", "confirmed", "rejected", "cancelled"], read_only=True,
     )
     room_count = serializers.IntegerField(default=0)
     employee_count = serializers.IntegerField(default=0)

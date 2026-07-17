@@ -81,8 +81,9 @@ class HotelBookingRequestStatus:
     PENDING = "pending"
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
+    CANCELLED = "cancelled"
 
-    CHOICES = [PENDING, CONFIRMED, REJECTED]
+    CHOICES = [PENDING, CONFIRMED, REJECTED, CANCELLED]
 
 
 @dataclass(slots=True)

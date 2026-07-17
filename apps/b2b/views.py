@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.core.files.storage import default_storage
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -21,15 +21,12 @@ from drf_yasg.utils import swagger_auto_schema
 
 from apps.b2b.passport_ocr import PassportOCRError, extract_passport_data
 from apps.b2b.repository import (
-    add_hotel_booking_room,
-    add_hotel_booking_room_employee,
     add_trip_employee,
     create_budget_request,
     create_company,
     create_b2b_user,
     create_department,
     create_employee,
-    create_hotel_booking_request,
     create_lead_request,
     create_policy_rule,
     create_trip,
@@ -63,23 +60,22 @@ from apps.b2b.repository import (
     review_budget_request,
     update_company,
     update_employee,
-    update_hotel_booking_request_status,
     update_policy_rule,
     update_travel_policy,
     update_trip,
 )
-from apps.b2b.models import DepartmentBudgetStatus, EmployeeRole, HotelBookingRequestStatus
+from apps.b2b.models import DepartmentBudgetStatus, EmployeeRole
+from apps.b2b.hotel_booking_service import (
+    HotelBookingError,
+    booking_detail,
+    cancel_booking_request,
+    create_booking_request,
+    reconcile_booking_request,
+)
 from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer, IsB2BPerformer
 from apps.b2b.tasks import _send_b2b_lead_telegram_notification
 from apps.property.hotel_repository import _run_in_schema, get_hotel_for_public, resolve_hotel_guid
-from apps.hotels.repository import (
-    count_hotels,
-    create_hotel_booking,
-    get_available_rooms,
-    get_bookings_status,
-    get_hotel_calendar,
-    search_hotels,
-)
+from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, search_hotels
 from apps.hotels.serializers import (
     HotelCardSerializer,
     HotelSearchParamsSerializer,
@@ -241,42 +237,6 @@ class B2BHotelRoomsView(APIView):
         return Response(RoomAvailabilitySerializer(rooms, many=True).data)
 
 
-def _refresh_booking_request_status(booking_request: dict) -> dict:
-    """Pull-based status sync: while a request is still `pending`, ask the
-    hotel's own tenant schema whether its sibling `pms_booking` rows have
-    been accepted/rejected by the partner, and persist the derived group
-    status. Called on every read (list + detail) so "qabul qilindi" /
-    "bekor qilindi" reflects reality without needing a push from the PMS
-    side.
-    """
-    if booking_request.get("status") != HotelBookingRequestStatus.PENDING:
-        return booking_request
-    rooms = list_hotel_booking_rooms(booking_request["id"])
-    booking_ids = [r["pms_booking_id"] for r in rooms if r.get("pms_booking_id")]
-    if not booking_ids:
-        return booking_request
-    try:
-        statuses = _run_in_schema(
-            booking_request["tenant_schema"],
-            lambda: get_bookings_status(booking_ids),
-        )
-    except Exception:
-        return booking_request
-    status_values = {s["status"] for s in statuses}
-    if not status_values:
-        return booking_request
-    if "cancelled" in status_values:
-        new_status = HotelBookingRequestStatus.REJECTED
-    elif status_values <= {"confirmed", "checked_in", "checked_out"}:
-        new_status = HotelBookingRequestStatus.CONFIRMED
-    else:
-        return booking_request
-    updated = update_hotel_booking_request_status(
-        booking_request["id"], new_status, reviewed_at=timezone.now(),
-    )
-    return updated or booking_request
-
-
 class B2BHotelBookingListCreateView(APIView):
     """GET/POST /b2b/hotels/bookings/
 
@@ -285,10 +245,12 @@ class B2BHotelBookingListCreateView(APIView):
     therefore multiple `pms_booking` rows, but they are shown as one entry in
     booking history.
     """
-    permission_classes = [IsAuthenticated, IsB2BPerformer]
+    def get_permissions(self):
+        role_permission = IsB2BOwnerOrPerformer if self.request.method == "GET" else IsB2BPerformer
+        return [IsAuthenticated(), role_permission()]
 
     @swagger_auto_schema(
-        operation_summary="List booking requests (performer)",
+        operation_summary="List company booking requests",
         operation_description=(
             "Each booking request, including requests with multiple rooms and "
             "employees, appears here as a single row with `room_count` and "
@@ -299,12 +261,12 @@ class B2BHotelBookingListCreateView(APIView):
             openapi.Parameter("trip_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Filter by business trip."),
             openapi.Parameter(
                 "status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
-                enum=["pending", "confirmed", "rejected"],
+                enum=["pending", "confirmed", "rejected", "cancelled"],
                 description="Filter by status.",
             ),
         ],
         responses={200: HotelBookingRequestSerializer(many=True)},
-        tags=["B2B / Executer"],
+        tags=["B2B / Hotels"],
     )
     def get(self, request):
         company_id = _get_company_id(request)
@@ -312,12 +274,14 @@ class B2BHotelBookingListCreateView(APIView):
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
         trip_id = request.query_params.get("trip_id")
         req_status = request.query_params.get("status")
-        rows = list_hotel_booking_requests(
-            company_id,
-            trip_id=int(trip_id) if trip_id else None,
-            status=req_status,
-        )
-        rows = [_refresh_booking_request_status(r) for r in rows]
+        try:
+            parsed_trip_id = int(trip_id) if trip_id else None
+        except (TypeError, ValueError):
+            return Response({"detail": "trip_id must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
+        rows = list_hotel_booking_requests(company_id, trip_id=parsed_trip_id)
+        rows = [reconcile_booking_request(row) for row in rows]
+        if req_status:
+            rows = [row for row in rows if row.get("status") == req_status]
         return Response(HotelBookingRequestSerializer(rows, many=True).data)
 
     @swagger_auto_schema(
@@ -337,10 +301,11 @@ class B2BHotelBookingListCreateView(APIView):
         request_body=HotelBookingRequestCreateSerializer,
         responses={
             201: HotelBookingRequestDetailSerializer(),
-            400: openapi.Response(description="Validation error / room not available / capacity exceeded."),
+            400: openapi.Response(description="Validation error, date, capacity, or budget violation."),
             404: openapi.Response(description="Trip, hotel or employee not found."),
+            409: openapi.Response(description="Room or employee is no longer available."),
         },
-        tags=["B2B / Executer"],
+        tags=["B2B / Hotels"],
     )
     def post(self, request):
         company_id = _get_company_id(request)
@@ -350,127 +315,14 @@ class B2BHotelBookingListCreateView(APIView):
         serializer = HotelBookingRequestCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        data = serializer.validated_data
-
-        trip = get_trip(data["trip_id"], company_id)
-        if not trip:
-            return Response({"detail": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        resolved = resolve_hotel_guid(data["hotel_guid"])
-        if not resolved:
-            return Response({"detail": "Invalid hotel_guid."}, status=status.HTTP_400_BAD_REQUEST)
-        schema_name, hotel_id = resolved
-
-        hotel = get_hotel_for_public(data["hotel_guid"])
-        if not hotel:
-            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        check_in = data["check_in"]
-        check_out = data["check_out"]
-
-        # Re-check availability server-side (race-safe) before touching anything.
         try:
-            available_rooms = _run_in_schema(
-                schema_name,
-                lambda: get_available_rooms(hotel_id, check_in=check_in, check_out=check_out, guests=1),
-            )
-        except Exception:
-            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
-        available_by_id = {r["id"]: r for r in available_rooms}
-
-        seen_employee_ids: set[int] = set()
-        for room in data["rooms"]:
-            avail_room = available_by_id.get(room["room_id"])
-            if not avail_room:
-                return Response(
-                    {"detail": f"Room {room['room_id']} is not available for these dates."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            capacity = avail_room.get("capacity")
-            if capacity is not None and len(room["employee_ids"]) > capacity:
-                return Response(
-                    {"detail": f"Room {room['room_id']} capacity is {capacity}."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            for employee_id in room["employee_ids"]:
-                if not get_employee(employee_id, company_id):
-                    return Response(
-                        {"detail": f"Employee {employee_id} not found."},
-                        status=status.HTTP_404_NOT_FOUND,
-                    )
-                seen_employee_ids.add(employee_id)
-
-        requested_by = _get_user_id(request)
-
-        with transaction.atomic():
-            booking_request = create_hotel_booking_request(
+            booking_request = create_booking_request(
                 company_id=company_id,
-                trip_id=data["trip_id"],
-                tenant_schema=schema_name,
-                hotel_property_id=hotel_id,
-                hotel_name=hotel.get("title") or hotel.get("name"),
-                check_in=check_in,
-                check_out=check_out,
-                requested_by=requested_by,
+                requested_by=_get_user_id(request),
+                data=serializer.validated_data,
             )
-            if not booking_request:
-                transaction.set_rollback(True)
-                return Response(
-                    {"detail": "Failed to create booking request."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
-            for room in data["rooms"]:
-                avail_room = available_by_id[room["room_id"]]
-                room_id = room["room_id"]
-
-                def _create_room_booking(rid=room_id, employees=room["employee_ids"]):
-                    return create_hotel_booking(
-                        property_id=hotel_id,
-                        room_id=rid,
-                        client_user_id=requested_by,
-                        check_in=check_in,
-                        check_out=check_out,
-                        adults=len(employees),
-                        b2b_company_id=company_id,
-                    )
-
-                pms_booking = _run_in_schema(schema_name, _create_room_booking)
-                if not pms_booking:
-                    transaction.set_rollback(True)
-                    return Response(
-                        {"detail": f"Room {room_id} could not be booked (may have just been taken)."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-                booking_room = add_hotel_booking_room(
-                    booking_request_id=booking_request["id"],
-                    room_id=room_id,
-                    room_name=avail_room.get("display_name") or avail_room.get("room_type_name"),
-                    pms_booking_id=pms_booking["id"],
-                    price_per_night=avail_room.get("price_per_night"),
-                    total_price=pms_booking.get("total_cost"),
-                )
-                for employee_id in room["employee_ids"]:
-                    add_hotel_booking_room_employee(
-                        booking_room_id=booking_room["id"],
-                        employee_id=employee_id,
-                    )
-                    add_trip_employee(
-                        trip_id=data["trip_id"],
-                        employee_id=employee_id,
-                        property_id=hotel_id,
-                        room_id=room_id,
-                        check_in=check_in,
-                        check_out=check_out,
-                        pms_booking_id=pms_booking["id"],
-                        status="invited",
-                    )
-
-        rooms = list_hotel_booking_rooms(booking_request["id"])
-        booking_request["rooms"] = rooms
-        booking_request["room_count"] = len(rooms)
-        booking_request["employee_count"] = sum(len(r["employees"]) for r in rooms)
+        except HotelBookingError as exc:
+            return Response({"detail": exc.detail}, status=exc.status_code)
         return Response(
             HotelBookingRequestDetailSerializer(booking_request).data,
             status=status.HTTP_201_CREATED,
@@ -484,15 +336,15 @@ class B2BHotelBookingDetailView(APIView):
     mehmonxona, sanalar, holat, va har bir xona + unga biriktirilgan
     xodimlar ro'yxati.
     """
-    permission_classes = [IsAuthenticated, IsB2BPerformer]
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
 
     @swagger_auto_schema(
-        operation_summary="Get booking request details (performer)",
+        operation_summary="Get company booking request details",
         responses={
             200: HotelBookingRequestDetailSerializer(),
             404: openapi.Response(description="Booking not found."),
         },
-        tags=["B2B / Executer"],
+        tags=["B2B / Hotels"],
     )
     def get(self, request, booking_id):
         company_id = _get_company_id(request)
@@ -501,11 +353,34 @@ class B2BHotelBookingDetailView(APIView):
         booking_request = get_hotel_booking_request(booking_id, company_id)
         if not booking_request:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
-        booking_request = _refresh_booking_request_status(booking_request)
-        rooms = list_hotel_booking_rooms(booking_id)
-        booking_request["rooms"] = rooms
-        booking_request["room_count"] = len(rooms)
-        booking_request["employee_count"] = sum(len(r["employees"]) for r in rooms)
+        booking_request = reconcile_booking_request(booking_request)
+        return Response(HotelBookingRequestDetailSerializer(booking_detail(booking_request)).data)
+
+
+class B2BHotelBookingCancelView(APIView):
+    permission_classes = [IsAuthenticated, IsB2BPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Cancel a grouped hotel booking",
+        operation_description=(
+            "Cancels every active room booking in the request. Only pending or "
+            "confirmed bookings can be cancelled, and only before check-in."
+        ),
+        responses={
+            200: HotelBookingRequestDetailSerializer(),
+            404: openapi.Response(description="Booking not found."),
+            409: openapi.Response(description="Booking can no longer be cancelled."),
+        },
+        tags=["B2B / Hotels"],
+    )
+    def post(self, request, booking_id):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            booking_request = cancel_booking_request(booking_id=booking_id, company_id=company_id)
+        except HotelBookingError as exc:
+            return Response({"detail": exc.detail}, status=exc.status_code)
         return Response(HotelBookingRequestDetailSerializer(booking_request).data)
 
 

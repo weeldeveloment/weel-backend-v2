@@ -249,6 +249,46 @@ def get_employee(employee_id: int, company_id: int | None = None) -> dict[str, A
     return fetch_one(f"SELECT * FROM {B2B_EMPLOYEE_TABLE} WHERE id = %s", [employee_id])
 
 
+def get_active_employee(employee_id: int, company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        SELECT * FROM {B2B_EMPLOYEE_TABLE}
+        WHERE id = %s AND company_id = %s AND is_active = TRUE
+        """,
+        [employee_id, company_id],
+    )
+
+
+def employee_has_overlapping_hotel_booking(
+    employee_id: int,
+    *,
+    check_in: date,
+    check_out: date,
+) -> bool:
+    row = fetch_one(
+        f"""
+        SELECT EXISTS (
+            SELECT 1
+            FROM {B2B_HOTEL_BOOKING_ROOM_EMPLOYEE_TABLE} bre
+            JOIN {B2B_HOTEL_BOOKING_ROOM_TABLE} brm ON brm.id = bre.booking_room_id
+            JOIN {B2B_HOTEL_BOOKING_REQUEST_TABLE} br ON br.id = brm.booking_request_id
+            WHERE bre.employee_id = %s
+              AND br.status IN (%s, %s)
+              AND br.check_in < %s
+              AND br.check_out > %s
+        ) AS has_overlap
+        """,
+        [
+            employee_id,
+            HotelBookingRequestStatus.PENDING,
+            HotelBookingRequestStatus.CONFIRMED,
+            check_out,
+            check_in,
+        ],
+    )
+    return bool(row and row["has_overlap"])
+
+
 def update_employee(employee_id: int, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return None
@@ -345,6 +385,63 @@ def add_trip_employee(*, trip_id: int, employee_id: int, **kwargs: Any) -> dict[
     return fetch_one(
         f"INSERT INTO {B2B_TRIP_EMPLOYEE_TABLE} ({', '.join(cols)}) VALUES ({placeholders}) RETURNING *",
         vals,
+    )
+
+
+def upsert_trip_employee(*, trip_id: int, employee_id: int, **kwargs: Any) -> dict[str, Any] | None:
+    existing = fetch_one(
+        f"""
+        SELECT id FROM {B2B_TRIP_EMPLOYEE_TABLE}
+        WHERE trip_id = %s AND employee_id = %s
+        ORDER BY id DESC LIMIT 1
+        """,
+        [trip_id, employee_id],
+    )
+    if not existing:
+        return add_trip_employee(trip_id=trip_id, employee_id=employee_id, **kwargs)
+
+    updates = {key: value for key, value in kwargs.items() if value is not None}
+    if not updates:
+        return fetch_one(
+            f"SELECT * FROM {B2B_TRIP_EMPLOYEE_TABLE} WHERE id = %s",
+            [existing["id"]],
+        )
+    sets = ", ".join(f"{key} = %s" for key in updates)
+    return fetch_one(
+        f"""
+        UPDATE {B2B_TRIP_EMPLOYEE_TABLE}
+        SET {sets}, updated_at = %s
+        WHERE id = %s
+        RETURNING *
+        """,
+        [*updates.values(), timezone.now(), existing["id"]],
+    )
+
+
+def update_trip_employee_status_by_pms_booking(pms_booking_id: int, status: str) -> None:
+    execute(
+        f"""
+        UPDATE {B2B_TRIP_EMPLOYEE_TABLE}
+        SET status = %s, updated_at = %s
+        WHERE pms_booking_id = %s
+        """,
+        [status, timezone.now(), pms_booking_id],
+    )
+
+
+def update_booking_request_employee_statuses(booking_request_id: int, status: str) -> None:
+    execute(
+        f"""
+        UPDATE {B2B_TRIP_EMPLOYEE_TABLE} te
+        SET status = %s, updated_at = %s
+        WHERE te.pms_booking_id IN (
+            SELECT room.pms_booking_id
+            FROM {B2B_HOTEL_BOOKING_ROOM_TABLE} room
+            WHERE room.booking_request_id = %s
+              AND room.pms_booking_id IS NOT NULL
+        )
+        """,
+        [status, timezone.now(), booking_request_id],
     )
 
 

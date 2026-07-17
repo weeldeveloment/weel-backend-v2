@@ -328,6 +328,22 @@ def get_available_rooms(
     )
 
 
+def lock_hotel_rooms(property_id: int, room_ids: list[int]) -> list[dict[str, Any]]:
+    """Lock selected rooms so availability can be checked and booked atomically."""
+    if not room_ids:
+        return []
+    return fetch_all(
+        """
+        SELECT id, property_id
+        FROM pms_room
+        WHERE property_id = %s AND id = ANY(%s) AND is_active = TRUE
+        ORDER BY id
+        FOR UPDATE
+        """,
+        [property_id, sorted(room_ids)],
+    )
+
+
 def get_room_with_details(room_id: int) -> dict[str, Any] | None:
     return fetch_one(
         """
