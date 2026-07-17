@@ -201,7 +201,7 @@ def create_employee(*, company_id: int, full_name: str, **kwargs: Any) -> dict[s
         "department_id": int, "position": str, "email": str, "phone": str,
         "date_of_birth": lambda v: v, "passport_series": str, "passport_pinfl": str,
         "passport_upload_front": str, "passport_upload_back": str,
-        "photo": str, "individual_limit": lambda v: v, "status": str,
+        "photo": str, "individual_limit": lambda v: v, "status": str, "role": str,
     }
     for key, caster in field_map.items():
         if key in kwargs and kwargs[key] is not None:

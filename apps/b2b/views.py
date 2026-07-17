@@ -720,6 +720,7 @@ class B2BEmployeeListCreateView(APIView):
             openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Lavozimi"),
             openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Xodim uchun individual limit"),
             openapi.Parameter("status", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["available", "on_trip", "blocked"], required=False, description="Xodim holati (default: available)"),
+            openapi.Parameter("role", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["owner", "performer", "employee"], required=False, description="Xodim roli (default: employee)"),
         ],
         responses={
             201: B2BEmployeeSerializer(),
@@ -806,7 +807,7 @@ class B2BEmployeeRetrieveUpdateView(APIView):
         employee = get_employee(employee_id, company_id)
         if not employee:
             return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(status.status.HTTP_204_NO_CONTENT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class BusinessTripListCreateView(APIView):
     permission_classes = [IsAuthenticated]
