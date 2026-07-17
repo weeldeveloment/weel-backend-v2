@@ -68,7 +68,7 @@ from apps.b2b.repository import (
     update_travel_policy,
     update_trip,
 )
-from apps.b2b.models import DepartmentBudgetStatus, HotelBookingRequestStatus
+from apps.b2b.models import DepartmentBudgetStatus, EmployeeRole, HotelBookingRequestStatus
 from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer, IsB2BPerformer
 from apps.b2b.tasks import _send_b2b_lead_telegram_notification
 from apps.property.hotel_repository import _run_in_schema, get_hotel_for_public, resolve_hotel_guid
