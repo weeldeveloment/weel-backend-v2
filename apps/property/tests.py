@@ -22,8 +22,9 @@ from property.apartment_repository import (
 from property.apartment_serializers import ApartmentAdminUpdateSerializer, ApartmentCreateSerializer, ApartmentListSerializer, ApartmentDetailSerializer, _parse_int_maybe
 from property.cottage_serializers import CottageCreateSerializer, CottageListSerializer, CottageDetailSerializer
 from property.cottage_serializers import CottageAdminUpdateSerializer
-from property.hotel_serializers import HotelAdminUpdateSerializer
+from property.hotel_serializers import HotelAdminUpdateSerializer, HotelCardSerializer as PropertyHotelCardSerializer
 from property.hotel_repository import create_admin_hotel
+from hotels.serializers import HotelCardSerializer as PublicHotelCardSerializer
 from property.views import (
     ApartmentPropertyListCreateView,
     CottagePropertyListCreateView,
@@ -255,6 +256,105 @@ class DetailSerializerTests(SimpleTestCase):
         self.assertEqual(data["comment_count"], 3)
         self.assertEqual(data["img"], ["http://testserver/media/test.jpg"])
         self.assertIn("property_room", data)
+
+    def test_property_hotel_card_serializer_returns_title_from_name(self):
+        row = {
+            "id": 1,
+            "guid": "guid-1",
+            "name": "Legacy hotel name",
+            "description_uz": None,
+            "description_ru": None,
+            "description_en": None,
+            "address": "Main street",
+            "img": [],
+            "star_rating": 4,
+            "weel_classification": "comfort",
+            "themes": [],
+            "city": "Tashkent",
+            "country": "UZ",
+            "latitude": "41.3",
+            "longitude": "69.2",
+            "min_price": Decimal("100.00"),
+            "currency": "UZS",
+            "timezone": "Asia/Tashkent",
+            "rating": Decimal("4.50"),
+            "review_count": 2,
+            "booking_count": 5,
+            "available_rooms": 3,
+            "amenities": [],
+            "legal_info": {},
+            "check_in_time": None,
+            "check_out_time": None,
+            "cancellation_policy": None,
+            "policies": {},
+            "is_favorite": False,
+            "is_verified": True,
+            "is_active": True,
+            "is_testing": False,
+            "is_archived": False,
+            "is_recommended": False,
+            "verification_status": "waiting",
+            "tenant_schema": "tenant1",
+            "organization": {},
+            "partner_user": None,
+            "property_detail": {},
+            "created_at": None,
+            "updated_at": None,
+        }
+        data = PropertyHotelCardSerializer(row).data
+
+        self.assertEqual(data["title"], "Legacy hotel name")
+        self.assertNotIn("name", data)
+
+    def test_public_hotel_card_serializer_returns_title_from_name(self):
+        row = {
+            "id": 1,
+            "guid": "guid-1",
+            "name": "Legacy hotel name",
+            "city": "Tashkent",
+            "country": "UZ",
+            "description_uz": None,
+            "description_ru": None,
+            "description_en": None,
+            "star_rating": 4,
+            "weel_classification": "comfort",
+            "is_recommended": False,
+            "is_verified": True,
+            "is_active": True,
+            "is_testing": False,
+            "is_archived": False,
+            "verification_status": "waiting",
+            "themes": [],
+            "amenities": [],
+            "legal_info": {},
+            "booking_count": 5,
+            "rating": Decimal("4.50"),
+            "review_count": 2,
+            "available_rooms": 3,
+            "total_estimated_price": None,
+            "matching_rooms": [],
+            "check_in_time": None,
+            "check_out_time": None,
+            "cancellation_policy": None,
+            "policies": {},
+            "currency": "UZS",
+            "timezone": "Asia/Tashkent",
+            "latitude": 41.3,
+            "longitude": 69.2,
+            "min_price": Decimal("100.00"),
+            "img": [],
+            "is_favorite": False,
+            "organization": {},
+            "partner_user": None,
+            "property_detail": {},
+            "tenant_schema": "tenant1",
+            "created_at": None,
+            "updated_at": None,
+        }
+        data = PublicHotelCardSerializer(row).data
+
+        self.assertEqual(data["title"], "Legacy hotel name")
+        self.assertNotIn("name", data)
 
     @patch("property.apartment_serializers.default_storage.url", return_value="/media/test.jpg")
     def test_apartment_detail_defaults_uzbek_description(self, _mock_url):

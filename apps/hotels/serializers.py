@@ -109,7 +109,7 @@ class HotelCardSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     guid = serializers.CharField(allow_null=True, required=False)
     organization_name = serializers.CharField(allow_null=True, required=False)
-    name = serializers.CharField()
+    title = serializers.CharField()
     city = serializers.CharField(allow_null=True)
     country = serializers.CharField(allow_null=True, required=False)
     description = serializers.CharField(allow_null=True)
@@ -151,29 +151,11 @@ class HotelCardSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(allow_null=True, required=False)
     updated_at = serializers.DateTimeField(allow_null=True, required=False)
 
-
-class HotelDetailSerializer(HotelCardSerializer):
-    check_in_time = serializers.CharField(allow_null=True, required=False)
-    check_out_time = serializers.CharField(allow_null=True, required=False)
-    country = serializers.CharField(allow_null=True, required=False)
-    currency = serializers.CharField(allow_null=True, required=False)
-    is_verified = serializers.BooleanField(default=False)
-    cancellation_policy = serializers.CharField(allow_null=True, required=False)
-    timezone = serializers.CharField(allow_null=True, required=False)
-    policies = serializers.DictField(default=dict)
-    amenities = serializers.ListField(child=serializers.CharField(), default=list)
-    is_favorite = serializers.BooleanField(default=False)
-    created_at = serializers.DateTimeField(allow_null=True, required=False)
-    room_types = serializers.ListField(child=serializers.DictField(), default=list)
-    reviews = serializers.ListField(child=serializers.DictField(), default=list)
-
-    class Meta:
-        ref_name = "HotelDetail"
-
     def to_representation(self, instance):
         request = self.context.get("request")
         row = dict(instance)
         lang = _preferred_language(request)
+        row["title"] = row.get("title") or row.get("name") or ""
         row["description"] = (
             row.get(f"description_{lang}")
             or row.get("description_uz")
@@ -225,6 +207,43 @@ class HotelDetailSerializer(HotelCardSerializer):
         room = dict(room)
         room["img"] = _build_media_url(request, room.get("img") or [])
         return room
+
+
+class HotelDetailSerializer(HotelCardSerializer):
+    check_in_time = serializers.CharField(allow_null=True, required=False)
+    check_out_time = serializers.CharField(allow_null=True, required=False)
+    country = serializers.CharField(allow_null=True, required=False)
+    currency = serializers.CharField(allow_null=True, required=False)
+    is_verified = serializers.BooleanField(default=False)
+    cancellation_policy = serializers.CharField(allow_null=True, required=False)
+    timezone = serializers.CharField(allow_null=True, required=False)
+    policies = serializers.DictField(default=dict)
+    amenities = serializers.ListField(child=serializers.CharField(), default=list)
+    is_favorite = serializers.BooleanField(default=False)
+    created_at = serializers.DateTimeField(allow_null=True, required=False)
+    room_types = serializers.ListField(child=serializers.DictField(), default=list)
+    reviews = serializers.ListField(child=serializers.DictField(), default=list)
+
+    class Meta:
+        ref_name = "HotelDetail"
+
+    def to_representation(self, instance):
+        request = self.context.get("request")
+        row = dict(instance)
+        row["title"] = row.get("title") or row.get("name") or ""
+        row["description"] = (
+            row.get("description")
+            or row.get("description_uz")
+            or row.get("description_en")
+            or row.get("description_ru")
+        )
+        room_types = row.get("room_types") or []
+        if room_types:
+            room_types = [
+                self._build_room_summary(r, request) for r in room_types
+            ]
+        row["room_types"] = room_types
+        return super().to_representation(row)
 
 
 class RoomAvailabilitySerializer(serializers.Serializer):

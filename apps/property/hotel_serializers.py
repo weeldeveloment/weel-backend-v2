@@ -94,7 +94,7 @@ class RoomTypeSummarySerializer(serializers.Serializer):
 class HotelCardSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     guid = serializers.CharField(read_only=True)
-    name = serializers.CharField(read_only=True)
+    title = serializers.CharField(read_only=True)
     description = serializers.CharField(allow_null=True, read_only=True)
     description_uz = serializers.CharField(allow_null=True, read_only=True)
     description_ru = serializers.CharField(allow_null=True, read_only=True)
@@ -142,7 +142,7 @@ class HotelCardSerializer(serializers.Serializer):
         request = self.context.get("request")
         row = dict(instance)
         lang = _preferred_language(request)
-        row["name"] = row.get("name") or ""
+        row["title"] = row.get("title") or row.get("name") or ""
         row["description"] = (
             row.get(f"description_{lang}")
             or row.get("description_uz")
