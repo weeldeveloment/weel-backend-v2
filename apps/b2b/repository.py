@@ -259,6 +259,19 @@ def update_employee(employee_id: int, **kwargs: Any) -> dict[str, Any] | None:
         values,
     )
 
+def delete_employee(employee_id: int, company_id: int | None = None) -> dict[str, Any] | None: # noqa
+    if not company_id:
+        return Response("Comany Not Found", status=404)
+
+    if not employee_id:
+        return Response("Employee Not Found", status=404)
+
+    return fetch_one(
+        f"DELETE FROM {B2b_EMPLOYEE_TABLE} WHERE id = %s company_id = %s RETURNING *", # noqa
+        [employee_id, company_id],
+    )
+
+
 
 # ─── Business Trips ───────────────────────────────────────────────────────────
 

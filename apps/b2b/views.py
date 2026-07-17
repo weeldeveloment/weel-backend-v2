@@ -816,6 +816,13 @@ class B2BEmployeeRetrieveUpdateView(APIView):
             return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(B2BEmployeeSerializer(employee).data)
 
+    @swagger_auto_schema(response={204: "No Content"})
+    def delete(self, request, employee_id):
+        company_id = _get_company_id(request)
+        employee = get_employee(employee_id, company_id)
+        if not employee:
+            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status.status.HTTP_204_NO_CONTENT)
 
 class BusinessTripListCreateView(APIView):
     permission_classes = [IsAuthenticated]
