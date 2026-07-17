@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from typing import Any
 
@@ -188,6 +189,15 @@ class HotelCardSerializer(serializers.Serializer):
         row["is_recommended"] = bool(row.get("is_recommended", False))
         row["is_favorite"] = str(row.get("guid")) in _favorite_guid_set(self.context)
         row["themes"] = row.get("themes") or []
+        raw_legal_info = row.get("legal_info")
+        if isinstance(raw_legal_info, str):
+            try:
+                raw_legal_info = json.loads(raw_legal_info)
+            except (TypeError, ValueError):
+                raw_legal_info = {}
+        row["legal_info"] = (
+            raw_legal_info if isinstance(raw_legal_info, dict) else {}
+        )
         row["weel_classification"] = row.get("weel_classification")
         row["star_rating"] = row.get("star_rating")
         row["country"] = row.get("country")

@@ -103,8 +103,8 @@ class HotelDetailView(APIView):
         manual_parameters=[_GUID_PARAM],
         responses={200: HotelDetailSerializer()},
     )
-    def get(self, request, guid):
-        resolved = _resolve_hotel(guid)
+    def get(self, request, guid=None, hotel_guid=None):
+        resolved = _resolve_hotel(hotel_guid or guid)
         if not resolved:
             return Response({"detail": "Invalid GUID."}, status=status.HTTP_400_BAD_REQUEST)
 

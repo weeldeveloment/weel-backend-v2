@@ -1,6 +1,8 @@
+from datetime import date
 from unittest.mock import patch
 
 from apps.hotels.repository import (
+    calculate_stay_price,
     find_client_hotel_booking_across_schemas,
     find_hotel_booking_across_schemas,
     list_client_hotel_bookings_across_schemas,
@@ -75,3 +77,17 @@ def test_hotel_booking_task_uses_explicit_tenant_schema():
     assert resolved == ("tenant_two", {"id": 4, "tenant_schema": "tenant_two"})
     list_orgs.assert_not_called()
     assert run_in_schema.call_args.args[0] == "tenant_two"
+
+
+def test_stay_price_rejects_room_without_price():
+    with patch(
+        "apps.hotels.repository.fetch_one",
+        return_value={"base_price": None, "currency": "USD"},
+    ):
+        result = calculate_stay_price(
+            2,
+            check_in=date(2026, 7, 17),
+            check_out=date(2026, 7, 21),
+        )
+
+    assert result is None

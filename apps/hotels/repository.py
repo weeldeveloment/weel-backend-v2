@@ -301,7 +301,7 @@ def get_available_rooms(
             r.room_type_name, r.room_type_preset AS preset,
             r.meal_plan,
             r.area AS area_sqm,
-            COALESCE(r.base_price, 0) AS price_per_night,
+            r.base_price AS price_per_night,
             COALESCE(r.currency, 'USD') AS currency,
             COALESCE(r.photos, '{{}}'::text[]) AS images,
             r.availability,
@@ -309,6 +309,8 @@ def get_available_rooms(
         FROM pms_room r
         WHERE r.property_id = %s
           AND r.is_active = TRUE
+          AND r.base_price IS NOT NULL
+          AND r.base_price > 0
           AND r.capacity >= %s
           AND NOT EXISTS (
               SELECT 1 FROM pms_booking b
@@ -379,9 +381,11 @@ def calculate_stay_price(
 
     raw_rate = room.get("base_price")
     if raw_rate is None:
-        raw_rate = 0
+        return None
 
     ppn = Decimal(str(raw_rate))
+    if ppn <= 0:
+        return None
     base_price = ppn * nights
     hold_amount = (base_price * Decimal("0.30")).quantize(Decimal("0.01"))
     return {
@@ -461,16 +465,7 @@ def create_hotel_booking(
 
     pricing = calculate_stay_price(room_id, check_in, check_out)
     if not pricing:
-        ppn = Decimal("100000")
-        base_price = ppn * nights
-        hold_amount = (base_price * Decimal("0.30")).quantize(Decimal("0.01"))
-        pricing = {
-            "nights": nights,
-            "price_per_night": ppn,
-            "total_price": base_price,
-            "hold_amount": hold_amount,
-            "remaining_on_arrival": base_price - hold_amount,
-        }
+        return None
 
     return _insert_hotel_booking_with_retry(
         property_id=property_id,

@@ -473,9 +473,14 @@ def fetch_room_summaries(schema_name: str, property_id: int) -> list[dict[str, A
                     COALESCE(r.beds, '[]'::jsonb) AS beds,
                     COALESCE(r.photos, ARRAY[]::text[]) AS photos,
                     COALESCE(r.amenities, ARRAY[]::text[]) AS amenities,
-                    COALESCE(r.base_price, 0) AS price_from
+                    r.base_price AS price_from,
+                    r.base_price AS price_per_night,
+                    COALESCE(r.currency, 'USD') AS currency
                 FROM pms_room r
-                WHERE r.property_id = %s AND r.is_active = TRUE
+                WHERE r.property_id = %s
+                  AND r.is_active = TRUE
+                  AND r.base_price IS NOT NULL
+                  AND r.base_price > 0
                 ORDER BY r.room_number ASC
                 """,
                 [property_id],
@@ -499,9 +504,14 @@ def fetch_room_summaries_raw(property_id: int) -> list[dict[str, Any]]:
                 COALESCE(r.beds, '[]'::jsonb) AS beds,
                 COALESCE(r.photos, ARRAY[]::text[]) AS photos,
                 COALESCE(r.amenities, ARRAY[]::text[]) AS amenities,
-                COALESCE(r.base_price, 0) AS price_from
+                r.base_price AS price_from,
+                r.base_price AS price_per_night,
+                COALESCE(r.currency, 'USD') AS currency
             FROM pms_room r
-            WHERE r.property_id = %s AND r.is_active = TRUE
+            WHERE r.property_id = %s
+              AND r.is_active = TRUE
+              AND r.base_price IS NOT NULL
+              AND r.base_price > 0
             ORDER BY r.room_number ASC
             """,
             [property_id],
