@@ -40,6 +40,212 @@ def _check_room_availability(
     return row is not None
 
 
+def _split_filter_values(values: list[str] | tuple[str, ...] | str | None) -> list[str]:
+    if values is None:
+        return []
+    if isinstance(values, str):
+        raw_items = values.split(",")
+    else:
+        raw_items = list(values)
+    return [str(item).strip() for item in raw_items if str(item).strip()]
+
+
+def _has_rate_plan_tables() -> bool:
+    row = fetch_one(
+        """
+        SELECT (
+            to_regclass('pms_rate_plan') IS NOT NULL
+            AND to_regclass('pms_room_type_rate_plan') IS NOT NULL
+        ) AS exists_flag
+        """
+    )
+    return bool(row and row["exists_flag"])
+
+
+def _room_filter_clause(
+    *,
+    room_types: list[str] | None = None,
+    room_type_presets: list[str] | None = None,
+    rate_plans: list[str] | None = None,
+    meal_plans: list[str] | None = None,
+    min_capacity: int | None = None,
+    max_capacity: int | None = None,
+    min_price: Decimal | None = None,
+    max_price: Decimal | None = None,
+) -> tuple[list[str], list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    room_types = room_types or []
+    room_type_presets = room_type_presets or []
+    rate_plans = rate_plans or []
+    meal_plans = meal_plans or []
+
+    if room_types:
+        clauses.append("r.room_type_name = ANY(%s::text[])")
+        params.append(room_types)
+    if room_type_presets:
+        clauses.append("r.room_type_preset = ANY(%s::text[])")
+        params.append(room_type_presets)
+    if meal_plans:
+        clauses.append("r.meal_plan = ANY(%s::text[])")
+        params.append(meal_plans)
+    if min_capacity is not None:
+        clauses.append("r.capacity >= %s")
+        params.append(min_capacity)
+    if max_capacity is not None:
+        clauses.append("r.capacity <= %s")
+        params.append(max_capacity)
+    if min_price is not None:
+        clauses.append("COALESCE(r.base_price, 0) >= %s")
+        params.append(min_price)
+    if max_price is not None:
+        clauses.append("COALESCE(r.base_price, 0) <= %s")
+        params.append(max_price)
+    if rate_plans:
+        if _has_rate_plan_tables():
+            clauses.append(
+                """
+                (
+                    r.room_type_name = ANY(%s::text[])
+                    OR r.room_type_preset = ANY(%s::text[])
+                    OR EXISTS (
+                        SELECT 1
+                        FROM pms_room_type_rate_plan rtrp
+                        JOIN pms_rate_plan rp ON rp.id = rtrp.rate_plan_id
+                        WHERE rtrp.room_type_id = r.room_type_id
+                          AND rp.code = ANY(%s::text[])
+                          AND rp.is_active = TRUE
+                    )
+                )
+                """
+            )
+            params.extend([rate_plans, rate_plans, rate_plans])
+        else:
+            clauses.append(
+                "(r.room_type_name = ANY(%s::text[]) OR r.room_type_preset = ANY(%s::text[]) OR r.meal_plan = ANY(%s::text[]))"
+            )
+            params.extend([rate_plans, rate_plans, rate_plans])
+
+    return clauses, params
+
+
+def _room_sellability_reason(row: dict[str, Any]) -> str | None:
+    availability = str(row.get("availability") or "").lower()
+    condition = str(row.get("condition") or "").lower()
+    if availability == "blocked":
+        return "blocked"
+    if availability == "occupied":
+        return "occupied"
+    if condition in {"maintenance", "inspection"}:
+        return condition
+    return None
+
+
+def _calendar_status(row: dict[str, Any]) -> tuple[str, str | None]:
+    booking_status = row.get("booking_status")
+    slot_status = str(row.get("slot_status") or "").lower()
+    availability = str(row.get("availability") or "").lower()
+    condition = str(row.get("condition") or "").lower()
+
+    if booking_status and booking_status not in {"cancelled", "checked_out", "no_show"}:
+        return "occupied", "booking"
+    if slot_status in {"held", "blocked", "occupied"}:
+        return slot_status, slot_status
+    if availability == "occupied":
+        return "occupied", "room_occupied"
+    if availability == "blocked":
+        return "blocked", "room_blocked"
+    if condition in {"maintenance", "inspection"}:
+        return "blocked", condition
+    return "available", None
+
+
+def _best_room_allocation(
+    rooms: list[dict[str, Any]],
+    guests: int,
+    *,
+    nights: int = 1,
+    budget_max: Decimal | None = None,
+) -> tuple[list[dict[str, Any]], Decimal | None]:
+    """Pick the smallest-capacity room combination that can host ``guests``.
+
+    Tie-break order: smallest total capacity, then fewest rooms, then lowest
+    total price, then stable room id order.
+    """
+    if guests <= 0 or not rooms:
+        return [], None
+
+    nights = max(int(nights or 1), 1)
+
+    normalized: list[tuple[int, Decimal, int, dict[str, Any]]] = []
+    for room in rooms:
+        try:
+            capacity = int(room.get("capacity_adults") or room.get("capacity") or 0)
+        except (TypeError, ValueError):
+            capacity = 0
+        if capacity <= 0:
+            continue
+        try:
+            price = Decimal(str(room.get("price_per_night") or 0))
+        except Exception:
+            price = Decimal("0")
+        normalized.append((capacity, price, int(room.get("id") or 0), dict(room)))
+
+    if not normalized:
+        return [], None
+
+    normalized.sort(key=lambda item: (-item[0], item[1], item[2]))
+    suffix_capacity = [0] * (len(normalized) + 1)
+    for idx in range(len(normalized) - 1, -1, -1):
+        suffix_capacity[idx] = suffix_capacity[idx + 1] + normalized[idx][0]
+
+    best_combo: list[dict[str, Any]] | None = None
+    best_key: tuple[int, int, Decimal, tuple[int, ...]] | None = None
+
+    def _maybe_store(selected: list[tuple[int, Decimal, int, dict[str, Any]]], total_capacity: int, total_price: Decimal) -> None:
+        nonlocal best_combo, best_key
+        if budget_max is not None and total_price > budget_max:
+            return
+        key = (
+            total_capacity,
+            len(selected),
+            total_price,
+            tuple(item[2] for item in selected),
+        )
+        if best_key is None or key < best_key:
+            best_key = key
+            best_combo = [dict(item[3]) for item in selected]
+
+    def _dfs(start: int, selected: list[tuple[int, Decimal, int, dict[str, Any]]], total_capacity: int, total_price: Decimal) -> None:
+        if budget_max is not None and total_price > budget_max:
+            return
+        if total_capacity >= guests:
+            _maybe_store(selected, total_capacity, total_price)
+            return
+        if start >= len(normalized):
+            return
+        if total_capacity + suffix_capacity[start] < guests:
+            return
+
+        for idx in range(start, len(normalized)):
+            capacity, price, room_id, room = normalized[idx]
+            room_total_price = price * Decimal(nights)
+            selected_room = dict(room)
+            selected_room["nights"] = nights
+            selected_room["total_price"] = room_total_price
+            selected.append((capacity, room_total_price, room_id, selected_room))
+            _dfs(idx + 1, selected, total_capacity + capacity, total_price + room_total_price)
+            selected.pop()
+
+    _dfs(0, [], 0, Decimal("0"))
+    if not best_combo:
+        return [], None
+    best_combo.sort(key=lambda row: (str(row.get("room_number") or ""), int(row.get("id") or 0)))
+    total_price = sum((Decimal(str(room.get("total_price") or 0)) for room in best_combo), Decimal("0"))
+    return best_combo, total_price
+
+
 def get_bookings_status(booking_ids: list[int]) -> list[dict[str, Any]]:
     """Fetch just id+status for a set of ``pms_booking`` rows.
 
@@ -61,11 +267,32 @@ def get_available_rooms(
     check_in: date,
     check_out: date,
     guests: int = 1,
+    room_types: list[str] | None = None,
+    room_type_presets: list[str] | None = None,
+    rate_plans: list[str] | None = None,
+    meal_plans: list[str] | None = None,
+    min_capacity: int | None = None,
+    max_capacity: int | None = None,
+    min_price: Decimal | None = None,
+    max_price: Decimal | None = None,
 ) -> list[dict[str, Any]]:
+    filter_clauses, filter_params = _room_filter_clause(
+        room_types=room_types,
+        room_type_presets=room_type_presets,
+        rate_plans=rate_plans,
+        meal_plans=meal_plans,
+        min_capacity=min_capacity if min_capacity is not None else guests,
+        max_capacity=max_capacity,
+        min_price=min_price,
+        max_price=max_price,
+    )
+    extra_where = ""
+    if filter_clauses:
+        extra_where = " AND " + " AND ".join(filter_clauses)
     return fetch_all(
-        """
+        f"""
         SELECT
-            r.id, r.room_number, r.floor, r.display_name,
+            r.id, r.room_number, r.floor, r.display_name, r.room_type_id,
             r.bedroom_count, r.beds, r.amenities,
             r.capacity AS capacity_adults,
             r.room_type_name, r.room_type_preset AS preset,
@@ -73,7 +300,9 @@ def get_available_rooms(
             r.area AS area_sqm,
             COALESCE(r.base_price, 0) AS price_per_night,
             COALESCE(r.currency, 'USD') AS currency,
-            COALESCE(r.photos, '{}'::text[]) AS images
+            COALESCE(r.photos, '{{}}'::text[]) AS images,
+            r.availability,
+            r.condition
         FROM pms_room r
         WHERE r.property_id = %s
           AND r.is_active = TRUE
@@ -92,9 +321,10 @@ def get_available_rooms(
                 AND cs.date < %s
                 AND cs.status != 'available'
           )
+          {extra_where}
         ORDER BY r.room_number ASC
         """,
-        [property_id, guests, check_out, check_in, check_in, check_out],
+        [property_id, guests, check_out, check_in, check_in, check_out, *filter_params],
     )
 
 
@@ -122,7 +352,7 @@ def calculate_stay_price(
         return None
 
     room = fetch_one(
-        "SELECT base_price FROM pms_room WHERE id = %s AND is_active = TRUE",
+        "SELECT base_price, currency FROM pms_room WHERE id = %s AND is_active = TRUE",
         [room_id],
     )
     if not room:
@@ -141,6 +371,7 @@ def calculate_stay_price(
         "total_price": base_price,
         "hold_amount": hold_amount,
         "remaining_on_arrival": base_price - hold_amount,
+        "currency": room.get("currency") or "USD",
     }
 
 
@@ -202,6 +433,8 @@ def create_hotel_booking(
 ) -> dict[str, Any] | None:
     nights = (check_out - check_in).days
     if nights <= 0:
+        return None
+    if adults < 1 or children < 0:
         return None
 
     if not _check_room_availability(room_id, check_in, check_out):
@@ -286,7 +519,7 @@ def list_client_hotel_bookings(
             b.property_id, b.room_id,
             p.name AS hotel_name, p.city AS hotel_city, p.star_rating AS hotel_star_rating,
             r.room_number, r.display_name AS room_name, r.floor,
-            r.room_type_name, r.room_type_preset,
+            r.room_type_name, r.room_type_preset, r.room_type_id,
             COALESCE(r.base_price, 0) AS room_price_per_night
         FROM pms_booking b
         JOIN pms_property p ON p.id = b.property_id
@@ -317,9 +550,9 @@ def get_client_hotel_booking(
             COALESCE(r.base_price, 0) AS room_price_per_night,
             r.bedroom_count, r.beds, r.amenities,
             r.capacity,
-            r.room_type_name, r.room_type_preset,
+            r.room_type_name, r.room_type_preset, r.room_type_id,
             r.meal_plan,
-            COALESCE(r.photos, '{}'::text[]) AS photos
+            COALESCE(r.photos, '{{}}'::text[]) AS photos
         FROM pms_booking b
         JOIN pms_property p ON p.id = b.property_id
         JOIN pms_room r ON r.id = b.room_id
@@ -383,6 +616,14 @@ def _search_hotels_in_schema(
     themes: list[str] | None,
     price_min: Decimal | None,
     price_max: Decimal | None,
+    budget_max: Decimal | None,
+    room_types: list[str] | None,
+    room_type_presets: list[str] | None,
+    rate_plans: list[str] | None,
+    meal_plans: list[str] | None,
+    min_capacity: int | None,
+    max_capacity: int | None,
+    allow_multi_room: bool = False,
 ) -> list[dict[str, Any]]:
 
     conditions = ["p.is_active = TRUE"]
@@ -408,6 +649,8 @@ def _search_hotels_in_schema(
     # (non-cancelled/completed) booking are excluded, and hotels left with
     # zero matching rooms are dropped entirely — this is the "kalendar +
     # necha kishi" (calendar + guest count) → only-available-hotels filter.
+    capacity_requirement = 1 if allow_multi_room else (min_capacity or guests)
+
     if check_in and check_out:
         avail_join = """
             LEFT JOIN LATERAL (
@@ -423,9 +666,25 @@ def _search_hotels_in_schema(
                         AND b.check_in < %s
                         AND b.check_out > %s
                   )
+                  {room_filter_sql}
             ) pricing ON TRUE
         """
-        avail_params = [guests, check_out, check_in]
+        room_filter_sql = ""
+        room_filter_params: list[Any] = []
+        filter_clauses, filter_params = _room_filter_clause(
+            room_types=room_types,
+            room_type_presets=room_type_presets,
+            rate_plans=rate_plans,
+            meal_plans=meal_plans,
+            min_capacity=capacity_requirement,
+            max_capacity=max_capacity,
+            min_price=None,
+            max_price=None,
+        )
+        if filter_clauses:
+            room_filter_sql = " AND " + " AND ".join(filter_clauses)
+            room_filter_params = filter_params
+        avail_params = [capacity_requirement, check_out, check_in, *room_filter_params]
         conditions.append("COALESCE(pricing.available_rooms, 0) > 0")
     else:
         avail_join = """
@@ -433,9 +692,25 @@ def _search_hotels_in_schema(
                 SELECT COALESCE(MIN(r.base_price), 0) AS min_price, COUNT(*) AS available_rooms
                 FROM pms_room r
                 WHERE r.property_id = p.id AND r.is_active = TRUE AND r.capacity >= %s
+                  {room_filter_sql}
             ) pricing ON TRUE
         """
-        avail_params = [guests]
+        room_filter_sql = ""
+        room_filter_params = []
+        filter_clauses, filter_params = _room_filter_clause(
+            room_types=room_types,
+            room_type_presets=room_type_presets,
+            rate_plans=rate_plans,
+            meal_plans=meal_plans,
+            min_capacity=capacity_requirement,
+            max_capacity=max_capacity,
+            min_price=None,
+            max_price=None,
+        )
+        if filter_clauses:
+            room_filter_sql = " AND " + " AND ".join(filter_clauses)
+            room_filter_params = filter_params
+        avail_params = [capacity_requirement, *room_filter_params]
 
     if price_min is not None:
         conditions.append("pricing.min_price >= %s")
@@ -499,7 +774,7 @@ def _search_hotels_in_schema(
                 WHERE rv.property_id = p.id AND rv.is_complained = FALSE
             ) AS review_count
         FROM pms_property p
-        {avail_join}
+        {avail_join.format(room_filter_sql=room_filter_sql)}
         {where}
     """
     all_params = avail_params + params
@@ -520,7 +795,45 @@ def _search_hotels_in_schema(
                 row["legal_info"] = {}
         elif not isinstance(raw_legal, dict):
             row["legal_info"] = {}
-    return rows
+
+    if not allow_multi_room:
+        return rows
+
+    filtered_rows: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            candidate_rooms = get_available_rooms(
+                int(row["id"]),
+                check_in=check_in or date.today(),
+                check_out=check_out or (check_in or date.today()) + timedelta(days=30),
+                guests=1,
+                room_types=room_types,
+                room_type_presets=room_type_presets,
+                rate_plans=rate_plans,
+                meal_plans=meal_plans,
+                min_capacity=1,
+                max_capacity=max_capacity,
+                min_price=price_min,
+                max_price=price_max,
+            )
+        except Exception:
+            continue
+        search_check_in = check_in or date.today()
+        search_check_out = check_out or (search_check_in + timedelta(days=30))
+        nights = max((search_check_out - search_check_in).days, 1)
+        matching_rooms, total_price = _best_room_allocation(
+            candidate_rooms,
+            guests,
+            nights=nights,
+            budget_max=budget_max,
+        )
+        if not matching_rooms:
+            continue
+        row["matching_rooms"] = matching_rooms
+        row["total_estimated_price"] = total_price
+        row["available_rooms"] = len(candidate_rooms)
+        filtered_rows.append(row)
+    return filtered_rows
 
 
 def _collect_hotel_rows(
@@ -535,9 +848,17 @@ def _collect_hotel_rows(
     themes: list[str] | None = None,
     price_min: Decimal | None = None,
     price_max: Decimal | None = None,
+    budget_max: Decimal | None = None,
+    room_types: list[str] | None = None,
+    room_type_presets: list[str] | None = None,
+    rate_plans: list[str] | None = None,
+    meal_plans: list[str] | None = None,
+    min_capacity: int | None = None,
+    max_capacity: int | None = None,
     lat: float | None = None,
     lon: float | None = None,
     radius_km: float = 10.0,
+    allow_multi_room: bool = False,
 ) -> list[dict[str, Any]]:
     from apps.property.hotel_repository import _run_in_schema, list_hotel_organizations, _haversine_km
 
@@ -552,7 +873,11 @@ def _collect_hotel_rows(
                     city=city, check_in=check_in, check_out=check_out, guests=guests,
                     star_rating=star_rating, weel_classification=weel_classification,
                     is_recommended=is_recommended, themes=themes,
-                    price_min=price_min, price_max=price_max,
+                    price_min=price_min, price_max=price_max, budget_max=budget_max,
+                    room_types=room_types, room_type_presets=room_type_presets,
+                    rate_plans=rate_plans, meal_plans=meal_plans,
+                    min_capacity=min_capacity, max_capacity=max_capacity,
+                    allow_multi_room=allow_multi_room,
                 ),
             )
         except Exception:
@@ -604,19 +929,31 @@ def search_hotels(
     themes: list[str] | None = None,
     price_min: Decimal | None = None,
     price_max: Decimal | None = None,
+    budget_max: Decimal | None = None,
+    room_types: list[str] | None = None,
+    room_type_presets: list[str] | None = None,
+    rate_plans: list[str] | None = None,
+    meal_plans: list[str] | None = None,
+    min_capacity: int | None = None,
+    max_capacity: int | None = None,
     lat: float | None = None,
     lon: float | None = None,
     radius_km: float = 10.0,
     sort_by: str = "popular",
     limit: int = 20,
     offset: int = 0,
+    allow_multi_room: bool = False,
 ) -> list[dict[str, Any]]:
     rows = _collect_hotel_rows(
         city=city, check_in=check_in, check_out=check_out, guests=guests,
         star_rating=star_rating, weel_classification=weel_classification,
         is_recommended=is_recommended, themes=themes,
-        price_min=price_min, price_max=price_max,
+        price_min=price_min, price_max=price_max, budget_max=budget_max,
+        room_types=room_types, room_type_presets=room_type_presets,
+        rate_plans=rate_plans, meal_plans=meal_plans,
+        min_capacity=min_capacity, max_capacity=max_capacity,
         lat=lat, lon=lon, radius_km=radius_km,
+        allow_multi_room=allow_multi_room,
     )
     rows.sort(key=_SORT_KEYS.get(sort_by, _SORT_KEYS["popular"]))
     return rows[offset : offset + limit]
@@ -634,16 +971,28 @@ def count_hotels(
     themes: list[str] | None = None,
     price_min: Decimal | None = None,
     price_max: Decimal | None = None,
+    budget_max: Decimal | None = None,
+    room_types: list[str] | None = None,
+    room_type_presets: list[str] | None = None,
+    rate_plans: list[str] | None = None,
+    meal_plans: list[str] | None = None,
+    min_capacity: int | None = None,
+    max_capacity: int | None = None,
     lat: float | None = None,
     lon: float | None = None,
     radius_km: float = 10.0,
+    allow_multi_room: bool = False,
 ) -> int:
     return len(_collect_hotel_rows(
         city=city, check_in=check_in, check_out=check_out, guests=guests,
         star_rating=star_rating, weel_classification=weel_classification,
         is_recommended=is_recommended, themes=themes,
-        price_min=price_min, price_max=price_max,
+        price_min=price_min, price_max=price_max, budget_max=budget_max,
+        room_types=room_types, room_type_presets=room_type_presets,
+        rate_plans=rate_plans, meal_plans=meal_plans,
+        min_capacity=min_capacity, max_capacity=max_capacity,
         lat=lat, lon=lon, radius_km=radius_km,
+        allow_multi_room=allow_multi_room,
     ))
 
 
@@ -723,23 +1072,77 @@ def get_hotel_calendar(
     *,
     from_date: date,
     to_date: date,
+    room_types: list[str] | None = None,
+    room_type_presets: list[str] | None = None,
+    include_summary: bool = False,
 ) -> list[dict[str, Any]]:
-    return fetch_all(
-        """
+    filter_clauses, filter_params = _room_filter_clause(
+        room_types=room_types,
+        room_type_presets=room_type_presets,
+    )
+    room_where = ""
+    if filter_clauses:
+        room_where = " AND " + " AND ".join(filter_clauses)
+    rows = fetch_all(
+        f"""
         SELECT r.id AS room_id, r.display_name AS room_name,
+               r.room_type_id, r.room_type_name, r.room_type_preset,
+               r.capacity, COALESCE(r.base_price, 0) AS price_per_night,
                d.date::date AS date,
-               CASE WHEN b.id IS NOT NULL THEN 'booked' ELSE 'available' END AS status
+               CASE
+                   WHEN b.id IS NOT NULL THEN 'occupied'
+                   WHEN cs.status IS NOT NULL THEN cs.status
+                   WHEN r.availability = 'blocked' THEN 'blocked'
+                   WHEN r.availability = 'occupied' THEN 'occupied'
+                   WHEN r.condition IN ('maintenance', 'inspection') THEN 'blocked'
+                   ELSE 'available'
+               END AS status,
+               CASE
+                   WHEN b.id IS NOT NULL THEN 'booking'
+                   WHEN cs.status IS NOT NULL THEN cs.status
+                   WHEN r.availability = 'blocked' THEN 'room_blocked'
+                   WHEN r.availability = 'occupied' THEN 'room_occupied'
+                   WHEN r.condition IN ('maintenance', 'inspection') THEN r.condition
+                   ELSE NULL
+               END AS status_reason
         FROM pms_room r
         CROSS JOIN LATERAL (
             SELECT generate_series(%s::date, %s::date, '1 day'::interval)::date AS date
         ) d
+        LEFT JOIN pms_calendar_slot cs
+            ON cs.room_id = r.id
+           AND cs.date = d.date
         LEFT JOIN pms_booking b
             ON b.room_id = r.id
             AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
             AND b.check_in < d.date + 1
             AND b.check_out > d.date
         WHERE r.property_id = %s AND r.is_active = TRUE
+          {room_where}
         ORDER BY r.id, d.date
         """,
-        [from_date, to_date, property_id],
+        [from_date, to_date, property_id, *filter_params],
     )
+    if not include_summary:
+        return rows
+
+    summary: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        dt = row["date"].isoformat() if hasattr(row["date"], "isoformat") else str(row["date"])
+        bucket = summary.setdefault(
+            dt,
+            {"date": dt, "available": 0, "occupied": 0, "blocked": 0, "held": 0, "total_rooms": 0},
+        )
+        bucket["total_rooms"] += 1
+        status = row.get("status")
+        if status in bucket:
+            bucket[status] += 1
+        elif status == "blocked":
+            bucket["blocked"] += 1
+        elif status == "occupied":
+            bucket["occupied"] += 1
+        elif status == "held":
+            bucket["held"] += 1
+        else:
+            bucket["available"] += 1
+    return {"rows": rows, "summary": list(summary.values())}
