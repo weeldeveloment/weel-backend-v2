@@ -61,6 +61,7 @@ class B2BEmployeeSerializer(serializers.Serializer):
     passport_pinfl = serializers.CharField(max_length=20, required=True)
     individual_limit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     status = serializers.ChoiceField(choices=["available", "on_trip", "blocked"], required=False, default="available")
+    role = serializers.ChoiceField(choices=["owner", "performer", "employee"], required=False, default="employee")
     is_active = serializers.BooleanField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 

@@ -51,6 +51,14 @@ class EmployeeStatus:
     CHOICES = [AVAILABLE, ON_TRIP, BLOCKED]
 
 
+class EmployeeRole:
+    OWNER = "owner"
+    PERFORMER = "performer"
+    EMPLOYEE = "employee"
+
+    CHOICES = [OWNER, PERFORMER, EMPLOYEE]
+
+
 class DepartmentBudgetStatus:
     """Where a department stands against its owner-set budget limit,
     based on how much of ``budget_limit`` remains unspent.
@@ -152,6 +160,7 @@ class B2BEmployee(HardDeleteBaseModel):
     photo: str | None = None
     individual_limit: Decimal | None = None
     status: str = EmployeeStatus.AVAILABLE
+    role: str = EmployeeRole.EMPLOYEE
     is_active: bool = True
     _meta = SimpleNamespace(db_table="b2b_employee")
 

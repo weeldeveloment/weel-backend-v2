@@ -730,6 +730,7 @@ class B2BEmployeeListCreateView(APIView):
             openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Job title"),
             openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Individual limit for the employee"),
             openapi.Parameter("status", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["available", "on_trip", "blocked"], required=False, description="Employee status (default: available)"),
+            openapi.Parameter("role", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["owner", "performer", "employee"], required=False, description="Employee role (default: employee)"),
         ],
         responses={
             201: B2BEmployeeSerializer(),
@@ -747,6 +748,19 @@ class B2BEmployeeListCreateView(APIView):
         department_id = validated.get("department_id")
         if department_id and not any(d["id"] == department_id for d in list_departments(company_id)):
             return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        role = validated.get("role", EmployeeRole.EMPLOYEE)
+        if role == EmployeeRole.OWNER:
+            return Response({"detail": "Owner role cannot be assigned to an employee."}, status=status.HTTP_400_BAD_REQUEST)
+        if role == EmployeeRole.PERFORMER:
+            has_performer = any(
+                e["role"] == EmployeeRole.PERFORMER for e in list_employees(company_id)
+            )
+            if has_performer:
+                return Response(
+                    {"detail": "Company already has a performer employee."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         front_file = validated.pop("passport_upload_front")
         back_file = validated.pop("passport_upload_back")
@@ -793,7 +807,15 @@ class B2BEmployeeRetrieveUpdateView(APIView):
             return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(B2BEmployeeSerializer(employee).data)
 
-    @swagger_auto_schema(request_body=B2BEmployeeSerializer, responses={200: B2BEmployeeSerializer()})
+    @swagger_auto_schema(
+        request_body=B2BEmployeeSerializer,
+        operation_description=(
+            "`role`: `owner` hech qachon berilmaydi (400 xatolik). `performer` qilib "
+            "belgilansa, kompaniyadagi joriy performer avtomatik `employee` roliga "
+            "o'tkaziladi va shu xodim yangi performer bo'lib qoladi."
+        ),
+        responses={200: B2BEmployeeSerializer()},
+    )
     def patch(self, request, employee_id):
         company_id = _get_company_id(request)
         serializer = B2BEmployeeSerializer(data=request.data, partial=True)
@@ -802,6 +824,15 @@ class B2BEmployeeRetrieveUpdateView(APIView):
         department_id = serializer.validated_data.get("department_id")
         if department_id and not any(d["id"] == department_id for d in list_departments(company_id)):
             return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        role = serializer.validated_data.get("role")
+        if role == EmployeeRole.OWNER:
+            return Response({"detail": "Owner role cannot be assigned to an employee."}, status=status.HTTP_400_BAD_REQUEST)
+        if role == EmployeeRole.PERFORMER:
+            for e in list_employees(company_id):
+                if e["role"] == EmployeeRole.PERFORMER and e["id"] != employee_id:
+                    update_employee(e["id"], role=EmployeeRole.EMPLOYEE)
+
         employee = update_employee(employee_id, **{
             k: v for k, v in serializer.validated_data.items()
             if k not in ("company_id", "department_name")
@@ -816,7 +847,7 @@ class B2BEmployeeRetrieveUpdateView(APIView):
         employee = get_employee(employee_id, company_id)
         if not employee:
             return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(status.status.HTTP_204_NO_CONTENT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class BusinessTripListCreateView(APIView):
     permission_classes = [IsAuthenticated]
