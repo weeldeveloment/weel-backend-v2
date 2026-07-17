@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
 from shared.raw.db import execute, fetch_all, fetch_one
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Room Availability ────────────────────────────────────────────────────────
@@ -520,6 +523,16 @@ def list_client_hotel_bookings(
     client_user_id: int,
     statuses: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    room_type_name = (
+        "r.room_type_name"
+        if _pms_room_has_column("room_type_name")
+        else "rt.name"
+    )
+    room_type_preset = (
+        "r.room_type_preset"
+        if _pms_room_has_column("room_type_preset")
+        else "rt.preset"
+    )
     conditions = ["b.created_by = %s"]
     params: list[Any] = [client_user_id]
     if statuses:
@@ -535,11 +548,14 @@ def list_client_hotel_bookings(
             b.property_id, b.room_id,
             p.name AS hotel_name, p.city AS hotel_city, p.star_rating AS hotel_star_rating,
             r.room_number, r.display_name AS room_name, r.floor,
-            r.room_type_name, r.room_type_preset, r.room_type_id,
+            {room_type_name} AS room_type_name,
+            {room_type_preset} AS room_type_preset,
+            r.room_type_id,
             COALESCE(r.base_price, 0) AS room_price_per_night
         FROM pms_booking b
         JOIN pms_property p ON p.id = b.property_id
         JOIN pms_room r ON r.id = b.room_id
+        LEFT JOIN pms_room_type rt ON rt.id = r.room_type_id
         WHERE {where}
         ORDER BY b.created_at DESC, b.id DESC
         """,
@@ -551,8 +567,18 @@ def get_client_hotel_booking(
     booking_id: int,
     client_user_id: int,
 ) -> dict[str, Any] | None:
+    room_type_name = (
+        "r.room_type_name"
+        if _pms_room_has_column("room_type_name")
+        else "rt.name"
+    )
+    room_type_preset = (
+        "r.room_type_preset"
+        if _pms_room_has_column("room_type_preset")
+        else "rt.preset"
+    )
     return fetch_one(
-        """
+        f"""
         SELECT
             b.id, b.booking_number, b.status, b.check_in, b.check_out,
             b.adult_count, b.child_count, b.total_cost, b.hold_amount,
@@ -566,16 +592,35 @@ def get_client_hotel_booking(
             COALESCE(r.base_price, 0) AS room_price_per_night,
             r.bedroom_count, r.beds, r.amenities,
             r.capacity,
-            r.room_type_name, r.room_type_preset, r.room_type_id,
+            {room_type_name} AS room_type_name,
+            {room_type_preset} AS room_type_preset,
+            r.room_type_id,
             r.meal_plan,
             COALESCE(r.photos, '{{}}'::text[]) AS photos
         FROM pms_booking b
         JOIN pms_property p ON p.id = b.property_id
         JOIN pms_room r ON r.id = b.room_id
+        LEFT JOIN pms_room_type rt ON rt.id = r.room_type_id
         WHERE b.id = %s AND b.created_by = %s
         """,
         [booking_id, client_user_id],
     )
+
+
+def _pms_room_has_column(column_name: str) -> bool:
+    row = fetch_one(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'pms_room'
+              AND column_name = %s
+        ) AS exists_flag
+        """,
+        [column_name],
+    )
+    return bool(row and row["exists_flag"])
 
 
 def get_hotel_booking_by_id(booking_id: int) -> dict[str, Any] | None:
@@ -591,6 +636,92 @@ def get_hotel_booking_by_id(booking_id: int) -> dict[str, Any] | None:
         """,
         [booking_id],
     )
+
+
+def list_client_hotel_bookings_across_schemas(
+    client_user_id: int,
+    statuses: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    from apps.property.hotel_repository import _run_in_schema, list_hotel_organizations
+
+    bookings: list[dict[str, Any]] = []
+    for organization in list_hotel_organizations():
+        schema_name = organization["schema_name"]
+        try:
+            rows = _run_in_schema(
+                schema_name,
+                lambda: list_client_hotel_bookings(client_user_id, statuses),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to list client hotel bookings in tenant schema",
+                extra={"tenant_schema": schema_name, "client_user_id": client_user_id},
+            )
+            continue
+        for row in rows:
+            row["tenant_schema"] = schema_name
+        bookings.extend(rows)
+
+    return sorted(
+        bookings,
+        key=lambda row: (row.get("created_at"), row.get("id")),
+        reverse=True,
+    )
+
+
+def find_client_hotel_booking_across_schemas(
+    booking_id: int,
+    client_user_id: int,
+) -> tuple[str, dict[str, Any]] | None:
+    from apps.property.hotel_repository import _run_in_schema, list_hotel_organizations
+
+    for organization in list_hotel_organizations():
+        schema_name = organization["schema_name"]
+        try:
+            booking = _run_in_schema(
+                schema_name,
+                lambda: get_client_hotel_booking(booking_id, client_user_id),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to find client hotel booking in tenant schema",
+                extra={"tenant_schema": schema_name, "booking_id": booking_id},
+            )
+            continue
+        if booking:
+            booking["tenant_schema"] = schema_name
+            return schema_name, booking
+    return None
+
+
+def find_hotel_booking_across_schemas(
+    booking_id: int,
+    *,
+    schema_name: str | None = None,
+) -> tuple[str, dict[str, Any]] | None:
+    from apps.property.hotel_repository import _run_in_schema, list_hotel_organizations
+
+    schema_names = (
+        [schema_name]
+        if schema_name
+        else [organization["schema_name"] for organization in list_hotel_organizations()]
+    )
+    for candidate_schema in schema_names:
+        try:
+            booking = _run_in_schema(
+                candidate_schema,
+                lambda: get_hotel_booking_by_id(booking_id),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to find hotel booking in tenant schema",
+                extra={"tenant_schema": candidate_schema, "booking_id": booking_id},
+            )
+            continue
+        if booking:
+            booking["tenant_schema"] = candidate_schema
+            return candidate_schema, booking
+    return None
 
 
 def update_hotel_booking_status(

@@ -304,20 +304,25 @@ def send_pending_booking_payment_reminders(self):
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def auto_cancel_hotel_booking(self, booking_id):
+def auto_cancel_hotel_booking(self, booking_id, schema_name=None):
     from apps.hotels.repository import (
-        get_hotel_booking_by_id,
+        find_hotel_booking_across_schemas,
         release_hotel_booking_calendar_slots,
         update_hotel_booking_status,
     )
+    from apps.property.hotel_repository import _run_in_schema
 
-    booking = get_hotel_booking_by_id(int(booking_id))
-    if not booking:
+    resolved = find_hotel_booking_across_schemas(
+        int(booking_id),
+        schema_name=schema_name,
+    )
+    if not resolved:
         logger.warning(
             "auto_cancel_hotel: booking not found",
-            extra={"booking_id": str(booking_id)},
+            extra={"booking_id": str(booking_id), "tenant_schema": schema_name},
         )
         return
+    resolved_schema, booking = resolved
     if booking["status"] not in ("pending", "new"):
         logger.info(
             "auto_cancel_hotel: skipped",
@@ -349,12 +354,15 @@ def auto_cancel_hotel_booking(self, booking_id):
             )
     mark_latest_transaction_dismissed(int(booking["id"]))
 
-    release_hotel_booking_calendar_slots(
-        room_id=int(booking["room_id"]),
-        check_in=booking["check_in"],
-        check_out=booking["check_out"],
-    )
-    update_hotel_booking_status(int(booking["id"]), "cancelled")
+    def _cancel_booking():
+        release_hotel_booking_calendar_slots(
+            room_id=int(booking["room_id"]),
+            check_in=booking["check_in"],
+            check_out=booking["check_out"],
+        )
+        update_hotel_booking_status(int(booking["id"]), "cancelled")
+
+    _run_in_schema(resolved_schema, _cancel_booking)
 
     NotificationService.send_to_client(
         client=_client_ref(int(booking["created_by"])),

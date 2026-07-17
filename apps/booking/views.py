@@ -1306,7 +1306,7 @@ class ClientHotelBookingCreateView(APIView):
 
         from .tasks import auto_cancel_hotel_booking
         auto_cancel_hotel_booking.apply_async(
-            kwargs={"booking_id": booking["id"]},
+            kwargs={"booking_id": booking["id"], "schema_name": _schema},
             countdown=60 * 30,
         )
 
@@ -1341,12 +1341,12 @@ class ClientHotelBookingListView(APIView):
         responses={200: HotelBookingListSerializer(many=True)},
     )
     def get(self, request):
-        from apps.hotels.repository import list_client_hotel_bookings
+        from apps.hotels.repository import list_client_hotel_bookings_across_schemas
 
         status_param = request.query_params.get("status")
         statuses = [status_param] if status_param else None
 
-        bookings = list_client_hotel_bookings(
+        bookings = list_client_hotel_bookings_across_schemas(
             client_user_id=int(request.user.id),
             statuses=statuses,
         )
@@ -1371,14 +1371,15 @@ class ClientHotelBookingDetailView(APIView):
         },
     )
     def get(self, request, booking_id):
-        from apps.hotels.repository import get_client_hotel_booking
+        from apps.hotels.repository import find_client_hotel_booking_across_schemas
 
-        booking = get_client_hotel_booking(
+        resolved = find_client_hotel_booking_across_schemas(
             booking_id=int(booking_id),
             client_user_id=int(request.user.id),
         )
-        if not booking:
+        if not resolved:
             raise NotFound({"detail": _("Hotel booking not found.")})
+        _schema, booking = resolved
 
         serializer = HotelBookingDetailSerializer(booking)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -1407,17 +1408,19 @@ class ClientHotelBookingCancelView(APIView):
     )
     def post(self, request, booking_id):
         from apps.hotels.repository import (
-            get_client_hotel_booking,
+            find_client_hotel_booking_across_schemas,
             release_hotel_booking_calendar_slots,
             update_hotel_booking_status,
         )
+        from apps.property.hotel_repository import _run_in_schema
 
-        booking = get_client_hotel_booking(
+        resolved = find_client_hotel_booking_across_schemas(
             booking_id=int(booking_id),
             client_user_id=int(request.user.id),
         )
-        if not booking:
+        if not resolved:
             raise NotFound({"detail": _("Hotel booking not found.")})
+        schema_name, booking = resolved
 
         if booking["status"] not in ("new", "pending", "confirmed"):
             raise ValidationError({"detail": _("Only pending or confirmed bookings can be cancelled.")})
@@ -1441,12 +1444,15 @@ class ClientHotelBookingCancelView(APIView):
                 )
         mark_latest_transaction_dismissed(int(booking["id"]))
 
-        release_hotel_booking_calendar_slots(
-            room_id=int(booking["room_id"]),
-            check_in=booking["check_in"],
-            check_out=booking["check_out"],
-        )
-        update_hotel_booking_status(int(booking["id"]), "cancelled")
+        def _cancel_booking():
+            release_hotel_booking_calendar_slots(
+                room_id=int(booking["room_id"]),
+                check_in=booking["check_in"],
+                check_out=booking["check_out"],
+            )
+            update_hotel_booking_status(int(booking["id"]), "cancelled")
+
+        _run_in_schema(schema_name, _cancel_booking)
 
         return Response(
             {"detail": _("Booking cancelled successfully.")},
