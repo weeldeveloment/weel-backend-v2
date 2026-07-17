@@ -68,7 +68,7 @@ from apps.b2b.repository import (
     update_travel_policy,
     update_trip,
 )
-from apps.b2b.models import DepartmentBudgetStatus, HotelBookingRequestStatus
+from apps.b2b.models import DepartmentBudgetStatus, EmployeeRole, HotelBookingRequestStatus
 from apps.b2b.permissions import IsB2BOwner, IsB2BPerformer
 from apps.b2b.tasks import _send_b2b_lead_telegram_notification
 from apps.property.hotel_repository import _run_in_schema, get_hotel_for_public, resolve_hotel_guid
@@ -707,20 +707,23 @@ class B2BEmployeeListCreateView(APIView):
             "`passport_upload_front` va `passport_upload_back` (SHAXS GUVOHNOMASI old va "
             "orqa tomoni) — barchasi majburiy. `full_name`, `date_of_birth`, "
             "`passport_series` va `passport_pinfl` klientdan qabul qilinmaydi — "
-            "ular yuklangan rasmlardan avtomatik OCR orqali o'qib olinadi."
+            "ular yuklangan rasmlardan avtomatik OCR orqali o'qib olinadi. "
+            "`role`: `owner` hech qachon berilmaydi (400 xatolik); `performer` "
+            "kompaniyada bir vaqtning o'zida faqat bitta xodimda bo'lishi mumkin — "
+            "agar allaqachon performer mavjud bo'lsa, yangisini shu rolda yaratib bo'lmaydi."
         ),
         consumes=["multipart/form-data"],
         manual_parameters=[
-            openapi.Parameter("department_id", openapi.IN_FORM, type=openapi.TYPE_INTEGER, required=True, description="Bo'lim ID (majburiy)"),
-            openapi.Parameter("email", openapi.IN_FORM, type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, required=True, description="Email (majburiy)"),
-            openapi.Parameter("phone", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Telefon raqami (majburiy)"),
-            openapi.Parameter("passport_upload_front", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="SHAXS GUVOHNOMASI old tomoni (jpg, png; maksimum 5MB)"),
-            openapi.Parameter("passport_upload_back", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="SHAXS GUVOHNOMASI orqa tomoni, MRZ kodi bilan (jpg, png; maksimum 5MB)"),
-            openapi.Parameter("photo", openapi.IN_FORM, type=openapi.TYPE_FILE, required=False, description="Xodimning shaxsiy (profil) fotosurati (jpg, png; maksimum 5MB, ixtiyoriy)"),
-            openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Lavozimi"),
-            openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Xodim uchun individual limit"),
-            openapi.Parameter("status", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["available", "on_trip", "blocked"], required=False, description="Xodim holati (default: available)"),
-            openapi.Parameter("role", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["owner", "performer", "employee"], required=False, description="Xodim roli (default: employee)"),
+            openapi.Parameter("department_id", openapi.IN_FORM, type=openapi.TYPE_INTEGER, required=True, description="Department ID (required)"),
+            openapi.Parameter("email", openapi.IN_FORM, type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, required=True, description="Email address (required)"),
+            openapi.Parameter("phone", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Phone number (required)"),
+            openapi.Parameter("passport_upload_front", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Front side of the ID document (jpg, png; max 5MB)"),
+            openapi.Parameter("passport_upload_back", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Back side of the ID document with MRZ code (jpg, png; max 5MB)"),
+            openapi.Parameter("photo", openapi.IN_FORM, type=openapi.TYPE_FILE, required=False, description="Employee profile photo (jpg, png; max 5MB, optional)"),
+            openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Job title"),
+            openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Individual limit for the employee"),
+            openapi.Parameter("status", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["available", "on_trip", "blocked"], required=False, description="Employee status (default: available)"),
+            openapi.Parameter("role", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["owner", "performer", "employee"], required=False, description="Employee role (default: employee)"),
         ],
         responses={
             201: B2BEmployeeSerializer(),
@@ -738,6 +741,19 @@ class B2BEmployeeListCreateView(APIView):
         department_id = validated.get("department_id")
         if department_id and not any(d["id"] == department_id for d in list_departments(company_id)):
             return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        role = validated.get("role", EmployeeRole.EMPLOYEE)
+        if role == EmployeeRole.OWNER:
+            return Response({"detail": "Owner role cannot be assigned to an employee."}, status=status.HTTP_400_BAD_REQUEST)
+        if role == EmployeeRole.PERFORMER:
+            has_performer = any(
+                e["role"] == EmployeeRole.PERFORMER for e in list_employees(company_id)
+            )
+            if has_performer:
+                return Response(
+                    {"detail": "Company already has a performer employee."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         front_file = validated.pop("passport_upload_front")
         back_file = validated.pop("passport_upload_back")
@@ -784,7 +800,15 @@ class B2BEmployeeRetrieveUpdateView(APIView):
             return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(B2BEmployeeSerializer(employee).data)
 
-    @swagger_auto_schema(request_body=B2BEmployeeSerializer, responses={200: B2BEmployeeSerializer()})
+    @swagger_auto_schema(
+        request_body=B2BEmployeeSerializer,
+        operation_description=(
+            "`role`: `owner` hech qachon berilmaydi (400 xatolik). `performer` qilib "
+            "belgilansa, kompaniyadagi joriy performer avtomatik `employee` roliga "
+            "o'tkaziladi va shu xodim yangi performer bo'lib qoladi."
+        ),
+        responses={200: B2BEmployeeSerializer()},
+    )
     def patch(self, request, employee_id):
         company_id = _get_company_id(request)
         serializer = B2BEmployeeSerializer(data=request.data, partial=True)
@@ -793,6 +817,15 @@ class B2BEmployeeRetrieveUpdateView(APIView):
         department_id = serializer.validated_data.get("department_id")
         if department_id and not any(d["id"] == department_id for d in list_departments(company_id)):
             return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        role = serializer.validated_data.get("role")
+        if role == EmployeeRole.OWNER:
+            return Response({"detail": "Owner role cannot be assigned to an employee."}, status=status.HTTP_400_BAD_REQUEST)
+        if role == EmployeeRole.PERFORMER:
+            for e in list_employees(company_id):
+                if e["role"] == EmployeeRole.PERFORMER and e["id"] != employee_id:
+                    update_employee(e["id"], role=EmployeeRole.EMPLOYEE)
+
         employee = update_employee(employee_id, **{
             k: v for k, v in serializer.validated_data.items()
             if k not in ("company_id", "department_name")
