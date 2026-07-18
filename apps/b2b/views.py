@@ -246,8 +246,7 @@ class B2BHotelBookingListCreateView(APIView):
     booking history.
     """
     def get_permissions(self):
-        role_permission = IsB2BOwnerOrPerformer if self.request.method == "GET" else IsB2BPerformer
-        return [IsAuthenticated(), role_permission()]
+        return [IsAuthenticated(), IsB2BOwnerOrPerformer()]
 
     @swagger_auto_schema(
         operation_summary="List company booking requests",
@@ -285,7 +284,7 @@ class B2BHotelBookingListCreateView(APIView):
         return Response(HotelBookingRequestSerializer(rows, many=True).data)
 
     @swagger_auto_schema(
-        operation_summary="Submit a booking request (rooms + employees, performer)",
+        operation_summary="Submit a booking request (rooms + employees, owner or performer)",
         operation_description=(
             "Final step 2 submission: send `hotel_guid`, dates, and the "
             "employees assigned to each room (`employee_ids`, 1 or 2 people "
