@@ -107,14 +107,21 @@ class B2BLoginSendOTPView(APIView):
                 }
             )
 
-        if not OTPRedisService.can_resend(phone, SmsPurpose.B2B_LOGIN):
-            return Response(
-                {"detail": _("Please wait before requesting a new OTP.")},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
+        try:
+            if not OTPRedisService.can_resend(phone, SmsPurpose.B2B_LOGIN):
+                return Response(
+                    {"detail": _("Please wait before requesting a new OTP.")},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
 
-        otp_code = OTPRedisService.create_otp(phone, SmsPurpose.B2B_LOGIN)
-        OTPRedisService.mark_resend(phone, SmsPurpose.B2B_LOGIN)
+            otp_code = OTPRedisService.create_otp(phone, SmsPurpose.B2B_LOGIN)
+            OTPRedisService.mark_resend(phone, SmsPurpose.B2B_LOGIN)
+        except Exception:
+            logger.exception("B2B login OTP cache is unavailable.")
+            return Response(
+                {"detail": _("OTP service is temporarily unavailable.")},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         try:
             send_otp_sms_eskiz.delay(phone, SmsPurpose.B2B_LOGIN, otp_code)

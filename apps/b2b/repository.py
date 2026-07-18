@@ -300,15 +300,27 @@ def update_employee(employee_id: int, **kwargs: Any) -> dict[str, Any] | None:
     )
 
 def delete_employee(employee_id: int, company_id: int | None = None) -> dict[str, Any] | None: # noqa
-    if not company_id:
-        return Response("Comany Not Found", status=404)
-
-    if not employee_id:
-        return Response("Employee Not Found", status=404)
-
+    if not company_id or not employee_id:
+        return None
     return fetch_one(
-        f"DELETE FROM {B2b_EMPLOYEE_TABLE} WHERE id = %s company_id = %s RETURNING *", # noqa
-        [employee_id, company_id],
+        f"""
+        UPDATE {B2B_EMPLOYEE_TABLE}
+        SET is_active = FALSE, updated_at = %s
+        WHERE id = %s AND company_id = %s AND is_active = TRUE
+        RETURNING *
+        """,
+        [timezone.now(), employee_id, company_id],
+    )
+
+
+def delete_trip(trip_id: int, company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        DELETE FROM {B2B_BUSINESS_TRIP_TABLE}
+        WHERE id = %s AND company_id = %s AND status IN ('draft', 'cancelled')
+        RETURNING *
+        """,
+        [trip_id, company_id],
     )
 
 
@@ -683,6 +695,7 @@ def create_hotel_booking_request(
     *,
     company_id: int,
     trip_id: int | None,
+    hotel_guid: str,
     tenant_schema: str,
     hotel_property_id: int,
     hotel_name: str | None,
@@ -694,13 +707,14 @@ def create_hotel_booking_request(
     return fetch_one(
         f"""
         INSERT INTO {B2B_HOTEL_BOOKING_REQUEST_TABLE}
-            (company_id, trip_id, tenant_schema, hotel_property_id, hotel_name,
-             check_in, check_out, status, requested_by, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (company_id, trip_id, hotel_guid, tenant_schema, hotel_property_id,
+             hotel_name, check_in, check_out, status, requested_by, created_at,
+             updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
-            company_id, trip_id, tenant_schema, hotel_property_id, hotel_name,
+            company_id, trip_id, hotel_guid, tenant_schema, hotel_property_id, hotel_name,
             check_in, check_out, HotelBookingRequestStatus.PENDING, requested_by, now, now,
         ],
     )

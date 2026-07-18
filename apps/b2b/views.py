@@ -31,7 +31,9 @@ from apps.b2b.repository import (
     create_policy_rule,
     create_trip,
     create_voucher,
+    delete_employee,
     delete_policy_rule,
+    delete_trip,
     get_company,
     get_dashboard_summary,
     get_department_monthly_spending,
@@ -720,6 +722,9 @@ class B2BEmployeeRetrieveUpdateView(APIView):
         employee = get_employee(employee_id, company_id)
         if not employee:
             return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+        deleted = delete_employee(employee_id, company_id)
+        if not deleted:
+            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class BusinessTripListCreateView(APIView):
@@ -778,6 +783,19 @@ class BusinessTripRetrieveUpdateView(APIView):
         if not trip:
             return Response({"detail": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(BusinessTripSerializer(trip).data)
+
+    @swagger_auto_schema(response={204: "No Content"})
+    def delete(self, request, trip_id):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        deleted = delete_trip(trip_id, company_id)
+        if not deleted:
+            return Response(
+                {"detail": "Trip not found or cannot be deleted."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class TripEmployeeListCreateView(APIView):

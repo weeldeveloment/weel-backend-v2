@@ -266,6 +266,10 @@ if settings.PROMETHEUS_ENABLED:
 
 urlpatterns += [
     path("i18n/", include("django.conf.urls.i18n")),
+    path("b2b/", include("apps.b2b.urls")),
+    path("documents/", include("apps.documents.urls")),
+    path("hotels/", include("apps.hotels.urls")),
+    path("activities/", include("apps.activities.urls")),
     path("api/", include("apps.urls")),
     path("api/platform/", include("apps.platform.urls")),
     path("api/pms/", include("apps.pms.urls")),
