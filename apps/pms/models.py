@@ -61,7 +61,6 @@ class RoomType(HardDeleteBaseModel):
     name: str | None = None
     description: str | None = None
     base_rate: Decimal | None = None
-    currency: str = "USD"
     capacity: int = 2
     amenities: list = field(default_factory=list)
     photos: list = field(default_factory=list)
@@ -174,7 +173,6 @@ class Property(HardDeleteBaseModel):
     quiet_hours: bool = True
     alcohol_allowed: bool = True
     pets_allowed: bool = False
-    currency: str = "USD"
     timezone: str = "Asia/Tashkent"
     photos: list = field(default_factory=list)
     is_active: bool = True

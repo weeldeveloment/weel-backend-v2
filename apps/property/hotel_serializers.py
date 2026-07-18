@@ -158,6 +158,7 @@ class HotelCardSerializer(serializers.Serializer):
         except (TypeError, ValueError):
             row["longitude"] = None
         row["img"] = _build_media_url(request, row.get("img") or [])
+        row["currency"] = row.get("min_price_currency") or row.get("currency")
         row["min_price"] = _convert_price_for_output(row.get("min_price"), row.get("currency"))
         row["amenities"] = row.get("amenities") or []
         row["rating"] = row.get("rating")
@@ -343,7 +344,6 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
     quiet_hours = serializers.BooleanField(required=False)
     alcohol_allowed = serializers.BooleanField(required=False)
     pets_allowed = serializers.BooleanField(required=False)
-    currency = serializers.ChoiceField(choices=["USD", "UZS"], required=False)
     timezone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     is_active = serializers.BooleanField(required=False)
     is_testing = serializers.BooleanField(required=False)
@@ -402,7 +402,6 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
             "quiet_hours",
             "alcohol_allowed",
             "pets_allowed",
-            "currency",
             "timezone",
             "is_active",
             "is_testing",

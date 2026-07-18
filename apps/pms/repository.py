@@ -89,7 +89,7 @@ def create_property(*, organization_id: int, name: str, **kwargs: Any) -> dict[s
         "check_in_time": lambda v: v, "check_out_time": lambda v: v,
         "cancellation_policy": str, "quiet_hours": bool,
         "alcohol_allowed": bool, "pets_allowed": bool,
-        "currency": str, "timezone": str,
+        "timezone": str,
         "photos": _to_pg_array,
         "partner_user_id": int,
         "is_active": bool,
@@ -329,7 +329,7 @@ def create_room_type(*, property_id: int, **kwargs: Any) -> dict[str, Any] | Non
     field_map = {
         "preset": str, "custom_name": str, "name": str,
         "description": str, "base_rate": lambda v: v,
-        "currency": str, "capacity": int,
+        "capacity": int,
         "amenities": _to_pg_array, "photos": _to_pg_array,
         "is_active": bool,
     }

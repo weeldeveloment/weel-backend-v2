@@ -27,7 +27,6 @@ class Command(BaseCommand):
                         name VARCHAR(100) NOT NULL,
                         description TEXT,
                         base_rate NUMERIC(12,2),
-                        currency VARCHAR(3) DEFAULT 'USD',
                         capacity INTEGER DEFAULT 2,
                         amenities TEXT[] DEFAULT '{}',
                         photos TEXT[] DEFAULT '{}',

@@ -172,7 +172,6 @@ def _execute_hotel_query(
                 COALESCE(p.quiet_hours, TRUE) AS quiet_hours,
                 COALESCE(p.alcohol_allowed, FALSE) AS alcohol_allowed,
                 COALESCE(p.pets_allowed, FALSE) AS pets_allowed,
-                p.currency,
                 p.timezone,
                 COALESCE(p.photos, ARRAY[]::text[]) AS photos,
                 COALESCE(p.is_active, TRUE) AS is_active,
@@ -184,7 +183,24 @@ def _execute_hotel_query(
                 p.created_at,
                 p.updated_at,
                 %s AS tenant_schema,
-                (SELECT MIN(r.base_price) FROM pms_room r WHERE r.property_id = p.id AND r.is_active = TRUE) AS min_price,
+                (
+                    SELECT r.base_price
+                    FROM pms_room r
+                    WHERE r.property_id = p.id
+                      AND r.is_active = TRUE
+                      AND r.base_price IS NOT NULL
+                    ORDER BY r.base_price ASC, r.id ASC
+                    LIMIT 1
+                ) AS min_price,
+                (
+                    SELECT r.currency
+                    FROM pms_room r
+                    WHERE r.property_id = p.id
+                      AND r.is_active = TRUE
+                      AND r.base_price IS NOT NULL
+                    ORDER BY r.base_price ASC, r.id ASC
+                    LIMIT 1
+                ) AS min_price_currency,
                 (SELECT AVG(rv.rating) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS rating,
                 (SELECT COUNT(*) FROM pms_review rv WHERE rv.property_id = p.id AND rv.is_complained = FALSE) AS review_count,
                 (SELECT COUNT(*) FROM pms_booking pb WHERE pb.property_id = p.id AND pb.status NOT IN ('cancelled')) AS booking_count,
@@ -475,7 +491,7 @@ def fetch_room_summaries(schema_name: str, property_id: int) -> list[dict[str, A
                     COALESCE(r.amenities, ARRAY[]::text[]) AS amenities,
                     r.base_price AS price_from,
                     r.base_price AS price_per_night,
-                    COALESCE(r.currency, 'USD') AS currency
+                    COALESCE(r.currency, 'UZS') AS currency
                 FROM pms_room r
                 WHERE r.property_id = %s
                   AND r.is_active = TRUE
@@ -506,7 +522,7 @@ def fetch_room_summaries_raw(property_id: int) -> list[dict[str, Any]]:
                 COALESCE(r.amenities, ARRAY[]::text[]) AS amenities,
                 r.base_price AS price_from,
                 r.base_price AS price_per_night,
-                COALESCE(r.currency, 'USD') AS currency
+                COALESCE(r.currency, 'UZS') AS currency
             FROM pms_room r
             WHERE r.property_id = %s
               AND r.is_active = TRUE
@@ -572,7 +588,6 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     quiet_hours,
                     alcohol_allowed,
                     pets_allowed,
-                    currency,
                     timezone,
                     photos,
                     is_active,
@@ -583,7 +598,7 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     updated_at
                 ) VALUES (
                     gen_random_uuid(),
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING id, guid
                 """,
@@ -608,7 +623,6 @@ def create_admin_hotel(*, schema_name: str, values: dict[str, Any]) -> dict[str,
                     values.get("quiet_hours", True),
                     values.get("alcohol_allowed", False),
                     values.get("pets_allowed", False),
-                    values.get("currency") or "USD",
                     values.get("timezone") or "Asia/Tashkent",
                     values.get("photos") or [],
                     values.get("is_active", True),
@@ -660,7 +674,6 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
         "quiet_hours",
         "alcohol_allowed",
         "pets_allowed",
-        "currency",
         "timezone",
         "photos",
         "is_active",

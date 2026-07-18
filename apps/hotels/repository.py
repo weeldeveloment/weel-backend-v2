@@ -302,7 +302,7 @@ def get_available_rooms(
             r.meal_plan,
             r.area AS area_sqm,
             r.base_price AS price_per_night,
-            COALESCE(r.currency, 'USD') AS currency,
+            COALESCE(r.currency, 'UZS') AS currency,
             COALESCE(r.photos, '{{}}'::text[]) AS images,
             r.availability,
             r.condition
@@ -394,7 +394,7 @@ def calculate_stay_price(
         "total_price": base_price,
         "hold_amount": hold_amount,
         "remaining_on_arrival": base_price - hold_amount,
-        "currency": room.get("currency") or "USD",
+        "currency": room.get("currency") or "UZS",
     }
 
 
@@ -796,7 +796,44 @@ def _search_hotels_in_schema(
     if check_in and check_out:
         avail_join = """
             LEFT JOIN LATERAL (
-                SELECT COALESCE(MIN(r.base_price), 0) AS min_price, COUNT(*) AS available_rooms
+                SELECT
+                    (
+                        SELECT r_min.base_price
+                        FROM pms_room r_min
+                        WHERE r_min.property_id = p.id
+                          AND r_min.is_active = TRUE
+                          AND r_min.capacity >= %s
+                          AND r_min.base_price IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM pms_booking b
+                              WHERE b.room_id = r_min.id
+                                AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
+                                AND b.check_in < %s
+                                AND b.check_out > %s
+                          )
+                          {room_filter_sql_for_min}
+                        ORDER BY r_min.base_price ASC, r_min.id ASC
+                        LIMIT 1
+                    ) AS min_price,
+                    (
+                        SELECT r_min.currency
+                        FROM pms_room r_min
+                        WHERE r_min.property_id = p.id
+                          AND r_min.is_active = TRUE
+                          AND r_min.capacity >= %s
+                          AND r_min.base_price IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM pms_booking b
+                              WHERE b.room_id = r_min.id
+                                AND b.status NOT IN ('cancelled', 'checked_out', 'no_show')
+                                AND b.check_in < %s
+                                AND b.check_out > %s
+                          )
+                          {room_filter_sql_for_min}
+                        ORDER BY r_min.base_price ASC, r_min.id ASC
+                        LIMIT 1
+                    ) AS min_price_currency,
+                    COUNT(*) AS available_rooms
                 FROM pms_room r
                 WHERE r.property_id = p.id
                   AND r.is_active = TRUE
@@ -826,12 +863,40 @@ def _search_hotels_in_schema(
         if filter_clauses:
             room_filter_sql = " AND " + " AND ".join(filter_clauses)
             room_filter_params = filter_params
-        avail_params = [capacity_requirement, check_out, check_in, *room_filter_params]
+        room_filter_sql_for_min = room_filter_sql.replace("r.", "r_min.")
+        avail_params = [
+            capacity_requirement, check_out, check_in, *room_filter_params,
+            capacity_requirement, check_out, check_in, *room_filter_params,
+            capacity_requirement, check_out, check_in, *room_filter_params,
+        ]
         conditions.append("COALESCE(pricing.available_rooms, 0) > 0")
     else:
         avail_join = """
             LEFT JOIN LATERAL (
-                SELECT COALESCE(MIN(r.base_price), 0) AS min_price, COUNT(*) AS available_rooms
+                SELECT
+                    (
+                        SELECT r_min.base_price
+                        FROM pms_room r_min
+                        WHERE r_min.property_id = p.id
+                          AND r_min.is_active = TRUE
+                          AND r_min.capacity >= %s
+                          AND r_min.base_price IS NOT NULL
+                          {room_filter_sql_for_min}
+                        ORDER BY r_min.base_price ASC, r_min.id ASC
+                        LIMIT 1
+                    ) AS min_price,
+                    (
+                        SELECT r_min.currency
+                        FROM pms_room r_min
+                        WHERE r_min.property_id = p.id
+                          AND r_min.is_active = TRUE
+                          AND r_min.capacity >= %s
+                          AND r_min.base_price IS NOT NULL
+                          {room_filter_sql_for_min}
+                        ORDER BY r_min.base_price ASC, r_min.id ASC
+                        LIMIT 1
+                    ) AS min_price_currency,
+                    COUNT(*) AS available_rooms
                 FROM pms_room r
                 WHERE r.property_id = p.id AND r.is_active = TRUE AND r.capacity >= %s
                   {room_filter_sql}
@@ -852,7 +917,12 @@ def _search_hotels_in_schema(
         if filter_clauses:
             room_filter_sql = " AND " + " AND ".join(filter_clauses)
             room_filter_params = filter_params
-        avail_params = [capacity_requirement, *room_filter_params]
+        room_filter_sql_for_min = room_filter_sql.replace("r.", "r_min.")
+        avail_params = [
+            capacity_requirement, *room_filter_params,
+            capacity_requirement, *room_filter_params,
+            capacity_requirement, *room_filter_params,
+        ]
 
     if price_min is not None:
         conditions.append("pricing.min_price >= %s")
@@ -890,7 +960,6 @@ def _search_hotels_in_schema(
             COALESCE(p.quiet_hours, TRUE) AS quiet_hours,
             COALESCE(p.alcohol_allowed, FALSE) AS alcohol_allowed,
             COALESCE(p.pets_allowed, FALSE) AS pets_allowed,
-            p.currency,
             p.timezone,
             COALESCE(p.photos, ARRAY[]::text[]) AS photos,
             COALESCE(p.is_active, TRUE) AS is_active,
@@ -902,6 +971,7 @@ def _search_hotels_in_schema(
             p.created_at,
             p.updated_at,
             pricing.min_price,
+            pricing.min_price_currency,
             COALESCE(pricing.available_rooms, 0) AS available_rooms,
             (
                 SELECT COUNT(*) FROM pms_booking pb
@@ -916,7 +986,10 @@ def _search_hotels_in_schema(
                 WHERE rv.property_id = p.id AND rv.is_complained = FALSE
             ) AS review_count
         FROM pms_property p
-        {avail_join.format(room_filter_sql=room_filter_sql)}
+        {avail_join.format(
+            room_filter_sql=room_filter_sql,
+            room_filter_sql_for_min=room_filter_sql_for_min,
+        )}
         {where}
     """
     all_params = avail_params + params

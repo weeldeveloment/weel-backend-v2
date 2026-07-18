@@ -306,6 +306,58 @@ class DetailSerializerTests(SimpleTestCase):
         self.assertEqual(data["title"], "Legacy hotel name")
         self.assertNotIn("name", data)
 
+    @patch("property.hotel_serializers.to_uzs", side_effect=lambda amount: amount * Decimal("12100"))
+    def test_property_hotel_card_uses_min_price_currency_before_hotel_currency(self, mock_to_uzs):
+        row = {
+            "id": 1,
+            "guid": "guid-1",
+            "name": "www",
+            "description_uz": None,
+            "description_ru": None,
+            "description_en": None,
+            "address": "Main street",
+            "img": [],
+            "star_rating": 0,
+            "weel_classification": None,
+            "themes": [],
+            "city": "Tashkent",
+            "country": "UZ",
+            "latitude": None,
+            "longitude": None,
+            "min_price": Decimal("1000.00"),
+            "min_price_currency": "UZS",
+            "currency": "USD",
+            "timezone": "Asia/Tashkent",
+            "rating": None,
+            "review_count": 0,
+            "booking_count": 0,
+            "available_rooms": 1,
+            "amenities": [],
+            "legal_info": {},
+            "check_in_time": None,
+            "check_out_time": None,
+            "cancellation_policy": None,
+            "policies": {},
+            "is_favorite": False,
+            "is_verified": True,
+            "is_active": True,
+            "is_testing": False,
+            "is_archived": False,
+            "is_recommended": False,
+            "verification_status": "waiting",
+            "tenant_schema": "tenant1",
+            "organization": {},
+            "partner_user": None,
+            "property_detail": {},
+            "created_at": None,
+            "updated_at": None,
+        }
+
+        data = PropertyHotelCardSerializer(row).data
+
+        self.assertEqual(str(data["min_price"]), "1000.00")
+        mock_to_uzs.assert_not_called()
+
     def test_public_hotel_card_serializer_returns_title_from_name(self):
         row = {
             "id": 1,
