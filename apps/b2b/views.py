@@ -72,7 +72,7 @@ from apps.b2b.hotel_booking_service import (
     create_booking_request,
     reconcile_booking_request,
 )
-from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer, IsB2BPerformer
+from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer
 from apps.b2b.tasks import _send_b2b_lead_telegram_notification
 from apps.property.hotel_repository import _run_in_schema, get_hotel_for_public, resolve_hotel_guid
 from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, search_hotels
@@ -188,10 +188,10 @@ class B2BHotelRoomsView(APIView):
     in step 1. Each room's `capacity` shows how many employees can be placed
     there.
     """
-    permission_classes = [IsAuthenticated, IsB2BPerformer]
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
 
     @swagger_auto_schema(
-        operation_summary="List hotel rooms (performer, step 2)",
+        operation_summary="List hotel rooms (owner or performer, step 2)",
         operation_description=(
             "For the selected `hotel_guid`, return the available rooms for the "
             "same `check_in`/`check_out`/`guests` values chosen in step 1. "
@@ -357,7 +357,7 @@ class B2BHotelBookingDetailView(APIView):
 
 
 class B2BHotelBookingCancelView(APIView):
-    permission_classes = [IsAuthenticated, IsB2BPerformer]
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
 
     @swagger_auto_schema(
         operation_summary="Cancel a grouped hotel booking",
@@ -387,10 +387,10 @@ class B2BHotelCalendarView(APIView):
     """GET /b2b/hotels/<hotel_guid>/calendar/
 
     Shows the full occupancy calendar for the hotel. Each date for each room
-    is returned as ``booked`` or ``available``. Performers use this view to
-    inspect free dates before arranging a business trip.
+    is returned as ``booked`` or ``available``. Owners and performers use this
+    view to inspect free dates before arranging a business trip.
     """
-    permission_classes = [IsAuthenticated, IsB2BPerformer]
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
 
     @swagger_auto_schema(
         operation_summary="Hotel occupancy calendar",
@@ -400,8 +400,9 @@ class B2BHotelCalendarView(APIView):
             "range.\n\n"
             "Each row contains `room_id`, `room_name`, `date`, and `status` "
             "(`booked` or `available`). This includes both B2B bookings and "
-            "bookings made through the hotel's own site, so performers can "
-            "see the real occupancy state and choose free dates accurately."
+            "bookings made through the hotel's own site, so owners and "
+            "performers can see the real occupancy state and choose free dates "
+            "accurately."
         ),
         manual_parameters=[
             openapi.Parameter(

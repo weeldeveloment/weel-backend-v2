@@ -15,7 +15,12 @@ if not settings.configured:
 
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from apps.b2b.views import B2BHotelBookingListCreateView
+from apps.b2b.views import (
+    B2BHotelBookingCancelView,
+    B2BHotelBookingListCreateView,
+    B2BHotelCalendarView,
+    B2BHotelRoomsView,
+)
 
 
 def _booking_payload():
@@ -79,6 +84,15 @@ def _post_booking(role):
     return B2BHotelBookingListCreateView.as_view()(request)
 
 
+def _authenticated_user(role):
+    return SimpleNamespace(
+        id=9,
+        company_id=55,
+        role=role,
+        is_authenticated=True,
+    )
+
+
 @pytest.mark.parametrize("role", ["owner", "performer"])
 def test_hotel_booking_post_allows_b2b_owner_and_performer(role):
     with patch(
@@ -101,3 +115,100 @@ def test_hotel_booking_post_rejects_non_b2b_booking_roles(role):
 
     assert response.status_code == 403
     create_booking_request.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["owner", "performer"])
+def test_hotel_rooms_allows_b2b_owner_and_performer(role):
+    request = APIRequestFactory().get(
+        "/api/b2b/hotels/hotel-guid/rooms/",
+        {"check_in": "2026-07-20", "check_out": "2026-07-22", "guests": "1"},
+    )
+    force_authenticate(request, user=_authenticated_user(role))
+
+    with (
+        patch(
+            "apps.b2b.views.resolve_hotel_guid",
+            return_value=("tenant_hotel", 3),
+        ) as resolve_hotel_guid,
+        patch("apps.b2b.views.get_available_rooms", return_value=[]) as get_available_rooms,
+        patch("apps.b2b.views._run_in_schema", side_effect=lambda _schema, fn: fn()),
+    ):
+        response = B2BHotelRoomsView.as_view()(request, hotel_guid="hotel-guid")
+
+    assert response.status_code == 200
+    resolve_hotel_guid.assert_called_once_with("hotel-guid")
+    get_available_rooms.assert_called_once()
+
+
+@pytest.mark.parametrize("role", ["employee", None])
+def test_hotel_rooms_rejects_non_b2b_booking_roles(role):
+    request = APIRequestFactory().get("/api/b2b/hotels/hotel-guid/rooms/")
+    force_authenticate(request, user=_authenticated_user(role))
+
+    with patch("apps.b2b.views.resolve_hotel_guid") as resolve_hotel_guid:
+        response = B2BHotelRoomsView.as_view()(request, hotel_guid="hotel-guid")
+
+    assert response.status_code == 403
+    resolve_hotel_guid.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["owner", "performer"])
+def test_hotel_booking_cancel_allows_b2b_owner_and_performer(role):
+    request = APIRequestFactory().post("/api/b2b/hotels/bookings/101/cancel/")
+    force_authenticate(request, user=_authenticated_user(role))
+
+    with patch(
+        "apps.b2b.views.cancel_booking_request",
+        return_value=_booking_response(),
+    ) as cancel_booking_request:
+        response = B2BHotelBookingCancelView.as_view()(request, booking_id=101)
+
+    assert response.status_code == 200
+    cancel_booking_request.assert_called_once_with(booking_id=101, company_id=55)
+
+
+@pytest.mark.parametrize("role", ["employee", None])
+def test_hotel_booking_cancel_rejects_non_b2b_booking_roles(role):
+    request = APIRequestFactory().post("/api/b2b/hotels/bookings/101/cancel/")
+    force_authenticate(request, user=_authenticated_user(role))
+
+    with patch("apps.b2b.views.cancel_booking_request") as cancel_booking_request:
+        response = B2BHotelBookingCancelView.as_view()(request, booking_id=101)
+
+    assert response.status_code == 403
+    cancel_booking_request.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["owner", "performer"])
+def test_hotel_calendar_allows_b2b_owner_and_performer(role):
+    request = APIRequestFactory().get(
+        "/api/b2b/hotels/hotel-guid/calendar/",
+        {"from_date": "2026-07-20", "to_date": "2026-07-22"},
+    )
+    force_authenticate(request, user=_authenticated_user(role))
+
+    with (
+        patch(
+            "apps.b2b.views.resolve_hotel_guid",
+            return_value=("tenant_hotel", 3),
+        ) as resolve_hotel_guid,
+        patch("apps.b2b.views.get_hotel_calendar", return_value=[]) as get_hotel_calendar,
+        patch("apps.b2b.views._run_in_schema", side_effect=lambda _schema, fn: fn()),
+    ):
+        response = B2BHotelCalendarView.as_view()(request, hotel_guid="hotel-guid")
+
+    assert response.status_code == 200
+    resolve_hotel_guid.assert_called_once_with("hotel-guid")
+    get_hotel_calendar.assert_called_once()
+
+
+@pytest.mark.parametrize("role", ["employee", None])
+def test_hotel_calendar_rejects_non_b2b_booking_roles(role):
+    request = APIRequestFactory().get("/api/b2b/hotels/hotel-guid/calendar/")
+    force_authenticate(request, user=_authenticated_user(role))
+
+    with patch("apps.b2b.views.resolve_hotel_guid") as resolve_hotel_guid:
+        response = B2BHotelCalendarView.as_view()(request, hotel_guid="hotel-guid")
+
+    assert response.status_code == 403
+    resolve_hotel_guid.assert_not_called()
