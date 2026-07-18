@@ -1101,9 +1101,8 @@ def _extract_prepare_params(
     limit = _parse_int(_source_get(source, "limit"))
     if limit is None:
         limit = default_limit
-    if limit is None:
-        limit = _DEFAULT_PUBLIC_LIST_LIMIT
-    limit = max(0, min(limit, 200))
+    if limit is not None:
+        limit = max(0, min(limit, 200))
     return {
         "min_price": _parse_decimal(_source_get(source, "min_price")),
         "max_price": _parse_decimal(_source_get(source, "max_price")),
@@ -1186,6 +1185,48 @@ def _list_hotel_rows(
         testing_only=testing_only,
     )
     return prepare_property_rows(rows, limit=limit, **pp)
+
+
+def _admin_verified_filter(value) -> bool | None:
+    raw = str(value or "").strip().lower()
+    if raw == "verified":
+        return True
+    if raw == "unverified":
+        return False
+    return _parse_bool(value)
+
+
+def _filter_admin_property_rows(
+    rows: list[dict[str, Any]],
+    *,
+    is_verified: bool | None,
+    created_from: date | None,
+    created_to: date | None,
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        if is_verified is not None and bool(row.get("is_verified")) != is_verified:
+            continue
+        created_at = row.get("created_at")
+        if created_at:
+            created_date = _as_date(created_at)
+            if isinstance(created_date, str):
+                created_date = _parse_date(created_date[:10])
+            if created_date is None:
+                continue
+            if created_from and created_date < created_from:
+                continue
+            if created_to and created_date > created_to:
+                continue
+        elif created_from or created_to:
+            continue
+        filtered.append(row)
+    return filtered
+
+
+def _paginate_rows(rows: list, *, page: int, limit: int) -> list:
+    start = (max(1, page) - 1) * limit
+    return rows[start:start + limit]
 
 
 def _serialize_partner_user(user) -> dict | None:
@@ -2287,7 +2328,7 @@ class PropertyListCreateView(APIView):
             rows = _list_cottage_rows(
                 query_params,
                 public_only=True,
-                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+                default_limit=None,
                 testing_only=testing_only,
             )
             paginator = self.pagination_class()
@@ -2301,7 +2342,7 @@ class PropertyListCreateView(APIView):
             rows = _list_apartment_rows(
                 query_params,
                 public_only=True,
-                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+                default_limit=None,
                 testing_only=testing_only,
             )
             paginator = self.pagination_class()
@@ -2314,7 +2355,7 @@ class PropertyListCreateView(APIView):
         if requested_kind == PROPERTY_KIND_HOTEL:
             rows = _list_hotel_rows(
                 query_params,
-                default_limit=_DEFAULT_PUBLIC_LIST_LIMIT,
+                default_limit=None,
                 testing_only=testing_only,
             )
             paginator = self.pagination_class()
@@ -3987,6 +4028,19 @@ class AdminAllPropertiesListView(APIView):
     def get(self, request, *args, **kwargs):
         ctx = {"request": request}
         requested_kind = parse_property_kind(request.query_params.get("property_type"))
+        query_params = request.query_params.copy()
+        query_params.pop("page", None)
+        query_params.pop("limit", None)
+        raw_page = _parse_int(request.query_params.get("page"))
+        raw_limit = _parse_int(request.query_params.get("limit"))
+        page = raw_page if raw_page and raw_page >= 1 else 1
+        limit = raw_limit if raw_limit and raw_limit >= 1 else 12
+        is_verified = _admin_verified_filter(
+            request.query_params.get("is_verified")
+            or request.query_params.get("verified")
+        )
+        created_from = _parse_date(request.query_params.get("created_from"))
+        created_to = _parse_date(request.query_params.get("created_to"))
         list_kwargs = dict(
             public_only=False,
             include_all_records=True,
@@ -3994,56 +4048,115 @@ class AdminAllPropertiesListView(APIView):
         )
         if requested_kind == PROPERTY_KIND_APARTMENT:
             rows = _attach_partner_users(
-                _list_apartment_rows(request.query_params, **list_kwargs)
+                _list_apartment_rows(query_params, **list_kwargs)
             )
+            rows = _filter_admin_property_rows(
+                rows,
+                is_verified=is_verified,
+                created_from=created_from,
+                created_to=created_to,
+            )
+            total = len(rows)
+            rows = _paginate_rows(rows, page=page, limit=limit)
             return Response(
-                ApartmentAdminListSerializer(rows, many=True, context=ctx).data
+                _paginated_envelope(
+                    request,
+                    ApartmentAdminListSerializer(rows, many=True, context=ctx).data,
+                    total,
+                    page,
+                    limit,
+                )
             )
         if requested_kind == PROPERTY_KIND_COTTAGE:
             rows = _attach_partner_users(
-                _list_cottage_rows(request.query_params, **list_kwargs)
+                _list_cottage_rows(query_params, **list_kwargs)
             )
+            rows = _filter_admin_property_rows(
+                rows,
+                is_verified=is_verified,
+                created_from=created_from,
+                created_to=created_to,
+            )
+            total = len(rows)
+            rows = _paginate_rows(rows, page=page, limit=limit)
             return Response(
-                CottageAdminListSerializer(rows, many=True, context=ctx).data
+                _paginated_envelope(
+                    request,
+                    CottageAdminListSerializer(rows, many=True, context=ctx).data,
+                    total,
+                    page,
+                    limit,
+                )
             )
         if requested_kind == PROPERTY_KIND_HOTEL:
-            raw_page = _parse_int(request.query_params.get("page"))
-            raw_limit = _parse_int(request.query_params.get("limit"))
-            page = raw_page if raw_page and raw_page >= 1 else 1
-            limit = raw_limit if raw_limit and raw_limit >= 1 else 12
             rows, total = list_admin_hotels(
                 search=request.query_params.get("search"),
                 organization_id=_parse_int(request.query_params.get("organization_id")),
                 tenant_schema=request.query_params.get("tenant_schema"),
                 is_active=_parse_bool(request.query_params.get("is_active")),
-                created_from=_parse_date(request.query_params.get("created_from")),
-                created_to=_parse_date(request.query_params.get("created_to")),
-                page=page,
-                limit=limit,
+                created_from=created_from,
+                created_to=created_to,
             )
+            rows = _filter_admin_property_rows(
+                rows,
+                is_verified=is_verified,
+                created_from=None,
+                created_to=None,
+            )
+            total = len(rows)
+            rows = _paginate_rows(rows, page=page, limit=limit)
             rows = _attach_partner_users(rows)
             serialized = HotelAdminListSerializer(rows, many=True, context=ctx).data
             return Response(_paginated_envelope(request, serialized, total, page, limit))
         apt_rows = _attach_partner_users(
-            _list_apartment_rows(request.query_params, **list_kwargs)
+            _list_apartment_rows(query_params, **list_kwargs)
         )
         cot_rows = _attach_partner_users(
-            _list_cottage_rows(request.query_params, **list_kwargs)
+            _list_cottage_rows(query_params, **list_kwargs)
         )
         hotel_rows, _total = list_admin_hotels(
             search=request.query_params.get("search"),
             organization_id=_parse_int(request.query_params.get("organization_id")),
             tenant_schema=request.query_params.get("tenant_schema"),
             is_active=_parse_bool(request.query_params.get("is_active")),
-            created_from=_parse_date(request.query_params.get("created_from")),
-            created_to=_parse_date(request.query_params.get("created_to")),
+            created_from=created_from,
+            created_to=created_to,
         )
+        apt_rows = _filter_admin_property_rows(
+            apt_rows,
+            is_verified=is_verified,
+            created_from=created_from,
+            created_to=created_to,
+        )
+        cot_rows = _filter_admin_property_rows(
+            cot_rows,
+            is_verified=is_verified,
+            created_from=created_from,
+            created_to=created_to,
+        )
+        hotel_rows = _filter_admin_property_rows(
+            hotel_rows,
+            is_verified=is_verified,
+            created_from=None,
+            created_to=None,
+        )
+        total = len(apt_rows) + len(cot_rows) + len(hotel_rows)
         data = (
             ApartmentAdminListSerializer(apt_rows, many=True, context=ctx).data
             + CottageAdminListSerializer(cot_rows, many=True, context=ctx).data
             + HotelAdminListSerializer(hotel_rows, many=True, context=ctx).data
         )
-        return Response(data, status=status.HTTP_200_OK)
+        data = sorted(data, key=lambda row: row.get("created_at") or "", reverse=True)
+        return Response(
+            _paginated_envelope(
+                request,
+                _paginate_rows(data, page=page, limit=limit),
+                total,
+                page,
+                limit,
+            ),
+            status=status.HTTP_200_OK,
+        )
 
 
 class AdminApartmentListCreateView(APIView):
@@ -4160,6 +4273,7 @@ class AdminHotelListCreateView(APIView):
             openapi.Parameter("organization_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
             openapi.Parameter("tenant_schema", openapi.IN_QUERY, type=openapi.TYPE_STRING),
             openapi.Parameter("is_active", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN),
+            openapi.Parameter("is_verified", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN),
             openapi.Parameter("created_from", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
             openapi.Parameter("created_to", openapi.IN_QUERY, type=openapi.TYPE_STRING, format="date"),
             openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
@@ -4169,7 +4283,7 @@ class AdminHotelListCreateView(APIView):
     )
     def get(self, request, *args, **kwargs):
         ctx = {"request": request}
-        rows = list_admin_hotels(
+        rows, total = list_admin_hotels(
             search=request.query_params.get("search"),
             organization_id=_parse_int(request.query_params.get("organization_id")),
             tenant_schema=request.query_params.get("tenant_schema"),
@@ -4177,6 +4291,13 @@ class AdminHotelListCreateView(APIView):
             created_from=_parse_date(request.query_params.get("created_from")),
             created_to=_parse_date(request.query_params.get("created_to")),
         )
+        rows = _filter_admin_property_rows(
+            rows,
+            is_verified=_admin_verified_filter(request.query_params.get("is_verified")),
+            created_from=None,
+            created_to=None,
+        )
+        total = len(rows)
         rows = _attach_partner_users(rows)
         paginator = _OptionalLimitPagePagination()
         paginated_data = paginator.paginate_queryset(rows, request)

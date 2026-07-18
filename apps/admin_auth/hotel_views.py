@@ -194,8 +194,19 @@ class AdminHotelRoomInventoryView(AdminHotelBaseView):
 
     @swagger_auto_schema(responses={200: RoomSerializer(many=True)})
     def get(self, request, property_id):
+        raw_room_type_id = request.query_params.get("room_type_id")
+        room_type_id = None
+        if raw_room_type_id:
+            try:
+                room_type_id = int(raw_room_type_id)
+            except (TypeError, ValueError):
+                return Response({"detail": "room_type_id must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
         room_type_name = request.query_params.get("room_type_name")
-        rooms = list_rooms(property_id, room_type_name=room_type_name if room_type_name else None)
+        rooms = list_rooms(
+            property_id,
+            room_type_id=room_type_id,
+            room_type_name=room_type_name if room_type_name else None,
+        )
         return Response(RoomSerializer(rooms, many=True).data)
 
 

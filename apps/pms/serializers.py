@@ -108,7 +108,7 @@ class RoomSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     property_id = serializers.IntegerField(read_only=True)
     room_type_id = serializers.IntegerField(required=False, allow_null=True)
-    room_type = RoomTypeSerializer(read_only=True, required=False)
+    room_type = serializers.CharField(read_only=True, allow_null=True)
     room_type_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     room_type_preset = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     room_number = serializers.CharField(max_length=20)
@@ -141,6 +141,12 @@ class RoomSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(required=False)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
+
+    def to_representation(self, instance):
+        row = dict(instance)
+        if not row.get("room_type"):
+            row["room_type"] = row.get("room_type_name")
+        return super().to_representation(row)
 
 
 class RoomMassUpdateItemSerializer(serializers.Serializer):

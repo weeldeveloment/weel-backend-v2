@@ -252,10 +252,19 @@ def create_room(*, property_id: int, **kwargs: Any) -> dict[str, Any] | None:
     )
 
 
-def list_rooms(property_id: int, *, room_type_name: str | None = None, is_active: bool = True) -> list[dict[str, Any]]:
+def list_rooms(
+    property_id: int,
+    *,
+    room_type_id: int | None = None,
+    room_type_name: str | None = None,
+    is_active: bool = True,
+) -> list[dict[str, Any]]:
     conditions = ["property_id = %s"]
     params: list[Any] = [property_id]
 
+    if room_type_id is not None:
+        conditions.append("room_type_id = %s")
+        params.append(room_type_id)
     if room_type_name:
         conditions.append("room_type_name = %s")
         params.append(room_type_name)
