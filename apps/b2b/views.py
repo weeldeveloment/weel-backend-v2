@@ -87,6 +87,7 @@ from apps.hotels.serializers import (
 )
 from apps.b2b.serializers import (
     ActiveTripEmployeeSerializer,
+    ActiveTripEmployeesResponseSerializer,
     B2BCompanySerializer,
     B2BDepartmentSerializer,
     B2BDepartmentSummarySerializer,
@@ -94,10 +95,12 @@ from apps.b2b.serializers import (
     B2BEmployeeSerializer,
     B2BHotelCalendarSerializer,
     B2BUserSerializer,
+    BudgetRequestListResponseSerializer,
     BudgetRequestSerializer,
     BusinessTripSerializer,
     DashboardSummarySerializer,
     DepartmentMonthlySpendingSerializer,
+    StatisticsResponseSerializer,
     HotelBookingRequestCreateSerializer,
     HotelBookingRequestDetailSerializer,
     HotelBookingRequestSerializer,
@@ -930,21 +933,7 @@ class BudgetRequestListCreateView(APIView):
                 description="Filter by status. For owners this is usually `pending`.",
             ),
         ],
-        responses={
-            200: openapi.Response(
-                description="Budget requests plus total count",
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        "count": openapi.Schema(type=openapi.TYPE_INTEGER),
-                        "results": openapi.Schema(
-                            type=openapi.TYPE_ARRAY,
-                            items=openapi.Schema(type=openapi.TYPE_OBJECT),
-                        ),
-                    },
-                ),
-            ),
-        },
+        responses={200: BudgetRequestListResponseSerializer()},
     )
     def get(self, request):
         company_id = _get_company_id(request)
@@ -1100,6 +1089,26 @@ class B2BStatisticsView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        operation_summary="Company spending statistics",
+        operation_description=(
+            "Returns spending summaries grouped by time window (`periods`) and "
+            "by department (`by_department`). The `period` query parameter "
+            "selects the window for the department breakdown."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "period",
+                openapi.IN_QUERY,
+                description="Time window: 1h, 1d, 14d, 1m, 3m, 1y, or all (default: all)",
+                type=openapi.TYPE_STRING,
+                enum=["1h", "1d", "14d", "1m", "3m", "1y", "all"],
+                default="all",
+            ),
+        ],
+        responses={200: StatisticsResponseSerializer()},
+        tags=["B2B / Statistics"],
+    )
     def get(self, request):
         company_id = _get_company_id(request)
         if not company_id:
@@ -1344,10 +1353,7 @@ class ActiveTripEmployeesView(APIView):
                 default="all",
             ),
         ],
-        responses={
-            200: ActiveTripEmployeeSerializer(many=True),
-            400: openapi.Response(description="Company context required."),
-        },
+        responses={200: ActiveTripEmployeesResponseSerializer()},
     )
     def get(self, request):
         company_id = _get_company_id(request)

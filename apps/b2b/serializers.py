@@ -291,6 +291,31 @@ class BudgetRequestSerializer(serializers.Serializer):
         return data
 
 
+class BudgetRequestListResponseSerializer(serializers.Serializer):
+    count = serializers.IntegerField(read_only=True)
+    results = BudgetRequestSerializer(many=True, read_only=True)
+
+
+class DepartmentStatSerializer(serializers.Serializer):
+    department_id = serializers.IntegerField(read_only=True)
+    department_name = serializers.CharField(read_only=True)
+    total_trips = serializers.IntegerField(read_only=True)
+    total_employees = serializers.IntegerField(read_only=True)
+    approved_spend = serializers.CharField(read_only=True)
+
+
+class PeriodStatSerializer(serializers.Serializer):
+    total_budget = serializers.CharField(read_only=True)
+    total_trips = serializers.IntegerField(read_only=True)
+    approved_spend = serializers.CharField(read_only=True)
+
+
+class StatisticsResponseSerializer(serializers.Serializer):
+    period = serializers.CharField(read_only=True)
+    periods = serializers.DictField(child=PeriodStatSerializer(), read_only=True)
+    by_department = DepartmentStatSerializer(many=True, read_only=True)
+
+
 class ReviewBudgetRequestSerializer(serializers.Serializer):
     """Owner tomonidan byudjet so'rovini tasdiqlash/rad etish. `description`
     — owner nega tasdiqlagani/rad etganini yozadigan ixtiyoriy izoh."""
@@ -332,6 +357,12 @@ class ActiveTripEmployeeSerializer(serializers.Serializer):
     trip_status = serializers.CharField(read_only=True)
     trip_employee_status = serializers.CharField(read_only=True)
     assigned_at = serializers.DateTimeField(read_only=True)
+
+
+class ActiveTripEmployeesResponseSerializer(serializers.Serializer):
+    type = serializers.CharField(read_only=True)
+    count = serializers.IntegerField(read_only=True)
+    results = ActiveTripEmployeeSerializer(many=True, read_only=True)
 
 
 class RecentTripEmployeeSerializer(serializers.Serializer):

@@ -41,3 +41,8 @@ sms-reminder-logs:
 # Partners that currently have at least one active property
 sms-reminder-partners:
 	command $(PYTHON) manage.py shell -c "from users.models import Partner; qs=Partner.objects.filter(is_active=True, partner__is_archived=False).exclude(phone_number='').distinct().values('id','first_name','last_name','phone_number')[:50]; print(list(qs))"
+
+# --- OpenAPI schema export for frontend type generation ---
+export-schema:
+	command $(PYTHON) manage.py export_openapi_schema --output openapi.json
+	command $(PYTHON) manage.py export_openapi_schema --output b2b-openapi.json --variant b2b
