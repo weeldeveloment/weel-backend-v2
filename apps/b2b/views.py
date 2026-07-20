@@ -176,8 +176,8 @@ class B2BHotelSearchView(APIView):
         d.pop("children", None)
         d.pop("babies", None)
 
-        hotels = search_hotels(**d, limit=page_size, offset=offset, allow_multi_room=True)
-        count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"}, allow_multi_room=True)
+        hotels = search_hotels(**d, limit=page_size, offset=offset)
+        count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"})
         return Response({
             "count": count,
             "page": page,
