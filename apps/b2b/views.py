@@ -1317,6 +1317,38 @@ class TopHotelsByBookingsView(APIView):
 _VALID_ACTIVE_TRIP_TYPES = {"yolda", "borgan", "all"}
 
 
+def _enrich_with_pms_vouchers(rows: list[dict[str, Any]]) -> None:
+    from shared.raw.db import fetch_all as _fetch_all
+
+    by_schema: dict[str, set[int]] = {}
+    for row in rows:
+        schema = row.get("tenant_schema")
+        pms_id = row.get("pms_booking_id")
+        if schema and pms_id:
+            by_schema.setdefault(schema, set()).add(pms_id)
+
+    voucher_map: dict[tuple[str, int], str] = {}
+    for schema, pms_ids in by_schema.items():
+        placeholders = ", ".join(["%s"] * len(pms_ids))
+        try:
+            result = _run_in_schema(
+                schema,
+                lambda: _fetch_all(
+                    f"SELECT id, voucher_number FROM pms_booking WHERE id IN ({placeholders}) AND voucher_number IS NOT NULL",
+                    list(pms_ids),
+                ),
+            )
+            for row in result or []:
+                voucher_map[(schema, row["id"])] = row["voucher_number"]
+        except Exception:
+            pass
+
+    for row in rows:
+        schema = row.get("tenant_schema")
+        pms_id = row.get("pms_booking_id")
+        row["voucher_number"] = voucher_map.get((schema, pms_id)) if (schema and pms_id) else None
+
+
 class ActiveTripEmployeesView(APIView):
     """GET /api/b2b/trips/active-employees/?type=yolda|borgan|all
 
@@ -1368,6 +1400,7 @@ class ActiveTripEmployeesView(APIView):
             )
 
         rows = list_active_trip_employees(company_id, type_=type_)
+        _enrich_with_pms_vouchers(rows)
         return Response({
             "type": type_,
             "count": len(rows),
