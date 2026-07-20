@@ -646,7 +646,21 @@ class BookingAcceptView(PMSBaseView):
         booking = accept_booking(booking_id, _get_user_id(request))
         if not booking:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        self._reconcile_b2b_booking(booking_id)
         return Response(BookingSerializer(booking).data)
+
+    @staticmethod
+    def _reconcile_b2b_booking(pms_booking_id: int) -> None:
+        from apps.b2b.repository import get_b2b_booking_request_by_pms_booking_id
+        from apps.b2b.hotel_booking_service import reconcile_booking_request
+
+        booking_request = get_b2b_booking_request_by_pms_booking_id(pms_booking_id)
+        if not booking_request:
+            return
+        try:
+            reconcile_booking_request(booking_request)
+        except Exception:
+            logger.exception("Failed to reconcile B2B booking after PMS accept (pms_booking_id=%s)", pms_booking_id)
 
 
 class BookingCancelView(PMSBaseView):
@@ -658,6 +672,7 @@ class BookingCancelView(PMSBaseView):
             return Response({"detail": f"Database error: {e}"}, status=status.HTTP_400_BAD_REQUEST)
         if not booking:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        BookingAcceptView._reconcile_b2b_booking(booking_id)
         return Response(BookingSerializer(booking).data)
 
 
@@ -667,6 +682,7 @@ class BookingCheckInView(PMSBaseView):
         booking = check_in_booking(booking_id, _get_user_id(request))
         if not booking:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        BookingAcceptView._reconcile_b2b_booking(booking_id)
         return Response(BookingSerializer(booking).data)
 
 
@@ -676,6 +692,7 @@ class BookingCheckOutView(PMSBaseView):
         booking = check_out_booking(booking_id, _get_user_id(request))
         if not booking:
             return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        BookingAcceptView._reconcile_b2b_booking(booking_id)
         return Response(BookingSerializer(booking).data)
 
 

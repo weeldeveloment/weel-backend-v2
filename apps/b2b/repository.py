@@ -753,6 +753,19 @@ def add_hotel_booking_room_employee(*, booking_room_id: int, employee_id: int) -
     )
 
 
+def get_b2b_booking_request_by_pms_booking_id(pms_booking_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        SELECT br.*
+        FROM {B2B_HOTEL_BOOKING_REQUEST_TABLE} br
+        JOIN {B2B_HOTEL_BOOKING_ROOM_TABLE} brm ON brm.booking_request_id = br.id
+        WHERE brm.pms_booking_id = %s
+        LIMIT 1
+        """,
+        [pms_booking_id],
+    )
+
+
 def get_hotel_booking_request(booking_request_id: int, company_id: int | None = None) -> dict[str, Any] | None:
     if company_id is not None:
         return fetch_one(
