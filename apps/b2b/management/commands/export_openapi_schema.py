@@ -3,7 +3,8 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand
 from drf_yasg import openapi
-from drf_yasg.generators import OpenAPISchemaGenerator
+
+from core.swagger_hooks import RequiredFixOpenAPISchemaGenerator
 
 
 class Command(BaseCommand):
@@ -46,12 +47,12 @@ class Command(BaseCommand):
                 contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
                 license=openapi.License(name="Proprietary"),
             )
-            patterns = _b2b_patterns()
+            patterns = _b2b_patterns
         else:
             from core.urls import schema_info as info
             patterns = None
 
-        schema_generator = OpenAPISchemaGenerator(
+        schema_generator = RequiredFixOpenAPISchemaGenerator(
             info=info,
             url=getattr(settings, "SWAGGER_URL", None),
             patterns=patterns,
@@ -62,15 +63,17 @@ class Command(BaseCommand):
         output_path = Path(options["output"])
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        schema_dict = schema.as_dict()
+
         if options["format"] == "yaml":
             import yaml
-            content = yaml.dump(schema.to_dict(), default_flow_style=False, allow_unicode=True)
+            content = yaml.dump(schema_dict, default_flow_style=False, allow_unicode=True)
             output_path.write_text(content, encoding="utf-8")
         else:
-            content = json.dumps(schema.to_dict(), indent=2, ensure_ascii=False)
+            content = json.dumps(schema_dict, indent=2, ensure_ascii=False)
             output_path.write_text(content, encoding="utf-8")
 
-        path_count = len(schema.to_dict().get("paths", {}))
+        path_count = len(schema_dict.get("paths", {}))
         self.stdout.write(
             self.style.SUCCESS(
                 f"OpenAPI schema ({variant}) exported to {output_path.resolve()} — {path_count} paths"

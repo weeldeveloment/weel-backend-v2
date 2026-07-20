@@ -33,6 +33,7 @@ from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
 from core import settings
+from core.swagger_hooks import RequiredFixOpenAPISchemaGenerator
 
 schema_info = openapi.Info(
     "Weel API",
@@ -49,6 +50,7 @@ schema_view = get_schema_view(
     public=True,
     url=settings.SWAGGER_URL,
     permission_classes=[permissions.AllowAny],
+    generator_class=RequiredFixOpenAPISchemaGenerator,
 )
 
 # Separate Swagger schema — only B2B/Hotels/Documents + admin hotel & b2b endpoints
@@ -84,7 +86,7 @@ b2b_schema_view = get_schema_view(
     openapi.Info(
         "Weel B2B API",
         "v1",
-        "B2B Corporate Travel Management — Business Trips, Documents, Hotel Catalog, Admin",
+        "B2B Corporate Travel Management —Business Trips, Documents, Hotel Catalog, Admin",
         contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
         license=openapi.License(name="Proprietary"),
     ),
@@ -92,6 +94,7 @@ b2b_schema_view = get_schema_view(
     url=settings.SWAGGER_URL,
     permission_classes=[permissions.AllowAny],
     patterns=_b2b_patterns,
+    generator_class=RequiredFixOpenAPISchemaGenerator,
 )
 
 _SWAGGER_LOCAL_AUTH_ATTEMPTS: dict[str, tuple[int, float]] = {}
