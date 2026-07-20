@@ -238,7 +238,7 @@ class BookingSerializer(serializers.Serializer):
     confirmed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     confirmation_deadline = serializers.DateTimeField(read_only=True, allow_null=True)
     b2b_company_id = serializers.IntegerField(read_only=True, allow_null=True)
-    voucher_number = serializers.CharField(read_only=True, allow_null=True)
+    voucher_number = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     room_number = serializers.CharField(read_only=True, allow_null=True)
     guest_first_name = serializers.CharField(read_only=True, allow_null=True)

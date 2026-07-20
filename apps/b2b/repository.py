@@ -1033,11 +1033,15 @@ def list_active_trip_employees(company_id: int, type_: str = "all") -> list[dict
             e.email            AS email,
             e.phone            AS phone,
             d.name             AS department_name,
-            d.id               AS department_id
+            d.id               AS department_id,
+            br.hotel_name      AS hotel_name,
+            tv.voucher_number  AS voucher_number
         FROM {B2B_TRIP_EMPLOYEE_TABLE} te
         JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = te.trip_id
         JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = te.employee_id
         LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
+        LEFT JOIN {B2B_HOTEL_BOOKING_REQUEST_TABLE} br ON br.trip_id = t.id
+        LEFT JOIN {B2B_TRAVEL_VOUCHER_TABLE} tv ON tv.trip_id = t.id
         WHERE t.company_id = %s
           AND t.status IN ('active', 'pending')
           AND te.status NOT IN ('cancelled', 'checked_out')

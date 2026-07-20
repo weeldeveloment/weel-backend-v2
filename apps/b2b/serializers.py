@@ -357,6 +357,12 @@ class ActiveTripEmployeeSerializer(serializers.Serializer):
     trip_status = serializers.CharField(read_only=True)
     trip_employee_status = serializers.CharField(read_only=True)
     assigned_at = serializers.DateTimeField(read_only=True)
+    hotel_name = serializers.CharField(read_only=True, allow_null=True)
+    voucher_number = serializers.CharField(read_only=True, allow_null=True)
+    pms_accepted = serializers.SerializerMethodField()
+
+    def get_pms_accepted(self, obj):
+        return obj.get("trip_employee_status") in ("confirmed", "checked_in")
 
 
 class ActiveTripEmployeesResponseSerializer(serializers.Serializer):

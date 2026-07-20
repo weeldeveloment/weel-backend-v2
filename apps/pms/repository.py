@@ -653,6 +653,11 @@ def _generate_booking_number() -> str:
     return f"PMS-{datetime.now().strftime('%Y')}-{random.randint(10000, 99999)}"
 
 
+def _generate_voucher_number(booking_id: int) -> str:
+    import random
+    return f"V-{booking_id}-{random.randint(10000, 99999)}"
+
+
 def create_booking(
     *,
     property_id: int,
@@ -874,13 +879,21 @@ def update_booking_with_guest(
 
 
 def accept_booking(booking_id: int, user_id: int | None = None) -> dict[str, Any] | None:
-    booking = update_booking(booking_id, status="confirmed")
+    existing = get_booking(booking_id)
+    if not existing:
+        return None
+
+    voucher_number = existing.get("voucher_number")
+    if not voucher_number:
+        voucher_number = _generate_voucher_number(booking_id)
+
+    booking = update_booking(booking_id, status="confirmed", voucher_number=voucher_number)
     if booking:
         _add_booking_history(
             booking_id=booking_id,
             action="status_changed",
-            previous_value={"status": "new"},
-            new_value={"status": "confirmed"},
+            previous_value={"status": existing.get("status"), "voucher_number": None},
+            new_value={"status": "confirmed", "voucher_number": voucher_number},
             user_id=user_id,
         )
     return booking

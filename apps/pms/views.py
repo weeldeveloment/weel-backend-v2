@@ -24,6 +24,7 @@ from apps.platform.raw_repository import get_organization_by_id, get_organizatio
 from apps.shared.permissions import HasOrganization
 
 from apps.pms.repository import (
+    _generate_voucher_number,
     accept_booking,
     add_property_image,
     block_dates,
@@ -719,6 +720,44 @@ class BookingHistoryView(PMSBaseView):
     def get(self, request, property_id, booking_id):
         history = get_booking_history(booking_id)
         return Response(BookingHistorySerializer(history, many=True).data)
+
+
+class BookingVoucherView(PMSBaseView):
+    """GET  — read voucher_number for a booking.
+    POST — regenerate / set voucher_number (only when booking is confirmed)."""
+
+    @swagger_auto_schema(responses={200: BookingSerializer()})
+    def get(self, request, property_id, booking_id):
+        booking = get_booking(booking_id, property_id)
+        if not booking:
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(BookingSerializer(booking).data)
+
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "voucher_number": openapi.Schema(type=openapi.TYPE_STRING, description="Optional custom voucher number. Auto-generated if omitted."),
+            },
+        ),
+        responses={200: BookingSerializer()},
+    )
+    def post(self, request, property_id, booking_id):
+        booking = get_booking(booking_id, property_id)
+        if not booking:
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if booking.get("status") != "confirmed":
+            return Response(
+                {"detail": "Voucher can only be set after booking is confirmed."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        voucher_number = request.data.get("voucher_number") or _generate_voucher_number(booking_id)
+        updated = update_booking(booking_id, voucher_number=voucher_number)
+        if not updated:
+            return Response({"detail": "Failed to update voucher."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(BookingSerializer(updated).data)
 
 
 class ReviewListCreateView(PMSBaseView):

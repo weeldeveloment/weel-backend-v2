@@ -12,6 +12,7 @@ from .views import (
     BookingMealPlanView,
     BookingMoveView,
     BookingRetrieveView,
+    BookingVoucherView,
     CalendarBlockView,
     CalendarHoldView,
     CalendarUnblockView,
@@ -72,6 +73,7 @@ urlpatterns = [
     path("properties/<int:property_id>/bookings/<int:booking_id>/move/", BookingMoveView.as_view(), name="pms-booking-move"),
     path("properties/<int:property_id>/bookings/<int:booking_id>/meal-plan/", BookingMealPlanView.as_view(), name="pms-booking-meal-plan"),
     path("properties/<int:property_id>/bookings/<int:booking_id>/history/", BookingHistoryView.as_view(), name="pms-booking-history"),
+    path("properties/<int:property_id>/bookings/<int:booking_id>/voucher/", BookingVoucherView.as_view(), name="pms-booking-voucher"),
 
     # Reviews
     path("properties/<int:property_id>/reviews/", ReviewListCreateView.as_view(), name="pms-review-list-create"),
