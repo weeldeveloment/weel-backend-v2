@@ -390,7 +390,7 @@ def update_user_profile(
     params = list(allowed.values()) + [user_id, role]
     row = fetch_one(
         f"""
-        UPDATE {USER_TABLE}
+        UPDATE public.{USER_TABLE}
         SET {assignments}
         WHERE id = %s
           AND role = %s

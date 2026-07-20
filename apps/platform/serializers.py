@@ -23,8 +23,8 @@ class AuthenticatedOrgCreateSerializer(serializers.Serializer):
 
 
 class OrganizationUpdateSerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=200, required=False)
-    slug = serializers.SlugField(max_length=100, required=False)
+    name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    slug = serializers.CharField(max_length=100, required=False, allow_blank=True)
 
 
 class PlatformUserSerializer(serializers.Serializer):
@@ -37,9 +37,9 @@ class PlatformUserSerializer(serializers.Serializer):
 
 
 class PlatformUserUpdateSerializer(serializers.Serializer):
-    first_name = serializers.CharField(max_length=100, required=False)
-    last_name = serializers.CharField(max_length=100, required=False)
-    phone = serializers.CharField(max_length=32, required=False)
+    first_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
 
 
 class PmsOtpRegisterSerializer(serializers.Serializer):

@@ -181,6 +181,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "core.middleware.request_tracing.RequestTracingMiddleware",
     "core.middleware.locale.HeaderLocaleMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "core.middleware.tenant.TenantMiddleware",
@@ -777,6 +778,11 @@ LOGGING = {
         "core": {
             "handlers": ["console", "stdout_json", "file"],
             "level": "DEBUG",
+            "propagate": False,
+        },
+        "core.request_tracing": {
+            "handlers": ["console", "stdout_json", "file"],
+            "level": "INFO",
             "propagate": False,
         },
         "users": {
