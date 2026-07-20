@@ -184,7 +184,7 @@ class HotelCardSerializer(serializers.Serializer):
             "pets_allowed": bool(row.get("pets_allowed", False)),
             "quiet_hours": bool(row.get("quiet_hours", True)),
         }
-        row["img"] = _build_media_url(request, row.get("img") or [])
+        row["img"] = _build_media_url(request, row.get("photos") or [])
         row["is_verified"] = bool(row.get("is_verified", False))
         row["is_recommended"] = bool(row.get("is_recommended", False))
         row["is_favorite"] = str(row.get("guid")) in _favorite_guid_set(self.context)
@@ -215,7 +215,7 @@ class HotelCardSerializer(serializers.Serializer):
     @staticmethod
     def _build_room_summary(room: dict, request: Any) -> dict:
         room = dict(room)
-        room["img"] = _build_media_url(request, room.get("img") or [])
+        room["img"] = _build_media_url(request, room.get("images") or [])
         return room
 
 
