@@ -692,8 +692,9 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
             filtered_values[key] = _json.dumps(value)
         else:
             filtered_values[key] = value
+    new_currency = values.pop("currency", None)
     filtered_values["organization_id"] = organization["id"]
-    if not filtered_values:
+    if not filtered_values and not new_currency:
         return get_admin_hotel(hotel_guid)
 
     set_parts = []
@@ -707,19 +708,23 @@ def update_admin_hotel(*, hotel_guid: str, values: dict[str, Any]) -> dict[str, 
 
     def _update() -> bool:
         with connection.cursor() as cursor:
-            cursor.execute(
-                f"""
-                UPDATE pms_property
-                SET {", ".join(set_parts)}
-                WHERE id = %s
-                """,
-                params,
-            )
-            return cursor.rowcount > 0
+            if set_parts:
+                cursor.execute(
+                    f"""
+                    UPDATE pms_property
+                    SET {", ".join(set_parts)}
+                    WHERE id = %s
+                    """,
+                    params,
+                )
+            if new_currency:
+                cursor.execute(
+                    "UPDATE pms_room SET currency = %s WHERE property_id = %s",
+                    [new_currency, hotel_id],
+                )
+            return True
 
-    updated = _run_in_schema(schema_name, _update)
-    if not updated:
-        return None
+    _run_in_schema(schema_name, _update)
     return get_admin_hotel(hotel_guid)
 
 

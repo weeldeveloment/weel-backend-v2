@@ -2156,13 +2156,13 @@ class HotelPropertyReviewListCreateView(APIView):
         responses={200: openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))},
     )
     def get(self, request, hotel_guid):
-        from apps.property.hotel_repository import resolve_hotel_guid
+        from apps.property.hotel_repository import resolve_hotel_guid, _run_in_schema
         resolved = resolve_hotel_guid(str(hotel_guid))
         if not resolved:
             raise NotFound(_("Hotel not found"))
-        _schema, hotel_id = resolved
+        schema_name, hotel_id = resolved
         from apps.hotels.repository import get_hotel_reviews
-        reviews = get_hotel_reviews(hotel_id)
+        reviews = _run_in_schema(schema_name, lambda: get_hotel_reviews(hotel_id))
         return Response(reviews, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(

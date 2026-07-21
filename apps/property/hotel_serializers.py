@@ -365,6 +365,7 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+    currency = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     property_detail = HotelAdminPropertyDetailSerializer(required=False)
 
     def validate(self, attrs):
@@ -435,6 +436,9 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
             prepared["legal_info"] = {
                 k: (str(v) if v is not None else "") for k, v in raw_legal.items()
             }
+
+        if "currency" in attrs:
+            prepared["currency"] = str(attrs.get("currency") or "").upper()
 
         if isinstance(property_detail, dict):
             for key in (

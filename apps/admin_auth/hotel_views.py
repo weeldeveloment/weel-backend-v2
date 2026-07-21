@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 
 def _set_tenant_from_guid(hotel_guid: str) -> int | None:
-    resolved = resolve_hotel_guid(hotel_guid, include_inactive=True)
+    resolved = resolve_hotel_guid(hotel_guid, include_inactive=True, include_unverified=True)
     if not resolved:
         return None
     schema_name, hotel_id = resolved
