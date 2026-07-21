@@ -41,6 +41,7 @@ from apps.pms.repository import (
     respond_to_review,
     update_booking_with_guest,
     update_property,
+    update_room,
 )
 from apps.pms.serializers import (
     AnalyticsQuerySerializer,
@@ -485,3 +486,17 @@ class AdminHotelAnalyticsView(AdminHotelBaseView):
         )
 
         return Response(AnalyticsResponseSerializer(data).data)
+
+
+class AdminHotelRoomUpdateView(AdminHotelBaseView):
+    """Update room condition for inspection workflow"""
+
+    def patch(self, request, property_id, room_id):
+        serializer = RoomSerializer(data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        room = update_room(room_id, **serializer.validated_data)
+        if not room:
+            return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(RoomSerializer(room).data)
