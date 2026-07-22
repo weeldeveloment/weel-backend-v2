@@ -185,6 +185,7 @@ MIDDLEWARE = [
     "core.middleware.locale.HeaderLocaleMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "core.middleware.tenant.TenantMiddleware",
+    "core.middleware.cache.CacheMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
     "request_logging.middleware.LoggingMiddleware",  # django-request-logging
     "core.middleware.memory_profiling.MemoryProfilingMiddleware",
@@ -219,7 +220,7 @@ if _db_port in ("", "db_port"):
 # ASGI (Daphne) deployments must use CONN_MAX_AGE=0: persistent connections
 # accumulate one per thread and exhaust PostgreSQL's max_connections under load.
 _db_conn_max_age = int((os.environ.get("DB_CONN_MAX_AGE") or "0").strip() or "0")
-_db_conn_health_checks = bool(int((os.environ.get("DB_CONN_HEALTH_CHECKS") or "0").strip() or "0"))
+_db_conn_health_checks = bool(int((os.environ.get("DB_CONN_HEALTH_CHECKS") or "1").strip() or "1"))
 
 DATABASES = {
     "default": {
@@ -231,6 +232,9 @@ DATABASES = {
         "PORT": _db_port,
         "CONN_MAX_AGE": _db_conn_max_age,
         "CONN_HEALTH_CHECKS": _db_conn_health_checks,
+        "OPTIONS": {
+            "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "5")),
+        },
     }
 }
 
@@ -279,6 +283,8 @@ else:
             },
         },
     }
+
+CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "60"))
 
 # Use InMemoryChannelLayer for development without Redis
 if DEBUG and not _redis_url:
