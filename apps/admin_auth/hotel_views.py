@@ -7,6 +7,7 @@ from typing import Any
 from django.db import IntegrityError, connection
 
 from rest_framework import serializers, status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -43,6 +44,7 @@ from apps.pms.repository import (
     update_property,
     update_room,
 )
+from apps.pms.repository import get_room
 from apps.pms.serializers import (
     AnalyticsQuerySerializer,
     AnalyticsResponseSerializer,
@@ -254,11 +256,19 @@ class AdminHotelBookingsView(AdminHotelBaseView):
         status_filter = request.query_params.get("status")
         from_date = request.query_params.get("from_date")
         to_date = request.query_params.get("to_date")
+        raw_room_id = request.query_params.get("room_id")
+        room_id = None
+        if raw_room_id:
+            try:
+                room_id = int(raw_room_id)
+            except (TypeError, ValueError):
+                return Response({"detail": "room_id must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
         bookings = list_bookings(
             property_id=property_id,
             status=status_filter,
             from_date=from_date,
             to_date=to_date,
+            room_id=room_id,
         )
         return Response(BookingSerializer(bookings, many=True).data)
 
@@ -489,14 +499,40 @@ class AdminHotelAnalyticsView(AdminHotelBaseView):
 
 
 class AdminHotelRoomUpdateView(AdminHotelBaseView):
-    """Update room condition for inspection workflow"""
+    """Update room fields for inspection/editing workflow"""
 
     def patch(self, request, property_id, room_id):
+        room = get_room(room_id, int(property_id))
+        if not room:
+            return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+
         serializer = RoomSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        room = update_room(room_id, **serializer.validated_data)
+        updated = update_room(room_id, **serializer.validated_data)
+        if not updated:
+            return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(RoomSerializer(updated).data)
+
+
+class AdminHotelRoomImageUploadView(AdminHotelBaseView):
+    """Upload an image for a specific room"""
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, property_id, room_id):
+        room = get_room(room_id, int(property_id))
         if not room:
             return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(RoomSerializer(room).data)
+
+        image_file = request.FILES.get("image")
+        if not image_file:
+            return Response({"detail": "No image file provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from django.core.files.storage import default_storage
+        path = default_storage.save(
+            f"pms/properties/{property_id}/rooms/{room_id}/{image_file.name}",
+            image_file,
+        )
+        image_url = default_storage.url(path)
+        return Response({"image_url": image_url}, status=status.HTTP_201_CREATED)

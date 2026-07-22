@@ -77,6 +77,7 @@ class PropertyServiceListSerializer(serializers.Serializer):
     guid = serializers.UUIDField(required=False, allow_null=True)
     title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     icon_url = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    category_key = serializers.CharField(required=False, allow_null=True)
 
 
 class PrefectureDistrictListSerializer(serializers.Serializer):

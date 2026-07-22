@@ -146,33 +146,42 @@ def _load_db_icons() -> dict[str, str]:
     return result
 
 
-def list_property_services(language: str = "uz") -> list[dict[str, Any]]:
+def list_property_services(
+    language: str = "uz",
+    property_type: str | None = None,
+) -> list[dict[str, Any]]:
     if table_exists("services"):
         try:
             if language == "ru":
                 title_select = "COALESCE(NULLIF(s.title_ru, ''), NULLIF(s.title, ''))"
                 order_field = "COALESCE(NULLIF(s.title_ru, ''), NULLIF(s.title, ''))"
             elif language == "en":
-                title_select = "COALESCE(NULLIF(s.title_en, ''), NULLIF(s.title, ''))"
-                order_field = "COALESCE(NULLIF(s.title_en, ''), NULLIF(s.title, ''))"
+                title_select = "s.title"
+                order_field = "s.title"
             else:
                 title_select = "COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, ''))"
                 order_field = "COALESCE(NULLIF(s.title, ''), NULLIF(s.title_ru, ''))"
-            
-            return fetch_all(
-                f"""
+
+            type_clause = ""
+            params: list[Any] = []
+            if property_type:
+                type_clause = "WHERE %s = ANY(s.type)"
+                params.append(property_type)
+
+            query = f"""
                 SELECT
                     s.id AS guid,
                     {title_select} AS title,
-                    s.icon_url AS icon_url
+                    s.icon_url AS icon_url,
+                    s.category_key AS category_key
                 FROM services s
-                ORDER BY {order_field}, s.id
+                {type_clause}
+                ORDER BY s.category_key NULLS LAST, {order_field}, s.id
                 """
-            )
+            return fetch_all(query, params if params else None)
         except ProgrammingError:
             pass
 
-    # Backward compatible schema candidates.
     legacy_candidates = [PROPERTY_SERVICE_TABLE, "property_service", "property_propertyservice"]
     seen: set[str] = set()
     for table_name in legacy_candidates:
@@ -198,7 +207,8 @@ def list_property_services(language: str = "uz") -> list[dict[str, Any]]:
                 SELECT
                     ps.guid,
                     {legacy_title_select} AS title,
-                    ps.icon AS icon_url
+                    ps.icon AS icon_url,
+                    NULL AS category_key
                 FROM {table_name} ps
                 ORDER BY {legacy_order}, ps.id
                 """
@@ -206,7 +216,6 @@ def list_property_services(language: str = "uz") -> list[dict[str, Any]]:
         except ProgrammingError:
             pass
 
-    # Keep endpoint stable instead of throwing 500 when table is unavailable.
     return []
 
 

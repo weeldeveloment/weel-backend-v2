@@ -1482,9 +1482,10 @@ class PropertyServiceListView(APIView):
     )
     def get(self, request, *args, **kwargs):
         language = _preferred_language(request)
+        property_type = request.query_params.get("property_type") or None
 
         def _load():
-            rows = list_property_services(language)
+            rows = list_property_services(language, property_type=property_type)
             data = []
             for row in rows:
                 payload = dict(row)
@@ -1495,7 +1496,7 @@ class PropertyServiceListView(APIView):
 
         data = _get_or_set_cached_payload(
             request,
-            _public_cache_key(request, f"property:service-list:{language}"),
+            _public_cache_key(request, f"property:service-list:{language}:ptype={property_type or ''}"),
             _PROPERTY_META_CACHE_TTL_SECONDS,
             _load,
         )
