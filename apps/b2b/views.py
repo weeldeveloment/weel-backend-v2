@@ -76,8 +76,9 @@ from apps.b2b.hotel_booking_service import (
 )
 from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer
 from apps.b2b.tasks import _send_b2b_lead_telegram_notification
-from apps.property.hotel_repository import _run_in_schema, get_hotel_for_public, resolve_hotel_guid
+from apps.property.hotel_repository import _run_in_schema, _safe_schema_name, get_hotel_for_public, resolve_hotel_guid
 from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, search_hotels
+from shared.raw.db import fetch_all
 from apps.hotels.serializers import (
     HotelCardSerializer,
     HotelSearchParamsSerializer,
@@ -1318,30 +1319,37 @@ _VALID_ACTIVE_TRIP_TYPES = {"yolda", "borgan", "all"}
 
 
 def _enrich_with_pms_vouchers(rows: list[dict[str, Any]]) -> None:
-    from shared.raw.db import fetch_all as _fetch_all
-
     by_schema: dict[str, set[int]] = {}
     for row in rows:
         schema = row.get("tenant_schema")
         pms_id = row.get("pms_booking_id")
-        if schema and pms_id:
+        if schema and pms_id and _safe_schema_name(schema):
             by_schema.setdefault(schema, set()).add(pms_id)
 
-    voucher_map: dict[tuple[str, int], str] = {}
+    if not by_schema:
+        return
+
+    parts: list[str] = []
+    params: list[Any] = []
     for schema, pms_ids in by_schema.items():
         placeholders = ", ".join(["%s"] * len(pms_ids))
-        try:
-            result = _run_in_schema(
-                schema,
-                lambda: _fetch_all(
-                    f"SELECT id, voucher_number FROM pms_booking WHERE id IN ({placeholders}) AND voucher_number IS NOT NULL",
-                    list(pms_ids),
-                ),
-            )
-            for row in result or []:
-                voucher_map[(schema, row["id"])] = row["voucher_number"]
-        except Exception:
-            pass
+        parts.append(
+            f"SELECT %s AS _schema, id, voucher_number "
+            f"FROM {schema}.pms_booking "
+            f"WHERE id IN ({placeholders}) AND voucher_number IS NOT NULL"
+        )
+        params.append(schema)
+        params.extend(pms_ids)
+
+    union_sql = " UNION ALL ".join(parts)
+
+    try:
+        result = fetch_all(union_sql, params)
+        voucher_map: dict[tuple[str, int], str] = {
+            (row["_schema"], row["id"]): row["voucher_number"] for row in result
+        }
+    except Exception:
+        voucher_map = {}
 
     for row in rows:
         schema = row.get("tenant_schema")
