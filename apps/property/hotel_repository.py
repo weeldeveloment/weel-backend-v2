@@ -407,6 +407,7 @@ def list_admin_hotels(
     search: str | None = None,
     organization_id: int | None = None,
     tenant_schema: str | None = None,
+    partner_user_id: int | None = None,
     is_active: bool | None = None,
     created_from: date | None = None,
     created_to: date | None = None,
@@ -432,6 +433,8 @@ def list_admin_hotels(
             continue
         for row in tenant_rows:
             payload = _serialize_hotel_row(row, organization)
+            if partner_user_id is not None and int(payload.get("partner_user_id") or 0) != int(partner_user_id):
+                continue
             if is_active is not None and bool(payload.get("is_active")) != is_active:
                 continue
             if not _matches_created_range(

@@ -130,7 +130,7 @@ class HotelCardSerializer(serializers.Serializer):
     verification_status = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
     tenant_schema = serializers.CharField(allow_blank=True, allow_null=True, read_only=True)
     organization = serializers.DictField(read_only=True, default=dict)
-    partner_user = serializers.DictField(read_only=True, default=dict)
+    owner_user = serializers.DictField(read_only=True, default=dict)
     property_detail = serializers.DictField(read_only=True, default=dict)
     created_at = serializers.DateTimeField(allow_null=True, read_only=True)
     updated_at = serializers.DateTimeField(allow_null=True, read_only=True)
@@ -191,8 +191,9 @@ class HotelCardSerializer(serializers.Serializer):
             "slug": row.get("organization_slug"),
             "schema_name": row.get("tenant_schema"),
         }
-        partner_payload = row.get("partner_user")
-        row["partner_user"] = partner_payload if isinstance(partner_payload, dict) else None
+        row["owner_user"] = (
+            row.get("owner_user") if isinstance(row.get("owner_user"), dict) else None
+        )
         row["property_detail"] = {
             "description_ru": row.get("description_ru") or None,
             "description_uz": row.get("description_uz") or None,
@@ -297,14 +298,16 @@ class HotelAdminListSerializer(HotelCardSerializer):
 
     def to_representation(self, instance):
         row = dict(instance)
-        row["partner_user"] = row.get("partner_user") if isinstance(row.get("partner_user"), dict) else None
+        row["owner_user"] = (
+            row.get("owner_user") if isinstance(row.get("owner_user"), dict) else None
+        )
         data = super().to_representation(row)
         return data
 
 
 class HotelAdminUpdateSerializer(serializers.Serializer):
     organization_id = serializers.IntegerField(required=False, allow_null=True)
-    partner_user_id = serializers.IntegerField(required=False, allow_null=True)
+    owner_user_id = serializers.IntegerField(required=False, allow_null=True)
     tenant_schema = serializers.CharField(required=False, allow_blank=False)
     title = serializers.CharField(required=False, allow_blank=False)
     description_ru = serializers.CharField(
@@ -374,8 +377,8 @@ class HotelAdminUpdateSerializer(serializers.Serializer):
 
         if "organization_id" in attrs:
             prepared["organization_id"] = attrs.get("organization_id")
-        if "partner_user_id" in attrs:
-            prepared["partner_user_id"] = attrs.get("partner_user_id")
+        if "owner_user_id" in attrs:
+            prepared["partner_user_id"] = attrs.get("owner_user_id")
         if "tenant_schema" in attrs:
             prepared["tenant_schema"] = str(attrs.get("tenant_schema") or "").strip()
 

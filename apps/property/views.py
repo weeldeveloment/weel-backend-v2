@@ -1229,7 +1229,7 @@ def _paginate_rows(rows: list, *, page: int, limit: int) -> list:
     return rows[start:start + limit]
 
 
-def _serialize_partner_user(user) -> dict | None:
+def _serialize_owner_user(user) -> dict | None:
     if user is None:
         return None
     return {
@@ -1259,8 +1259,29 @@ def _attach_partner_users(rows: list[dict]) -> list[dict]:
         raw_partner_id = row.get("partner_user_id")
         partner_id = _parse_int(raw_partner_id)
         payload["partner_user"] = (
-            _serialize_partner_user(users_by_id.get(partner_id))
+            _serialize_owner_user(users_by_id.get(partner_id))
             if partner_id is not None
+            else None
+        )
+        enriched.append(payload)
+    return enriched
+
+
+def _attach_owner_users(rows: list[dict]) -> list[dict]:
+    owner_ids = {
+        int(row["partner_user_id"])
+        for row in rows
+        if row.get("partner_user_id") not in (None, "", "null")
+    }
+    users_by_id = fetch_users_by_ids(owner_ids)
+    enriched: list[dict] = []
+    for row in rows:
+        payload = dict(row)
+        raw_owner_id = row.get("partner_user_id")
+        owner_id = _parse_int(raw_owner_id)
+        payload["owner_user"] = (
+            _serialize_owner_user(users_by_id.get(owner_id))
+            if owner_id is not None
             else None
         )
         enriched.append(payload)
@@ -3939,17 +3960,17 @@ class PartnerAllPropertyListView(APIView):
 
     @swagger_auto_schema(
         operation_id="listAllPartnerProperties",
-        operation_summary="List all properties for a partner",
-        operation_description="Admin or Partner. Returns every property owned by a partner (or the authenticated partner). Admins can pass partner_id to query another partner's listings.",
+        operation_summary="List all properties for an owner",
+        operation_description="Admin or Partner. Returns every property owned by the requested owner (or the authenticated owner). Admins can pass owner_id to query another owner's listings.",
         tags=["Property / Partner"],
         manual_parameters=PROPERTY_LIST_QUERY_PARAMS
         + [
             openapi.Parameter(
-                "partner_id",
+                "owner_id",
                 openapi.IN_QUERY,
                 type=openapi.TYPE_INTEGER,
                 required=False,
-                description="Admin only: target partner user id. Partners ignore this and always use the JWT subject.",
+                description="Admin only: target owner user id. Partners ignore this and always use the JWT subject.",
             ),
         ],
         responses={
@@ -3962,11 +3983,11 @@ class PartnerAllPropertyListView(APIView):
         ctx = {"request": request}
         role = getattr(request.user, "role", None)
         if role == "admin":
-            raw = request.query_params.get("partner_id")
+            raw = request.query_params.get("owner_id")
             if raw is None or str(raw).strip() == "":
                 raise ValidationError(
                     {
-                        "partner_id": _(
+                        "owner_id": _(
                             "This field is required when using an admin token."
                         )
                     }
@@ -3974,10 +3995,10 @@ class PartnerAllPropertyListView(APIView):
             try:
                 partner_id = int(str(raw).strip())
             except (TypeError, ValueError):
-                raise ValidationError({"partner_id": _("Enter a valid integer.")})
-            if get_user_by_id(partner_id, role="partner", active_only=True) is None:
+                raise ValidationError({"owner_id": _("Enter a valid integer.")})
+            if get_user_by_id(partner_id, active_only=True) is None:
                 raise ValidationError(
-                    {"partner_id": _("No active partner account found for this id.")}
+                    {"owner_id": _("No active owner account found for this id.")}
                 )
         else:
             partner_id = int(request.user.id)
@@ -3993,9 +4014,15 @@ class PartnerAllPropertyListView(APIView):
             partner_user_id=partner_id,
             default_limit=None,
         )
+        hotel_rows, _ = list_admin_hotels(
+            search=request.query_params.get("search"),
+            partner_user_id=partner_id,
+        )
+        hotel_rows = _attach_owner_users(hotel_rows)
         data = (
             ApartmentPartnerListSerializer(apt_rows, many=True, context=ctx).data
             + CottagePartnerListSerializer(cot_rows, many=True, context=ctx).data
+            + HotelAdminListSerializer(hotel_rows, many=True, context=ctx).data
         )
         return Response(data, status=status.HTTP_200_OK)
 
@@ -4106,7 +4133,7 @@ class AdminAllPropertiesListView(APIView):
             )
             total = len(rows)
             rows = _paginate_rows(rows, page=page, limit=limit)
-            rows = _attach_partner_users(rows)
+            rows = _attach_owner_users(rows)
             serialized = HotelAdminListSerializer(rows, many=True, context=ctx).data
             return Response(_paginated_envelope(request, serialized, total, page, limit))
         apt_rows = _attach_partner_users(
@@ -4141,6 +4168,7 @@ class AdminAllPropertiesListView(APIView):
             created_from=None,
             created_to=None,
         )
+        hotel_rows = _attach_owner_users(hotel_rows)
         total = len(apt_rows) + len(cot_rows) + len(hotel_rows)
         data = (
             ApartmentAdminListSerializer(apt_rows, many=True, context=ctx).data
@@ -4194,8 +4222,8 @@ class AdminApartmentListCreateView(APIView):
             raise APIException(_("Failed to create apartment"))
         partner_id = _parse_int(created.get("partner_user_id"))
         created = dict(created)
-        created["partner_user"] = (
-            _serialize_partner_user(get_user_by_id(partner_id))
+        created["owner_user"] = (
+            _serialize_owner_user(get_user_by_id(partner_id))
             if partner_id is not None
             else None
         )
@@ -4235,8 +4263,8 @@ class AdminCottageListCreateView(APIView):
             raise APIException(_("Failed to create cottage"))
         partner_id = _parse_int(created.get("partner_user_id"))
         created = dict(created)
-        created["partner_user"] = (
-            _serialize_partner_user(get_user_by_id(partner_id))
+        created["owner_user"] = (
+            _serialize_owner_user(get_user_by_id(partner_id))
             if partner_id is not None
             else None
         )
@@ -4299,7 +4327,7 @@ class AdminHotelListCreateView(APIView):
             created_to=None,
         )
         total = len(rows)
-        rows = _attach_partner_users(rows)
+        rows = _attach_owner_users(rows)
         paginator = _OptionalLimitPagePagination()
         paginated_data = paginator.paginate_queryset(rows, request)
         if paginated_data is not None:
@@ -4342,8 +4370,8 @@ class AdminHotelListCreateView(APIView):
             raise APIException(_("Failed to create hotel"))
         partner_id = _parse_int(created.get("partner_user_id"))
         created = dict(created)
-        created["partner_user"] = (
-            _serialize_partner_user(get_user_by_id(partner_id))
+        created["owner_user"] = (
+            _serialize_owner_user(get_user_by_id(partner_id))
             if partner_id is not None
             else None
         )
@@ -4369,8 +4397,8 @@ class AdminHotelPatchView(APIView):
             raise NotFound(_("Hotel not found"))
         partner_id = _parse_int(row.get("partner_user_id"))
         row = dict(row)
-        row["partner_user"] = (
-            _serialize_partner_user(get_user_by_id(partner_id))
+        row["owner_user"] = (
+            _serialize_owner_user(get_user_by_id(partner_id))
             if partner_id is not None
             else None
         )
@@ -4402,8 +4430,8 @@ class AdminHotelPatchView(APIView):
             raise NotFound(_("Hotel not found"))
         partner_id = _parse_int(updated.get("partner_user_id"))
         updated = dict(updated)
-        updated["partner_user"] = (
-            _serialize_partner_user(get_user_by_id(partner_id))
+        updated["owner_user"] = (
+            _serialize_owner_user(get_user_by_id(partner_id))
             if partner_id is not None
             else None
         )
