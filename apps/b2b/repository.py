@@ -1044,7 +1044,7 @@ def list_transactions(
     combined_cte = f"""
         WITH combined AS (
             SELECT
-                br.id, br.created_at, br.amount, br.status,
+                br.id, br.created_at, br.amount, br.status::text AS status,
                 e.full_name AS employee_name,
                 d.name AS department_name,
                 t.destination_city AS direction,
