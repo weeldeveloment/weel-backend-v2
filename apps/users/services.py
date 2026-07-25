@@ -49,6 +49,15 @@ class EskizService:
         if not all([self.email, self.password, self.login_url, self.send_sms_url]):
             logger.warning("Eskiz service is not fully configured")
 
+    @classmethod
+    def is_configured(cls) -> bool:
+        return bool(
+            getattr(settings, "ESKIZ_EMAIL", None)
+            and getattr(settings, "ESKIZ_PASSWORD", None)
+            and getattr(settings, "ESKIZ_LOGIN_URL", None)
+            and getattr(settings, "ESKIZ_SMS_SEND_URL", None)
+        )
+
     @staticmethod
     def _mask_phone(phone_number: str) -> str:
         if not phone_number:
@@ -296,7 +305,11 @@ class EskizService:
 
 
 class OTPRedisService:
-    OTP_EXPIRE = 60
+    # Eskiz SMS delivery has been observed taking 3-6 minutes end-to-end
+    # (operator-side, outside our control) — a 60s window meant the code
+    # was already expired by the time it reached the phone. 10 minutes
+    # gives comfortable headroom above the worst observed delay (~5m50s).
+    OTP_EXPIRE = 600
     MAX_ATTEMPTS = 3
     OTP_LENGTH = 4
     RESEND_COOLDOWN = 30
@@ -431,11 +444,18 @@ class OTPRedisService:
         else:
             return False
 
-        return bool(
-            configured_phone
-            and cls._normalize_phone(phone_number)
-            == cls._normalize_phone(configured_phone)
-        )
+        if not configured_phone:
+            return False
+
+        # Env var may hold one phone or a comma/whitespace-separated list —
+        # e.g. TEST_B2B_PHONE_NUMBER="+998901234567,+998907654321" lets both
+        # the owner and a performer bypass real SMS in dev/test.
+        test_phones = {
+            cls._normalize_phone(p)
+            for p in configured_phone.replace(" ", ",").split(",")
+            if p.strip()
+        }
+        return cls._normalize_phone(phone_number) in test_phones
 
     @classmethod
     def verify_otp(cls, phone_number: str, otp_code: str, purpose: SmsPurpose):

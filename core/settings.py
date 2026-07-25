@@ -136,6 +136,7 @@ CORS_ALLOW_HEADERS = [
     "x-telegram-init-data",
     "telegram-init-data",
     "telegram-web-app-data",
+    "ngrok-skip-browser-warning",
 ]
 
 GLOBAL_APPS = [

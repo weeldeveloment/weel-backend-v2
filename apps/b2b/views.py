@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import base64
 import logging
 import random
 from datetime import date, timedelta
 from decimal import Decimal
+from io import BytesIO
 from typing import Any
+from urllib.parse import quote
+
+import qrcode
 
 from django.core.files.storage import default_storage
 from django.db import IntegrityError
@@ -37,21 +42,31 @@ from apps.b2b.repository import (
     get_company,
     get_dashboard_summary,
     get_department_monthly_spending,
+    list_dashboard_notifications,
     get_department_spending,
     get_employee,
     get_hotel_booking_request,
+    get_hotel_monthly_summary,
+    get_trip_status_summary,
     get_or_create_travel_policy,
     get_policy_rule,
+    get_rule_used_amount,
+    get_monthly_spending_chart,
+    get_spending_chart,
+    get_weekly_spending_chart,
     get_spending_overview,
     get_top_employees_by_trip_count,
     get_top_hotels_by_booking_count,
     get_trip,
     get_voucher,
+    count_active_trip_employees,
     list_active_trip_employees,
     list_budget_requests,
+    list_transactions,
     list_departments,
     list_departments_with_budget,
     list_employees,
+    list_employees_with_individual_limit,
     list_hotel_booking_requests,
     list_hotel_booking_rooms,
     list_policy_rules,
@@ -60,13 +75,15 @@ from apps.b2b.repository import (
     list_trip_employees,
     list_trips,
     review_budget_request,
+    revoke_b2b_login_by_phone,
+    sync_performer_b2b_login,
     update_company,
     update_employee,
     update_policy_rule,
     update_travel_policy,
     update_trip,
 )
-from apps.b2b.models import DepartmentBudgetStatus, EmployeeRole
+from apps.b2b.models import B2BUserRole, EmployeeRole, TripEmployeeStatus, compute_budget_status
 from apps.b2b.hotel_booking_service import (
     HotelBookingError,
     booking_detail,
@@ -77,7 +94,7 @@ from apps.b2b.hotel_booking_service import (
 from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer
 from apps.b2b.tasks import _send_b2b_lead_telegram_notification
 from apps.property.hotel_repository import _run_in_schema, _safe_schema_name, get_hotel_for_public, resolve_hotel_guid
-from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, search_hotels
+from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, get_hotel_card_by_guid, search_hotels
 from shared.raw.db import fetch_all
 from apps.hotels.serializers import (
     HotelCardSerializer,
@@ -93,15 +110,23 @@ from apps.b2b.serializers import (
     B2BDepartmentSerializer,
     B2BDepartmentSummarySerializer,
     B2BEmployeeCreateSerializer,
+    B2BEmployeeLimitSerializer,
+    B2BEmployeePassportPreviewSerializer,
     B2BEmployeeSerializer,
     B2BHotelCalendarSerializer,
     B2BUserSerializer,
     BudgetRequestListResponseSerializer,
+    TransactionSerializer,
+    TransactionListResponseSerializer,
     BudgetRequestSerializer,
     BusinessTripSerializer,
+    DashboardNotificationSerializer,
     DashboardSummarySerializer,
     DepartmentMonthlySpendingSerializer,
     StatisticsResponseSerializer,
+    MonthlySpendingChartResponseSerializer,
+    StatisticsChartResponseSerializer,
+    WeeklySpendingChartResponseSerializer,
     HotelBookingRequestCreateSerializer,
     HotelBookingRequestDetailSerializer,
     HotelBookingRequestSerializer,
@@ -110,6 +135,8 @@ from apps.b2b.serializers import (
     ReviewBudgetRequestSerializer,
     TopEmployeeByTripsSerializer,
     TopHotelByBookingsSerializer,
+    HotelMonthlySummarySerializer,
+    TripStatusSummarySerializer,
     TravelPolicyRuleCreateSerializer,
     TravelPolicyRuleSerializer,
     TravelPolicyRuleUpdateSerializer,
@@ -185,6 +212,27 @@ class B2BHotelSearchView(APIView):
             "page_size": page_size,
             "results": HotelCardSerializer(hotels, many=True).data,
         })
+
+
+class B2BHotelCardView(APIView):
+    """GET /b2b/hotels/<hotel_guid>/card/
+
+    Fetch one hotel's search-result card by GUID — used to reopen the
+    booking flow for an already-known hotel (e.g. clicking a "popular
+    hotel" in analytics) without a fuzzy city/name search.
+    """
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Fetch a single hotel card by GUID",
+        responses={200: HotelCardSerializer(), 404: openapi.Response(description="Hotel not found.")},
+        tags=["B2B / Executer"],
+    )
+    def get(self, request, hotel_guid):
+        hotel = get_hotel_card_by_guid(hotel_guid)
+        if not hotel:
+            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(HotelCardSerializer(hotel).data)
 
 
 class B2BHotelRoomsView(APIView):
@@ -483,7 +531,10 @@ class B2BHotelCalendarView(APIView):
 
 
 class B2BCompanyView(APIView):
-    permission_classes = [IsAuthenticated]
+    """Company settings — owner-only. A performer has no business reason to
+    view or change company-wide settings, so this is locked down at the API
+    level too (not just hidden in the sidebar)."""
+    permission_classes = [IsAuthenticated, IsB2BOwner]
 
     @swagger_auto_schema(responses={200: B2BCompanySerializer()})
     def get(self, request):
@@ -523,6 +574,10 @@ class B2BDepartmentListCreateView(APIView):
             "(but not zero), `empty` means nothing remains or the limit was "
             "exceeded, and `no_limit` means no limit is set for the department."
         ),
+        manual_parameters=[
+            openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING, required=False),
+            openapi.Parameter("month", openapi.IN_QUERY, type=openapi.TYPE_STRING, required=False, description="YYYY-MM; scopes used_amount to that month"),
+        ],
         responses={200: B2BDepartmentSummarySerializer(many=True)},
     )
     def get(self, request):
@@ -531,7 +586,8 @@ class B2BDepartmentListCreateView(APIView):
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
 
         search = request.query_params.get("search")
-        depts = list_departments_with_budget(company_id, search=search)
+        month = request.query_params.get("month")
+        depts = list_departments_with_budget(company_id, search=search, month=month)
         employees_by_dept: dict[int, list[dict[str, Any]]] = {}
         for emp in list_employees(company_id):
             employees_by_dept.setdefault(emp["department_id"], []).append(emp)
@@ -540,23 +596,15 @@ class B2BDepartmentListCreateView(APIView):
         for d in depts:
             budget_limit = d["budget_limit"]
             used_amount = d["used_amount"]
-            if budget_limit is None:
-                remaining_amount = None
-                dept_status = DepartmentBudgetStatus.NO_LIMIT
-            else:
-                remaining_amount = budget_limit - used_amount
-                if remaining_amount <= 0:
-                    dept_status = DepartmentBudgetStatus.EMPTY
-                elif remaining_amount <= budget_limit * Decimal("0.25"):
-                    dept_status = DepartmentBudgetStatus.LOW
-                else:
-                    dept_status = DepartmentBudgetStatus.HIGH
+            remaining_amount = None if budget_limit is None else budget_limit - used_amount
+            dept_status = compute_budget_status(budget_limit, used_amount)
             payload.append({
                 "id": d["department_id"],
                 "company_id": d["company_id"],
                 "name": d["department_name"],
                 "budget_limit": budget_limit,
                 "used_amount": used_amount,
+                "on_trip_amount": d["on_trip_amount"],
                 "remaining_amount": remaining_amount,
                 "status": dept_status,
                 "employees": employees_by_dept.get(d["department_id"], []),
@@ -576,6 +624,46 @@ class B2BDepartmentListCreateView(APIView):
         if not dept:
             return Response({"detail": "Failed to create department."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(B2BDepartmentSerializer(dept).data, status=status.HTTP_201_CREATED)
+
+
+class B2BEmployeeLimitsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="List employees with a personal limit",
+        operation_description=(
+            "Return every active employee who has a personal budget "
+            "(`individual_limit`) set, together with how much of it has "
+            "been used (`used_amount`, scoped to `month` when given), the "
+            "remaining amount, and a status derived the same way as "
+            "department status: `high` (more than 25% remains), `low` "
+            "(25% or less), `empty` (nothing remains)."
+        ),
+        manual_parameters=[
+            openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING, required=False),
+            openapi.Parameter("month", openapi.IN_QUERY, type=openapi.TYPE_STRING, required=False, description="YYYY-MM; scopes used_amount to that month"),
+        ],
+        responses={200: B2BEmployeeLimitSerializer(many=True)},
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        search = request.query_params.get("search")
+        month = request.query_params.get("month")
+        employees = list_employees_with_individual_limit(company_id, search=search, month=month)
+
+        payload = []
+        for e in employees:
+            limit = e["individual_limit"]
+            used = e["used_amount"]
+            payload.append({
+                **e,
+                "remaining_amount": limit - used,
+                "status": compute_budget_status(limit, used),
+            })
+        return Response(B2BEmployeeLimitSerializer(payload, many=True).data)
 
 
 class B2BEmployeeListCreateView(APIView):
@@ -649,6 +737,12 @@ class B2BEmployeeListCreateView(APIView):
             passport_data = extract_passport_data(front_file, back_file)
         except PassportOCRError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Passport OCR failed unexpectedly")
+            return Response(
+                {"detail": "Не удалось распознать паспортные данные. Попробуйте другое фото."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         front_path = default_storage.save(f"b2b/employees/passports/{front_file.name}", front_file)
         back_path = default_storage.save(f"b2b/employees/passports/{back_file.name}", back_file)
@@ -674,11 +768,65 @@ class B2BEmployeeListCreateView(APIView):
         )
         if not employee:
             return Response({"detail": "Failed to create employee."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        if employee["role"] == EmployeeRole.PERFORMER:
+            sync_performer_b2b_login(company_id, employee)
         return Response(B2BEmployeeSerializer(employee).data, status=status.HTTP_201_CREATED)
 
 
-class B2BEmployeeRetrieveUpdateView(APIView):
+class B2BEmployeePassportPreviewView(APIView):
+    """Passport old/orqa skanidan OCR orqali ma'lumotlarni oldindan
+    ko'rsatish uchun. Hech narsa saqlanmaydi (na fayl, na xodim) — bu shunchaki
+    ``POST /b2b/employees/`` chaqirilishidan oldin foydalanuvchiga natijani
+    ko'rsatish uchun. Yakuniy saqlashda ``B2BEmployeeListCreateView.post`` OCR'ni
+    yana o'zi ishga tushiradi."""
+
     permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Preview passport OCR extraction",
+        operation_description=(
+            "Accepts the front and back scans of an ID document and returns "
+            "the fields extracted by OCR (full_name, date_of_birth, "
+            "passport_series, passport_pinfl). Nothing is saved — files are "
+            "processed in memory only."
+        ),
+        consumes=["multipart/form-data"],
+        manual_parameters=[
+            openapi.Parameter("passport_upload_front", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Front side of the ID document"),
+            openapi.Parameter("passport_upload_back", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Back side of the ID document with MRZ code"),
+        ],
+        responses={
+            200: openapi.Response(description="OCR extraction result"),
+            400: openapi.Response(description="Validation error or passport image does not match the template."),
+        },
+    )
+    def post(self, request):
+        serializer = B2BEmployeePassportPreviewSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        front_file = serializer.validated_data["passport_upload_front"]
+        back_file = serializer.validated_data["passport_upload_back"]
+        try:
+            passport_data = extract_passport_data(front_file, back_file)
+        except PassportOCRError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Passport OCR preview failed unexpectedly")
+            return Response(
+                {"detail": "Не удалось распознать паспортные данные. Попробуйте другое фото."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(passport_data, status=status.HTTP_200_OK)
+
+
+class B2BEmployeeRetrieveUpdateView(APIView):
+    """A performer can view employees but not modify or remove them — only
+    the owner edits/deletes."""
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsB2BOwner()]
 
     @swagger_auto_schema(responses={200: B2BEmployeeSerializer()})
     def get(self, request, employee_id):
@@ -697,6 +845,10 @@ class B2BEmployeeRetrieveUpdateView(APIView):
     )
     def patch(self, request, employee_id):
         company_id = _get_company_id(request)
+        existing = get_employee(employee_id, company_id)
+        if not existing:
+            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+
         serializer = B2BEmployeeSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -711,6 +863,18 @@ class B2BEmployeeRetrieveUpdateView(APIView):
             for e in list_employees(company_id):
                 if e["role"] == EmployeeRole.PERFORMER and e["id"] != employee_id:
                     update_employee(e["id"], role=EmployeeRole.EMPLOYEE)
+                    revoke_b2b_login_by_phone(company_id, e["phone"])
+        elif role == EmployeeRole.EMPLOYEE and existing["role"] == EmployeeRole.PERFORMER:
+            revoke_b2b_login_by_phone(company_id, existing["phone"])
+
+        new_phone = serializer.validated_data.get("phone")
+        if (
+            existing["role"] == EmployeeRole.PERFORMER
+            and role != EmployeeRole.EMPLOYEE
+            and new_phone
+            and new_phone != existing["phone"]
+        ):
+            revoke_b2b_login_by_phone(company_id, existing["phone"])
 
         employee = update_employee(employee_id, **{
             k: v for k, v in serializer.validated_data.items()
@@ -718,6 +882,9 @@ class B2BEmployeeRetrieveUpdateView(APIView):
         })
         if not employee:
             return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if employee["role"] == EmployeeRole.PERFORMER:
+            sync_performer_b2b_login(company_id, employee)
         return Response(B2BEmployeeSerializer(employee).data)
 
     @swagger_auto_schema(response={204: "No Content"})
@@ -729,6 +896,8 @@ class B2BEmployeeRetrieveUpdateView(APIView):
         deleted = delete_employee(employee_id, company_id)
         if not deleted:
             return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+        if employee["role"] == EmployeeRole.PERFORMER:
+            revoke_b2b_login_by_phone(company_id, employee["phone"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class BusinessTripListCreateView(APIView):
@@ -827,7 +996,14 @@ class TripEmployeeListCreateView(APIView):
 
 
 class TravelPolicyView(APIView):
-    permission_classes = [IsAuthenticated]
+    """Travel Policy — viewable by owner and performer, but only the owner
+    can change it (performer gets a read-only view on the frontend, and is
+    blocked here too in case the request bypasses the UI)."""
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsB2BOwner()]
 
     @swagger_auto_schema(responses={200: TravelPolicySerializer()})
     def get(self, request):
@@ -918,7 +1094,12 @@ class BudgetRequestListCreateView(APIView):
     ``GET ?status=pending`` and approves/rejects via
     ``POST /budget-requests/<id>/review/``.
     """
-    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        # Owners get the company-wide review queue ("Заявки"); performers get
+        # the same endpoint but scoped to the requests they raised themselves,
+        # so they can see whether the owner approved or rejected them.
+        return [IsAuthenticated()]
 
     @swagger_auto_schema(
         operation_summary="List budget requests (owner)",
@@ -941,7 +1122,14 @@ class BudgetRequestListCreateView(APIView):
         if not company_id:
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
         req_status = request.query_params.get("status")
-        requests = list_budget_requests(company_id, status=req_status)
+        user = request.user
+        role = user.get("role") if isinstance(user, dict) else getattr(user, "role", None)
+        is_owner = role == B2BUserRole.OWNER
+        requests = list_budget_requests(
+            company_id,
+            status=req_status,
+            requested_by=None if is_owner else _get_user_id(request),
+        )
         return Response({
             "count": len(requests),
             "results": BudgetRequestSerializer(requests, many=True).data,
@@ -996,6 +1184,56 @@ class BudgetRequestListCreateView(APIView):
         if not budget_req:
             return Response({"detail": "Failed to create budget request."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(BudgetRequestSerializer(budget_req).data, status=status.HTTP_201_CREATED)
+
+
+class TransactionListView(APIView):
+    """GET /b2b/transactions/?search=&page=&page_size=
+
+    Paginated transaction history for the analytics page: one row per
+    budget request. `search` matches employee or department name.
+    `category` is derived: `hotel` if the underlying trip has a hotel
+    booking, otherwise `trip`. `status` is the raw budget-request status
+    (`pending` / `approved` / `rejected`).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Transaction history",
+        operation_description=(
+            "Paginated list of budget-request transactions, newest first. "
+            "`search` filters by employee or department name."
+        ),
+        manual_parameters=[
+            openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Search by employee/department name."),
+            openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Page number (default 1)."),
+            openapi.Parameter("page_size", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Rows per page (default 10, max 100)."),
+        ],
+        responses={200: TransactionListResponseSerializer()},
+        tags=["B2B / Statistics"],
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        search = request.query_params.get("search") or None
+        try:
+            page = max(int(request.query_params.get("page", 1)), 1)
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = int(request.query_params.get("page_size", 10))
+        except (TypeError, ValueError):
+            page_size = 10
+        page_size = min(max(page_size, 1), 100)
+
+        data = list_transactions(company_id, search=search, page=page, page_size=page_size)
+        return Response({
+            "count": data["count"],
+            "page": page,
+            "page_size": page_size,
+            "results": TransactionSerializer(data["results"], many=True).data,
+        })
 
 
 class BudgetRequestReviewView(APIView):
@@ -1083,9 +1321,14 @@ class B2BStatisticsView(APIView):
     - `by_department`: spending per department for the selected period (defaults to `all`)
 
     Each period entry:
-      total_budget   – sum of trip budgets created in that window
-      total_trips    – number of trips created in that window
-      approved_spend – sum of approved budget-request amounts in that window
+      total_budget           – sum of trip budgets created in that window
+      total_trips            – number of trips created in that window
+      approved_spend         – sum of approved budget-request amounts in that window
+      remaining_limit        – company-wide travel-policy limit minus approved_spend
+                                (floored at 0)
+      requested_extra_limit  – how much approved_spend exceeds the company-wide
+                                travel-policy limit (floored at 0) — money that
+                                had to be requested because the given limit fell short
     """
 
     permission_classes = [IsAuthenticated]
@@ -1141,6 +1384,140 @@ class B2BStatisticsView(APIView):
                 for d in departments
             ],
         })
+
+
+class B2BStatisticsChartView(APIView):
+    """
+    GET /b2b/statistics/chart/?period=1h|1d|14d|1m|3m|1y|all
+
+    Returns a date-bucketed series of approved spend for the "Общие расходы"
+    chart, plus the period total and the percent change versus the preceding
+    period of equal length.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Company spending chart",
+        operation_description=(
+            "Returns a date-bucketed approved-spend series for the selected "
+            "time window, along with the period total and percent change "
+            "versus the preceding equal-length period."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "period",
+                openapi.IN_QUERY,
+                description="Time window: 1h, 1d, 14d, 1m, 3m, 1y, or all (default: 14d)",
+                type=openapi.TYPE_STRING,
+                enum=["1h", "1d", "14d", "1m", "3m", "1y", "all"],
+                default="14d",
+            ),
+        ],
+        responses={200: StatisticsChartResponseSerializer()},
+        tags=["B2B / Statistics"],
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        period = request.query_params.get("period", "14d")
+        if period not in _VALID_PERIODS:
+            return Response(
+                {"detail": f"Invalid period. Choose from: 1h, 1d, 14d, 1m, 3m, 1y, all"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(get_spending_chart(company_id, period))
+
+
+_VALID_MONTHLY_CHART_MONTHS = {3, 6, 12}
+
+
+class B2BMonthlySpendingChartView(APIView):
+    """GET /b2b/statistics/monthly-chart/?months=3|6|12
+
+    Returns a calendar-month-bucketed approved-spend series (always exactly
+    `months` points, oldest first, one point per month including the
+    current one), each carrying its own month-over-month `change_percent`.
+    Powers the "Аналитика затрат" dashboard chart.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Monthly company spending chart",
+        operation_description=(
+            "Return a month-by-month approved-spend series for the last "
+            "`months` calendar months (default 12), each point carrying "
+            "its own month-over-month `change_percent`."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "months",
+                openapi.IN_QUERY,
+                description="Number of months: 3, 6, or 12 (default: 12)",
+                type=openapi.TYPE_INTEGER,
+                enum=[3, 6, 12],
+                default=12,
+            ),
+        ],
+        responses={200: MonthlySpendingChartResponseSerializer()},
+        tags=["B2B / Statistics"],
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            months = int(request.query_params.get("months", 12))
+        except (TypeError, ValueError):
+            months = 12
+        if months not in _VALID_MONTHLY_CHART_MONTHS:
+            months = 12
+
+        return Response(get_monthly_spending_chart(company_id, months))
+
+
+class B2BWeeklySpendingChartView(APIView):
+    """GET /b2b/statistics/weekly-chart/?month=YYYY-MM
+
+    Returns a week-bucketed approved-spend series for a single calendar
+    month (weeks 1-7, 8-14, 15-21, 22-28, 29-end), each with its own
+    week-over-week `change_percent`. Defaults to the current month.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Weekly company spending chart for one month",
+        operation_description=(
+            "Return a week-by-week approved-spend series for the selected "
+            "calendar month, each point carrying its own week-over-week "
+            "`change_percent`. If `month` is omitted, the current month is used."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "month",
+                openapi.IN_QUERY,
+                description="Month in YYYY-MM format. Defaults to the current month.",
+                type=openapi.TYPE_STRING,
+                format=openapi.FORMAT_DATE,
+                example="2026-06",
+            ),
+        ],
+        responses={200: WeeklySpendingChartResponseSerializer()},
+        tags=["B2B / Statistics"],
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        year, month = _parse_year_month(request)
+        return Response(get_weekly_spending_chart(company_id, year, month))
 
 
 # ─── Dashboard summary ──────────────────────────────────────────────────────
@@ -1313,9 +1690,148 @@ class TopHotelsByBookingsView(APIView):
         return Response(TopHotelByBookingsSerializer(rows, many=True).data)
 
 
-# ─── Active / upcoming trip employees (yolda / borgan) ─────────────────────
+class HotelMonthlySummaryView(APIView):
+    """GET /api/b2b/hotels/monthly-summary/
 
-_VALID_ACTIVE_TRIP_TYPES = {"yolda", "borgan", "all"}
+    Returns this calendar month's confirmed hotel spend, plus the top 5
+    hotels booked this month ordered by booking count descending.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="This month's hotel spend + top booked hotels",
+        operation_description=(
+            "`month_spend` is the sum of confirmed hotel bookings' room "
+            "prices for the current calendar month. `top_hotels` lists up "
+            "to 5 hotels booked this month, ordered by `booking_count` "
+            "descending."
+        ),
+        responses={200: HotelMonthlySummarySerializer()},
+        tags=["B2B / Statistics"],
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now()
+        summary = get_hotel_monthly_summary(company_id, now.year, now.month, limit=5)
+        return Response({
+            "year": now.year,
+            "month": now.month,
+            "month_spend": summary["month_spend"],
+            "top_hotels": summary["top_hotels"],
+        })
+
+
+class B2BHotelRecommendationsView(APIView):
+    """GET /api/b2b/hotels/recommendations/?limit=4
+
+    Hotel picks for the dashboard's "Рекомендация" widget. Each hotel's
+    `limit_status` reflects whether its nightly price fits the company's
+    travel-policy limit (the company-wide "all" tier rule). If the company
+    has no such limit configured, every hotel comes back `within_limit`.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Hotel recommendations for the dashboard",
+        operation_description=(
+            "Return up to `limit` recommended hotels (default 4, max 12). "
+            "`limit_status` is `limit_exceeded` when the hotel's nightly "
+            "price is above the company's travel-policy limit, otherwise "
+            "`within_limit`. Without a configured company-wide limit, all "
+            "hotels are returned as `within_limit`."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "limit",
+                openapi.IN_QUERY,
+                description="Number of hotels to return (1-12). Default 4.",
+                type=openapi.TYPE_INTEGER,
+                default=4,
+            ),
+        ],
+        tags=["B2B / Statistics"],
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            limit = int(request.query_params.get("limit", 4))
+        except (TypeError, ValueError):
+            limit = 4
+        if limit <= 0 or limit > 12:
+            limit = 4
+
+        price_limit = None
+        company_rules = list_policy_rules_by_type(company_id, "all")
+        if company_rules and company_rules[0].get("budget_limit") is not None:
+            price_limit = Decimal(str(company_rules[0]["budget_limit"]))
+
+        hotels = search_hotels(sort_by="weel_recommended", limit=limit)
+
+        results = []
+        for hotel in hotels:
+            raw_price = hotel.get("min_price")
+            price = Decimal(str(raw_price)) if raw_price is not None else None
+            is_exceeded = price_limit is not None and price is not None and price > price_limit
+            photos = hotel.get("photos") or []
+            rating = hotel.get("rating")
+            results.append({
+                "id": hotel["id"],
+                "guid": hotel.get("guid"),
+                "name": hotel.get("name") or "",
+                "city": hotel.get("city") or "",
+                "country": hotel.get("country") or "",
+                "rating": float(rating) if rating is not None else 0.0,
+                "reviews_count": hotel.get("review_count") or 0,
+                "price_per_night": float(price) if price is not None else 0.0,
+                "photo_url": photos[0] if photos else "",
+                "limit_status": "limit_exceeded" if is_exceeded else "within_limit",
+            })
+
+        return Response(results)
+
+
+class TripStatusSummaryView(APIView):
+    """GET /api/b2b/trips/status-summary/
+
+    For trips whose start_date falls in the current calendar month, returns
+    the count of distinct employees per trip status: active (currently away),
+    pending (date set, awaiting departure), completed (went and came back),
+    cancelled (booking was cancelled).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="This month's trip status breakdown",
+        operation_description=(
+            "Counts distinct employees per trip status for trips starting "
+            "this calendar month: `active`, `pending`, `completed`, `cancelled`."
+        ),
+        responses={200: TripStatusSummarySerializer()},
+        tags=["B2B / Statistics"],
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now()
+        summary = get_trip_status_summary(company_id, now.year, now.month)
+        return Response({
+            "year": now.year,
+            "month": now.month,
+            **summary,
+        })
+
+
+# ─── Active / upcoming trip employees (yolda / borgan / tugagan) ───────────
+
+_VALID_ACTIVE_TRIP_TYPES = {"yolda", "borgan", "all", "tugagan"}
 
 
 def _enrich_with_pms_vouchers(rows: list[dict[str, Any]]) -> None:
@@ -1357,40 +1873,186 @@ def _enrich_with_pms_vouchers(rows: list[dict[str, Any]]) -> None:
         row["voucher_number"] = voucher_map.get((schema, pms_id)) if (schema and pms_id) else None
 
 
+def _build_maps_url(address: str | None, latitude: Any, longitude: Any) -> str | None:
+    if latitude is not None and longitude is not None:
+        try:
+            return f"https://www.google.com/maps?q={float(latitude)},{float(longitude)}"
+        except (TypeError, ValueError):
+            pass
+    if address:
+        return f"https://www.google.com/maps/search/?api=1&query={quote(address)}"
+    return None
+
+
+def _generate_qr_data_uri(data: str) -> str | None:
+    try:
+        img = qrcode.make(data)
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
+    except Exception:
+        logger.exception("Failed to generate hotel location QR code")
+        return None
+
+
+def _format_hhmm(value: str | None) -> str | None:
+    """``"14:00:00"`` (or ``"14:00"``) -> ``"14:00"``."""
+    if not value:
+        return None
+    return value[:5]
+
+
+def _enrich_with_hotel_location(rows: list[dict[str, Any]]) -> None:
+    """Attach ``hotel_address``, ``hotel_maps_url`` and ``hotel_qr`` (a data-URI
+    PNG QR code encoding the maps link) to each row, sourced from the hotel's
+    own tenant schema (``pms_property``)."""
+    by_schema: dict[str, set[int]] = {}
+    for row in rows:
+        schema = row.get("tenant_schema")
+        property_id = row.get("hotel_property_id")
+        if schema and property_id and _safe_schema_name(schema):
+            by_schema.setdefault(schema, set()).add(property_id)
+
+    if not by_schema:
+        return
+
+    parts: list[str] = []
+    params: list[Any] = []
+    for schema, property_ids in by_schema.items():
+        placeholders = ", ".join(["%s"] * len(property_ids))
+        parts.append(
+            f"SELECT %s AS _schema, id, address, full_address, "
+            f"latitude::text AS latitude, longitude::text AS longitude, "
+            f"check_in_time::text AS check_in_time, check_out_time::text AS check_out_time "
+            f"FROM {schema}.pms_property "
+            f"WHERE id IN ({placeholders})"
+        )
+        params.append(schema)
+        params.extend(property_ids)
+
+    union_sql = " UNION ALL ".join(parts)
+
+    try:
+        result = fetch_all(union_sql, params)
+        location_map: dict[tuple[str, int], dict[str, Any]] = {
+            (row["_schema"], row["id"]): row for row in result
+        }
+    except Exception:
+        location_map = {}
+
+    for row in rows:
+        schema = row.get("tenant_schema")
+        property_id = row.get("hotel_property_id")
+        location = location_map.get((schema, property_id)) if (schema and property_id) else None
+        if not location:
+            row["hotel_address"] = None
+            row["hotel_maps_url"] = None
+            row["hotel_qr"] = None
+            row["hotel_check_in_time"] = None
+            row["hotel_check_out_time"] = None
+            continue
+
+        address = location.get("full_address") or location.get("address")
+        maps_url = _build_maps_url(address, location.get("latitude"), location.get("longitude"))
+        row["hotel_address"] = address
+        row["hotel_maps_url"] = maps_url
+        row["hotel_qr"] = _generate_qr_data_uri(maps_url) if maps_url else None
+        row["hotel_check_in_time"] = _format_hhmm(location.get("check_in_time"))
+        row["hotel_check_out_time"] = _format_hhmm(location.get("check_out_time"))
+
+
 class ActiveTripEmployeesView(APIView):
-    """GET /api/b2b/trips/active-employees/?type=yolda|borgan|all
+    """GET /api/b2b/trips/active-employees/?type=yolda|borgan|all|tugagan
 
     Returns employees that are currently on a business trip or about to go
     on one. Scoped to the authenticated company.
 
     Query params:
-        type: ``"yolda"``  – today is between the trip's ``start_date`` and
-                              ``end_date`` (currently travelling).
-               ``"borgan"`` – trip starts in the future (upcoming trip).
-               ``"all"``    – both groups combined (default).
+        type: ``"yolda"``   – today is between the trip's ``start_date`` and
+                               ``end_date`` (currently travelling).
+              ``"borgan"``  – trip starts in the future (upcoming trip).
+              ``"all"``     – both groups combined (default).
+              ``"tugagan"`` – archive: trips that have already ended.
 
-    Trip must be in ``active`` or ``pending`` status and the trip-employee
-    assignment must not be ``cancelled`` or ``checked_out``.
+    Trip must be in ``active`` or ``pending`` status (also ``completed`` for
+    ``type=tugagan``) and the trip-employee assignment must not be
+    ``cancelled`` or ``checked_out``.
     """
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Employees on a trip or about to depart",
+        operation_summary="Employees on a trip, about to depart, or archived",
         operation_description=(
-            "Return employees attached to active (`active` or `pending`) trips "
-            "whose assignments are not `cancelled` or `checked_out`. "
+            "Return employees attached to active (`active` or `pending`, plus "
+            "`completed` for `type=tugagan`) trips whose assignments are not "
+            "`cancelled` or `checked_out` (unless `status` is given explicitly). "
             "`type=yolda` returns employees whose trip dates include today, "
             "`type=borgan` returns employees whose trip starts in the future, "
-            "and `type=all` (default) combines both groups."
+            "`type=all` (default) combines both groups, and `type=tugagan` "
+            "returns the archive of trips that have already ended. "
+            "Pass `page` to paginate (`count` becomes the total row count "
+            "across all pages instead of the page size); omit it to keep the "
+            "legacy behaviour of returning every matching row (optionally "
+            "capped by `limit`)."
         ),
         manual_parameters=[
             openapi.Parameter(
                 "type",
                 openapi.IN_QUERY,
-                description="Filter type: yolda | borgan | all (default: all)",
+                description="Filter type: yolda | borgan | all | tugagan (default: all)",
                 type=openapi.TYPE_STRING,
-                enum=["yolda", "borgan", "all"],
+                enum=["yolda", "borgan", "all", "tugagan"],
                 default="all",
+            ),
+            openapi.Parameter(
+                "search",
+                openapi.IN_QUERY,
+                description="Filter by employee full name (partial, case-insensitive).",
+                type=openapi.TYPE_STRING,
+            ),
+            openapi.Parameter(
+                "department_id",
+                openapi.IN_QUERY,
+                description="Filter to a single department.",
+                type=openapi.TYPE_INTEGER,
+            ),
+            openapi.Parameter(
+                "status",
+                openapi.IN_QUERY,
+                description="Filter to a single trip-employee status.",
+                type=openapi.TYPE_STRING,
+                enum=TripEmployeeStatus.CHOICES,
+            ),
+            openapi.Parameter(
+                "date_from",
+                openapi.IN_QUERY,
+                description="Only include trips ending on/after this date (YYYY-MM-DD).",
+                type=openapi.TYPE_STRING,
+            ),
+            openapi.Parameter(
+                "date_to",
+                openapi.IN_QUERY,
+                description="Only include trips starting on/before this date (YYYY-MM-DD).",
+                type=openapi.TYPE_STRING,
+            ),
+            openapi.Parameter(
+                "page",
+                openapi.IN_QUERY,
+                description="1-indexed page number. Enables pagination.",
+                type=openapi.TYPE_INTEGER,
+            ),
+            openapi.Parameter(
+                "page_size",
+                openapi.IN_QUERY,
+                description="Rows per page (1-100, default 10). Only used with `page`.",
+                type=openapi.TYPE_INTEGER,
+            ),
+            openapi.Parameter(
+                "limit",
+                openapi.IN_QUERY,
+                description="Max number of employees to return (1-100). Omit for no limit. Ignored when `page` is set.",
+                type=openapi.TYPE_INTEGER,
             ),
         ],
         responses={200: ActiveTripEmployeesResponseSerializer()},
@@ -1403,11 +2065,77 @@ class ActiveTripEmployeesView(APIView):
         type_ = request.query_params.get("type", "all")
         if type_ not in _VALID_ACTIVE_TRIP_TYPES:
             return Response(
-                {"detail": f"Invalid type. Choose from: yolda, borgan, all."},
+                {"detail": "Invalid type. Choose from: yolda, borgan, all, tugagan."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        rows = list_active_trip_employees(company_id, type_=type_)
+        search = request.query_params.get("search") or None
+
+        department_id: int | None = None
+        raw_department_id = request.query_params.get("department_id")
+        if raw_department_id:
+            try:
+                department_id = int(raw_department_id)
+            except (TypeError, ValueError):
+                return Response({"detail": "Invalid department_id."}, status=status.HTTP_400_BAD_REQUEST)
+
+        status_param = request.query_params.get("status") or None
+        if status_param and status_param not in TripEmployeeStatus.CHOICES:
+            return Response(
+                {"detail": f"Invalid status. Choose from: {', '.join(TripEmployeeStatus.CHOICES)}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        date_from = request.query_params.get("date_from") or None
+        date_to = request.query_params.get("date_to") or None
+
+        filters: dict[str, Any] = dict(
+            type_=type_,
+            search=search,
+            department_id=department_id,
+            status=status_param,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        raw_page = request.query_params.get("page")
+        if raw_page:
+            try:
+                page = max(1, int(raw_page))
+            except (TypeError, ValueError):
+                page = 1
+            try:
+                page_size = int(request.query_params.get("page_size") or 10)
+            except (TypeError, ValueError):
+                page_size = 10
+            page_size = max(1, min(page_size, 100))
+
+            rows = list_active_trip_employees(
+                company_id,
+                limit=page_size,
+                offset=(page - 1) * page_size,
+                **filters,
+            )
+            total = count_active_trip_employees(company_id, **filters)
+            _enrich_with_pms_vouchers(rows)
+            _enrich_with_hotel_location(rows)
+            return Response({
+                "type": type_,
+                "count": total,
+                "results": ActiveTripEmployeeSerializer(rows, many=True).data,
+            })
+
+        limit: int | None = None
+        raw_limit = request.query_params.get("limit")
+        if raw_limit:
+            try:
+                limit = int(raw_limit)
+            except (TypeError, ValueError):
+                limit = None
+            if limit is not None and (limit <= 0 or limit > 100):
+                limit = None
+
+        rows = list_active_trip_employees(company_id, limit=limit, **filters)
         _enrich_with_pms_vouchers(rows)
         return Response({
             "type": type_,
@@ -1485,16 +2213,23 @@ class DepartmentMonthlySpendingView(APIView):
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
         year, month = _parse_year_month(request)
         rows = get_department_monthly_spending(company_id, year, month)
-        payload = [
-            {
+        payload = []
+        for r in rows:
+            month_spend = Decimal(str(r["month_spend"] or "0"))
+            prev_month_spend = Decimal(str(r["prev_month_spend"] or "0"))
+            if prev_month_spend > 0:
+                change_percent = float((month_spend - prev_month_spend) / prev_month_spend * 100)
+            else:
+                change_percent = 100.0 if month_spend > 0 else 0.0
+            payload.append({
                 "department_id": r["department_id"],
                 "department_name": r["department_name"],
                 "month_trips": r["month_trips"] or 0,
                 "total_employees": r["total_employees"] or 0,
-                "month_spend": str(r["month_spend"] or "0"),
-            }
-            for r in rows
-        ]
+                "budget_limit": str(r["budget_limit"] or "0"),
+                "month_spend": str(month_spend),
+                "change_percent": round(change_percent, 1),
+            })
         return Response({
             "year": year,
             "month": month,
@@ -1502,15 +2237,77 @@ class DepartmentMonthlySpendingView(APIView):
         })
 
 
+# ─── Dashboard notifications ────────────────────────────────────────────────
+
+class DashboardNotificationsView(APIView):
+    """GET /api/b2b/dashboard/notifications/?limit=8
+
+    Returns the dashboard's notification feed, derived on the fly from
+    existing data (no dedicated notification model exists yet):
+      limit_exceeded     – employee approved spend this month > individual_limit
+      budget_threshold   – department has used >= 90% of its budget_limit
+      trip_approved      – a trip-linked budget request was approved
+      documents_uploaded – employee has a passport scan on file
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Dashboard notification feed",
+        operation_description=(
+            "Return the most recent dashboard notifications across 4 event "
+            "types: `limit_exceeded`, `budget_threshold`, `trip_approved`, "
+            "`documents_uploaded`. Default `limit=8`, maximum 50."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "limit",
+                openapi.IN_QUERY,
+                description="Number of notifications to return (1-50). Default 8.",
+                type=openapi.TYPE_INTEGER,
+                default=8,
+            ),
+        ],
+        responses={
+            200: openapi.Response(
+                description="Notification feed",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "notifications": openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                        ),
+                    },
+                ),
+            ),
+            400: openapi.Response(description="Company context required."),
+        },
+    )
+    def get(self, request):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            limit = int(request.query_params.get("limit", 8))
+        except (TypeError, ValueError):
+            limit = 8
+        if limit <= 0 or limit > 50:
+            limit = 8
+        rows = list_dashboard_notifications(company_id, limit=limit)
+        return Response({"notifications": DashboardNotificationSerializer(rows, many=True).data})
+
+
 # ─── Travel limit helpers ───────────────────────────────────────────────────
 
 def _hydrate_rule_with_target(company_id: int, rule: dict[str, Any]) -> dict[str, Any]:
     """Decorate a TravelPolicyRule row with the human-readable name of the
-    department / employee it targets (if any)."""
+    department / employee it targets (if any), and how much of it has
+    actually been spent (``used_amount``, real confirmed-booking money)."""
     out = dict(rule)
     out["target_name"] = None
     applies_to = rule.get("applies_to")
     target_id = rule.get("target_id")
+    out["used_amount"] = get_rule_used_amount(company_id, applies_to, target_id)
     if not target_id:
         return out
     if applies_to == "department":
@@ -1551,8 +2348,14 @@ class TravelLimitsView(APIView):
     Single endpoint for all three limit tiers: the company-wide default
     (``all``, no target), per-department, and per-employee. ``applies_to``
     selects the tier — as a query param for GET, in the body for POST.
+
+    Read-only for a performer — only the owner can add limit rules.
     """
-    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsB2BOwner()]
 
     @swagger_auto_schema(
         operation_summary="List limit rules",
@@ -1637,8 +2440,8 @@ class TravelLimitsView(APIView):
 
 
 class TravelLimitDetailView(APIView):
-    """PATCH / DELETE /api/b2b/travel-policy/limits/<rule_id>/"""
-    permission_classes = [IsAuthenticated]
+    """PATCH / DELETE /api/b2b/travel-policy/limits/<rule_id>/ — owner-only."""
+    permission_classes = [IsAuthenticated, IsB2BOwner]
 
     @swagger_auto_schema(
         operation_summary="Update a limit rule",
@@ -1658,7 +2461,28 @@ class TravelLimitDetailView(APIView):
         serializer = TravelPolicyRuleUpdateSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        updated = update_policy_rule(rule_id, **serializer.validated_data)
+        data = serializer.validated_data
+
+        if "applies_to" in data or "target_id" in data:
+            applies_to = data.get("applies_to", rule["applies_to"])
+            target_id = data.get("target_id") if applies_to != "all" else None
+            data["target_id"] = target_id
+
+            bad = _validate_limit_target(company_id, applies_to, target_id)
+            if bad is not None:
+                return bad
+
+            if (
+                applies_to == "all"
+                and rule["applies_to"] != "all"
+                and list_policy_rules_by_type(company_id, "all")
+            ):
+                return Response(
+                    {"detail": "Global limit already exists. Use PATCH to update it."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        updated = update_policy_rule(rule_id, **data)
         if not updated:
             return Response({"detail": "Failed to update limit rule."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(

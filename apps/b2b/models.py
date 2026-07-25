@@ -76,6 +76,20 @@ class DepartmentBudgetStatus:
     CHOICES = [NO_LIMIT, HIGH, LOW, EMPTY]
 
 
+def compute_budget_status(limit: Decimal | None, used: Decimal) -> str:
+    """Shared status rule for anything measured against a budget limit
+    (departments and individual employee limits alike). See
+    ``DepartmentBudgetStatus`` for what each value means."""
+    if limit is None:
+        return DepartmentBudgetStatus.NO_LIMIT
+    remaining = limit - used
+    if remaining <= 0:
+        return DepartmentBudgetStatus.EMPTY
+    if remaining <= limit * Decimal("0.25"):
+        return DepartmentBudgetStatus.LOW
+    return DepartmentBudgetStatus.HIGH
+
+
 class HotelBookingRequestStatus:
     """Status of a whole multi-room hotel booking request (the group)."""
     PENDING = "pending"

@@ -65,6 +65,14 @@ class B2BEmployeeSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 
+    def validate_phone(self, value: str) -> str:
+        # Stored (and later matched for B2B login) without spaces — a
+        # performer's phone must match exactly what they type in at login.
+        value = value.replace(" ", "").strip()
+        if not value.startswith("+"):
+            value = "+" + value
+        return value
+
 
 class B2BDepartmentSummarySerializer(serializers.Serializer):
     """GET ``/b2b/departments/`` response: department + its owner-set budget
@@ -74,10 +82,27 @@ class B2BDepartmentSummarySerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
     budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
     used_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    on_trip_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     remaining_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
     status = serializers.ChoiceField(choices=["no_limit", "high", "low", "empty"], read_only=True)
     employees = B2BEmployeeSerializer(many=True, read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+
+
+class B2BEmployeeLimitSerializer(serializers.Serializer):
+    """GET ``/b2b/employees/limits/`` response: an employee with a personal
+    (``individual_limit``) budget, plus usage against it."""
+    id = serializers.IntegerField(read_only=True)
+    full_name = serializers.CharField(read_only=True)
+    position = serializers.CharField(read_only=True, allow_null=True)
+    photo = serializers.CharField(read_only=True, allow_null=True)
+    department_id = serializers.IntegerField(read_only=True, allow_null=True)
+    department_name = serializers.CharField(read_only=True, allow_null=True)
+    individual_limit = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    used_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    on_trip_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    remaining_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    status = serializers.ChoiceField(choices=["high", "low", "empty"], read_only=True)
 
 
 class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
@@ -109,6 +134,16 @@ class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
 
     def validate_passport_upload_back(self, file):
         return self._validate_image_file(file)
+
+
+class B2BEmployeePassportPreviewSerializer(serializers.Serializer):
+    """POST ``/b2b/employees/passport-preview/`` uchun serializer.
+
+    Faqat OCR orqali passport ma'lumotlarini oldindan ko'rish uchun —
+    hech narsa saqlanmaydi, xodim yaratilmaydi.
+    """
+    passport_upload_front = serializers.FileField(required=True)
+    passport_upload_back = serializers.FileField(required=True)
 
 
 class BusinessTripSerializer(serializers.Serializer):
@@ -271,8 +306,13 @@ class BudgetRequestSerializer(serializers.Serializer):
     employee_id = serializers.IntegerField(required=False, allow_null=True)
     department_id = serializers.IntegerField(required=False, allow_null=True)
     trip_name = serializers.CharField(read_only=True, allow_null=True)
+    trip_destination = serializers.CharField(read_only=True, allow_null=True)
     employee_name = serializers.CharField(read_only=True, allow_null=True)
+    employee_position = serializers.CharField(read_only=True, allow_null=True)
     department_name = serializers.CharField(read_only=True, allow_null=True)
+    requester_first_name = serializers.CharField(read_only=True, allow_null=True)
+    requester_last_name = serializers.CharField(read_only=True, allow_null=True)
+    requester_role = serializers.CharField(read_only=True, allow_null=True)
     amount = serializers.DecimalField(max_digits=14, decimal_places=2)
     description = serializers.CharField(max_length=500, required=False, allow_blank=True, allow_null=True)
     status = serializers.CharField(read_only=True)
@@ -280,6 +320,15 @@ class BudgetRequestSerializer(serializers.Serializer):
     reviewed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     review_description = serializers.CharField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
+    department_budget_limit = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, allow_null=True, required=False,
+    )
+    department_used_amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, required=False,
+    )
+    employee_used_amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, required=False,
+    )
 
     def validate(self, data):
         employee_id = data.get("employee_id")
@@ -296,6 +345,29 @@ class BudgetRequestListResponseSerializer(serializers.Serializer):
     results = BudgetRequestSerializer(many=True, read_only=True)
 
 
+class TransactionSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    date = serializers.DateTimeField(source="created_at", read_only=True)
+    employee = serializers.SerializerMethodField()
+    amount = serializers.CharField(read_only=True)
+    category = serializers.SerializerMethodField()
+    direction = serializers.CharField(read_only=True, allow_null=True)
+    status = serializers.CharField(read_only=True)
+
+    def get_employee(self, obj) -> str:
+        return obj.get("employee_name") or obj.get("department_name") or ""
+
+    def get_category(self, obj) -> str:
+        return "hotel" if obj.get("has_hotel") else "trip"
+
+
+class TransactionListResponseSerializer(serializers.Serializer):
+    count = serializers.IntegerField(read_only=True)
+    page = serializers.IntegerField(read_only=True)
+    page_size = serializers.IntegerField(read_only=True)
+    results = TransactionSerializer(many=True, read_only=True)
+
+
 class DepartmentStatSerializer(serializers.Serializer):
     department_id = serializers.IntegerField(read_only=True)
     department_name = serializers.CharField(read_only=True)
@@ -308,12 +380,54 @@ class PeriodStatSerializer(serializers.Serializer):
     total_budget = serializers.CharField(read_only=True)
     total_trips = serializers.IntegerField(read_only=True)
     approved_spend = serializers.CharField(read_only=True)
+    remaining_limit = serializers.CharField(read_only=True)
+    requested_extra_limit = serializers.CharField(read_only=True)
 
 
 class StatisticsResponseSerializer(serializers.Serializer):
     period = serializers.CharField(read_only=True)
     periods = serializers.DictField(child=PeriodStatSerializer(), read_only=True)
     by_department = DepartmentStatSerializer(many=True, read_only=True)
+
+
+class StatisticsChartPointSerializer(serializers.Serializer):
+    date = serializers.CharField(read_only=True)
+    value = serializers.CharField(read_only=True)
+
+
+class StatisticsChartResponseSerializer(serializers.Serializer):
+    period = serializers.CharField(read_only=True)
+    total = serializers.CharField(read_only=True)
+    change_percent = serializers.FloatField(read_only=True)
+
+
+class MonthlySpendingChartPointSerializer(serializers.Serializer):
+    year = serializers.IntegerField(read_only=True)
+    month = serializers.IntegerField(read_only=True)
+    value = serializers.CharField(read_only=True)
+    change_percent = serializers.FloatField(read_only=True)
+
+
+class MonthlySpendingChartResponseSerializer(serializers.Serializer):
+    months = serializers.IntegerField(read_only=True)
+    total = serializers.CharField(read_only=True)
+    points = MonthlySpendingChartPointSerializer(many=True, read_only=True)
+
+
+class WeeklySpendingChartPointSerializer(serializers.Serializer):
+    week = serializers.IntegerField(read_only=True)
+    start = serializers.DateField(read_only=True)
+    end = serializers.DateField(read_only=True)
+    value = serializers.CharField(read_only=True)
+    change_percent = serializers.FloatField(read_only=True)
+
+
+class WeeklySpendingChartResponseSerializer(serializers.Serializer):
+    year = serializers.IntegerField(read_only=True)
+    month = serializers.IntegerField(read_only=True)
+    total = serializers.CharField(read_only=True)
+    weeks = WeeklySpendingChartPointSerializer(many=True, read_only=True)
+    points = StatisticsChartPointSerializer(many=True, read_only=True)
 
 
 class ReviewBudgetRequestSerializer(serializers.Serializer):
@@ -344,8 +458,10 @@ class ActiveTripEmployeeSerializer(serializers.Serializer):
     employee_id = serializers.IntegerField(read_only=True)
     full_name = serializers.CharField(read_only=True, allow_null=True)
     position = serializers.CharField(read_only=True, allow_null=True)
+    role = serializers.CharField(read_only=True, allow_null=True)
     email = serializers.CharField(read_only=True, allow_null=True)
     phone = serializers.CharField(read_only=True, allow_null=True)
+    photo = serializers.CharField(read_only=True, allow_null=True)
     department_id = serializers.IntegerField(read_only=True, allow_null=True)
     department_name = serializers.CharField(read_only=True, allow_null=True)
     trip_name = serializers.CharField(read_only=True, allow_null=True)
@@ -359,6 +475,14 @@ class ActiveTripEmployeeSerializer(serializers.Serializer):
     assigned_at = serializers.DateTimeField(read_only=True)
     hotel_name = serializers.CharField(read_only=True, allow_null=True)
     voucher_number = serializers.CharField(read_only=True, allow_null=True)
+    room_name = serializers.CharField(read_only=True, allow_null=True)
+    price_per_night = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
+    total_price = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
+    hotel_address = serializers.CharField(read_only=True, allow_null=True)
+    hotel_maps_url = serializers.CharField(read_only=True, allow_null=True)
+    hotel_qr = serializers.CharField(read_only=True, allow_null=True)
+    hotel_check_in_time = serializers.CharField(read_only=True, allow_null=True)
+    hotel_check_out_time = serializers.CharField(read_only=True, allow_null=True)
     pms_accepted = serializers.SerializerMethodField()
 
     def get_pms_accepted(self, obj):
@@ -400,6 +524,7 @@ class TopEmployeeByTripsSerializer(serializers.Serializer):
     position = serializers.CharField(read_only=True, allow_null=True)
     email = serializers.CharField(read_only=True, allow_null=True)
     phone = serializers.CharField(read_only=True, allow_null=True)
+    photo = serializers.CharField(read_only=True, allow_null=True)
     department_id = serializers.IntegerField(read_only=True, allow_null=True)
     department_name = serializers.CharField(read_only=True, allow_null=True)
     trip_count = serializers.IntegerField(read_only=True)
@@ -410,8 +535,25 @@ class TopHotelByBookingsSerializer(serializers.Serializer):
     tenant_schema = serializers.CharField(read_only=True)
     hotel_property_id = serializers.IntegerField(read_only=True)
     hotel_name = serializers.CharField(read_only=True, allow_null=True)
+    hotel_guid = serializers.CharField(read_only=True, allow_null=True)
     booking_count = serializers.IntegerField(read_only=True)
     total_spend = serializers.DecimalField(read_only=True, max_digits=14, decimal_places=2)
+
+
+class HotelMonthlySummarySerializer(serializers.Serializer):
+    year = serializers.IntegerField(read_only=True)
+    month = serializers.IntegerField(read_only=True)
+    month_spend = serializers.CharField(read_only=True)
+    top_hotels = TopHotelByBookingsSerializer(many=True, read_only=True)
+
+
+class TripStatusSummarySerializer(serializers.Serializer):
+    year = serializers.IntegerField(read_only=True)
+    month = serializers.IntegerField(read_only=True)
+    active = serializers.IntegerField(read_only=True)
+    pending = serializers.IntegerField(read_only=True)
+    completed = serializers.IntegerField(read_only=True)
+    cancelled = serializers.IntegerField(read_only=True)
 
 
 class DepartmentMonthlySpendingSerializer(serializers.Serializer):
@@ -419,7 +561,9 @@ class DepartmentMonthlySpendingSerializer(serializers.Serializer):
     department_name = serializers.CharField(read_only=True)
     month_trips = serializers.IntegerField(read_only=True)
     total_employees = serializers.IntegerField(read_only=True)
+    budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     month_spend = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    change_percent = serializers.FloatField(read_only=True)
 
 
 class DashboardSummarySerializer(serializers.Serializer):
@@ -428,6 +572,24 @@ class DashboardSummarySerializer(serializers.Serializer):
     spent_this_month = serializers.DecimalField(max_digits=14, decimal_places=2)
     active_employees = serializers.IntegerField()
     pending_limit_requests = serializers.IntegerField()
+    change_percent = serializers.FloatField(read_only=True)
+
+
+class DashboardNotificationSerializer(serializers.Serializer):
+    """Serializer for a single dashboard notification feed item."""
+    type = serializers.ChoiceField(
+        choices=[
+            "limit_exceeded",
+            "budget_threshold",
+            "trip_approved",
+            "documents_uploaded",
+            "trip_started",
+            "trip_completed",
+        ],
+        read_only=True,
+    )
+    message = serializers.CharField(read_only=True)
+    occurred_at = serializers.DateTimeField(read_only=True)
 
 
 class TravelPolicyRuleSerializer(serializers.Serializer):
@@ -438,6 +600,7 @@ class TravelPolicyRuleSerializer(serializers.Serializer):
     target_id = serializers.IntegerField(required=False, allow_null=True)
     target_name = serializers.CharField(read_only=True, allow_null=True)
     budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    used_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, required=False)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
@@ -449,6 +612,8 @@ class TravelPolicyRuleCreateSerializer(serializers.Serializer):
 
 
 class TravelPolicyRuleUpdateSerializer(serializers.Serializer):
+    applies_to = serializers.ChoiceField(choices=["all", "department", "employee"], required=False)
+    target_id = serializers.IntegerField(required=False, allow_null=True)
     budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
 
 

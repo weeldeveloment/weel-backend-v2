@@ -923,6 +923,14 @@ def _search_hotels_in_schema(
             capacity_requirement, *room_filter_params,
             capacity_requirement, *room_filter_params,
         ]
+        # Without a date range the lateral join still counts only rooms large
+        # enough for the party, but nothing dropped the hotels left with zero
+        # of them — so a guest-count filter on its own silently matched
+        # everything. Only enforced once a capacity is actually requested, so
+        # plain listings (guests=1) keep showing hotels that have no rooms
+        # configured yet.
+        if capacity_requirement > 1:
+            conditions.append("COALESCE(pricing.available_rooms, 0) > 0")
 
     if price_min is not None:
         conditions.append("pricing.min_price >= %s")
@@ -1226,6 +1234,51 @@ def get_hotel_card(property_id: int) -> dict[str, Any] | None:
         """,
         [property_id],
     )
+
+
+def get_hotel_card_by_guid(hotel_guid: str) -> dict[str, Any] | None:
+    """Fetch a single hotel's search-result card (same shape as
+    ``search_hotels`` rows) by its cross-schema GUID. Used to reopen the
+    booking flow for one specific, already-known hotel (e.g. from booking
+    history / analytics) without a fuzzy city-text search."""
+    from apps.property.hotel_repository import (
+        _run_in_schema,
+        list_hotel_organizations,
+        resolve_hotel_guid,
+    )
+
+    resolved = resolve_hotel_guid(hotel_guid)
+    if not resolved:
+        return None
+    schema_name, hotel_id = resolved
+
+    organization = next(
+        (
+            org
+            for org in list_hotel_organizations()
+            if org["schema_name"] == schema_name
+        ),
+        None,
+    )
+    if not organization:
+        return None
+
+    try:
+        rows = _run_in_schema(
+            schema_name,
+            lambda: _search_hotels_in_schema(
+                schema_name, organization,
+                city=None, check_in=None, check_out=None, guests=1,
+                star_rating=None, weel_classification=None, is_recommended=None,
+                themes=None, price_min=None, price_max=None, budget_max=None,
+                room_types=None, room_type_presets=None, rate_plans=None, meal_plans=None,
+                min_capacity=None, max_capacity=None,
+            ),
+        )
+    except Exception:
+        return None
+
+    return next((row for row in rows if int(row.get("id") or 0) == hotel_id), None)
 
 
 def get_hotel_reviews(

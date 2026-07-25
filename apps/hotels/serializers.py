@@ -113,6 +113,10 @@ class HotelCardSerializer(serializers.Serializer):
     title = serializers.CharField(read_only=True)
     city = serializers.CharField(allow_null=True, read_only=True)
     country = serializers.CharField(allow_null=True, required=False, read_only=True)
+    # The repository already selects these; without them declared here the
+    # street address never reached the client (hotel detail showed no address).
+    address = serializers.CharField(allow_null=True, required=False, read_only=True)
+    full_address = serializers.CharField(allow_null=True, required=False, read_only=True)
     description = serializers.CharField(allow_null=True, read_only=True)
     description_uz = serializers.CharField(allow_null=True, required=False, read_only=True)
     description_ru = serializers.CharField(allow_null=True, required=False, read_only=True)
@@ -276,6 +280,15 @@ class RoomAvailabilitySerializer(serializers.Serializer):
     area_sqm = serializers.FloatField(allow_null=True)
     meal_plan = serializers.CharField(allow_null=True)
     img = serializers.JSONField(default=list)
+
+    def to_representation(self, instance):
+        # get_available_rooms() aliases the photo column as `images`, so without
+        # this the declared `img` field always fell back to its empty default
+        # and room photos never reached the client.
+        row = dict(instance)
+        if not row.get("img"):
+            row["img"] = row.get("images") or []
+        return super().to_representation(row)
 
 
 class RoomSelectParamsSerializer(serializers.Serializer):

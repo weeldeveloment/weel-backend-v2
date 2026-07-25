@@ -96,6 +96,10 @@ app.conf.beat_schedule = {
         "task": "activities.expire_stale_pending_bookings",
         "schedule": crontab(minute="*/2"),  # hold TTL is 5 min — check often to release fast
     },
+    "sync_trip_statuses": {
+        "task": "b2b.sync_trip_statuses",
+        "schedule": crontab(hour=0, minute=5),  # daily just after midnight (Asia/Tashkent)
+    },
 }
 
 # app.conf.task_queues = (
