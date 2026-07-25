@@ -786,7 +786,7 @@ def _search_hotels_in_schema(
     allow_multi_room: bool = False,
 ) -> list[dict[str, Any]]:
 
-    conditions = ["p.is_active = TRUE"]
+    conditions = ["p.is_active = TRUE", "COALESCE(p.is_verified, FALSE) = TRUE"]
     params: list[Any] = []
 
     if city:
