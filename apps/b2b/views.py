@@ -712,18 +712,18 @@ class B2BDepartmentDetailView(APIView):
 class B2BDepartmentMoveEmployeesView(APIView):
     """POST /b2b/departments/<id>/move-employees/ — owner or performer.
 
-    Reassigns every employee of department <id> to `target_department_id`.
-    The source department is left in place, now empty — this only clears
-    it out; deleting it (now that it has no employees) is a separate
-    `DELETE /b2b/departments/<id>/` call.
+    Reassigns every employee of department <id> to `target_department_id`,
+    then deletes <id> — the "delete a department without losing its
+    employees" flow: move everyone out first, source department goes away
+    right after since there's nothing left to keep it around for.
     """
     permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
 
     @swagger_auto_schema(
-        operation_summary="Move a department's employees to another department",
+        operation_summary="Move a department's employees out, then delete it",
         request_body=B2BDepartmentMoveEmployeesSerializer,
         responses={
-            200: openapi.Response(description="Employees moved."),
+            200: openapi.Response(description="Employees moved and department deleted."),
             400: openapi.Response(description="Validation error."),
             404: openapi.Response(description="Source or target department not found."),
         },
@@ -747,6 +747,7 @@ class B2BDepartmentMoveEmployeesView(APIView):
         moved_count = move_department_employees(
             from_department_id=department_id, to_department_id=target_id, company_id=company_id
         )
+        delete_department(department_id, company_id)
         return Response({
             "moved_count": moved_count,
             "source_name": source["name"],
