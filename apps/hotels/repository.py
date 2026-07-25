@@ -6,8 +6,21 @@ from decimal import Decimal
 from typing import Any
 
 from shared.raw.db import execute, fetch_all, fetch_one
+from payment.exchange_rate import to_uzs
 
 logger = logging.getLogger(__name__)
+
+
+def _to_uzs_amount(amount: Any, currency: str | None) -> tuple[Decimal | None, str]:
+    """Convert a USD room price to UZS at the live rate; everything else
+    (already UZS, or no price at all) passes through unchanged. Callers
+    display and charge whatever this returns, so the two always agree."""
+    if amount is None:
+        return None, (currency or "UZS")
+    value = Decimal(str(amount))
+    if (currency or "UZS").upper() == "USD":
+        return to_uzs(value), "UZS"
+    return value, (currency or "UZS")
 
 
 # ─── Room Availability ────────────────────────────────────────────────────────
@@ -292,7 +305,7 @@ def get_available_rooms(
     extra_where = ""
     if filter_clauses:
         extra_where = " AND " + " AND ".join(filter_clauses)
-    return fetch_all(
+    rows = fetch_all(
         f"""
         SELECT
             r.id, r.room_number, r.floor, r.display_name, r.room_type_id,
@@ -331,6 +344,11 @@ def get_available_rooms(
         """,
         [property_id, guests, check_out, check_in, check_in, check_out, *filter_params],
     )
+    for row in rows:
+        row["price_per_night"], row["currency"] = _to_uzs_amount(
+            row.get("price_per_night"), row.get("currency")
+        )
+    return rows
 
 
 def lock_hotel_rooms(property_id: int, room_ids: list[int]) -> list[dict[str, Any]]:
@@ -383,8 +401,8 @@ def calculate_stay_price(
     if raw_rate is None:
         return None
 
-    ppn = Decimal(str(raw_rate))
-    if ppn <= 0:
+    ppn, currency = _to_uzs_amount(raw_rate, room.get("currency"))
+    if ppn is None or ppn <= 0:
         return None
     base_price = ppn * nights
     hold_amount = (base_price * Decimal("0.30")).quantize(Decimal("0.01"))
@@ -394,7 +412,7 @@ def calculate_stay_price(
         "total_price": base_price,
         "hold_amount": hold_amount,
         "remaining_on_arrival": base_price - hold_amount,
-        "currency": room.get("currency") or "UZS",
+        "currency": currency,
     }
 
 
@@ -1010,6 +1028,9 @@ def _search_hotels_in_schema(
         row["organization_slug"] = organization.get("slug")
         row["tenant_schema"] = schema_name
         row["guid"] = str(row["guid"]) if row.get("guid") else None
+        row["min_price"], row["currency"] = _to_uzs_amount(
+            row.get("min_price"), row.get("min_price_currency")
+        )
         raw_legal = row.get("legal_info")
         if isinstance(raw_legal, str):
             try:
