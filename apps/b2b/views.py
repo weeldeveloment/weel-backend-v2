@@ -41,6 +41,7 @@ from apps.b2b.repository import (
     delete_policy_rule,
     delete_trip,
     count_department_employees,
+    deactivate_department_employees,
     move_department_employees,
     update_department,
     get_company,
@@ -670,9 +671,19 @@ class B2BDepartmentDetailView(APIView):
     @swagger_auto_schema(
         operation_summary="Delete a department",
         operation_description=(
-            "Fails with 400 if the department still has active employees — "
-            "move them first via `POST /b2b/departments/<id>/move-employees/`."
+            "Fails with 400 if the department still has active employees, "
+            "unless `with_employees=true` is passed — that also deactivates "
+            "every employee still in it (same as `DELETE /b2b/employees/<id>/` "
+            "would, just for the whole department at once) before removing "
+            "the department itself. To keep the employees instead, move them "
+            "first via `POST /b2b/departments/<id>/move-employees/`."
         ),
+        manual_parameters=[
+            openapi.Parameter(
+                "with_employees", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, required=False,
+                description="Also deactivate the department's employees instead of blocking the delete.",
+            ),
+        ],
         responses={
             204: openapi.Response(description="Deleted."),
             400: openapi.Response(description="Department still has employees."),
@@ -685,12 +696,15 @@ class B2BDepartmentDetailView(APIView):
             return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
         if not update_department(department_id, company_id):
             return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+        with_employees = str(request.query_params.get("with_employees", "")).lower() in {"1", "true", "yes"}
         employee_count = count_department_employees(department_id)
         if employee_count > 0:
-            return Response(
-                {"detail": "Department still has employees.", "employee_count": employee_count},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            if not with_employees:
+                return Response(
+                    {"detail": "Department still has employees.", "employee_count": employee_count},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            deactivate_department_employees(department_id, company_id)
         delete_department(department_id, company_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -698,16 +712,18 @@ class B2BDepartmentDetailView(APIView):
 class B2BDepartmentMoveEmployeesView(APIView):
     """POST /b2b/departments/<id>/move-employees/ — owner or performer.
 
-    Reassigns every employee of department <id> to `target_department_id`,
-    then deletes <id>. Used by the "delete a non-empty department" flow.
+    Reassigns every employee of department <id> to `target_department_id`.
+    The source department is left in place, now empty — this only clears
+    it out; deleting it (now that it has no employees) is a separate
+    `DELETE /b2b/departments/<id>/` call.
     """
     permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
 
     @swagger_auto_schema(
-        operation_summary="Move a department's employees out, then delete it",
+        operation_summary="Move a department's employees to another department",
         request_body=B2BDepartmentMoveEmployeesSerializer,
         responses={
-            204: openapi.Response(description="Employees moved and department deleted."),
+            200: openapi.Response(description="Employees moved."),
             400: openapi.Response(description="Validation error."),
             404: openapi.Response(description="Source or target department not found."),
         },
@@ -722,13 +738,20 @@ class B2BDepartmentMoveEmployeesView(APIView):
         target_id = serializer.validated_data["target_department_id"]
         if target_id == department_id:
             return Response({"detail": "Target department must be different."}, status=status.HTTP_400_BAD_REQUEST)
-        if not update_department(department_id, company_id):
+        source = update_department(department_id, company_id)
+        if not source:
             return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
-        if not update_department(target_id, company_id):
+        target = update_department(target_id, company_id)
+        if not target:
             return Response({"detail": "Target department not found."}, status=status.HTTP_404_NOT_FOUND)
-        move_department_employees(from_department_id=department_id, to_department_id=target_id, company_id=company_id)
-        delete_department(department_id, company_id)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        moved_count = move_department_employees(
+            from_department_id=department_id, to_department_id=target_id, company_id=company_id
+        )
+        return Response({
+            "moved_count": moved_count,
+            "source_name": source["name"],
+            "target_name": target["name"],
+        })
 
 
 class B2BEmployeeLimitsView(APIView):

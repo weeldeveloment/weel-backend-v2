@@ -270,6 +270,22 @@ def count_department_employees(department_id: int) -> int:
     return int((row or {}).get("cnt") or 0)
 
 
+def deactivate_department_employees(department_id: int, company_id: int) -> int:
+    """Soft-delete every active employee in a department in one go — the
+    same ``is_active = FALSE`` deactivation ``delete_employee`` does for one
+    employee at a time, applied to the whole department at once. Used when
+    the owner chooses to delete a department along with its people instead
+    of moving them elsewhere first."""
+    return execute(
+        f"""
+        UPDATE {B2B_EMPLOYEE_TABLE}
+        SET is_active = FALSE, updated_at = %s
+        WHERE department_id = %s AND company_id = %s AND is_active = TRUE
+        """,
+        [timezone.now(), department_id, company_id],
+    )
+
+
 def delete_department(department_id: int, company_id: int) -> bool:
     """Hard-delete an empty department. Callers must confirm it has no
     active employees first (see ``count_department_employees``) — deleting
