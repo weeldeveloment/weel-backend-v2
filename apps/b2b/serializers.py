@@ -30,11 +30,24 @@ class B2BUserSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
 
 
+DEPARTMENT_COLORS = ["#7C3AED", "#16A34A", "#DC2626", "#2563EB", "#EA580C"]
+
+
 class B2BDepartmentSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     company_id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(max_length=100)
+    color = serializers.ChoiceField(choices=DEPARTMENT_COLORS, required=False)
     created_at = serializers.DateTimeField(read_only=True)
+
+
+class B2BDepartmentUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100, required=False)
+    color = serializers.ChoiceField(choices=DEPARTMENT_COLORS, required=False)
+
+
+class B2BDepartmentMoveEmployeesSerializer(serializers.Serializer):
+    target_department_id = serializers.IntegerField()
 
 
 class B2BEmployeeSerializer(serializers.Serializer):
@@ -80,6 +93,7 @@ class B2BDepartmentSummarySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     company_id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
+    color = serializers.CharField(read_only=True)
     budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
     used_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     on_trip_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)

@@ -36,9 +36,13 @@ from apps.b2b.repository import (
     create_policy_rule,
     create_trip,
     create_voucher,
+    delete_department,
     delete_employee,
     delete_policy_rule,
     delete_trip,
+    count_department_employees,
+    move_department_employees,
+    update_department,
     get_company,
     get_dashboard_summary,
     get_department_monthly_spending,
@@ -109,6 +113,8 @@ from apps.b2b.serializers import (
     B2BCompanySerializer,
     B2BDepartmentSerializer,
     B2BDepartmentSummarySerializer,
+    B2BDepartmentUpdateSerializer,
+    B2BDepartmentMoveEmployeesSerializer,
     B2BEmployeeCreateSerializer,
     B2BEmployeeLimitSerializer,
     B2BEmployeePassportPreviewSerializer,
@@ -602,6 +608,7 @@ class B2BDepartmentListCreateView(APIView):
                 "id": d["department_id"],
                 "company_id": d["company_id"],
                 "name": d["department_name"],
+                "color": d["color"],
                 "budget_limit": budget_limit,
                 "used_amount": used_amount,
                 "on_trip_amount": d["on_trip_amount"],
@@ -620,10 +627,108 @@ class B2BDepartmentListCreateView(APIView):
         serializer = B2BDepartmentSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        dept = create_department(company_id=company_id, name=serializer.validated_data["name"])
+        dept = create_department(
+            company_id=company_id,
+            name=serializer.validated_data["name"],
+            color=serializer.validated_data.get("color"),
+        )
         if not dept:
             return Response({"detail": "Failed to create department."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(B2BDepartmentSerializer(dept).data, status=status.HTTP_201_CREATED)
+
+
+class B2BDepartmentDetailView(APIView):
+    """PATCH / DELETE /b2b/departments/<id>/ — owner or performer.
+
+    PATCH renames the department and/or changes its color badge.
+    DELETE removes it, but only once it has no active employees left — the
+    FK is ``ON DELETE SET NULL``, not cascade, so deleting a department that
+    still has people in it would silently orphan them. Use
+    ``POST /b2b/departments/<id>/move-employees/`` to relocate them first.
+    """
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Rename or recolor a department",
+        request_body=B2BDepartmentUpdateSerializer,
+        responses={200: B2BDepartmentSerializer(), 404: openapi.Response(description="Department not found.")},
+    )
+    def patch(self, request, department_id):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = B2BDepartmentUpdateSerializer(data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.validated_data:
+            return Response({"detail": "Nothing to update."}, status=status.HTTP_400_BAD_REQUEST)
+        dept = update_department(department_id, company_id, **serializer.validated_data)
+        if not dept:
+            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(B2BDepartmentSerializer(dept).data)
+
+    @swagger_auto_schema(
+        operation_summary="Delete a department",
+        operation_description=(
+            "Fails with 400 if the department still has active employees — "
+            "move them first via `POST /b2b/departments/<id>/move-employees/`."
+        ),
+        responses={
+            204: openapi.Response(description="Deleted."),
+            400: openapi.Response(description="Department still has employees."),
+            404: openapi.Response(description="Department not found."),
+        },
+    )
+    def delete(self, request, department_id):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not update_department(department_id, company_id):
+            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+        employee_count = count_department_employees(department_id)
+        if employee_count > 0:
+            return Response(
+                {"detail": "Department still has employees.", "employee_count": employee_count},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        delete_department(department_id, company_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class B2BDepartmentMoveEmployeesView(APIView):
+    """POST /b2b/departments/<id>/move-employees/ — owner or performer.
+
+    Reassigns every employee of department <id> to `target_department_id`,
+    then deletes <id>. Used by the "delete a non-empty department" flow.
+    """
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Move a department's employees out, then delete it",
+        request_body=B2BDepartmentMoveEmployeesSerializer,
+        responses={
+            204: openapi.Response(description="Employees moved and department deleted."),
+            400: openapi.Response(description="Validation error."),
+            404: openapi.Response(description="Source or target department not found."),
+        },
+    )
+    def post(self, request, department_id):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = B2BDepartmentMoveEmployeesSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        target_id = serializer.validated_data["target_department_id"]
+        if target_id == department_id:
+            return Response({"detail": "Target department must be different."}, status=status.HTTP_400_BAD_REQUEST)
+        if not update_department(department_id, company_id):
+            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not update_department(target_id, company_id):
+            return Response({"detail": "Target department not found."}, status=status.HTTP_404_NOT_FOUND)
+        move_department_employees(from_department_id=department_id, to_department_id=target_id, company_id=company_id)
+        delete_department(department_id, company_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class B2BEmployeeLimitsView(APIView):
