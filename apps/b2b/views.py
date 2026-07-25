@@ -2191,8 +2191,16 @@ class ActiveTripEmployeesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        date_from = request.query_params.get("date_from") or None
-        date_to = request.query_params.get("date_to") or None
+        date_from_str = request.query_params.get("date_from") or None
+        date_to_str = request.query_params.get("date_to") or None
+        try:
+            date_from = date.fromisoformat(date_from_str) if date_from_str else None
+            date_to = date.fromisoformat(date_to_str) if date_to_str else None
+        except ValueError:
+            return Response(
+                {"detail": "Invalid date_from/date_to format. Use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         filters: dict[str, Any] = dict(
             type_=type_,

@@ -208,8 +208,19 @@ def deactivate_b2b_user(user_id: int, company_id: int) -> dict[str, Any] | None:
 
 def _month_range(month: str) -> tuple[datetime, datetime]:
     """Parse a ``YYYY-MM`` string into a ``[start, end)`` datetime range
-    covering that calendar month, in the current timezone."""
-    year, mon = (int(part) for part in month.split("-"))
+    covering that calendar month, in the current timezone. A malformed
+    value (bad separator, non-numeric part, month outside 1-12) falls
+    back to the current month instead of raising — same forgiving
+    behavior as the view-layer ``_parse_year_month`` for this same
+    ``month`` query param elsewhere in the app."""
+    now = timezone.now()
+    try:
+        year_str, mon_str = month.split("-")
+        year, mon = int(year_str), int(mon_str)
+        if mon < 1 or mon > 12:
+            raise ValueError
+    except (ValueError, AttributeError):
+        year, mon = now.year, now.month
     tz = timezone.get_current_timezone()
     start = datetime(year, mon, 1, tzinfo=tz)
     end_year, end_month = _shift_months(year, mon, 1)
