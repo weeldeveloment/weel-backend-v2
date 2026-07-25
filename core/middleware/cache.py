@@ -6,6 +6,7 @@ import uuid
 
 from django.conf import settings
 from django.core.cache import cache
+from django.core.serializers.json import DjangoJSONEncoder
 from django.http import HttpResponse
 
 CACHE_PREFIX = "weel:cache:v1"
@@ -123,7 +124,7 @@ class CacheMiddleware:
             age = time.time() - cached.get("cached_at", 0)
             if age < DEFAULT_TTL:
                 return HttpResponse(
-                    json.dumps(cached["data"]),
+                    json.dumps(cached["data"], cls=DjangoJSONEncoder),
                     status=cached["status"],
                     content_type=cached["content_type"],
                 )
@@ -139,7 +140,7 @@ class CacheMiddleware:
                     finally:
                         _release_lock(lock_key, lock_token)
                 return HttpResponse(
-                    json.dumps(cached["data"]),
+                    json.dumps(cached["data"], cls=DjangoJSONEncoder),
                     status=cached["status"],
                     content_type=cached["content_type"],
                 )
@@ -159,7 +160,7 @@ class CacheMiddleware:
         cached = _wait_for_cache(cache_key, LOCK_WAIT_MAX)
         if cached is not None:
             return HttpResponse(
-                json.dumps(cached["data"]),
+                json.dumps(cached["data"], cls=DjangoJSONEncoder),
                 status=cached["status"],
                 content_type=cached["content_type"],
             )
