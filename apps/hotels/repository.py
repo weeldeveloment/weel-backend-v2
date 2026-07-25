@@ -5,10 +5,39 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
+from django.core.files.storage import default_storage
+
 from shared.raw.db import execute, fetch_all, fetch_one
 from payment.exchange_rate import to_uzs
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_photos(photos: list[Any] | None) -> list[str]:
+    """Resolve a property's raw ``photos`` column into URLs a browser can
+    actually load: already-absolute URLs pass through, storage-relative
+    keys (uploaded straight to S3/MinIO without going through
+    ``default_storage.url()``) get the public media domain prepended, and
+    stale ``blob:`` URLs — a browser-tab-local object URL some upload path
+    saved by mistake, valid only in the session that created it — are
+    dropped instead of being handed to the client as a dead link."""
+    if not photos:
+        return []
+    urls: list[str] = []
+    for value in photos:
+        if not value:
+            continue
+        item = str(value)
+        if item.startswith("http://") or item.startswith("https://"):
+            urls.append(item)
+            continue
+        if item.startswith("blob:"):
+            continue
+        try:
+            urls.append(default_storage.url(item))
+        except Exception:
+            continue
+    return urls
 
 
 def _to_uzs_amount(amount: Any, currency: str | None) -> tuple[Decimal | None, str]:
@@ -1031,6 +1060,7 @@ def _search_hotels_in_schema(
         row["min_price"], row["currency"] = _to_uzs_amount(
             row.get("min_price"), row.get("min_price_currency")
         )
+        row["photos"] = _normalize_photos(row.get("photos"))
         raw_legal = row.get("legal_info")
         if isinstance(raw_legal, str):
             try:
