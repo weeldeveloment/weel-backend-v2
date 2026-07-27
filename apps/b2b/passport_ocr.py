@@ -52,12 +52,21 @@ _FRONT_COUNTRY_MARKERS = ("UZBEKISTON", "OZBEKISTON")
 # to'g'rilaydi, kartaning qo'lda qanday tutilganini emas. Shu sababli barcha
 # asosiy burilishlarni sinab ko'ramiz.
 _ROTATIONS = (0, 90, 180, 270)
-_PSM_MODES = (6, 11, 4)
+# 6 = bitta bir xil matn bloki (MRZ qatorlari uchun standart va eng ishonchli),
+# 11 = siyrak matn — atrofida shovqin/chegara bo'lsa zaxira sifatida yetarli.
+# Server protsessor yadrolari cheklangan bo'lishi mumkin (parallellik faqat
+# yadrolar soniga qadar real tezlik beradi), shu sababli har bir qo'shimcha
+# kombinatsiya to'g'ridan-to'g'ri kutish vaqtiga qo'shiladi — kam foyda
+# beradigan variantlar (masalan PSM 4 — ustunli matn, gorizontal MRZ
+# qatoriga mos kelmaydi) olib tashlandi.
+_PSM_MODES = (6, 11)
 # None = faqat autocontrast. Kartadagi guilloche/gologramma fon naqshlari OCR
 # matnini shovqinlashtiradi — qattiq threshold (binarizatsiya) fonni bosib,
-# qalin qora matnni ajratib beradi, lekin yorug'lik sharoitiga qarab optimal
-# qiymat farq qilishi mumkin, shuning uchun bir nechtasi sinab ko'riladi.
-_THRESHOLDS = (None, 100, 120, 140)
+# qalin qora matnni ajratib beradi. To'rtta yaqin qiymat sinash o'rniga
+# ikkitasi (autocontrast + o'rtacha threshold) aksariyat yorug'lik
+# sharoitlarini qamrab oladi — checksum tekshiruvi noto'g'ri o'qishni
+# baribir rad etadi, shu sababli qolgan ikkitasini olib tashlash xavfsiz.
+_THRESHOLDS = (None, 120)
 
 _FRONT_FIELD_LABELS = {
     "surname": ("SURNAME", "FAMILIYASI"),
