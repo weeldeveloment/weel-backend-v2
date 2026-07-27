@@ -100,6 +100,10 @@ app.conf.beat_schedule = {
         "task": "b2b.sync_trip_statuses",
         "schedule": crontab(hour=0, minute=5),  # daily just after midnight (Asia/Tashkent)
     },
+    "sync_bookingcom_reservations": {
+        "task": "bookingcom.sync_reservations",
+        "schedule": crontab(minute="*/15"),
+    },
 }
 
 # app.conf.task_queues = (

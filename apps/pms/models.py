@@ -264,6 +264,12 @@ class Booking(HardDeleteBaseModel):
     voucher_number: str | None = None
     notes: str | None = None
     created_by: int | None = None
+    external_provider: str | None = None
+    external_reservation_id: str | None = None
+    external_room_id: str | None = None
+    external_payload_ref: dict = field(default_factory=dict)
+    imported_at: datetime | None = None
+    last_synced_at: datetime | None = None
     _meta = SimpleNamespace(db_table="pms_booking")
 
 

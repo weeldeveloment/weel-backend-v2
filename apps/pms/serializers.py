@@ -243,6 +243,12 @@ class BookingSerializer(serializers.Serializer):
     room_number = serializers.CharField(read_only=True, allow_null=True)
     guest_first_name = serializers.CharField(read_only=True, allow_null=True)
     guest_last_name = serializers.CharField(read_only=True, allow_null=True)
+    external_provider = serializers.CharField(read_only=True, allow_null=True)
+    external_reservation_id = serializers.CharField(read_only=True, allow_null=True)
+    external_room_id = serializers.CharField(read_only=True, allow_null=True)
+    external_payload_ref = JSONStringField(read_only=True)
+    imported_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    last_synced_at = serializers.DateTimeField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
