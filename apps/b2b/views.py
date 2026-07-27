@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import random
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -11,6 +13,7 @@ from urllib.parse import quote
 
 import qrcode
 
+from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.db import IntegrityError
 from django.utils import timezone
@@ -36,9 +39,14 @@ from apps.b2b.repository import (
     create_policy_rule,
     create_trip,
     create_voucher,
+    delete_department,
     delete_employee,
     delete_policy_rule,
     delete_trip,
+    count_department_employees,
+    deactivate_department_employees,
+    move_department_employees,
+    update_department,
     get_company,
     get_dashboard_summary,
     get_department_monthly_spending,
@@ -92,7 +100,7 @@ from apps.b2b.hotel_booking_service import (
     reconcile_booking_request,
 )
 from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer
-from apps.b2b.tasks import _send_b2b_lead_telegram_notification
+from apps.b2b.tasks import _send_b2b_lead_telegram_notification, run_passport_ocr_job
 from apps.property.hotel_repository import _run_in_schema, _safe_schema_name, get_hotel_for_public, resolve_hotel_guid
 from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, get_hotel_card_by_guid, search_hotels
 from shared.raw.db import fetch_all
@@ -109,6 +117,8 @@ from apps.b2b.serializers import (
     B2BCompanySerializer,
     B2BDepartmentSerializer,
     B2BDepartmentSummarySerializer,
+    B2BDepartmentUpdateSerializer,
+    B2BDepartmentMoveEmployeesSerializer,
     B2BEmployeeCreateSerializer,
     B2BEmployeeLimitSerializer,
     B2BEmployeePassportPreviewSerializer,
@@ -602,6 +612,7 @@ class B2BDepartmentListCreateView(APIView):
                 "id": d["department_id"],
                 "company_id": d["company_id"],
                 "name": d["department_name"],
+                "color": d["color"],
                 "budget_limit": budget_limit,
                 "used_amount": used_amount,
                 "on_trip_amount": d["on_trip_amount"],
@@ -620,10 +631,131 @@ class B2BDepartmentListCreateView(APIView):
         serializer = B2BDepartmentSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        dept = create_department(company_id=company_id, name=serializer.validated_data["name"])
+        dept = create_department(
+            company_id=company_id,
+            name=serializer.validated_data["name"],
+            color=serializer.validated_data.get("color"),
+        )
         if not dept:
             return Response({"detail": "Failed to create department."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(B2BDepartmentSerializer(dept).data, status=status.HTTP_201_CREATED)
+
+
+class B2BDepartmentDetailView(APIView):
+    """PATCH / DELETE /b2b/departments/<id>/ — owner or performer.
+
+    PATCH renames the department and/or changes its color badge.
+    DELETE removes it, but only once it has no active employees left — the
+    FK is ``ON DELETE SET NULL``, not cascade, so deleting a department that
+    still has people in it would silently orphan them. Use
+    ``POST /b2b/departments/<id>/move-employees/`` to relocate them first.
+    """
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Rename or recolor a department",
+        request_body=B2BDepartmentUpdateSerializer,
+        responses={200: B2BDepartmentSerializer(), 404: openapi.Response(description="Department not found.")},
+    )
+    def patch(self, request, department_id):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = B2BDepartmentUpdateSerializer(data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.validated_data:
+            return Response({"detail": "Nothing to update."}, status=status.HTTP_400_BAD_REQUEST)
+        dept = update_department(department_id, company_id, **serializer.validated_data)
+        if not dept:
+            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(B2BDepartmentSerializer(dept).data)
+
+    @swagger_auto_schema(
+        operation_summary="Delete a department",
+        operation_description=(
+            "Fails with 400 if the department still has active employees, "
+            "unless `with_employees=true` is passed — that also deactivates "
+            "every employee still in it (same as `DELETE /b2b/employees/<id>/` "
+            "would, just for the whole department at once) before removing "
+            "the department itself. To keep the employees instead, move them "
+            "first via `POST /b2b/departments/<id>/move-employees/`."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "with_employees", openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, required=False,
+                description="Also deactivate the department's employees instead of blocking the delete.",
+            ),
+        ],
+        responses={
+            204: openapi.Response(description="Deleted."),
+            400: openapi.Response(description="Department still has employees."),
+            404: openapi.Response(description="Department not found."),
+        },
+    )
+    def delete(self, request, department_id):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not update_department(department_id, company_id):
+            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+        with_employees = str(request.query_params.get("with_employees", "")).lower() in {"1", "true", "yes"}
+        employee_count = count_department_employees(department_id)
+        if employee_count > 0:
+            if not with_employees:
+                return Response(
+                    {"detail": "Department still has employees.", "employee_count": employee_count},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            deactivate_department_employees(department_id, company_id)
+        delete_department(department_id, company_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class B2BDepartmentMoveEmployeesView(APIView):
+    """POST /b2b/departments/<id>/move-employees/ — owner or performer.
+
+    Reassigns every employee of department <id> to `target_department_id`,
+    then deletes <id> — the "delete a department without losing its
+    employees" flow: move everyone out first, source department goes away
+    right after since there's nothing left to keep it around for.
+    """
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="Move a department's employees out, then delete it",
+        request_body=B2BDepartmentMoveEmployeesSerializer,
+        responses={
+            200: openapi.Response(description="Employees moved and department deleted."),
+            400: openapi.Response(description="Validation error."),
+            404: openapi.Response(description="Source or target department not found."),
+        },
+    )
+    def post(self, request, department_id):
+        company_id = _get_company_id(request)
+        if not company_id:
+            return Response({"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = B2BDepartmentMoveEmployeesSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        target_id = serializer.validated_data["target_department_id"]
+        if target_id == department_id:
+            return Response({"detail": "Target department must be different."}, status=status.HTTP_400_BAD_REQUEST)
+        source = update_department(department_id, company_id)
+        if not source:
+            return Response({"detail": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+        target = update_department(target_id, company_id)
+        if not target:
+            return Response({"detail": "Target department not found."}, status=status.HTTP_404_NOT_FOUND)
+        moved_count = move_department_employees(
+            from_department_id=department_id, to_department_id=target_id, company_id=company_id
+        )
+        delete_department(department_id, company_id)
+        return Response({
+            "moved_count": moved_count,
+            "source_name": source["name"],
+            "target_name": target["name"],
+        })
 
 
 class B2BEmployeeLimitsView(APIView):
@@ -664,6 +796,44 @@ class B2BEmployeeLimitsView(APIView):
                 "status": compute_budget_status(limit, used),
             })
         return Response(B2BEmployeeLimitSerializer(payload, many=True).data)
+
+
+# The add-employee form always runs a passport-preview OCR pass before the
+# user submits the create form with the same two images. Without this cache,
+# the (slow) OCR pipeline ran twice per employee — once for the preview and
+# again on submit — roughly doubling wait time for no benefit in the normal
+# flow, where the files submitted are byte-identical to what was previewed.
+#
+# Keyed by an opaque token (not by file content hash): the preview response
+# hands the token to the client, and the create request must present the
+# same token *and* the same files to reuse the cached result. This avoids a
+# content-addressed cache turning any two unrelated requests that happen to
+# upload byte-identical files into unintended cross-request hits.
+PASSPORT_OCR_CACHE_TTL_SECONDS = 600
+
+
+def _file_digest(file_obj) -> str:
+    file_obj.seek(0)
+    digest = hashlib.sha256(file_obj.read()).hexdigest()
+    file_obj.seek(0)
+    return digest
+
+
+def _extract_passport_data_for_create(front_file, back_file, ocr_token: str | None) -> dict:
+    """``ocr_token`` is the ``job_id`` from ``B2BEmployeePassportPreviewView``
+    — reuse its (already-completed) background OCR result instead of running
+    OCR a third time, as long as the same two files are still being
+    submitted."""
+    if ocr_token:
+        job = cache.get(f"passport_ocr_job:{ocr_token}")
+        if (
+            job
+            and job.get("status") == "done"
+            and job["front_digest"] == _file_digest(front_file)
+            and job["back_digest"] == _file_digest(back_file)
+        ):
+            return job["data"]
+    return extract_passport_data(front_file, back_file)
 
 
 class B2BEmployeeListCreateView(APIView):
@@ -733,8 +903,9 @@ class B2BEmployeeListCreateView(APIView):
 
         front_file = validated.pop("passport_upload_front")
         back_file = validated.pop("passport_upload_back")
+        ocr_token = validated.pop("ocr_token", None)
         try:
-            passport_data = extract_passport_data(front_file, back_file)
+            passport_data = _extract_passport_data_for_create(front_file, back_file, ocr_token)
         except PassportOCRError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
@@ -775,20 +946,25 @@ class B2BEmployeeListCreateView(APIView):
 
 class B2BEmployeePassportPreviewView(APIView):
     """Passport old/orqa skanidan OCR orqali ma'lumotlarni oldindan
-    ko'rsatish uchun. Hech narsa saqlanmaydi (na fayl, na xodim) — bu shunchaki
-    ``POST /b2b/employees/`` chaqirilishidan oldin foydalanuvchiga natijani
-    ko'rsatish uchun. Yakuniy saqlashda ``B2BEmployeeListCreateView.post`` OCR'ni
-    yana o'zi ishga tushiradi."""
+    ko'rsatish uchun. OCR sekin ishlaydi, shu sababli bu endpoint uni darhol
+    fon vazifasi (Celery) sifatida navbatga qo'yadi va ``job_id`` bilan
+    202 qaytaradi — klient natijani ``B2BEmployeePassportPreviewStatusView``
+    orqali so'rab turadi (polling). Xodim o'zi bu yerda saqlanmaydi; rasmlar
+    vaqtinchalik joylashtiriladi va vazifa tugagach (muvaffaqiyatli yoki
+    xato bilan) o'chiriladi. Natijadagi ``ocr_token``ni klient yakuniy
+    saqlashda (``B2BEmployeeListCreateView.post``) xuddi shu ikkita rasm
+    bilan birga qaytarsa, OCR ikkinchi marta ishga tushmaydi."""
 
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Preview passport OCR extraction",
+        operation_summary="Start passport OCR extraction (async)",
         operation_description=(
-            "Accepts the front and back scans of an ID document and returns "
-            "the fields extracted by OCR (full_name, date_of_birth, "
-            "passport_series, passport_pinfl). Nothing is saved — files are "
-            "processed in memory only."
+            "Accepts the front and back scans of an ID document, saves them "
+            "temporarily, and queues OCR extraction as a background job. "
+            "Poll GET /b2b/employees/passport-preview/{job_id}/ for the "
+            "result (full_name, date_of_birth, passport_series, "
+            "passport_pinfl)."
         ),
         consumes=["multipart/form-data"],
         manual_parameters=[
@@ -796,8 +972,8 @@ class B2BEmployeePassportPreviewView(APIView):
             openapi.Parameter("passport_upload_back", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Back side of the ID document with MRZ code"),
         ],
         responses={
-            200: openapi.Response(description="OCR extraction result"),
-            400: openapi.Response(description="Validation error or passport image does not match the template."),
+            202: openapi.Response(description="Job queued — returns {job_id}."),
+            400: openapi.Response(description="Validation error."),
         },
     )
     def post(self, request):
@@ -806,17 +982,44 @@ class B2BEmployeePassportPreviewView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         front_file = serializer.validated_data["passport_upload_front"]
         back_file = serializer.validated_data["passport_upload_back"]
-        try:
-            passport_data = extract_passport_data(front_file, back_file)
-        except PassportOCRError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception:
-            logger.exception("Passport OCR preview failed unexpectedly")
+
+        job_id = uuid.uuid4().hex
+        front_digest = _file_digest(front_file)
+        back_digest = _file_digest(back_file)
+        front_path = default_storage.save(f"b2b/employees/passports_pending/{job_id}_front", front_file)
+        back_path = default_storage.save(f"b2b/employees/passports_pending/{job_id}_back", back_file)
+
+        cache.set(
+            f"passport_ocr_job:{job_id}",
+            {"status": "pending", "front_digest": front_digest, "back_digest": back_digest},
+            PASSPORT_OCR_CACHE_TTL_SECONDS,
+        )
+        run_passport_ocr_job.delay(job_id, front_path, back_path)
+        return Response({"job_id": job_id}, status=status.HTTP_202_ACCEPTED)
+
+
+class B2BEmployeePassportPreviewStatusView(APIView):
+    """``B2BEmployeePassportPreviewView`` navbatga qo'ygan fon vazifasining
+    natijasini so'rash uchun (polling)."""
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Poll passport OCR job status",
+        responses={200: openapi.Response(description="{status: pending|done|error, ...}")},
+    )
+    def get(self, request, job_id):
+        job = cache.get(f"passport_ocr_job:{job_id}")
+        if job is None:
             return Response(
-                {"detail": "Не удалось распознать паспортные данные. Попробуйте другое фото."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"detail": "So'rov topilmadi yoki muddati tugagan. Rasmlarni qayta yuklang."},
+                status=status.HTTP_404_NOT_FOUND,
             )
-        return Response(passport_data, status=status.HTTP_200_OK)
+        if job["status"] == "pending":
+            return Response({"status": "pending"})
+        if job["status"] == "error":
+            return Response({"status": "error", "detail": job["detail"]})
+        return Response({"status": "done", "ocr_token": job_id, **job["data"]})
 
 
 class B2BEmployeeRetrieveUpdateView(APIView):
@@ -2086,8 +2289,16 @@ class ActiveTripEmployeesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        date_from = request.query_params.get("date_from") or None
-        date_to = request.query_params.get("date_to") or None
+        date_from_str = request.query_params.get("date_from") or None
+        date_to_str = request.query_params.get("date_to") or None
+        try:
+            date_from = date.fromisoformat(date_from_str) if date_from_str else None
+            date_to = date.fromisoformat(date_to_str) if date_to_str else None
+        except ValueError:
+            return Response(
+                {"detail": "Invalid date_from/date_to format. Use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         filters: dict[str, Any] = dict(
             type_=type_,

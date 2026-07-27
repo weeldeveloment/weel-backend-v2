@@ -42,6 +42,9 @@ def _to_pg_json(v: Any) -> Any:
 logger = logging.getLogger(__name__)
 
 _PROPERTY_COLUMN_CACHE: dict[str, bool] = {}
+_ROOM_SERVICE_LOOKUP_CACHE: dict[str, str] | None = None
+_TABLE_COLUMN_CACHE: dict[tuple[str, str, str], bool] = {}
+_CURRENT_SCHEMA_TABLE_COLUMN_CACHE: dict[tuple[str, str], bool] = {}
 
 
 def _t(name: str) -> str:
@@ -70,6 +73,138 @@ def _property_has_column(column_name: str) -> bool:
     return exists
 
 
+def _table_has_column(table_name: str, column_name: str, schema: str = "public") -> bool:
+    cache_key = (schema, table_name, column_name)
+    cached = _TABLE_COLUMN_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    row = fetch_one(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = %s
+              AND table_name = %s
+              AND column_name = %s
+        ) AS exists
+        """,
+        [schema, table_name, column_name],
+    )
+    exists = bool(row and row["exists"])
+    _TABLE_COLUMN_CACHE[cache_key] = exists
+    return exists
+
+
+def _current_table_has_column(table_name: str, column_name: str) -> bool:
+    cache_key = (table_name, column_name)
+    cached = _CURRENT_SCHEMA_TABLE_COLUMN_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    row = fetch_one(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = %s
+              AND column_name = %s
+        ) AS exists
+        """,
+        [table_name, column_name],
+    )
+    exists = bool(row and row["exists"])
+    _CURRENT_SCHEMA_TABLE_COLUMN_CACHE[cache_key] = exists
+    return exists
+
+
+def _normalize_amenity_token(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _build_room_service_lookup() -> dict[str, str]:
+    lookup: dict[str, str] = {}
+
+    def register(raw_value: Any, guid: Any) -> None:
+        key = _normalize_amenity_token(raw_value)
+        guid_value = str(guid or "").strip()
+        if key and guid_value:
+            lookup[key] = guid_value
+
+    if table_exists("services"):
+        title_columns = [
+            column_name
+            for column_name in ("title", "title_ru", "title_uz", "title_en")
+            if _table_has_column("services", column_name)
+        ]
+        selected_columns = ["s.id::text AS guid", *[f"s.{column_name}" for column_name in title_columns]]
+        rows = fetch_all(
+            f"""
+            SELECT
+                {", ".join(selected_columns)}
+            FROM services s
+            WHERE 'room' = ANY(s.type)
+            """
+        )
+        for row in rows:
+            guid = row.get("guid")
+            register(guid, guid)
+            for column_name in title_columns:
+                register(row.get(column_name), guid)
+
+    for legacy_table in ("property_service", "property_propertyservice"):
+        if not table_exists(legacy_table):
+            continue
+        title_columns = [
+            column_name
+            for column_name in ("title_en", "title_ru", "title_uz", "title")
+            if _table_has_column(legacy_table, column_name)
+        ]
+        selected_columns = ["ps.guid::text AS guid", *[f"ps.{column_name}" for column_name in title_columns]]
+        rows = fetch_all(
+            f"""
+            SELECT
+                {", ".join(selected_columns)}
+            FROM {legacy_table} ps
+            """
+        )
+        for row in rows:
+            guid = row.get("guid")
+            register(guid, guid)
+            for column_name in title_columns:
+                register(row.get(column_name), guid)
+        break
+
+    return lookup
+
+
+def get_room_service_lookup() -> dict[str, str]:
+    global _ROOM_SERVICE_LOOKUP_CACHE
+    if _ROOM_SERVICE_LOOKUP_CACHE is None:
+        _ROOM_SERVICE_LOOKUP_CACHE = _build_room_service_lookup()
+    return _ROOM_SERVICE_LOOKUP_CACHE
+
+
+def normalize_room_amenities(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+
+    lookup = get_room_service_lookup()
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for value in values:
+        raw_value = str(value or "").strip()
+        if not raw_value:
+            continue
+        canonical = lookup.get(_normalize_amenity_token(raw_value), raw_value)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        normalized.append(canonical)
+
+    return normalized
 # ─── Properties ──────────────────────────────────────────────────────────────
 
 
@@ -683,10 +818,18 @@ def create_booking(
         "confirmed_at": lambda v: v, "confirmation_deadline": lambda v: v,
         "b2b_company_id": int, "voucher_number": str,
         "notes": str, "created_by": int,
+        "external_provider": str,
+        "external_reservation_id": str,
+        "external_room_id": str,
+        "external_payload_ref": _to_pg_json,
+        "imported_at": lambda v: v,
+        "last_synced_at": lambda v: v,
     }
 
     for key, caster in field_map.items():
         if key in kwargs and kwargs[key] is not None:
+            if not _current_table_has_column(PMS_BOOKING_TABLE, key):
+                continue
             cols.append(key)
             vals.append(caster(kwargs[key]))
 
@@ -794,6 +937,14 @@ def update_booking(booking_id: int, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return None
 
+    kwargs = {
+        key: _to_pg_json(value) if key == "external_payload_ref" else value
+        for key, value in kwargs.items()
+        if _current_table_has_column(PMS_BOOKING_TABLE, key)
+    }
+    if not kwargs:
+        return get_booking(booking_id)
+
     sets = ", ".join(f"{k} = %s" for k in kwargs)
     values = list(kwargs.values())
     values.append(timezone.now())
@@ -844,6 +995,12 @@ def update_booking_with_guest(
         "total_cost",
         "b2b_company_id",
         "notes",
+        "external_provider",
+        "external_reservation_id",
+        "external_room_id",
+        "external_payload_ref",
+        "imported_at",
+        "last_synced_at",
     }
     updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
 

@@ -8,6 +8,45 @@ from users.services import TelegramService
 
 logger = logging.getLogger(__name__)
 
+# Must match B2BEmployeePassportPreviewView / B2BEmployeePassportPreviewStatusView
+# in apps/b2b/views.py — same cache-key prefix and TTL on both ends.
+PASSPORT_OCR_JOB_TTL_SECONDS = 600
+
+
+@app.task(name="b2b.run_passport_ocr_job")
+def run_passport_ocr_job(job_id: str, front_path: str, back_path: str) -> None:
+    """Runs the (slow) passport OCR pipeline off the request/response cycle.
+
+    ``front_path``/``back_path`` are default_storage keys the view already
+    saved the uploaded images under (temporary — deleted here once OCR is
+    done, regardless of outcome). The result is written to cache under the
+    same key the view polls, so this task has no return value the caller
+    needs.
+    """
+    from django.core.cache import cache
+    from django.core.files.storage import default_storage
+
+    from apps.b2b.passport_ocr import PassportOCRError, extract_passport_data
+
+    cache_key = f"passport_ocr_job:{job_id}"
+    job = cache.get(cache_key) or {}
+    try:
+        with default_storage.open(front_path) as front_file, default_storage.open(back_path) as back_file:
+            passport_data = extract_passport_data(front_file, back_file)
+        job["status"] = "done"
+        job["data"] = passport_data
+    except PassportOCRError as exc:
+        job["status"] = "error"
+        job["detail"] = str(exc)
+    except Exception:
+        logger.exception("Passport OCR background job failed unexpectedly: %s", job_id)
+        job["status"] = "error"
+        job["detail"] = "Не удалось распознать паспортные данные. Попробуйте другое фото."
+    finally:
+        cache.set(cache_key, job, PASSPORT_OCR_JOB_TTL_SECONDS)
+        default_storage.delete(front_path)
+        default_storage.delete(back_path)
+
 
 @app.task(name="b2b.sync_trip_statuses")
 def sync_trip_statuses():

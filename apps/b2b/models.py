@@ -155,6 +155,7 @@ class B2BDepartment(HardDeleteBaseModel):
     id: int | None = None
     company_id: int | None = None
     name: str | None = None
+    color: str | None = None
     _meta = SimpleNamespace(db_table="b2b_department")
 
 

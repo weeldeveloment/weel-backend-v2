@@ -157,11 +157,23 @@ class Command(BaseCommand):
                     voucher_number VARCHAR(50),
                     notes TEXT,
                     created_by BIGINT,
+                    external_provider VARCHAR(50),
+                    external_reservation_id VARCHAR(255),
+                    external_room_id VARCHAR(255),
+                    external_payload_ref JSONB DEFAULT '{}',
+                    imported_at TIMESTAMPTZ,
+                    last_synced_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
             """)
             self.stdout.write("  Created pms_booking")
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS pms_booking_external_ref_uidx
+                ON pms_booking (property_id, external_provider, external_reservation_id)
+                WHERE external_provider IS NOT NULL AND external_reservation_id IS NOT NULL;
+            """)
+            self.stdout.write("  Created pms_booking external reference index")
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pms_booking_history (
@@ -195,6 +207,76 @@ class Command(BaseCommand):
                 );
             """)
             self.stdout.write("  Created pms_review")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pms_bookingcom_connection (
+                    id BIGSERIAL PRIMARY KEY,
+                    property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE UNIQUE,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    bookingcom_property_id VARCHAR(255) NOT NULL,
+                    api_url VARCHAR(500) NOT NULL,
+                    api_token TEXT,
+                    username VARCHAR(255),
+                    password TEXT,
+                    last_successful_sync_at TIMESTAMPTZ,
+                    last_synced_at TIMESTAMPTZ,
+                    last_sync_status VARCHAR(30),
+                    last_error TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            self.stdout.write("  Created pms_bookingcom_connection")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pms_bookingcom_room_mapping (
+                    id BIGSERIAL PRIMARY KEY,
+                    property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                    external_room_id VARCHAR(255) NOT NULL,
+                    room_id BIGINT REFERENCES pms_room(id) ON DELETE SET NULL,
+                    room_type_id BIGINT,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE(property_id, external_room_id)
+                );
+            """)
+            self.stdout.write("  Created pms_bookingcom_room_mapping")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pms_bookingcom_sync_run (
+                    id BIGSERIAL PRIMARY KEY,
+                    property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                    connection_id BIGINT REFERENCES pms_bookingcom_connection(id) ON DELETE SET NULL,
+                    triggered_by VARCHAR(50) NOT NULL,
+                    status VARCHAR(30) NOT NULL,
+                    stats JSONB DEFAULT '{}',
+                    error_message TEXT,
+                    sync_cursor_from TIMESTAMPTZ,
+                    sync_cursor_to TIMESTAMPTZ,
+                    started_at TIMESTAMPTZ,
+                    finished_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            self.stdout.write("  Created pms_bookingcom_sync_run")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pms_bookingcom_sync_error (
+                    id BIGSERIAL PRIMARY KEY,
+                    sync_run_id BIGINT REFERENCES pms_bookingcom_sync_run(id) ON DELETE CASCADE,
+                    property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                    external_reservation_id VARCHAR(255),
+                    external_room_id VARCHAR(255),
+                    code VARCHAR(100) NOT NULL,
+                    message TEXT NOT NULL,
+                    payload JSONB DEFAULT '{}',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            self.stdout.write("  Created pms_bookingcom_sync_error")
 
             cursor.execute("SET search_path TO public;")
 

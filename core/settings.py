@@ -153,6 +153,7 @@ LOCAL_APPS: list[str] = [
     "apps.recommendation",
     "apps.platform",
     "apps.pms",
+    "apps.bookingcom",
     "apps.b2b",
     "apps.documents",
     "apps.hotels",
