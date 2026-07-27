@@ -100,7 +100,7 @@ from apps.b2b.hotel_booking_service import (
     reconcile_booking_request,
 )
 from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer
-from apps.b2b.tasks import _send_b2b_lead_telegram_notification
+from apps.b2b.tasks import _send_b2b_lead_telegram_notification, run_passport_ocr_job
 from apps.property.hotel_repository import _run_in_schema, _safe_schema_name, get_hotel_for_public, resolve_hotel_guid
 from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, get_hotel_card_by_guid, search_hotels
 from shared.raw.db import fetch_all
@@ -819,30 +819,20 @@ def _file_digest(file_obj) -> str:
     return digest
 
 
-def _passport_ocr_preview_and_cache(front_file, back_file) -> dict:
-    passport_data = extract_passport_data(front_file, back_file)
-    token = uuid.uuid4().hex
-    cache.set(
-        f"passport_ocr:{token}",
-        {
-            "front_digest": _file_digest(front_file),
-            "back_digest": _file_digest(back_file),
-            "data": passport_data,
-        },
-        PASSPORT_OCR_CACHE_TTL_SECONDS,
-    )
-    return {**passport_data, "ocr_token": token}
-
-
 def _extract_passport_data_for_create(front_file, back_file, ocr_token: str | None) -> dict:
+    """``ocr_token`` is the ``job_id`` from ``B2BEmployeePassportPreviewView``
+    — reuse its (already-completed) background OCR result instead of running
+    OCR a third time, as long as the same two files are still being
+    submitted."""
     if ocr_token:
-        cached = cache.get(f"passport_ocr:{ocr_token}")
+        job = cache.get(f"passport_ocr_job:{ocr_token}")
         if (
-            cached
-            and cached["front_digest"] == _file_digest(front_file)
-            and cached["back_digest"] == _file_digest(back_file)
+            job
+            and job.get("status") == "done"
+            and job["front_digest"] == _file_digest(front_file)
+            and job["back_digest"] == _file_digest(back_file)
         ):
-            return cached["data"]
+            return job["data"]
     return extract_passport_data(front_file, back_file)
 
 
@@ -956,21 +946,25 @@ class B2BEmployeeListCreateView(APIView):
 
 class B2BEmployeePassportPreviewView(APIView):
     """Passport old/orqa skanidan OCR orqali ma'lumotlarni oldindan
-    ko'rsatish uchun. Hech narsa saqlanmaydi (na fayl, na xodim) — bu shunchaki
-    ``POST /b2b/employees/`` chaqirilishidan oldin foydalanuvchiga natijani
-    ko'rsatish uchun. Javobdagi ``ocr_token``ni klient yakuniy saqlashda
-    (``B2BEmployeeListCreateView.post``) xuddi shu ikkita rasm bilan birga
-    qaytarsa, OCR ikkinchi marta ishga tushmay, keshlangan natija ishlatiladi."""
+    ko'rsatish uchun. OCR sekin ishlaydi, shu sababli bu endpoint uni darhol
+    fon vazifasi (Celery) sifatida navbatga qo'yadi va ``job_id`` bilan
+    202 qaytaradi — klient natijani ``B2BEmployeePassportPreviewStatusView``
+    orqali so'rab turadi (polling). Xodim o'zi bu yerda saqlanmaydi; rasmlar
+    vaqtinchalik joylashtiriladi va vazifa tugagach (muvaffaqiyatli yoki
+    xato bilan) o'chiriladi. Natijadagi ``ocr_token``ni klient yakuniy
+    saqlashda (``B2BEmployeeListCreateView.post``) xuddi shu ikkita rasm
+    bilan birga qaytarsa, OCR ikkinchi marta ishga tushmaydi."""
 
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Preview passport OCR extraction",
+        operation_summary="Start passport OCR extraction (async)",
         operation_description=(
-            "Accepts the front and back scans of an ID document and returns "
-            "the fields extracted by OCR (full_name, date_of_birth, "
-            "passport_series, passport_pinfl). Nothing is saved — files are "
-            "processed in memory only."
+            "Accepts the front and back scans of an ID document, saves them "
+            "temporarily, and queues OCR extraction as a background job. "
+            "Poll GET /b2b/employees/passport-preview/{job_id}/ for the "
+            "result (full_name, date_of_birth, passport_series, "
+            "passport_pinfl)."
         ),
         consumes=["multipart/form-data"],
         manual_parameters=[
@@ -978,8 +972,8 @@ class B2BEmployeePassportPreviewView(APIView):
             openapi.Parameter("passport_upload_back", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Back side of the ID document with MRZ code"),
         ],
         responses={
-            200: openapi.Response(description="OCR extraction result"),
-            400: openapi.Response(description="Validation error or passport image does not match the template."),
+            202: openapi.Response(description="Job queued — returns {job_id}."),
+            400: openapi.Response(description="Validation error."),
         },
     )
     def post(self, request):
@@ -988,17 +982,44 @@ class B2BEmployeePassportPreviewView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         front_file = serializer.validated_data["passport_upload_front"]
         back_file = serializer.validated_data["passport_upload_back"]
-        try:
-            passport_data = _passport_ocr_preview_and_cache(front_file, back_file)
-        except PassportOCRError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception:
-            logger.exception("Passport OCR preview failed unexpectedly")
+
+        job_id = uuid.uuid4().hex
+        front_digest = _file_digest(front_file)
+        back_digest = _file_digest(back_file)
+        front_path = default_storage.save(f"b2b/employees/passports_pending/{job_id}_front", front_file)
+        back_path = default_storage.save(f"b2b/employees/passports_pending/{job_id}_back", back_file)
+
+        cache.set(
+            f"passport_ocr_job:{job_id}",
+            {"status": "pending", "front_digest": front_digest, "back_digest": back_digest},
+            PASSPORT_OCR_CACHE_TTL_SECONDS,
+        )
+        run_passport_ocr_job.delay(job_id, front_path, back_path)
+        return Response({"job_id": job_id}, status=status.HTTP_202_ACCEPTED)
+
+
+class B2BEmployeePassportPreviewStatusView(APIView):
+    """``B2BEmployeePassportPreviewView`` navbatga qo'ygan fon vazifasining
+    natijasini so'rash uchun (polling)."""
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Poll passport OCR job status",
+        responses={200: openapi.Response(description="{status: pending|done|error, ...}")},
+    )
+    def get(self, request, job_id):
+        job = cache.get(f"passport_ocr_job:{job_id}")
+        if job is None:
             return Response(
-                {"detail": "Не удалось распознать паспортные данные. Попробуйте другое фото."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"detail": "So'rov topilmadi yoki muddati tugagan. Rasmlarni qayta yuklang."},
+                status=status.HTTP_404_NOT_FOUND,
             )
-        return Response(passport_data, status=status.HTTP_200_OK)
+        if job["status"] == "pending":
+            return Response({"status": "pending"})
+        if job["status"] == "error":
+            return Response({"status": "error", "detail": job["detail"]})
+        return Response({"status": "done", "ocr_token": job_id, **job["data"]})
 
 
 class B2BEmployeeRetrieveUpdateView(APIView):
