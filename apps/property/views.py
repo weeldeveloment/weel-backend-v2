@@ -108,7 +108,11 @@ from .cottage_serializers import (
     CottagePartnerListSerializer,
     CottageUpdateSerializer,
 )
-from apps.platform.raw_repository import get_organization_by_id, list_organizations
+from apps.platform.raw_repository import (
+    get_organization_by_id,
+    list_organization_members,
+    list_organizations,
+)
 from .hotel_repository import (
     admin_append_hotel_images,
     admin_remove_hotel_image,
@@ -139,6 +143,26 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _organization_owner_user_id(organization_id: int | None) -> int | None:
+    if organization_id is None:
+        return None
+    try:
+        members = list_organization_members(int(organization_id))
+    except Exception:
+        return None
+    owner_roles = {"owner", "admin"}
+    for member in members:
+        role = str(member.get("role") or "").strip().lower()
+        user_id = member.get("user_id")
+        if role in owner_roles and user_id is not None:
+            return int(user_id)
+    for member in members:
+        user_id = member.get("user_id")
+        if user_id is not None:
+            return int(user_id)
+    return None
 
 
 def _track_client_search(request) -> None:
@@ -4365,6 +4389,10 @@ class AdminHotelListCreateView(APIView):
         if organization is None:
             raise ValidationError({"organization_id": _("Organization not found.")})
         prepared["organization_id"] = organization.get("id")
+        prepared.setdefault(
+            "partner_user_id",
+            _organization_owner_user_id(_parse_int(organization.get("id"))),
+        )
         created = create_admin_hotel(schema_name=tenant_schema, values=prepared)
         if not created:
             raise APIException(_("Failed to create hotel"))
@@ -4425,6 +4453,12 @@ class AdminHotelPatchView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         prepared = serializer.validated_data.get("values") or {}
+        if "partner_user_id" not in prepared:
+            current_partner_id = _parse_int(current.get("partner_user_id"))
+            if current_partner_id is None:
+                prepared["partner_user_id"] = _organization_owner_user_id(
+                    _parse_int(current.get("organization_id"))
+                )
         updated = update_admin_hotel(hotel_guid=str(hotel_id), values=prepared)
         if not updated:
             raise NotFound(_("Hotel not found"))
