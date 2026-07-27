@@ -4596,7 +4596,7 @@ class AdminApartmentPatchView(APIView):
         partner_id = _parse_int(row.get("partner_user_id"))
         row = dict(row)
         row["partner_user"] = (
-            _serialize_partner_user(get_user_by_id(partner_id))
+            _serialize_owner_user(get_user_by_id(partner_id))
             if partner_id is not None
             else None
         )
@@ -4645,7 +4645,7 @@ class AdminApartmentPatchView(APIView):
         partner_id = _parse_int(updated.get("partner_user_id"))
         updated = dict(updated)
         updated["partner_user"] = (
-            _serialize_partner_user(get_user_by_id(partner_id))
+            _serialize_owner_user(get_user_by_id(partner_id))
             if partner_id is not None
             else None
         )
@@ -4675,7 +4675,7 @@ class AdminCottagePatchView(APIView):
         partner_id = _parse_int(row.get("partner_user_id"))
         row = dict(row)
         row["partner_user"] = (
-            _serialize_partner_user(get_user_by_id(partner_id))
+            _serialize_owner_user(get_user_by_id(partner_id))
             if partner_id is not None
             else None
         )
@@ -4725,7 +4725,7 @@ class AdminCottagePatchView(APIView):
         partner_id = _parse_int(updated.get("partner_user_id"))
         updated = dict(updated)
         updated["partner_user"] = (
-            _serialize_partner_user(get_user_by_id(partner_id))
+            _serialize_owner_user(get_user_by_id(partner_id))
             if partner_id is not None
             else None
         )
