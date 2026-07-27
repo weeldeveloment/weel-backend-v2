@@ -6,7 +6,7 @@ from typing import Any
 
 from django.utils import timezone
 
-from shared.raw.db import execute, fetch_all, fetch_one
+from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 from apps.pms.raw.tables import (
     PMS_BOOKINGCOM_CONNECTION_TABLE,
     PMS_BOOKINGCOM_ROOM_MAPPING_TABLE,
@@ -24,7 +24,25 @@ def _to_pg_json(value: Any) -> Any:
     return value
 
 
+def _has_connection_table() -> bool:
+    return table_exists(PMS_BOOKINGCOM_CONNECTION_TABLE)
+
+
+def _has_room_mapping_table() -> bool:
+    return table_exists(PMS_BOOKINGCOM_ROOM_MAPPING_TABLE)
+
+
+def _has_sync_run_table() -> bool:
+    return table_exists(PMS_BOOKINGCOM_SYNC_RUN_TABLE)
+
+
+def _has_sync_error_table() -> bool:
+    return table_exists(PMS_BOOKINGCOM_SYNC_ERROR_TABLE)
+
+
 def get_connection(property_id: int) -> dict[str, Any] | None:
+    if not _has_connection_table():
+        return None
     return fetch_one(
         f"""
         SELECT *
@@ -37,6 +55,8 @@ def get_connection(property_id: int) -> dict[str, Any] | None:
 
 
 def list_enabled_connections() -> list[dict[str, Any]]:
+    if not _has_connection_table():
+        return []
     return fetch_all(
         f"""
         SELECT c.*
@@ -58,6 +78,8 @@ def upsert_connection(
     username: str | None = None,
     password: str | None = None,
 ) -> dict[str, Any]:
+    if not _has_connection_table():
+        raise ValueError("Booking.com connection storage is not initialized for this property yet.")
     existing = get_connection(property_id)
     now = timezone.now()
     payload: dict[str, Any] = {
@@ -117,6 +139,8 @@ def upsert_connection(
 
 
 def delete_connection(property_id: int) -> bool:
+    if not _has_connection_table():
+        return False
     return (
         execute(
             f"DELETE FROM {PMS_BOOKINGCOM_CONNECTION_TABLE} WHERE property_id = %s",
@@ -127,6 +151,8 @@ def delete_connection(property_id: int) -> bool:
 
 
 def replace_room_mappings(property_id: int, mappings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not _has_room_mapping_table():
+        raise ValueError("Booking.com room mapping storage is not initialized for this property yet.")
     execute(
         f"DELETE FROM {PMS_BOOKINGCOM_ROOM_MAPPING_TABLE} WHERE property_id = %s",
         [property_id],
@@ -165,6 +191,8 @@ def replace_room_mappings(property_id: int, mappings: list[dict[str, Any]]) -> l
 
 
 def list_room_mappings(property_id: int) -> list[dict[str, Any]]:
+    if not _has_room_mapping_table():
+        return []
     return fetch_all(
         f"""
         SELECT *
@@ -177,6 +205,8 @@ def list_room_mappings(property_id: int) -> list[dict[str, Any]]:
 
 
 def get_room_mapping(property_id: int, external_room_id: str) -> dict[str, Any] | None:
+    if not _has_room_mapping_table():
+        return None
     return fetch_one(
         f"""
         SELECT *
@@ -226,6 +256,8 @@ def start_sync_run(
     triggered_by: str,
     sync_cursor_from: datetime | None,
 ) -> dict[str, Any]:
+    if not _has_sync_run_table():
+        raise ValueError("Booking.com sync storage is not initialized for this property yet.")
     now = timezone.now()
     return fetch_one(
         f"""
@@ -255,6 +287,8 @@ def finish_sync_run(
     sync_cursor_to: datetime | None,
     error_message: str | None = None,
 ) -> dict[str, Any] | None:
+    if not _has_sync_run_table():
+        return None
     now = timezone.now()
     return fetch_one(
         f"""
@@ -282,6 +316,8 @@ def log_sync_error(
     external_room_id: str | None = None,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
+    if not _has_sync_error_table():
+        return None
     now = timezone.now()
     return fetch_one(
         f"""
@@ -315,6 +351,8 @@ def log_sync_error(
 
 
 def get_latest_sync_run(property_id: int) -> dict[str, Any] | None:
+    if not _has_sync_run_table():
+        return None
     return fetch_one(
         f"""
         SELECT *
@@ -328,6 +366,8 @@ def get_latest_sync_run(property_id: int) -> dict[str, Any] | None:
 
 
 def list_recent_sync_errors(property_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    if not _has_sync_error_table():
+        return []
     return fetch_all(
         f"""
         SELECT *
@@ -347,6 +387,8 @@ def mark_connection_sync_state(
     last_successful_sync_at: datetime | None = None,
     last_error: str | None = None,
 ) -> dict[str, Any] | None:
+    if not _has_connection_table():
+        return None
     now = timezone.now()
     return fetch_one(
         f"""
