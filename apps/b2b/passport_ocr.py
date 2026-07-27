@@ -52,14 +52,13 @@ _FRONT_COUNTRY_MARKERS = ("UZBEKISTON", "OZBEKISTON")
 # to'g'rilaydi, kartaning qo'lda qanday tutilganini emas. Shu sababli barcha
 # asosiy burilishlarni sinab ko'ramiz.
 _ROTATIONS = (0, 90, 180, 270)
-# 6 = bitta bir xil matn bloki (MRZ qatorlari uchun standart va eng ishonchli),
-# 11 = siyrak matn — atrofida shovqin/chegara bo'lsa zaxira sifatida yetarli.
-# Server protsessor yadrolari cheklangan bo'lishi mumkin (parallellik faqat
-# yadrolar soniga qadar real tezlik beradi), shu sababli har bir qo'shimcha
-# kombinatsiya to'g'ridan-to'g'ri kutish vaqtiga qo'shiladi — kam foyda
-# beradigan variantlar (masalan PSM 4 — ustunli matn, gorizontal MRZ
-# qatoriga mos kelmaydi) olib tashlandi.
-_PSM_MODES = (6, 11)
+# Real serverda o'lchash shuni ko'rsatdiki, har bir Tesseract chaqiruvi
+# rasm hajmidan qat'iy nazar ~0.3-0.4s belgilangan xarajat qiladi (protsessor
+# yadrolari cheklangan konteynerda parallellik buni to'liq yashira olmaydi)
+# — shu sababli chaqiruvlar sonini kamaytirish endi eng katta tezlik
+# manbai. PSM 6 (bitta bir xil matn bloki) MRZ qatorlari uchun standart va
+# eng ishonchli rejim, shuning uchun yagona qoldirildi.
+_PSM_MODES = (6,)
 # None = faqat autocontrast. Kartadagi guilloche/gologramma fon naqshlari OCR
 # matnini shovqinlashtiradi — qattiq threshold (binarizatsiya) fonni bosib,
 # qalin qora matnni ajratib beradi. To'rtta yaqin qiymat sinash o'rniga
