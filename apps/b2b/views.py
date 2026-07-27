@@ -27,7 +27,6 @@ from shared.throttles import ResilientScopedRateThrottle
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 
-from apps.b2b.passport_ocr import PassportOCRError, extract_passport_data
 from apps.b2b.repository import (
     add_trip_employee,
     create_budget_request,
@@ -798,17 +797,10 @@ class B2BEmployeeLimitsView(APIView):
         return Response(B2BEmployeeLimitSerializer(payload, many=True).data)
 
 
-# The add-employee form always runs a passport-preview OCR pass before the
-# user submits the create form with the same two images. Without this cache,
-# the (slow) OCR pipeline ran twice per employee — once for the preview and
-# again on submit — roughly doubling wait time for no benefit in the normal
-# flow, where the files submitted are byte-identical to what was previewed.
-#
-# Keyed by an opaque token (not by file content hash): the preview response
-# hands the token to the client, and the create request must present the
-# same token *and* the same files to reuse the cached result. This avoids a
-# content-addressed cache turning any two unrelated requests that happen to
-# upload byte-identical files into unintended cross-request hits.
+# Employees are now entered by hand, so nothing on the create path runs OCR.
+# The passport-preview endpoints below stay as a standalone service (they
+# store nothing and create nobody), and this is how long their job result is
+# kept for the client to poll.
 PASSPORT_OCR_CACHE_TTL_SECONDS = 600
 
 
@@ -817,23 +809,6 @@ def _file_digest(file_obj) -> str:
     digest = hashlib.sha256(file_obj.read()).hexdigest()
     file_obj.seek(0)
     return digest
-
-
-def _extract_passport_data_for_create(front_file, back_file, ocr_token: str | None) -> dict:
-    """``ocr_token`` is the ``job_id`` from ``B2BEmployeePassportPreviewView``
-    — reuse its (already-completed) background OCR result instead of running
-    OCR a third time, as long as the same two files are still being
-    submitted."""
-    if ocr_token:
-        job = cache.get(f"passport_ocr_job:{ocr_token}")
-        if (
-            job
-            and job.get("status") == "done"
-            and job["front_digest"] == _file_digest(front_file)
-            and job["back_digest"] == _file_digest(back_file)
-        ):
-            return job["data"]
-    return extract_passport_data(front_file, back_file)
 
 
 class B2BEmployeeListCreateView(APIView):
@@ -851,20 +826,21 @@ class B2BEmployeeListCreateView(APIView):
     @swagger_auto_schema(
         operation_summary="Add a new employee",
         operation_description=(
-            "Adds a new employee to the company. `department_id`, `email`, "
-            "`phone`, `passport_upload_front`, and `passport_upload_back` "
-            "(front and back of the ID document) are required. `full_name`, "
-            "`date_of_birth`, `passport_series`, and `passport_pinfl` are not "
-            "accepted from the client; they are extracted automatically from "
-            "the uploaded images using OCR."
+            "Adds a new employee to the company. All of `first_name`, "
+            "`last_name`, `passport_series`, `passport_pinfl`, "
+            "`department_id`, `email` and `phone` are required and entered "
+            "by hand. `first_name` and `last_name` are stored joined as "
+            "`full_name`."
         ),
         consumes=["multipart/form-data"],
         manual_parameters=[
+            openapi.Parameter("last_name", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Surname (required)"),
+            openapi.Parameter("first_name", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Given name (required)"),
+            openapi.Parameter("passport_series", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="ID card / passport number, format AA1234567"),
+            openapi.Parameter("passport_pinfl", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="PINFL — 14 digits"),
             openapi.Parameter("department_id", openapi.IN_FORM, type=openapi.TYPE_INTEGER, required=True, description="Department ID (required)"),
             openapi.Parameter("email", openapi.IN_FORM, type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, required=True, description="Email address (required)"),
             openapi.Parameter("phone", openapi.IN_FORM, type=openapi.TYPE_STRING, required=True, description="Phone number (required)"),
-            openapi.Parameter("passport_upload_front", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Front side of the ID document (jpg, png; max 5MB)"),
-            openapi.Parameter("passport_upload_back", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description="Back side of the ID document with MRZ code (jpg, png; max 5MB)"),
             openapi.Parameter("photo", openapi.IN_FORM, type=openapi.TYPE_FILE, required=False, description="Employee profile photo (jpg, png; max 5MB, optional)"),
             openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Job title"),
             openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Individual limit for the employee"),
@@ -873,7 +849,7 @@ class B2BEmployeeListCreateView(APIView):
         ],
         responses={
             201: B2BEmployeeSerializer(),
-            400: openapi.Response(description="Validation error / Company context required / passport image does not match the template."),
+            400: openapi.Response(description="Validation error / Company context required."),
         },
     )
     def post(self, request):
@@ -901,39 +877,19 @@ class B2BEmployeeListCreateView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        front_file = validated.pop("passport_upload_front")
-        back_file = validated.pop("passport_upload_back")
-        ocr_token = validated.pop("ocr_token", None)
-        try:
-            passport_data = _extract_passport_data_for_create(front_file, back_file, ocr_token)
-        except PassportOCRError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception:
-            logger.exception("Passport OCR failed unexpectedly")
-            return Response(
-                {"detail": "Не удалось распознать паспортные данные. Попробуйте другое фото."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        front_path = default_storage.save(f"b2b/employees/passports/{front_file.name}", front_file)
-        back_path = default_storage.save(f"b2b/employees/passports/{back_file.name}", back_file)
-
         photo_file = validated.pop("photo", None)
         photo_url = None
         if photo_file:
             photo_path = default_storage.save(f"b2b/employees/photos/{photo_file.name}", photo_file)
             photo_url = default_storage.url(photo_path)
 
-        for field in ("full_name", "passport_pinfl", "date_of_birth", "passport_series"):
-            validated.pop(field, None)
+        # Ism va familiya alohida kiritiladi, lekin jadval, hisobot va
+        # vaucherlarning hammasi bitta `full_name` ustunidan o'qiydi.
+        first_name = validated.pop("first_name")
+        last_name = validated.pop("last_name")
         employee = create_employee(
             company_id=company_id,
-            full_name=passport_data["full_name"],
-            date_of_birth=passport_data["date_of_birth"],
-            passport_series=passport_data["passport_series"],
-            passport_pinfl=passport_data["passport_pinfl"],
-            passport_upload_front=default_storage.url(front_path),
-            passport_upload_back=default_storage.url(back_path),
+            full_name=f"{last_name} {first_name}",
             photo=photo_url,
             **{k: v for k, v in validated.items() if k not in ("company_id", "department_name")},
         )

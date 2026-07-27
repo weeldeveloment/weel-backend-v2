@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from decimal import Decimal
+
 from rest_framework import serializers
 
 
@@ -122,38 +124,57 @@ class B2BEmployeeLimitSerializer(serializers.Serializer):
 class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
     """POST ``/b2b/employees/`` uchun serializer (multipart/form-data).
 
-    ``email``, ``phone``, ``department_id`` — xodim yaratishning asosiy
-    majburiy maydonlari. ``passport_upload_front`` (SHAXS GUVOHNOMASI old
-    tomoni) va ``passport_upload_back`` (orqa tomoni, MRZ bilan) — ikkalasi
-    ham majburiy fayl. ``full_name``, ``date_of_birth``, ``passport_series``
-    va ``passport_pinfl`` shu rasmlardan avtomatik o'qib olinadi
-    (``apps.b2b.passport_ocr``), shuning uchun bu yerda ular majburiy emas —
-    view darajasida OCR natijasi bilan qayta yoziladi. ``photo`` — xodimning
-    shaxsiy (profil) fotosurati, ixtiyoriy.
-    """
-    full_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    passport_pinfl = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    passport_upload_front = serializers.FileField(required=True)
-    passport_upload_back = serializers.FileField(required=True)
-    photo = serializers.FileField(required=False)
-    # Opaque token returned by POST /b2b/employees/passport-preview/. When
-    # present and the uploaded images still match what was previewed, the
-    # server reuses that OCR result instead of re-running it — the OCR
-    # pipeline is slow, so this avoids paying for it twice for the common
-    # preview-then-submit flow.
-    ocr_token = serializers.CharField(required=False, allow_blank=True)
+    Xodim ma'lumotlari qo'lda kiritiladi: ``first_name`` (ism),
+    ``last_name`` (familiya), ``passport_series``, ``passport_pinfl``,
+    shuningdek ``email``, ``phone`` va ``department_id``. Ism va familiya
+    saqlashdan oldin bitta ``full_name`` maydoniga birlashtiriladi — jadval
+    va hisobotlar shu ustundan foydalanadi. ``photo`` — xodimning shaxsiy
+    (profil) fotosurati, ixtiyoriy.
 
-    def _validate_image_file(self, file):
+    Ilgari bu maydonlar SHAXS GUVOHNOMASI rasmlaridan OCR orqali o'qilardi;
+    endi rasm yuklash bu jarayondan olib tashlandi.
+    """
+    full_name = serializers.CharField(read_only=True)
+    first_name = serializers.CharField(max_length=100, required=True)
+    last_name = serializers.CharField(max_length=100, required=True)
+    passport_series = serializers.CharField(max_length=10, required=True)
+    passport_pinfl = serializers.CharField(max_length=20, required=True)
+    photo = serializers.FileField(required=False)
+
+    def validate_photo(self, file):
         max_size = 5 * 1024 * 1024  # 5MB
         if file.size > max_size:
             raise serializers.ValidationError("Fayl hajmi 5MB dan oshmasligi kerak.")
         return file
 
-    def validate_passport_upload_front(self, file):
-        return self._validate_image_file(file)
+    def validate_first_name(self, value: str) -> str:
+        return self._validate_name(value, "Ism")
 
-    def validate_passport_upload_back(self, file):
-        return self._validate_image_file(file)
+    def validate_last_name(self, value: str) -> str:
+        return self._validate_name(value, "Familiya")
+
+    @staticmethod
+    def _validate_name(value: str, label: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise serializers.ValidationError(f"{label} kiritilishi shart.")
+        return value
+
+    def validate_passport_series(self, value: str) -> str:
+        # O'zbekiston ID kartasi / passport raqami: ikkita harf va 7 ta raqam
+        # (masalan AD4779438). Kichik harf bilan kiritilsa ham qabul qilinadi.
+        value = value.replace(" ", "").upper()
+        if not re.fullmatch(r"[A-Z]{2}\d{7}", value):
+            raise serializers.ValidationError(
+                "Passport seriyasi AA1234567 ko'rinishida bo'lishi kerak."
+            )
+        return value
+
+    def validate_passport_pinfl(self, value: str) -> str:
+        value = value.replace(" ", "")
+        if not re.fullmatch(r"\d{14}", value):
+            raise serializers.ValidationError("PINFL 14 ta raqamdan iborat bo'lishi kerak.")
+        return value
 
 
 class B2BEmployeePassportPreviewSerializer(serializers.Serializer):
