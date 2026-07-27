@@ -15,13 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     postgresql-client \
     tesseract-ocr \
-    tesseract-ocr-osd \
     && rm -rf /var/lib/apt/lists/*
-
-# tesserocr keeps one Tesseract engine loaded per thread instead of
-# spawning a new OS process per OCR call (what pytesseract does) — needs
-# this to find the language data without an explicit path at call sites.
-ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
 
 RUN pip install "poetry==$POETRY_VERSION"
 

@@ -60,13 +60,9 @@ class Command(BaseCommand):
                     id BIGSERIAL PRIMARY KEY,
                     company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
                     name VARCHAR(100) NOT NULL,
-                    color VARCHAR(20) NOT NULL DEFAULT '#7C3AED',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
-            """)
-            cursor.execute("""
-                ALTER TABLE b2b_department ADD COLUMN IF NOT EXISTS color VARCHAR(20) NOT NULL DEFAULT '#7C3AED';
             """)
             self.stdout.write("  Created b2b_department")
 

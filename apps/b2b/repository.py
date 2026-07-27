@@ -208,19 +208,8 @@ def deactivate_b2b_user(user_id: int, company_id: int) -> dict[str, Any] | None:
 
 def _month_range(month: str) -> tuple[datetime, datetime]:
     """Parse a ``YYYY-MM`` string into a ``[start, end)`` datetime range
-    covering that calendar month, in the current timezone. A malformed
-    value (bad separator, non-numeric part, month outside 1-12) falls
-    back to the current month instead of raising — same forgiving
-    behavior as the view-layer ``_parse_year_month`` for this same
-    ``month`` query param elsewhere in the app."""
-    now = timezone.now()
-    try:
-        year_str, mon_str = month.split("-")
-        year, mon = int(year_str), int(mon_str)
-        if mon < 1 or mon > 12:
-            raise ValueError
-    except (ValueError, AttributeError):
-        year, mon = now.year, now.month
+    covering that calendar month, in the current timezone."""
+    year, mon = (int(part) for part in month.split("-"))
     tz = timezone.get_current_timezone()
     start = datetime(year, mon, 1, tzinfo=tz)
     end_year, end_month = _shift_months(year, mon, 1)
@@ -228,13 +217,8 @@ def _month_range(month: str) -> tuple[datetime, datetime]:
     return start, end
 
 
-def create_department(*, company_id: int, name: str, color: str | None = None) -> dict[str, Any] | None:
+def create_department(*, company_id: int, name: str) -> dict[str, Any] | None:
     now = timezone.now()
-    if color:
-        return fetch_one(
-            f"INSERT INTO {B2B_DEPARTMENT_TABLE} (company_id, name, color, created_at, updated_at) VALUES (%s, %s, %s, %s, %s) RETURNING *",
-            [company_id, name, color, now, now],
-        )
     return fetch_one(
         f"INSERT INTO {B2B_DEPARTMENT_TABLE} (company_id, name, created_at, updated_at) VALUES (%s, %s, %s, %s) RETURNING *",
         [company_id, name, now, now],
@@ -245,73 +229,6 @@ def list_departments(company_id: int) -> list[dict[str, Any]]:
     return fetch_all(
         f"SELECT * FROM {B2B_DEPARTMENT_TABLE} WHERE company_id = %s ORDER BY name ASC",
         [company_id],
-    )
-
-
-def update_department(department_id: int, company_id: int, **kwargs: Any) -> dict[str, Any] | None:
-    if not kwargs:
-        return fetch_one(
-            f"SELECT * FROM {B2B_DEPARTMENT_TABLE} WHERE id = %s AND company_id = %s",
-            [department_id, company_id],
-        )
-    sets = ", ".join(f"{k} = %s" for k in kwargs)
-    values = list(kwargs.values()) + [timezone.now(), department_id, company_id]
-    return fetch_one(
-        f"UPDATE {B2B_DEPARTMENT_TABLE} SET {sets}, updated_at = %s WHERE id = %s AND company_id = %s RETURNING *",
-        values,
-    )
-
-
-def count_department_employees(department_id: int) -> int:
-    row = fetch_one(
-        f"SELECT COUNT(*) AS cnt FROM {B2B_EMPLOYEE_TABLE} WHERE department_id = %s AND is_active = TRUE",
-        [department_id],
-    )
-    return int((row or {}).get("cnt") or 0)
-
-
-def deactivate_department_employees(department_id: int, company_id: int) -> int:
-    """Soft-delete every active employee in a department in one go — the
-    same ``is_active = FALSE`` deactivation ``delete_employee`` does for one
-    employee at a time, applied to the whole department at once. Used when
-    the owner chooses to delete a department along with its people instead
-    of moving them elsewhere first."""
-    return execute(
-        f"""
-        UPDATE {B2B_EMPLOYEE_TABLE}
-        SET is_active = FALSE, updated_at = %s
-        WHERE department_id = %s AND company_id = %s AND is_active = TRUE
-        """,
-        [timezone.now(), department_id, company_id],
-    )
-
-
-def delete_department(department_id: int, company_id: int) -> bool:
-    """Hard-delete an empty department. Callers must confirm it has no
-    active employees first (see ``count_department_employees``) — deleting
-    one that still does would only null out ``employee.department_id``
-    (the FK is ``ON DELETE SET NULL``, not cascade), silently orphaning
-    them, so the API blocks it earlier instead."""
-    rowcount = execute(
-        f"DELETE FROM {B2B_DEPARTMENT_TABLE} WHERE id = %s AND company_id = %s",
-        [department_id, company_id],
-    )
-    return rowcount > 0
-
-
-def move_department_employees(*, from_department_id: int, to_department_id: int, company_id: int) -> int:
-    """Reassign every employee of one department to another, both within
-    *company_id*. Returns how many rows moved."""
-    return execute(
-        f"""
-        UPDATE {B2B_EMPLOYEE_TABLE} e
-        SET department_id = %s, updated_at = %s
-        FROM {B2B_DEPARTMENT_TABLE} d_to
-        WHERE e.department_id = %s
-          AND d_to.id = %s AND d_to.company_id = %s
-          AND e.company_id = %s
-        """,
-        [to_department_id, timezone.now(), from_department_id, to_department_id, company_id, company_id],
     )
 
 
@@ -356,7 +273,6 @@ def list_departments_with_budget(
             d.id AS department_id,
             d.company_id AS company_id,
             d.name AS department_name,
-            d.color AS color,
             d.created_at AS created_at,
             CASE
                 WHEN dr.budget_limit IS NULL AND gr.budget_limit IS NULL THEN NULL
@@ -1060,7 +976,7 @@ def list_transactions(
     combined_cte = f"""
         WITH combined AS (
             SELECT
-                br.id, br.created_at, br.amount, br.status::text AS status,
+                br.id, br.created_at, br.amount, br.status,
                 e.full_name AS employee_name,
                 d.name AS department_name,
                 t.destination_city AS direction,
