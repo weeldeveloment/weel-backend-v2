@@ -25,6 +25,17 @@ EXEMPT_PATHS = {
     "/api/admin/auth/login/verify/",
 }
 
+# Endpoints whose whole purpose is to report state that changes *between*
+# two requests seconds apart. Caching a GET here does not save work, it
+# hides the very change the client is polling for: the passport OCR job
+# status returned "pending" on the first poll, that response was served
+# from cache for the next ~60s, and the client kept waiting long after the
+# job had finished (measured: OCR done in 8.8s, answer delivered 61s later).
+# Path prefixes, because the job id is part of the URL.
+EXEMPT_PATH_PREFIXES = (
+    "/api/b2b/employees/passport-preview/",
+)
+
 AUTH_HEADER_PREFIX = "Bearer "
 RELEASE_LOCK_SCRIPT = """
 if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -96,7 +107,7 @@ class CacheMiddleware:
         if not token:
             return self.get_response(request)
 
-        if request.path in EXEMPT_PATHS:
+        if request.path in EXEMPT_PATHS or request.path.startswith(EXEMPT_PATH_PREFIXES):
             return self.get_response(request)
 
         cache_control = request.META.get("HTTP_CACHE_CONTROL", "")

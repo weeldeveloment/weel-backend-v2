@@ -57,11 +57,42 @@ from PIL import Image, ImageOps
 # OMP_THREAD_LIMIT=1 ni tavsiya qiladi). Parallellikni o'zimiz boshqaramiz.
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
+def _available_cpus() -> int:
+    """Bu jarayonga AMALDA ajratilgan CPU soni.
+
+    ``os.cpu_count()`` konteyner ichida host mashinaning barcha yadrolarini
+    ko'rsatadi (masalan 56), holbuki cgroup limiti bir necha yadro bo'lishi
+    mumkin. Bunday holatda o'nlab oqim ochish parallellik bermaydi —
+    chaqiruvlar baribir navbat bilan bajariladi, ustiga kontekst almashinuvi
+    va xotira sarfi ortadi."""
+    for path, parse in (
+        ("/sys/fs/cgroup/cpu.max", lambda text: text.split()),  # cgroup v2
+        ("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", None),  # cgroup v1
+    ):
+        try:
+            with open(path) as handle:
+                raw = handle.read().strip()
+            if parse:
+                quota_raw, period_raw = parse(raw)
+            else:
+                quota_raw = raw
+                with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as handle:
+                    period_raw = handle.read().strip()
+            if quota_raw != "max" and int(quota_raw) > 0:
+                return max(1, round(int(quota_raw) / int(period_raw)))
+        except (OSError, ValueError):
+            continue
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 4
+
+
 # Har bir OCR chaqiruvi alohida OS jarayoniga chiqadi, shuning uchun
 # oqimlar GIL bilan cheklanmaydi — parallellik real. Ish hajmi
-# (rasm x burilish x threshold x psm) mashinaning yadrolar soniga
+# (rasm x burilish x threshold x psm) mashinaga ajratilgan yadrolar soniga
 # moslashtiriladi.
-_OCR_WORKERS = max(4, min(32, os.cpu_count() or 4))
+_OCR_WORKERS = max(2, min(32, _available_cpus()))
 
 
 class PassportOCRError(Exception):
@@ -89,6 +120,9 @@ _MRZ_PSM_MODES = (6, 11)
 # qalin qora matnni ajratib beradi, lekin yorug'lik sharoitiga qarab optimal
 # qiymat farq qilishi mumkin, shuning uchun bir nechtasi sinab ko'riladi.
 _THRESHOLDS = (None, 100, 120, 140)
+# Birinchi (eng arzon) bosqichda sinaladigan threshold'lar — amalda
+# aksariyat suratlar shu ikkitasida o'qiladi.
+_FAST_THRESHOLDS = (None, 120)
 # Orqa tomon MRZ whitelist bilan o'qiladi, lekin kartada PNFL "Shaxsiy
 # raqami" yozuvi ostida oddiy shriftda ham bor — uni ko'rish uchun bir
 # nechta whitelist'siz o'qish ham qo'shiladi (ikkinchi, mustaqil manba).
@@ -110,6 +144,8 @@ _OCR_TARGET_LONG_SIDE = 1800
 # variantlari o'qiladi. Bu ham tezroq, ham foydaliroq.
 _EXTRA_THRESHOLDS = (80, 160, 190)
 _EXTRA_PSM_MODES = (6, 11)
+# _ocr_tasks() bosqichlari: 0 = eng arzon, 1 = to'liq asosiy, 2 = qo'shimcha.
+_LAST_TIER = 2
 
 _APOSTROPHES = re.compile(r"[’'`´ʻʼ]")
 _NAME_WORD_RE = re.compile(r"[A-Z][A-Z']+")
@@ -584,18 +620,38 @@ class _Evidence:
         return max(counter.items(), key=lambda item: item[1])[0]
 
 
-def _ocr_tasks(side: str, *, extra: bool = False) -> list[tuple[int | None, int, str | None]]:
-    """(threshold, psm, whitelist) kombinatsiyalari ro'yxati."""
+def _ocr_tasks(side: str, tier: int) -> list[tuple[int | None, int, str | None]]:
+    """Bitta burilish uchun (threshold, psm, whitelist) kombinatsiyalari.
+
+    Ish uch bosqichga bo'lingan va keyingisi faqat oldingisi yetarli
+    bo'lmaganda bajariladi. Sifatli suratda 0-bosqichdagi bir necha o'qish
+    ham bir xil natijani berib, ovoz berish uchun yetadi — qolgan o'nlab
+    chaqiruv esa faqat kutish vaqtini uzaytirardi. Bu ayniqsa yadrosi kam
+    serverda seziladi: u yerda chaqiruvlar endi parallel emas, navbat
+    bilan bajariladi va har bittasi to'g'ridan-to'g'ri kutish vaqtiga
+    qo'shiladi."""
     if side == "back":
-        if extra:
-            tasks = [(t, psm, _MRZ_CHARSET) for t in _EXTRA_THRESHOLDS for psm in _EXTRA_PSM_MODES]
-            return tasks + [(t, 6, None) for t in _EXTRA_THRESHOLDS]
-        tasks = [(t, psm, _MRZ_CHARSET) for t in _THRESHOLDS for psm in _MRZ_PSM_MODES]
-        return tasks + [(t, psm, None) for t in _BACK_PLAIN_THRESHOLDS for psm in _MRZ_PSM_MODES]
-    if extra:
-        tasks = [(t, psm, None) for t in _EXTRA_THRESHOLDS for psm in _EXTRA_PSM_MODES]
-        return tasks + [(t, 3, None) for t in _BACK_PLAIN_THRESHOLDS]
-    return [(t, psm, None) for t in _THRESHOLDS for psm in _PSM_MODES]
+        if tier == 0:
+            tasks = [(t, psm, _MRZ_CHARSET) for t in _FAST_THRESHOLDS for psm in _MRZ_PSM_MODES]
+            return tasks + [(None, 6, None)]
+        if tier == 1:
+            rest = [t for t in _THRESHOLDS if t not in _FAST_THRESHOLDS]
+            tasks = [(t, psm, _MRZ_CHARSET) for t in rest for psm in _MRZ_PSM_MODES]
+            return tasks + [(t, psm, None) for t in _BACK_PLAIN_THRESHOLDS for psm in _MRZ_PSM_MODES
+                            if (t, psm) != (None, 6)]
+        tasks = [(t, psm, _MRZ_CHARSET) for t in _EXTRA_THRESHOLDS for psm in _EXTRA_PSM_MODES]
+        return tasks + [(t, 6, None) for t in _EXTRA_THRESHOLDS]
+    # Old tomon uchun birinchi bosqich QISQARTIRILMAYDI. Bu yerdagi
+    # maydonlar (ayniqsa sharif) hech qanday checksum bilan tasdiqlanmaydi
+    # — ularning yagona kafolati turli o'qishlarning bir xil natija
+    # berishi. Kam o'qish bilan "ishonchli" deb hisoblash arzon, lekin
+    # xato natija beradi: o'lchovda 6 ta o'qish "SHUXRATOVICH" ni
+    # "SHUXRATOV" deb kesib qoldirgan, 12 ta o'qish esa to'g'ri o'qigan.
+    if tier == 0:
+        return [(t, psm, None) for t in _THRESHOLDS for psm in _PSM_MODES]
+    if tier == 1:
+        return [(t, psm, None) for t in _EXTRA_THRESHOLDS for psm in _PSM_MODES]
+    return [(t, 3, None) for t in _FAST_THRESHOLDS + _EXTRA_THRESHOLDS]
 
 
 def _collect_from_text(text: str, whitelist: str | None, evidence: _Evidence) -> None:
@@ -649,7 +705,7 @@ class _Side:
         self.evidence = _Evidence()
         self.rotations: tuple[int, ...] = _ROTATIONS
         self._rotation_index = 0
-        self._extra_done = False
+        self._tier = 0
         self._preprocessed: dict[tuple[int, int | None], Image.Image] = {}
         scale = _PROBE_LONG_SIDE / max(self.image.width, self.image.height)
         self._probe_image = (
@@ -704,23 +760,28 @@ class _Side:
         """Keyingi bosqichdagi OCR chaqiruvlari (bo'lmasa — bo'sh ro'yxat).
 
         Agar karta joriy burilishda tanilgan bo'lsa, boshqa burilishlarni
-        sinash mantiqsiz — o'sha burilishda qo'shimcha threshold/rejimlar
-        o'qiladi. Aks holda keyingi burilishga o'tiladi."""
+        sinash mantiqsiz — o'sha burilishda keyingi, agressivroq
+        threshold/rejim to'plami o'qiladi. Aks holda keyingi burilishga
+        o'tiladi va u yerda hammasi eng arzon to'plamdan boshlanadi."""
         if self.is_confident():
             return []
         if self.found_anything():
-            if self._extra_done:
+            self._tier += 1
+            if self._tier > _LAST_TIER:
                 return []
-            self._extra_done = True
-            degrees, extra = self.rotations[self._rotation_index], True
         else:
             self._rotation_index += 1
             if self._rotation_index >= len(self.rotations):
                 return []
-            degrees, extra = self.rotations[self._rotation_index], False
+            self._tier = 0
+        return self._jobs_for(self.rotations[self._rotation_index], self._tier)
 
+    def first_jobs(self) -> list:
+        return self._jobs_for(self.rotations[0], 0)
+
+    def _jobs_for(self, degrees: int, tier: int) -> list:
         jobs = []
-        for threshold, psm, whitelist in _ocr_tasks(self.side, extra=extra):
+        for threshold, psm, whitelist in _ocr_tasks(self.side, tier):
             image = self._prepared(degrees, threshold)
             jobs.append(
                 lambda image=image, psm=psm, whitelist=whitelist: (
@@ -729,18 +790,6 @@ class _Side:
                 )
             )
         return jobs
-
-    def first_jobs(self) -> list:
-        degrees = self.rotations[0]
-        return [
-            (
-                lambda image=self._prepared(degrees, threshold), psm=psm, whitelist=whitelist: (
-                    whitelist,
-                    _ocr_image(image, whitelist=whitelist, psm=psm),
-                )
-            )
-            for threshold, psm, whitelist in _ocr_tasks(self.side)
-        ]
 
 
 def _run_stage(pool: ThreadPoolExecutor, jobs_by_side: list[tuple[_Side, list]]) -> bool:
