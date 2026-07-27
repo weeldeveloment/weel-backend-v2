@@ -17,10 +17,7 @@ O'zbekiston ID kartasida 1-qatordagi 15 xonali optional maydon 14 xonali PNFL'ni
 """
 from __future__ import annotations
 
-import logging
-import os
 import re
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Callable, TypeVar
@@ -28,48 +25,14 @@ from typing import Callable, TypeVar
 import pytesseract
 from PIL import Image, ImageOps
 
-try:
-    import tesserocr
-except ImportError:  # pragma: no cover - only missing outside the container image
-    tesserocr = None
-
-logger = logging.getLogger(__name__)
-
 _T = TypeVar("_T")
-# Each combo call runs concurrently — real wall-clock parallelism, not
-# limited by the Python GIL, since either a subprocess (pytesseract) or a
-# C++ engine call released from the GIL (tesserocr) does the actual work.
-# One shared, module-level pool (not one created per request) so the
-# per-thread tesserocr engines started below stay warm across requests
-# instead of being torn down and reloaded every time.
+# Each Tesseract call shells out to a separate OS process, so running these
+# concurrently gives real wall-clock parallelism (not limited by the
+# Python GIL) — this is what actually cuts user-facing wait time, since the
+# total OCR work per image is unavoidable (rotation/lighting/background
+# noise all vary per photo, so multiple threshold/PSM attempts are still
+# needed for accuracy).
 _OCR_WORKERS = 6
-_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=_OCR_WORKERS)
-
-_TESSDATA_PATH = os.environ.get("TESSDATA_PREFIX") or None
-_PSM_BY_CODE = (
-    {6: tesserocr.PSM.SINGLE_BLOCK, 11: tesserocr.PSM.SPARSE_TEXT, 4: tesserocr.PSM.SINGLE_COLUMN}
-    if tesserocr is not None
-    else {}
-)
-_tess_api_local = threading.local()
-
-
-def _get_tess_api() -> "tesserocr.PyTessBaseAPI":
-    """Har bir OS-thread o'ziga tegishli, qayta ishlatiladigan Tesseract
-    dvigatelini saqlaydi. ``pytesseract.image_to_string`` har chaqiruvda
-    yangi alohida OS-jarayon ishga tushirib, til ma'lumotlar faylini
-    qaytadan diskdan o'qiydi — bu chaqiruvlar soniga (48 tagacha) ko'paytirilgan
-    sobit xarajat edi. Xotiradagi bitta dvigatel namunasini (thread bo'yicha)
-    qayta ishlatish bu xarajatni deyarli yo'q qiladi."""
-    api = getattr(_tess_api_local, "api", None)
-    if api is None:
-        api = (
-            tesserocr.PyTessBaseAPI(path=_TESSDATA_PATH, lang="eng")
-            if _TESSDATA_PATH
-            else tesserocr.PyTessBaseAPI(lang="eng")
-        )
-        _tess_api_local.api = api
-    return api
 
 
 class PassportOCRError(Exception):
@@ -147,15 +110,6 @@ def _load_raw_image(image_file) -> Image.Image:
 
 
 def _ocr_image(image: Image.Image, *, whitelist: str | None = None, psm: int = 6) -> str:
-    if tesserocr is not None:
-        try:
-            api = _get_tess_api()
-            api.SetPageSegMode(_PSM_BY_CODE.get(psm, tesserocr.PSM.SINGLE_BLOCK))
-            api.SetVariable("tessedit_char_whitelist", whitelist or "")
-            api.SetImage(image)
-            return api.GetUTF8Text()
-        except Exception:
-            logger.exception("tesserocr call failed, falling back to pytesseract for this call")
     config = f"--psm {psm}"
     if whitelist:
         config += f" -c tessedit_char_whitelist={whitelist}"
@@ -320,8 +274,9 @@ def _try_ocr_combos(
             return index, exc
 
     results: list[_T | PassportOCRError | None] = [None] * len(combos)
-    for index, result in _OCR_EXECUTOR.map(run, range(len(combos))):
-        results[index] = result
+    with ThreadPoolExecutor(max_workers=_OCR_WORKERS) as executor:
+        for index, result in executor.map(run, range(len(combos))):
+            results[index] = result
 
     last_error: PassportOCRError | None = None
     for result in results:
