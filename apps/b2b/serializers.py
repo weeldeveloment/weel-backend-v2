@@ -30,11 +30,24 @@ class B2BUserSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
 
 
+DEPARTMENT_COLORS = ["#7C3AED", "#16A34A", "#DC2626", "#2563EB", "#EA580C"]
+
+
 class B2BDepartmentSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     company_id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(max_length=100)
+    color = serializers.ChoiceField(choices=DEPARTMENT_COLORS, required=False)
     created_at = serializers.DateTimeField(read_only=True)
+
+
+class B2BDepartmentUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100, required=False)
+    color = serializers.ChoiceField(choices=DEPARTMENT_COLORS, required=False)
+
+
+class B2BDepartmentMoveEmployeesSerializer(serializers.Serializer):
+    target_department_id = serializers.IntegerField()
 
 
 class B2BEmployeeSerializer(serializers.Serializer):
@@ -80,6 +93,7 @@ class B2BDepartmentSummarySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     company_id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
+    color = serializers.CharField(read_only=True)
     budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
     used_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     on_trip_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
@@ -122,6 +136,12 @@ class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
     passport_upload_front = serializers.FileField(required=True)
     passport_upload_back = serializers.FileField(required=True)
     photo = serializers.FileField(required=False)
+    # Opaque token returned by POST /b2b/employees/passport-preview/. When
+    # present and the uploaded images still match what was previewed, the
+    # server reuses that OCR result instead of re-running it — the OCR
+    # pipeline is slow, so this avoids paying for it twice for the common
+    # preview-then-submit flow.
+    ocr_token = serializers.CharField(required=False, allow_blank=True)
 
     def _validate_image_file(self, file):
         max_size = 5 * 1024 * 1024  # 5MB
@@ -248,6 +268,7 @@ class HotelBookingRequestSerializer(serializers.Serializer):
     tenant_schema = serializers.CharField()
     hotel_property_id = serializers.IntegerField()
     hotel_name = serializers.CharField(allow_null=True)
+    hotel_guid = serializers.CharField(allow_null=True, required=False)
     check_in = serializers.DateField()
     check_out = serializers.DateField()
     status = serializers.ChoiceField(

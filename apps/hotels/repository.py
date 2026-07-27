@@ -5,9 +5,51 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
+from django.core.files.storage import default_storage
+
 from shared.raw.db import execute, fetch_all, fetch_one
+from payment.exchange_rate import to_uzs
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_photos(photos: list[Any] | None) -> list[str]:
+    """Resolve a property's raw ``photos`` column into URLs a browser can
+    actually load: already-absolute URLs pass through, storage-relative
+    keys (uploaded straight to S3/MinIO without going through
+    ``default_storage.url()``) get the public media domain prepended, and
+    stale ``blob:`` URLs — a browser-tab-local object URL some upload path
+    saved by mistake, valid only in the session that created it — are
+    dropped instead of being handed to the client as a dead link."""
+    if not photos:
+        return []
+    urls: list[str] = []
+    for value in photos:
+        if not value:
+            continue
+        item = str(value)
+        if item.startswith("http://") or item.startswith("https://"):
+            urls.append(item)
+            continue
+        if item.startswith("blob:"):
+            continue
+        try:
+            urls.append(default_storage.url(item))
+        except Exception:
+            continue
+    return urls
+
+
+def _to_uzs_amount(amount: Any, currency: str | None) -> tuple[Decimal | None, str]:
+    """Convert a USD room price to UZS at the live rate; everything else
+    (already UZS, or no price at all) passes through unchanged. Callers
+    display and charge whatever this returns, so the two always agree."""
+    if amount is None:
+        return None, (currency or "UZS")
+    value = Decimal(str(amount))
+    if (currency or "UZS").upper() == "USD":
+        return to_uzs(value), "UZS"
+    return value, (currency or "UZS")
 
 
 # ─── Room Availability ────────────────────────────────────────────────────────
@@ -292,7 +334,7 @@ def get_available_rooms(
     extra_where = ""
     if filter_clauses:
         extra_where = " AND " + " AND ".join(filter_clauses)
-    return fetch_all(
+    rows = fetch_all(
         f"""
         SELECT
             r.id, r.room_number, r.floor, r.display_name, r.room_type_id,
@@ -331,6 +373,11 @@ def get_available_rooms(
         """,
         [property_id, guests, check_out, check_in, check_in, check_out, *filter_params],
     )
+    for row in rows:
+        row["price_per_night"], row["currency"] = _to_uzs_amount(
+            row.get("price_per_night"), row.get("currency")
+        )
+    return rows
 
 
 def lock_hotel_rooms(property_id: int, room_ids: list[int]) -> list[dict[str, Any]]:
@@ -383,8 +430,8 @@ def calculate_stay_price(
     if raw_rate is None:
         return None
 
-    ppn = Decimal(str(raw_rate))
-    if ppn <= 0:
+    ppn, currency = _to_uzs_amount(raw_rate, room.get("currency"))
+    if ppn is None or ppn <= 0:
         return None
     base_price = ppn * nights
     hold_amount = (base_price * Decimal("0.30")).quantize(Decimal("0.01"))
@@ -394,7 +441,7 @@ def calculate_stay_price(
         "total_price": base_price,
         "hold_amount": hold_amount,
         "remaining_on_arrival": base_price - hold_amount,
-        "currency": room.get("currency") or "UZS",
+        "currency": currency,
     }
 
 
@@ -768,7 +815,7 @@ def _search_hotels_in_schema(
     allow_multi_room: bool = False,
 ) -> list[dict[str, Any]]:
 
-    conditions = ["p.is_active = TRUE"]
+    conditions = ["p.is_active = TRUE", "COALESCE(p.is_verified, FALSE) = TRUE"]
     params: list[Any] = []
 
     if city:
@@ -1010,6 +1057,10 @@ def _search_hotels_in_schema(
         row["organization_slug"] = organization.get("slug")
         row["tenant_schema"] = schema_name
         row["guid"] = str(row["guid"]) if row.get("guid") else None
+        row["min_price"], row["currency"] = _to_uzs_amount(
+            row.get("min_price"), row.get("min_price_currency")
+        )
+        row["photos"] = _normalize_photos(row.get("photos"))
         raw_legal = row.get("legal_info")
         if isinstance(raw_legal, str):
             try:

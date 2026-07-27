@@ -192,6 +192,13 @@ class CacheMiddleware:
             try:
                 cache.incr(f"{CACHE_VERSION_PREFIX}:{token}")
             except ValueError:
-                cache.set(f"{CACHE_VERSION_PREFIX}:{token}", 1)
+                # No version key yet means every prior GET for this token was
+                # cached under the implicit default (1, per the `cache.get(...,
+                # 1)` fallback below) — setting it to 1 here would be a no-op
+                # that leaves that exact response in place, so the first
+                # mutation for a token would silently fail to invalidate
+                # anything. Start at 2 instead, guaranteed to differ from the
+                # default and so guaranteed to compute a fresh cache key.
+                cache.set(f"{CACHE_VERSION_PREFIX}:{token}", 2)
             except Exception:
                 pass
