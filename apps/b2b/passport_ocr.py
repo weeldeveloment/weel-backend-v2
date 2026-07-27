@@ -52,20 +52,18 @@ _FRONT_COUNTRY_MARKERS = ("UZBEKISTON", "OZBEKISTON")
 # to'g'rilaydi, kartaning qo'lda qanday tutilganini emas. Shu sababli barcha
 # asosiy burilishlarni sinab ko'ramiz.
 _ROTATIONS = (0, 90, 180, 270)
-# Real serverda o'lchash shuni ko'rsatdiki, har bir Tesseract chaqiruvi
-# rasm hajmidan qat'iy nazar ~0.3-0.4s belgilangan xarajat qiladi (protsessor
-# yadrolari cheklangan konteynerda parallellik buni to'liq yashira olmaydi)
-# — shu sababli chaqiruvlar sonini kamaytirish endi eng katta tezlik
-# manbai. PSM 6 (bitta bir xil matn bloki) MRZ qatorlari uchun standart va
-# eng ishonchli rejim, shuning uchun yagona qoldirildi.
-_PSM_MODES = (6,)
+# OCR endi so'rov-javob davri ichida emas, fon vazifasi (Celery) sifatida
+# ishlaydi (qarang: apps.b2b.tasks.run_passport_ocr_job) — foydalanuvchi
+# natijani kutib turmaydi, shuning uchun chaqiruvlar sonini kamaytirish
+# orqali tezlashtirish endi shart emas. Buning o'rniga aniqlikni
+# maksimallashtiramiz: real, xira/burchakli telefon suratlarida MRZ'ni
+# o'qish uchun bir nechta segmentatsiya rejimi kerak bo'lishi mumkin.
+_PSM_MODES = (6, 11, 4)
 # None = faqat autocontrast. Kartadagi guilloche/gologramma fon naqshlari OCR
 # matnini shovqinlashtiradi — qattiq threshold (binarizatsiya) fonni bosib,
-# qalin qora matnni ajratib beradi. To'rtta yaqin qiymat sinash o'rniga
-# ikkitasi (autocontrast + o'rtacha threshold) aksariyat yorug'lik
-# sharoitlarini qamrab oladi — checksum tekshiruvi noto'g'ri o'qishni
-# baribir rad etadi, shu sababli qolgan ikkitasini olib tashlash xavfsiz.
-_THRESHOLDS = (None, 120)
+# qalin qora matnni ajratib beradi, lekin yorug'lik sharoitiga qarab optimal
+# qiymat farq qilishi mumkin, shuning uchun bir nechtasi sinab ko'riladi.
+_THRESHOLDS = (None, 100, 120, 140)
 
 _FRONT_FIELD_LABELS = {
     "surname": ("SURNAME", "FAMILIYASI"),
