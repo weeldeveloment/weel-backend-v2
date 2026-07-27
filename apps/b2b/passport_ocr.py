@@ -1,10 +1,13 @@
 """O'zbekiston biometrik shaxs guvohnomasi (ID karta) rasmlaridan ma'lumot olish.
 
-Old tomon rasmidan (bosma matn OCR orqali) ism-familiya, otasining ismi,
-tug'ilgan sana va karta seriya/raqami olinadi — bu maydonlar aynan shu tomonda
-bosilgan bo'ladi. Orqa tomondagi MRZ (machine-readable zone) esa faqat PNFL
-manbai sifatida ishlatiladi, chunki PNFL boshqa hech qayerda ochiq matn
-sifatida bosilmagan, faqat MRZ'ning 1-qatoridagi optional maydonida kodlangan.
+Orqa tomondagi MRZ (machine-readable zone) asosiy ma'lumot manbai: undan
+ism-familiya, tug'ilgan sana, karta raqami va PNFL — hammasi bitta OCR
+o'qishidan olinadi. MRZ OCR-B degan maxsus, mashina o'qishi uchun optimallashtirilgan
+shriftda bosiladi va raqamli maydonlar (karta raqami, tug'ilgan sana, PNFL)
+check-digit bilan tasdiqlanadi, shu sababli u kartaning bezakli old tomon
+yozuviga qaraganda ancha ishonchli va tezroq o'qiladi. Old tomon faqat MRZ'dan
+ism-familiya olinmagan (masalan juda uzun ism MRZ maydoniga sig'may qolgan)
+kamdan-kam holatlarda zaxira sifatida ishlatiladi.
 
 MRZ format (ICAO 9303, TD1, 3 qator x 30 belgi):
   1-qator: hujjat kodi(2) + davlat(3) + hujjat raqami(9) + check(1) + optional(15)
@@ -15,10 +18,21 @@ O'zbekiston ID kartasida 1-qatordagi 15 xonali optional maydon 14 xonali PNFL'ni
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from typing import Callable, TypeVar
 
 import pytesseract
 from PIL import Image, ImageOps
+
+_T = TypeVar("_T")
+# Each Tesseract call shells out to a separate OS process, so running these
+# concurrently gives real wall-clock parallelism (not limited by the
+# Python GIL) — this is what actually cuts user-facing wait time, since the
+# total OCR work per image is unavoidable (rotation/lighting/background
+# noise all vary per photo, so multiple threshold/PSM attempts are still
+# needed for accuracy).
+_OCR_WORKERS = 6
 
 
 class PassportOCRError(Exception):
@@ -94,6 +108,81 @@ def _check_digit(field: str) -> int:
     return sum(_char_value(c) * _MRZ_WEIGHTS[i % 3] for i, c in enumerate(field)) % 10
 
 
+def _mrz_year_to_full(two_digit_year: int, *, today: date | None = None) -> int:
+    """YY -> to'liq yil. Kelajakka chiqib ketsa (masalan bugun 2026'da YY=95),
+    o'tgan asrga tegishli deb hisoblanadi — bu standart MRZ konventsiyasi."""
+    today = today or date.today()
+    century_base = (today.year // 100) * 100
+    year = century_base + two_digit_year
+    if year > today.year:
+        year -= 100
+    return year
+
+
+def _parse_mrz_name(line3: str) -> tuple[str, str, str | None]:
+    """3-qatordan FAMILIYA<<ISM<OTASINING_ISMI shablonini ajratadi.
+
+    Otasining ismi ko'pincha ikki so'zdan iborat bo'ladi — masalan
+    "ANVAR<OGLI" ("Anvar o'g'li") yoki "SODIQ<QIZI" ("Sodiq qizi") —
+    shuning uchun ISM'dan keyingi qolgan HAMMA '<'-ajratilgan bo'laklar
+    (faqat birinchisi emas) otasining ismiga qo'shib olinadi, aks holda
+    "O'G'LI"/"QIZI" so'zi tashlanib, ism to'liqsiz chiqadi."""
+    stripped = line3.rstrip("<")
+    surname_raw, _, rest = stripped.partition("<<")
+    given_parts = [p for p in rest.split("<") if p]
+    surname = surname_raw.replace("<", " ").strip()
+    given_names = given_parts[0] if given_parts else ""
+    patronymic = " ".join(given_parts[1:]) if len(given_parts) > 1 else None
+    return surname, given_names, patronymic
+
+
+def _parse_mrz_full(text: str) -> dict:
+    """Orqa tomon MRZ'sining barcha 3 qatoridan tekshirilgan (check-digit)
+    ma'lumotlarni oladi: karta raqami, tug'ilgan sana va PNFL raqamli
+    checksum bilan tasdiqlanadi; ism-familiya OCR-B shrifti standart bosma
+    matnga qaraganda ancha ishonchli o'qiladi, shu sababli asosiy manba
+    sifatida ishlatiladi."""
+    line1, line2, line3 = _find_mrz_lines(text)
+
+    document_field = line1[5:14]
+    if str(_check_digit(document_field)) != line1[14]:
+        raise PassportOCRError(
+            "Orqa tomondagi MRZ kodini aniq o'qib bo'lmadi. Rasmni yaxshiroq sifatda qayta yuklang."
+        )
+    card_match = re.match(r"([A-Z]{2}\d{7})", document_field)
+    if not card_match:
+        raise PassportOCRError("Karta raqamini orqa tomon MRZ'dan aniqlab bo'lmadi.")
+    card_number = card_match.group(1)
+
+    pinfl = line1[15:30].replace("<", "")
+    if not re.fullmatch(r"\d{14}", pinfl):
+        raise PassportOCRError("PNFL (14 xonali raqam) orqa tomondan aniqlanmadi.")
+
+    dob_field = line2[0:6]
+    if not dob_field.isdigit() or str(_check_digit(dob_field)) != line2[6]:
+        raise PassportOCRError(
+            "Tug'ilgan sanani orqa tomon MRZ'dan aniq o'qib bo'lmadi. Rasmni yaxshiroq sifatda qayta yuklang."
+        )
+    yy, mm, dd = int(dob_field[0:2]), int(dob_field[2:4]), int(dob_field[4:6])
+    try:
+        date_of_birth = date(_mrz_year_to_full(yy), mm, dd)
+    except ValueError as exc:
+        raise PassportOCRError("Tug'ilgan sana orqa tomon MRZ'da noto'g'ri kodlangan.") from exc
+
+    surname, given_names, patronymic = _parse_mrz_name(line3)
+    if not surname or not given_names:
+        full_name = ""
+    else:
+        full_name = " ".join(part for part in (surname, given_names, patronymic) if part)
+
+    return {
+        "full_name": full_name,
+        "date_of_birth": date_of_birth,
+        "passport_series": card_number,
+        "passport_pinfl": pinfl,
+    }
+
+
 def _find_mrz_lines(text: str) -> list[str]:
     candidates = []
     for raw_line in text.splitlines():
@@ -130,6 +219,56 @@ def _rotations_to_try(raw_image: Image.Image) -> tuple[int, ...]:
     return (guess,) + tuple(d for d in _ROTATIONS if d != guess)
 
 
+def _try_ocr_combos(
+    rotated_image: Image.Image,
+    *,
+    whitelist: str | None,
+    attempt: Callable[[str], _T | None],
+) -> _T | None:
+    """Berilgan burilishdagi rasm uchun barcha threshold/PSM kombinatsiyalarini
+    PARALLEL sinaydi (ketma-ket emas) va ustuvorlik tartibidagi (threshold,
+    keyin psm) birinchi muvaffaqiyatli natijani qaytaradi.
+
+    ``attempt(text)`` uchta holatdan birini qaytarishi mumkin:
+      - natija (masalan parslangan dict) — muvaffaqiyat;
+      - ``None`` — bu OCR o'qishi umuman mos kelmadi (masalan shablon
+        aniqlanmadi), xatolik emas;
+      - ``PassportOCRError`` chiqarishi mumkin — mos keldi, lekin
+        maydonlarni ajratib bo'lmadi.
+
+    Agar hech qanday kombinatsiya natija bermasa: kamida bitta xatolik
+    qayd etilgan bo'lsa o'sha qayta chiqariladi, aks holda ``None``
+    qaytariladi (chaqiruvchi keyingi burilishga o'tishi mumkin)."""
+    combos = [(threshold, psm) for threshold in _THRESHOLDS for psm in _PSM_MODES]
+    preprocessed = {
+        threshold: _preprocess_for_ocr(rotated_image, threshold=threshold)
+        for threshold in _THRESHOLDS
+    }
+
+    def run(index: int) -> tuple[int, _T | PassportOCRError | None]:
+        threshold, psm = combos[index]
+        text = _ocr_image(preprocessed[threshold], whitelist=whitelist, psm=psm)
+        try:
+            return index, attempt(text)
+        except PassportOCRError as exc:
+            return index, exc
+
+    results: list[_T | PassportOCRError | None] = [None] * len(combos)
+    with ThreadPoolExecutor(max_workers=_OCR_WORKERS) as executor:
+        for index, result in executor.map(run, range(len(combos))):
+            results[index] = result
+
+    last_error: PassportOCRError | None = None
+    for result in results:
+        if isinstance(result, PassportOCRError):
+            last_error = result
+        elif result is not None:
+            return result
+    if last_error is not None:
+        raise last_error
+    return None
+
+
 def _matches_front_template(text: str) -> bool:
     normalized = re.sub(r"[’'`]", "", text.upper())
     has_strong = any(marker in normalized for marker in _FRONT_STRONG_MARKERS)
@@ -140,11 +279,26 @@ def _matches_front_template(text: str) -> bool:
 
 def _clean_name_value(line: str) -> str | None:
     """Qiymat qatoridagi eng uzun harflar ketma-ketligini oladi (OCR chetlab
-    qo'ygan chiziqcha/nuqta kabi shovqinlarni tashlab yuborish uchun)."""
+    qo'ygan chiziqcha/nuqta kabi shovqinlarni tashlab yuborish uchun).
+
+    Familiya/ism uchun bitta so'zdan iborat bo'lgani sababli mos keladi."""
     words = re.findall(r"[A-Z]{2,}", line)
     if not words:
         return None
     return max(words, key=len)
+
+
+def _clean_patronymic_value(line: str) -> str | None:
+    """Otasining ismi qatoridagi HAMMA harf so'zlarini o'z tartibida
+    birlashtiradi. Otasining ismi ko'pincha ikki so'zdan iborat bo'ladi
+    (masalan "ANVAR OGLI" — "Anvar o'g'li"), shu sababli faqat eng uzun
+    so'zni olish (``_clean_name_value`` qiladigani) "OGLI"/"QIZI" kabi
+    qisqaroq, lekin muhim so'zni tashlab yuborishi yoki uni asosiy ism deb
+    xato olib, haqiqiy ismni yo'qotishi mumkin."""
+    words = re.findall(r"[A-Z]{2,}", line)
+    if not words:
+        return None
+    return " ".join(words)
 
 
 def _extract_front_fields(text: str) -> dict:
@@ -186,7 +340,7 @@ def _extract_front_fields(text: str) -> dict:
         raise PassportOCRError(
             "Old tomon rasmidan ism-familiyani aniqlab bo'lmadi. Rasmni tekis va yorug' joyda qayta yuklang."
         )
-    patronymic = _clean_name_value(values["patronymic"]) if "patronymic" in values else None
+    patronymic = _clean_patronymic_value(values["patronymic"]) if "patronymic" in values else None
 
     dob_match = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", values["date_of_birth"])
     if not dob_match:
@@ -218,64 +372,62 @@ def extract_front_data(front_file) -> dict:
     raw_image = _load_raw_image(front_file)
 
     template_matched = False
+
+    def attempt(text: str) -> dict | None:
+        nonlocal template_matched
+        if not _matches_front_template(text):
+            return None
+        template_matched = True
+        return _extract_front_fields(text)
+
     last_field_error: PassportOCRError | None = None
     for degrees in _rotations_to_try(raw_image):
         rotated = raw_image.rotate(-degrees, expand=True) if degrees else raw_image
-        for threshold in _THRESHOLDS:
-            image = _preprocess_for_ocr(rotated, threshold=threshold)
-            for psm in _PSM_MODES:
-                text = _ocr_image(image, psm=psm)
-                if not _matches_front_template(text):
-                    continue
-                template_matched = True
-                try:
-                    return _extract_front_fields(text)
-                except PassportOCRError as exc:
-                    last_field_error = exc
+        try:
+            result = _try_ocr_combos(rotated, whitelist=None, attempt=attempt)
+        except PassportOCRError as exc:
+            last_field_error = exc
+            continue
+        if result is not None:
+            return result
 
     if not template_matched:
         raise PassportOCRError("Old tomon rasmi namunaga (SHAXS GUVOHNOMASI old tomoni) mos kelmadi.")
     raise last_field_error
 
 
-def _parse_mrz_pinfl(text: str) -> str:
-    line1, _line2, _line3 = _find_mrz_lines(text)
+def extract_back_data(back_file) -> dict:
+    """Orqa tomondagi MRZ'dan checksum bilan tasdiqlangan barcha maydonlarni
+    (karta raqami, tug'ilgan sana, PNFL) va ism-familiyani oladi.
 
-    document_field = line1[5:14]
-    if str(_check_digit(document_field)) != line1[14]:
-        raise PassportOCRError("Orqa tomondagi MRZ kodini aniq o'qib bo'lmadi. Rasmni yaxshiroq sifatda qayta yuklang.")
-
-    pinfl = line1[15:30].replace("<", "")
-    if not re.fullmatch(r"\d{14}", pinfl):
-        raise PassportOCRError("PNFL (14 xonali raqam) orqa tomondan aniqlanmadi.")
-    return pinfl
-
-
-def extract_back_pinfl(back_file) -> str:
-    """Orqa tomondagi MRZ'dan faqat PNFL'ni oladi (bu maydon boshqa joyda ochiq bosilmagan).
-
-    Old tomondagi kabi, kamera burilishi va fon naqshlariga chidamli bo'lish
-    uchun bir nechta burilish/threshold/segmentatsiya kombinatsiyasi sinaladi.
+    MRZ OCR-B shrifti bilan bosilgan bo'lib, kartaning bezakli old tomon
+    yozuvidan ancha barqaror o'qiladi, shu ustiga raqamli maydonlar checksum
+    bilan tekshiriladi — shu sababli bu funksiya asosiy ma'lumot manbai
+    hisoblanadi, old tomon esa faqat ism topilmaganda zaxira sifatida
+    ishlatiladi (bu esa Tesseract chaqiruvlar sonini, demak kutish vaqtini,
+    ko'p hollarda yarmiga qisqartiradi).
     """
     raw_image = _load_raw_image(back_file)
 
     last_error: PassportOCRError | None = None
     for degrees in _rotations_to_try(raw_image):
         rotated = raw_image.rotate(-degrees, expand=True) if degrees else raw_image
-        for threshold in _THRESHOLDS:
-            image = _preprocess_for_ocr(rotated, threshold=threshold)
-            for psm in _PSM_MODES:
-                text = _ocr_image(image, whitelist=_MRZ_CHARSET, psm=psm)
-                try:
-                    return _parse_mrz_pinfl(text)
-                except PassportOCRError as exc:
-                    last_error = exc
+        try:
+            return _try_ocr_combos(rotated, whitelist=_MRZ_CHARSET, attempt=_parse_mrz_full)
+        except PassportOCRError as exc:
+            last_error = exc
 
     raise last_error
 
 
 def extract_passport_data(front_file, back_file) -> dict:
-    """Old tomondan ism-familiya/tug'ilgan sana/karta raqamini, orqa tomondan PNFL'ni oladi."""
-    passport_data = extract_front_data(front_file)
-    passport_data["passport_pinfl"] = extract_back_pinfl(back_file)
+    """Orqa tomon MRZ'sini asosiy manba sifatida, old tomonni esa faqat ism
+    MRZ'da topilmagan hollarda zaxira sifatida ishlatib, xodim ma'lumotlarini
+    oladi (qarang: ``extract_back_data``)."""
+    passport_data = extract_back_data(back_file)
+
+    if not passport_data["full_name"]:
+        front_data = extract_front_data(front_file)
+        passport_data["full_name"] = front_data["full_name"]
+
     return passport_data

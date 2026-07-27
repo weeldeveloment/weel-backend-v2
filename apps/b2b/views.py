@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import random
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -11,6 +13,7 @@ from urllib.parse import quote
 
 import qrcode
 
+from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.db import IntegrityError
 from django.utils import timezone
@@ -795,6 +798,54 @@ class B2BEmployeeLimitsView(APIView):
         return Response(B2BEmployeeLimitSerializer(payload, many=True).data)
 
 
+# The add-employee form always runs a passport-preview OCR pass before the
+# user submits the create form with the same two images. Without this cache,
+# the (slow) OCR pipeline ran twice per employee — once for the preview and
+# again on submit — roughly doubling wait time for no benefit in the normal
+# flow, where the files submitted are byte-identical to what was previewed.
+#
+# Keyed by an opaque token (not by file content hash): the preview response
+# hands the token to the client, and the create request must present the
+# same token *and* the same files to reuse the cached result. This avoids a
+# content-addressed cache turning any two unrelated requests that happen to
+# upload byte-identical files into unintended cross-request hits.
+PASSPORT_OCR_CACHE_TTL_SECONDS = 600
+
+
+def _file_digest(file_obj) -> str:
+    file_obj.seek(0)
+    digest = hashlib.sha256(file_obj.read()).hexdigest()
+    file_obj.seek(0)
+    return digest
+
+
+def _passport_ocr_preview_and_cache(front_file, back_file) -> dict:
+    passport_data = extract_passport_data(front_file, back_file)
+    token = uuid.uuid4().hex
+    cache.set(
+        f"passport_ocr:{token}",
+        {
+            "front_digest": _file_digest(front_file),
+            "back_digest": _file_digest(back_file),
+            "data": passport_data,
+        },
+        PASSPORT_OCR_CACHE_TTL_SECONDS,
+    )
+    return {**passport_data, "ocr_token": token}
+
+
+def _extract_passport_data_for_create(front_file, back_file, ocr_token: str | None) -> dict:
+    if ocr_token:
+        cached = cache.get(f"passport_ocr:{ocr_token}")
+        if (
+            cached
+            and cached["front_digest"] == _file_digest(front_file)
+            and cached["back_digest"] == _file_digest(back_file)
+        ):
+            return cached["data"]
+    return extract_passport_data(front_file, back_file)
+
+
 class B2BEmployeeListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -862,8 +913,9 @@ class B2BEmployeeListCreateView(APIView):
 
         front_file = validated.pop("passport_upload_front")
         back_file = validated.pop("passport_upload_back")
+        ocr_token = validated.pop("ocr_token", None)
         try:
-            passport_data = extract_passport_data(front_file, back_file)
+            passport_data = _extract_passport_data_for_create(front_file, back_file, ocr_token)
         except PassportOCRError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
@@ -906,8 +958,9 @@ class B2BEmployeePassportPreviewView(APIView):
     """Passport old/orqa skanidan OCR orqali ma'lumotlarni oldindan
     ko'rsatish uchun. Hech narsa saqlanmaydi (na fayl, na xodim) — bu shunchaki
     ``POST /b2b/employees/`` chaqirilishidan oldin foydalanuvchiga natijani
-    ko'rsatish uchun. Yakuniy saqlashda ``B2BEmployeeListCreateView.post`` OCR'ni
-    yana o'zi ishga tushiradi."""
+    ko'rsatish uchun. Javobdagi ``ocr_token``ni klient yakuniy saqlashda
+    (``B2BEmployeeListCreateView.post``) xuddi shu ikkita rasm bilan birga
+    qaytarsa, OCR ikkinchi marta ishga tushmay, keshlangan natija ishlatiladi."""
 
     permission_classes = [IsAuthenticated]
 
@@ -936,7 +989,7 @@ class B2BEmployeePassportPreviewView(APIView):
         front_file = serializer.validated_data["passport_upload_front"]
         back_file = serializer.validated_data["passport_upload_back"]
         try:
-            passport_data = extract_passport_data(front_file, back_file)
+            passport_data = _passport_ocr_preview_and_cache(front_file, back_file)
         except PassportOCRError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:

@@ -46,7 +46,8 @@ def test_passport_preview_success_does_not_persist(mock_extract, mock_storage):
     }
     response = _post(_files())
     assert response.status_code == 200
-    assert response.data == mock_extract.return_value
+    assert response.data["ocr_token"]
+    assert {k: v for k, v in response.data.items() if k != "ocr_token"} == mock_extract.return_value
     mock_storage.save.assert_not_called()
 
 

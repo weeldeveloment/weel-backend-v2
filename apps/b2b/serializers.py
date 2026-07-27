@@ -136,6 +136,12 @@ class B2BEmployeeCreateSerializer(B2BEmployeeSerializer):
     passport_upload_front = serializers.FileField(required=True)
     passport_upload_back = serializers.FileField(required=True)
     photo = serializers.FileField(required=False)
+    # Opaque token returned by POST /b2b/employees/passport-preview/. When
+    # present and the uploaded images still match what was previewed, the
+    # server reuses that OCR result instead of re-running it — the OCR
+    # pipeline is slow, so this avoids paying for it twice for the common
+    # preview-then-submit flow.
+    ocr_token = serializers.CharField(required=False, allow_blank=True)
 
     def _validate_image_file(self, file):
         max_size = 5 * 1024 * 1024  # 5MB
@@ -262,6 +268,7 @@ class HotelBookingRequestSerializer(serializers.Serializer):
     tenant_schema = serializers.CharField()
     hotel_property_id = serializers.IntegerField()
     hotel_name = serializers.CharField(allow_null=True)
+    hotel_guid = serializers.CharField(allow_null=True, required=False)
     check_in = serializers.DateField()
     check_out = serializers.DateField()
     status = serializers.ChoiceField(
