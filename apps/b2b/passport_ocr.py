@@ -242,10 +242,11 @@ def _try_ocr_combos(
     *,
     whitelist: str | None,
     attempt: Callable[[str], _T | None],
+    is_complete: Callable[[_T], bool] = lambda _result: True,
 ) -> _T | None:
     """Berilgan burilishdagi rasm uchun barcha threshold/PSM kombinatsiyalarini
     PARALLEL sinaydi (ketma-ket emas) va ustuvorlik tartibidagi (threshold,
-    keyin psm) birinchi muvaffaqiyatli natijani qaytaradi.
+    keyin psm) birinchi TO'LIQ (``is_complete``) natijani qaytaradi.
 
     ``attempt(text)`` uchta holatdan birini qaytarishi mumkin:
       - natija (masalan parslangan dict) — muvaffaqiyat;
@@ -253,6 +254,17 @@ def _try_ocr_combos(
         aniqlanmadi), xatolik emas;
       - ``PassportOCRError`` chiqarishi mumkin — mos keldi, lekin
         maydonlarni ajratib bo'lmadi.
+
+    Ba'zi maydonlar (masalan MRZ'dagi ism-familiya) checksum bilan
+    tasdiqlanmaydi — shu sababli checksum to'g'ri kelgan birinchi o'qishni
+    darhol qabul qilish xato: o'sha aniq o'qishda checksum'ga aloqasi
+    yo'q boshqa maydon (masalan ism) shovqin tufayli bo'sh chiqishi
+    mumkin, holbuki boshqa threshold/PSM o'qishi buni to'g'ri o'qigan
+    bo'lardi. Shu sababli ``is_complete(result)`` orqali "to'liq"
+    natijani ajratamiz: agar hech qaysi kombinatsiya to'liq natija
+    bermasa, eng birinchi TO'LIQSIZ (lekin baribir muvaffaqiyatli)
+    natija zaxira sifatida qaytariladi — chaqiruvchi buni yanada
+    yaxshiroq izlashni davom ettirishi mumkin (masalan keyingi burilish).
 
     Agar hech qanday kombinatsiya natija bermasa: kamida bitta xatolik
     qayd etilgan bo'lsa o'sha qayta chiqariladi, aks holda ``None``
@@ -276,12 +288,18 @@ def _try_ocr_combos(
         for index, result in executor.map(run, range(len(combos))):
             results[index] = result
 
+    incomplete_fallback: _T | None = None
     last_error: PassportOCRError | None = None
     for result in results:
         if isinstance(result, PassportOCRError):
             last_error = result
         elif result is not None:
-            return result
+            if is_complete(result):
+                return result
+            if incomplete_fallback is None:
+                incomplete_fallback = result
+    if incomplete_fallback is not None:
+        return incomplete_fallback
     if last_error is not None:
         raise last_error
     return None
@@ -427,14 +445,34 @@ def extract_back_data(back_file) -> dict:
     """
     raw_image = _load_raw_image(back_file)
 
+    # Document number/PNFL/DOB are checksum-verified, but the name (line 3)
+    # isn't — a combo can pass every checksum and still have garbled the
+    # name specifically. Keep searching (across rotations too) for a read
+    # that also has a name before settling for a checksum-valid-but-nameless
+    # fallback.
+    fallback_result: dict | None = None
     last_error: PassportOCRError | None = None
     for degrees in _rotations_to_try(raw_image):
         rotated = raw_image.rotate(-degrees, expand=True) if degrees else raw_image
         try:
-            return _try_ocr_combos(rotated, whitelist=_MRZ_CHARSET, attempt=_parse_mrz_full)
+            result = _try_ocr_combos(
+                rotated,
+                whitelist=_MRZ_CHARSET,
+                attempt=_parse_mrz_full,
+                is_complete=lambda r: bool(r["full_name"]),
+            )
         except PassportOCRError as exc:
             last_error = exc
+            continue
+        if result is None:
+            continue
+        if result["full_name"]:
+            return result
+        if fallback_result is None:
+            fallback_result = result
 
+    if fallback_result is not None:
+        return fallback_result
     raise last_error
 
 
