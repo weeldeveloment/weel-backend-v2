@@ -69,6 +69,16 @@ _FRONT_FIELD_LABELS = {
 _ALL_FRONT_LABEL_KEYWORDS = tuple(kw for labels in _FRONT_FIELD_LABELS.values() for kw in labels)
 
 
+# Tesseract'ning aniqligi bu kenglikdan yuqorida sezilarli oshmaydi, lekin
+# ishlash vaqti taxminan rasm yuzasiga proportsional o'sadi. Zamonaviy
+# telefon kameralari 3000-4000px kenglikdagi rasm berishi odatiy holat —
+# shuni har bir (48 tagacha) Tesseract chaqiruvida to'liq o'lchamda qayta
+# ishlash sekinlikning asosiy sababi edi. Shu sababli rasm hajmi BIR MARTA,
+# yuklanganda, ushbu kenglikka normallashtiriladi (kichik rasmlar
+# kattalashtiriladi, katta rasmlar kichraytiriladi).
+_OCR_TARGET_WIDTH = 1800
+
+
 def _preprocess_for_ocr(image: Image.Image, *, threshold: int | None = None) -> Image.Image:
     """Kichik/kontrastsiz/fon-naqshli telefon kamera suratlarida OCR aniqligini oshiradi."""
     image = image.convert("L")
@@ -76,9 +86,6 @@ def _preprocess_for_ocr(image: Image.Image, *, threshold: int | None = None) -> 
         image = image.point(lambda x: 255 if x > threshold else 0)
     else:
         image = ImageOps.autocontrast(image)
-    if image.width < 1800:
-        scale = 1800 / image.width
-        image = image.resize((int(image.width * scale), int(image.height * scale)), Image.LANCZOS)
     return image
 
 
@@ -86,6 +93,11 @@ def _load_raw_image(image_file) -> Image.Image:
     image_file.seek(0)
     image = ImageOps.exif_transpose(Image.open(image_file))
     image_file.seek(0)
+    if image.width != _OCR_TARGET_WIDTH:
+        scale = _OCR_TARGET_WIDTH / image.width
+        image = image.resize(
+            (_OCR_TARGET_WIDTH, max(1, round(image.height * scale))), Image.LANCZOS
+        )
     return image
 
 
