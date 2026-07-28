@@ -9,6 +9,13 @@ from uuid import uuid4
 from django.utils import timezone
 
 from property.models import VerificationStatus
+from property.search_filters import (
+    SERVICES_MATCH_ALL,
+    append_bbox_filter,
+    append_capacity_filters,
+    append_flag_filters,
+    append_services_filter,
+)
 from shared.raw.compat import get_table_name, is_postgresql
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 
@@ -241,6 +248,15 @@ def list_cottages(
     lat: float | None = None,
     lon: float | None = None,
     radius_km: float = 10.0,
+    bbox: tuple[float, float, float, float] | None = None,
+    services: list[str] | None = None,
+    services_match: str = SERVICES_MATCH_ALL,
+    min_guests: int | None = None,
+    min_rooms: int | None = None,
+    min_beds: int | None = None,
+    min_bathrooms: int | None = None,
+    allowed_pets: bool | None = None,
+    allowed_alcohol: bool | None = None,
     limit: int | None = None,
     offset: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -277,6 +293,32 @@ def list_cottages(
             " )) <= %s)"
         )
         params.extend([lat, lat, lon, radius_km])
+    append_bbox_filter(where, params, alias="c", bbox=bbox)
+    append_services_filter(
+        where, params, alias="c", services=services, match=services_match
+    )
+    append_capacity_filters(
+        where,
+        params,
+        alias="c",
+        min_guests=min_guests,
+        min_rooms=min_rooms,
+        min_beds=min_beds,
+        min_bathrooms=min_bathrooms,
+        available_columns={
+            "guests": HAS_COTTAGE_GUESTS,
+            "rooms": HAS_COTTAGE_ROOMS,
+            "beds": HAS_COTTAGE_BEDS,
+            "bathrooms": HAS_COTTAGE_BATHROOMS,
+        },
+    )
+    append_flag_filters(
+        where,
+        params,
+        alias="c",
+        allowed_pets=allowed_pets,
+        allowed_alcohol=allowed_alcohol,
+    )
     if region_id is not None:
         where.append(f"{REGION_SELECT_SQL} = %s")
         params.append(region_id)

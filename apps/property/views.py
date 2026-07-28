@@ -71,6 +71,7 @@ from .apartment_repository import (
     resolve_region_id_by_guid,
     update_apartment,
 )
+from .search_filters import SERVICES_MATCH_ALL, SERVICES_MATCH_ANY
 from .apartment_serializers import (
     ApartmentAdminListSerializer,
     ApartmentAdminUpdateSerializer,
@@ -697,6 +698,24 @@ def _source_get(source, key: str, default=None):
     return value
 
 
+def _source_get_list(source, key: str) -> list[str]:
+    """Read a repeatable query param, also accepting a comma-separated value."""
+    if hasattr(source, "getlist"):
+        raw_values = source.getlist(key)
+    else:
+        raw = source.get(key)
+        raw_values = raw if isinstance(raw, list) else [raw]
+    values: list[str] = []
+    for raw_value in raw_values:
+        if raw_value in (None, ""):
+            continue
+        for chunk in str(raw_value).split(","):
+            chunk = chunk.strip()
+            if chunk and chunk not in values:
+                values.append(chunk)
+    return values
+
+
 def _parse_bool(value) -> bool | None:
     if value is None:
         return None
@@ -1070,6 +1089,10 @@ def _extract_list_params(source):
     lon = _parse_float(_source_get(source, "lon"))
     radius_km = _parse_float(_source_get(source, "radius")) or 10.0
 
+    services_match = (_source_get(source, "services_match") or "").strip().lower()
+    if services_match not in {SERVICES_MATCH_ALL, SERVICES_MATCH_ANY}:
+        services_match = SERVICES_MATCH_ALL
+
     return {
         "search": _source_get(source, "search"),
         "region_id": region_id,
@@ -1081,8 +1104,69 @@ def _extract_list_params(source):
         "lat": lat,
         "lon": lon,
         "radius_km": radius_km,
+        "bbox": _extract_bbox(source),
+        "services": _source_get_list(source, "services"),
+        "services_match": services_match,
+        "min_guests": _parse_positive_int(_source_get(source, "guests")),
+        "min_rooms": _parse_positive_int(
+            _source_get(source, "bedrooms") or _source_get(source, "rooms")
+        ),
+        "min_beds": _parse_positive_int(_source_get(source, "beds")),
+        "min_bathrooms": _parse_positive_int(_source_get(source, "bathrooms")),
+        "allowed_pets": _parse_bool(_source_get(source, "allowed_pets")),
+        "allowed_alcohol": _parse_bool(_source_get(source, "allowed_alcohol")),
         "limit": limit,
     }
+
+
+def _resolve_hotel_amenities(service_guids: list[str] | None) -> list[str]:
+    """Translate amenity GUIDs into the amenity titles hotels store as text[]."""
+    if not service_guids:
+        return []
+    cache_key = "property:service-titles"
+    titles = cache.get(cache_key)
+    if titles is None:
+        titles = {}
+        try:
+            for row in list_property_services(language="uz"):
+                guid = str(row.get("guid") or "").strip()
+                title = str(row.get("title") or "").strip()
+                if guid and title:
+                    titles[guid] = title
+        except Exception:
+            logger.warning("amenity title lookup failed", exc_info=True)
+            titles = {}
+        cache.set(cache_key, titles, timeout=600)
+    resolved = [titles[str(guid)] for guid in service_guids if str(guid) in titles]
+    # Unknown values are treated as literal amenity names so callers can pass
+    # either GUIDs or raw titles.
+    resolved += [str(guid) for guid in service_guids if str(guid) not in titles]
+    return resolved
+
+
+def _parse_positive_int(value) -> int | None:
+    parsed = _parse_int(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
+
+
+def _extract_bbox(source) -> tuple[float, float, float, float] | None:
+    """Read a map viewport from `sw_lat/sw_lon/ne_lat/ne_lon` or `bbox`."""
+    corners = [
+        _parse_float(_source_get(source, key))
+        for key in ("sw_lat", "sw_lon", "ne_lat", "ne_lon")
+    ]
+    if all(corner is not None for corner in corners):
+        return tuple(corners)  # type: ignore[return-value]
+
+    raw = _source_get(source, "bbox")
+    if not raw:
+        return None
+    parts = [_parse_float(part) for part in str(raw).split(",")]
+    if len(parts) != 4 or any(part is None for part in parts):
+        return None
+    return tuple(parts)  # type: ignore[return-value]
 
 
 def _parse_date(value) -> date | None:
@@ -1182,6 +1266,10 @@ def _list_hotel_rows(
         lat=lp.get("lat"),
         lon=lp.get("lon"),
         radius_km=lp.get("radius_km") or 10.0,
+        bbox=lp.get("bbox"),
+        amenities=_resolve_hotel_amenities(lp.get("services")),
+        amenities_match_all=lp.get("services_match") != SERVICES_MATCH_ANY,
+        min_stars=_parse_positive_int(_source_get(source, "min_stars")),
         testing_only=testing_only,
     )
     return prepare_property_rows(rows, limit=limit, **pp)

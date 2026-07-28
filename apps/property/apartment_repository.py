@@ -13,6 +13,13 @@ from payment.exchange_rate import exchange_rate
 from shared.raw.compat import get_table_name, is_postgresql
 from shared.raw.db import execute, fetch_all, fetch_one, table_exists
 from property.models import VerificationStatus
+from property.search_filters import (
+    SERVICES_MATCH_ALL,
+    append_bbox_filter,
+    append_capacity_filters,
+    append_flag_filters,
+    append_services_filter,
+)
 from shared.raw.tables import BOOKING_TABLE
 
 APARTMENT_TYPE_GUID = UUID("11111111-1111-1111-1111-111111111111")
@@ -63,11 +70,23 @@ def parse_property_kind(value: str | UUID | None) -> str | None:
     raw = str(value).strip().lower()
     if not raw:
         return None
-    if raw in {"apartment", "apartments"}:
+    if raw in {"apartment", "apartments", "kvartira", "квартира"}:
         return PROPERTY_KIND_APARTMENT
-    if raw in {"cottage", "cottages"}:
+    if raw in {
+        "cottage",
+        "cottages",
+        "dacha",
+        "dom",
+        "house",
+        "guesthouse",
+        "guest_house",
+        "дача",
+        "дачи",
+        "дом",
+        "гостевой дом",
+    }:
         return PROPERTY_KIND_COTTAGE
-    if raw in {"hotel", "hotels"}:
+    if raw in {"hotel", "hotels", "mehmonxona", "отель", "гостиница"}:
         return PROPERTY_KIND_HOTEL
     return TYPE_GUID_TO_KIND.get(raw)
 
@@ -440,6 +459,15 @@ def list_apartments(
     lat: float | None = None,
     lon: float | None = None,
     radius_km: float = 10.0,
+    bbox: tuple[float, float, float, float] | None = None,
+    services: list[str] | None = None,
+    services_match: str = SERVICES_MATCH_ALL,
+    min_guests: int | None = None,
+    min_rooms: int | None = None,
+    min_beds: int | None = None,
+    min_bathrooms: int | None = None,
+    allowed_pets: bool | None = None,
+    allowed_alcohol: bool | None = None,
     limit: int | None = None,
     offset: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -476,6 +504,26 @@ def list_apartments(
             " )) <= %s)"
         )
         params.extend([lat, lat, lon, radius_km])
+    append_bbox_filter(where, params, alias="a", bbox=bbox)
+    append_services_filter(
+        where, params, alias="a", services=services, match=services_match
+    )
+    append_capacity_filters(
+        where,
+        params,
+        alias="a",
+        min_guests=min_guests,
+        min_rooms=min_rooms,
+        min_beds=min_beds,
+        min_bathrooms=min_bathrooms,
+    )
+    append_flag_filters(
+        where,
+        params,
+        alias="a",
+        allowed_pets=allowed_pets,
+        allowed_alcohol=allowed_alcohol,
+    )
     if region_id is not None:
         where.append("a.region_id = %s")
         params.append(region_id)
