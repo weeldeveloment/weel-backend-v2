@@ -297,6 +297,48 @@ def _matches_location(
     return _haversine_km(lat, lon, row_lat, row_lon) <= radius_km
 
 
+def _matches_bbox(
+    row: dict[str, Any],
+    bbox: tuple[float, float, float, float] | None,
+) -> bool:
+    if not bbox:
+        return True
+    sw_lat, sw_lon, ne_lat, ne_lon = bbox
+    try:
+        row_lat = float(row.get("latitude") or 0)
+        row_lon = float(row.get("longitude") or 0)
+    except (TypeError, ValueError):
+        return False
+    if row_lat == 0.0 and row_lon == 0.0:
+        return False
+    lat_min, lat_max = sorted((float(sw_lat), float(ne_lat)))
+    if not lat_min <= row_lat <= lat_max:
+        return False
+    if float(sw_lon) <= float(ne_lon):
+        return float(sw_lon) <= row_lon <= float(ne_lon)
+    # Viewport crosses the antimeridian.
+    return row_lon >= float(sw_lon) or row_lon <= float(ne_lon)
+
+
+def _matches_amenities(
+    row: dict[str, Any],
+    amenities: list[str] | None,
+    *,
+    match_all: bool = True,
+) -> bool:
+    if not amenities:
+        return True
+    wanted = {str(item).strip().lower() for item in amenities if str(item or "").strip()}
+    if not wanted:
+        return True
+    present = {
+        str(item).strip().lower()
+        for item in (row.get("amenities") or [])
+        if str(item or "").strip()
+    }
+    return wanted <= present if match_all else bool(wanted & present)
+
+
 def _matches_created_range(
     row: dict[str, Any],
     *,
@@ -365,6 +407,10 @@ def list_hotels(
     lat: float | None = None,
     lon: float | None = None,
     radius_km: float = 10.0,
+    bbox: tuple[float, float, float, float] | None = None,
+    amenities: list[str] | None = None,
+    amenities_match_all: bool = True,
+    min_stars: int | None = None,
     limit: int | None = None,
     testing_only: bool | None = None,
     include_unverified: bool = False,
@@ -386,6 +432,13 @@ def list_hotels(
             _serialize_hotel_row(row, organization)
             for row in tenant_rows
             if testing_only is None or bool(row.get("is_testing", False)) is bool(testing_only)
+        ]
+        serialized = [
+            row
+            for row in serialized
+            if _matches_bbox(row, bbox)
+            and _matches_amenities(row, amenities, match_all=amenities_match_all)
+            and (min_stars is None or int(row.get("star_rating") or 0) >= int(min_stars))
         ]
         rows.extend(serialized)
         if limit:

@@ -51,6 +51,15 @@ from .views import (
     HotelPropertyFavoriteToggleView,
 )
 
+from .map_views import (
+    PropertyFilterMetaView,
+    PropertyMapCardsView,
+    PropertyMapView,
+    PropertyPriceHistogramView,
+    PropertySearchView,
+    SearchDestinationsView,
+)
+
 from apps.hotels.views import HotelDetailView
 
 
@@ -66,6 +75,16 @@ urlpatterns = [
         PropertyTypeIconUploadView.as_view(),
         name="admin-property-type-icon-upload",
     ),
+    path("map/", PropertyMapView.as_view(), name="property-map"),
+    path("map/cards/", PropertyMapCardsView.as_view(), name="property-map-cards"),
+    path("search/", PropertySearchView.as_view(), name="property-search"),
+    path("filters/", PropertyFilterMetaView.as_view(), name="property-filter-meta"),
+    path(
+        "filters/price-histogram/",
+        PropertyPriceHistogramView.as_view(),
+        name="property-price-histogram",
+    ),
+    path("destinations/", SearchDestinationsView.as_view(), name="search-destinations"),
     path("location/", LocationListView.as_view(), name="location"),
     path("regions/", RegionListView.as_view(), name="region-list"),
     path(

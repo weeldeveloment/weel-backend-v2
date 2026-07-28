@@ -1263,3 +1263,296 @@ class PreparePropertyRowsSortTests(SimpleTestCase):
         result = prepare_property_rows(rows, reference_date=ref_date)
         self.assertIn("order_price_uzs", result[0])
         self.assertEqual(result[0]["order_price_uzs"], Decimal("100000"))
+
+
+class SearchFilterSqlTests(SimpleTestCase):
+    def test_bbox_filter_builds_between_clause(self):
+        from property.search_filters import append_bbox_filter
+
+        where: list[str] = []
+        params: list = []
+        append_bbox_filter(where, params, alias="a", bbox=(41.0, 69.0, 41.5, 69.5))
+        self.assertEqual(len(where), 1)
+        self.assertIn("a.latitude::float BETWEEN %s AND %s", where[0])
+        self.assertEqual(params, [41.0, 41.5, 69.0, 69.5])
+
+    def test_bbox_filter_handles_antimeridian(self):
+        from property.search_filters import append_bbox_filter
+
+        where: list[str] = []
+        params: list = []
+        append_bbox_filter(where, params, alias="a", bbox=(41.0, 179.0, 41.5, -179.0))
+        self.assertIn("OR", where[0])
+        self.assertEqual(params, [41.0, 41.5, 179.0, -179.0])
+
+    def test_bbox_filter_noop_without_bbox(self):
+        from property.search_filters import append_bbox_filter
+
+        where: list[str] = []
+        params: list = []
+        append_bbox_filter(where, params, alias="a", bbox=None)
+        self.assertEqual((where, params), ([], []))
+
+    @patch("property.search_filters.is_postgresql", return_value=True)
+    def test_services_filter_defaults_to_match_all(self, _mock_pg):
+        from property.search_filters import append_services_filter
+
+        where: list[str] = []
+        params: list = []
+        guid = str(uuid4())
+        append_services_filter(where, params, alias="a", services=[guid])
+        self.assertIn("@>", where[0])
+        self.assertEqual(params, [[guid]])
+
+    @patch("property.search_filters.is_postgresql", return_value=True)
+    def test_services_filter_any_uses_overlap(self, _mock_pg):
+        from property.search_filters import append_services_filter, SERVICES_MATCH_ANY
+
+        where: list[str] = []
+        params: list = []
+        guid = str(uuid4())
+        append_services_filter(
+            where, params, alias="a", services=[guid], match=SERVICES_MATCH_ANY
+        )
+        self.assertIn("&&", where[0])
+
+    def test_capacity_filters_skip_zero_and_missing_columns(self):
+        from property.search_filters import append_capacity_filters
+
+        where: list[str] = []
+        params: list = []
+        append_capacity_filters(
+            where,
+            params,
+            alias="c",
+            min_rooms=2,
+            min_beds=0,
+            min_bathrooms=1,
+            available_columns={"rooms": True, "beds": True, "bathrooms": False},
+        )
+        self.assertEqual(len(where), 1)
+        self.assertEqual(params, [2])
+
+
+class ListParamExtractionTests(SimpleTestCase):
+    def _params(self, query: str):
+        from django.http import QueryDict
+
+        return QueryDict(query)
+
+    def test_extract_bbox_from_corner_params(self):
+        from property.views import _extract_bbox
+
+        source = self._params("sw_lat=41.0&sw_lon=69.0&ne_lat=41.5&ne_lon=69.5")
+        self.assertEqual(_extract_bbox(source), (41.0, 69.0, 41.5, 69.5))
+
+    def test_extract_bbox_from_compact_param(self):
+        from property.views import _extract_bbox
+
+        self.assertEqual(
+            _extract_bbox(self._params("bbox=41.0,69.0,41.5,69.5")),
+            (41.0, 69.0, 41.5, 69.5),
+        )
+
+    def test_extract_bbox_returns_none_when_incomplete(self):
+        from property.views import _extract_bbox
+
+        self.assertIsNone(_extract_bbox(self._params("sw_lat=41.0&sw_lon=69.0")))
+        self.assertIsNone(_extract_bbox(self._params("bbox=41.0,69.0")))
+
+    def test_source_get_list_splits_and_dedupes(self):
+        from property.views import _source_get_list
+
+        source = self._params("services=a,b&services=b&services=c")
+        self.assertEqual(_source_get_list(source, "services"), ["a", "b", "c"])
+
+    def test_extract_list_params_reads_room_filters(self):
+        from property.views import _extract_list_params
+
+        source = self._params("bedrooms=2&beds=3&bathrooms=1&guests=4")
+        params = _extract_list_params(source)
+        self.assertEqual(params["min_rooms"], 2)
+        self.assertEqual(params["min_beds"], 3)
+        self.assertEqual(params["min_bathrooms"], 1)
+        self.assertEqual(params["min_guests"], 4)
+
+    def test_extract_list_params_treats_zero_as_unset(self):
+        from property.views import _extract_list_params
+
+        params = _extract_list_params(self._params("bathrooms=0"))
+        self.assertIsNone(params["min_bathrooms"])
+
+
+class MapPinAndCardTests(SimpleTestCase):
+    def _apartment_row(self, **overrides):
+        row = {
+            "property_kind": "apartment",
+            "guid": str(uuid4()),
+            "title": "Silk Road Inn",
+            "img": ["https://cdn.example.com/a.jpg"],
+            "latitude": "41.29",
+            "longitude": "69.24",
+            "effective_price": Decimal("520000"),
+            "price_per_person": Decimal("520000"),
+            "currency": "UZS",
+            "average_rating": Decimal("4.8"),
+            "comment_count": 341,
+            "prefecture_name": "Яккасарой",
+            "region_name": "Ташкент",
+            "guests": "5",
+        }
+        row.update(overrides)
+        return row
+
+    def test_build_map_pin_returns_price_and_coordinates(self):
+        from property.map_serializers import build_map_pin
+
+        row = self._apartment_row()
+        pin = build_map_pin(row, favorites={row["guid"]})
+        self.assertEqual(pin["latitude"], 41.29)
+        self.assertEqual(pin["longitude"], 69.24)
+        self.assertEqual(pin["price"], Decimal("520000"))
+        self.assertTrue(pin["is_favorite"])
+
+    def test_build_map_pin_skips_rows_without_coordinates(self):
+        from property.map_serializers import build_map_pin
+
+        self.assertIsNone(
+            build_map_pin(self._apartment_row(latitude=None, longitude=None), favorites=set())
+        )
+        self.assertIsNone(
+            build_map_pin(self._apartment_row(latitude="0", longitude="0"), favorites=set())
+        )
+
+    def test_build_property_card_matches_design_fields(self):
+        from property.map_serializers import build_property_card
+
+        card = build_property_card(self._apartment_row(), favorites=set())
+        self.assertEqual(card["title"], "Silk Road Inn")
+        self.assertEqual(card["rating"], 4.8)
+        self.assertEqual(card["comment_count"], 341)
+        self.assertEqual(card["location_label"], "Яккасарой, Ташкент")
+        self.assertEqual(card["guests"], 5)
+        self.assertEqual(card["price"], Decimal("520000"))
+        self.assertFalse(card["is_favorite"])
+
+    def test_hotel_card_reads_hotel_specific_fields(self):
+        from property.map_serializers import build_property_card
+
+        row = {
+            "property_kind": "hotel",
+            "guid": str(uuid4()),
+            "title": "Hotel Uzbekistan",
+            "img": [],
+            "latitude": "41.31",
+            "longitude": "69.28",
+            "min_price": Decimal("900000"),
+            "min_price_currency": "UZS",
+            "rating": Decimal("4.5"),
+            "review_count": 12,
+            "city": "Ташкент",
+            "country": "Узбекистан",
+            "star_rating": 5,
+        }
+        card = build_property_card(row, favorites=set())
+        self.assertEqual(card["price"], Decimal("900000"))
+        self.assertEqual(card["rating"], 4.5)
+        self.assertEqual(card["comment_count"], 12)
+        self.assertEqual(card["star_rating"], 5)
+        self.assertEqual(card["location_label"], "Ташкент, Узбекистан")
+
+    def test_location_label_dedupes_repeated_parts(self):
+        from property.map_serializers import row_location_label
+
+        label = row_location_label(
+            {"property_kind": "cottage", "prefecture_name": "Ташкент", "region_name": "Ташкент"}
+        )
+        self.assertEqual(label, "Ташкент")
+
+
+class MapClusteringTests(SimpleTestCase):
+    def _row(self, latitude, longitude, price="500000"):
+        return {
+            "property_kind": "apartment",
+            "guid": str(uuid4()),
+            "latitude": str(latitude),
+            "longitude": str(longitude),
+            "effective_price": Decimal(price),
+            "currency": "UZS",
+        }
+
+    def test_cell_size_shrinks_as_zoom_grows(self):
+        from property.map_views import _cluster_cell_size
+
+        self.assertGreater(_cluster_cell_size(6), _cluster_cell_size(12))
+
+    def test_nearby_rows_merge_into_a_cluster(self):
+        from property.map_views import _cluster_rows
+
+        rows = [self._row(41.30, 69.24), self._row(41.3001, 69.2401)]
+        pins, clusters = _cluster_rows(rows, zoom=6, favorites=set())
+        self.assertEqual(pins, [])
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0]["count"], 2)
+        self.assertEqual(clusters[0]["min_price"], Decimal("500000"))
+
+    def test_distant_rows_stay_individual_pins(self):
+        from property.map_views import _cluster_rows
+
+        rows = [self._row(41.30, 69.24), self._row(39.65, 66.95)]
+        pins, clusters = _cluster_rows(rows, zoom=10, favorites=set())
+        self.assertEqual(len(pins), 2)
+        self.assertEqual(clusters, [])
+
+    def test_cluster_min_price_uses_cheapest_member(self):
+        from property.map_views import _cluster_rows
+
+        rows = [
+            self._row(41.30, 69.24, price="900000"),
+            self._row(41.3001, 69.2401, price="300000"),
+        ]
+        _pins, clusters = _cluster_rows(rows, zoom=6, favorites=set())
+        self.assertEqual(clusters[0]["min_price"], Decimal("300000"))
+
+
+class PropertyKindParsingTests(SimpleTestCase):
+    def test_parse_kinds_defaults_to_every_kind(self):
+        from django.http import QueryDict
+        from property.map_views import ALL_KINDS, _parse_kinds
+
+        self.assertEqual(_parse_kinds(QueryDict("")), list(ALL_KINDS))
+
+    def test_parse_kinds_reads_multi_select(self):
+        from django.http import QueryDict
+        from property.map_views import _parse_kinds
+
+        self.assertEqual(
+            _parse_kinds(QueryDict("property_types=cottage,hotel")), ["cottage", "hotel"]
+        )
+
+    def test_parse_kinds_accepts_ui_labels(self):
+        from django.http import QueryDict
+        from property.map_views import _parse_kinds
+
+        self.assertEqual(_parse_kinds(QueryDict("property_types=Дом")), ["cottage"])
+        self.assertEqual(_parse_kinds(QueryDict("property_types=Квартира")), ["apartment"])
+
+    def test_parse_kinds_falls_back_to_single_param(self):
+        from django.http import QueryDict
+        from property.map_views import _parse_kinds
+
+        self.assertEqual(_parse_kinds(QueryDict("property_type=hotel")), ["hotel"])
+
+
+class MapUrlsTests(SimpleTestCase):
+    def test_map_and_filter_routes_resolve(self):
+        expected = {
+            "/api/property/map/": "property-map",
+            "/api/property/map/cards/": "property-map-cards",
+            "/api/property/search/": "property-search",
+            "/api/property/filters/": "property-filter-meta",
+            "/api/property/filters/price-histogram/": "property-price-histogram",
+            "/api/property/destinations/": "search-destinations",
+        }
+        for path, name in expected.items():
+            self.assertEqual(resolve(path).url_name, name)
