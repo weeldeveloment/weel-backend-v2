@@ -101,10 +101,12 @@ from apps.b2b.hotel_booking_service import (
 from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer
 from apps.b2b.tasks import _send_b2b_lead_telegram_notification, run_passport_ocr_job
 from apps.property.hotel_repository import _run_in_schema, _safe_schema_name, get_hotel_for_public, resolve_hotel_guid
-from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, get_hotel_card_by_guid, search_hotels
+from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, get_hotel_card_by_guid, list_hotel_cities, search_hotels
 from shared.raw.db import fetch_all
 from apps.hotels.serializers import (
     HotelCardSerializer,
+    HotelCityListSerializer,
+    HotelCitySerializer,
     HotelSearchParamsSerializer,
     HotelSearchPageSerializer,
     RoomAvailabilitySerializer,
@@ -221,6 +223,30 @@ class B2BHotelSearchView(APIView):
             "page_size": page_size,
             "results": HotelCardSerializer(hotels, many=True).data,
         })
+
+
+class B2BHotelCitiesView(APIView):
+    """GET /b2b/hotels/cities/
+
+    The destinations worth offering in the search box: only cities that
+    actually have bookable hotels, each with its hotel count.
+    """
+    permission_classes = [IsAuthenticated, IsB2BOwnerOrPerformer]
+
+    @swagger_auto_schema(
+        operation_summary="List cities that have bookable hotels",
+        operation_description=(
+            "Powers the destination suggestions in hotel search. Cities are "
+            "returned with the number of bookable hotels in each, most first, "
+            "and follow the same visibility rules as `/b2b/hotels/search/` so "
+            "a suggested city never yields an empty result."
+        ),
+        responses={200: HotelCityListSerializer()},
+        tags=["B2B / Executer"],
+    )
+    def get(self, request):
+        cities = list_hotel_cities()
+        return Response({"results": HotelCitySerializer(cities, many=True).data})
 
 
 class B2BHotelCardView(APIView):

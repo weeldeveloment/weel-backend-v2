@@ -359,3 +359,12 @@ class HotelSearchPageSerializer(serializers.Serializer):
     page = serializers.IntegerField()
     page_size = serializers.IntegerField()
     results = HotelCardSerializer(many=True)
+
+
+class HotelCitySerializer(serializers.Serializer):
+    city = serializers.CharField(read_only=True)
+    hotel_count = serializers.IntegerField(read_only=True)
+
+
+class HotelCityListSerializer(serializers.Serializer):
+    results = HotelCitySerializer(many=True)

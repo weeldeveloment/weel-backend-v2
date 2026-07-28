@@ -1270,6 +1270,53 @@ def count_hotels(
     ))
 
 
+def list_hotel_cities() -> list[dict[str, Any]]:
+    """Every city that currently has bookable hotels, with how many.
+
+    Feeds the search box's city suggestions, so it deliberately mirrors the
+    visibility rules of :func:`search_hotels` — a city offered as a suggestion
+    must never come back empty when it is searched for.
+    """
+    from apps.property.hotel_repository import _run_in_schema, list_hotel_organizations
+
+    # Keyed by lowercased name: the same city can be spelled inconsistently
+    # across tenant schemas, and suggesting it twice would look broken.
+    totals: dict[str, dict[str, Any]] = {}
+    for organization in list_hotel_organizations():
+        schema_name = organization["schema_name"]
+        try:
+            rows = _run_in_schema(
+                schema_name,
+                lambda: fetch_all(
+                    """
+                    SELECT p.city AS city, COUNT(*) AS hotel_count
+                    FROM pms_property p
+                    WHERE p.is_active = TRUE
+                      AND COALESCE(p.is_verified, FALSE) = TRUE
+                      AND p.city IS NOT NULL
+                      AND btrim(p.city) <> ''
+                    GROUP BY p.city
+                    """,
+                ),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to list hotel cities in tenant schema",
+                extra={"tenant_schema": schema_name},
+            )
+            continue
+
+        for row in rows:
+            city = str(row["city"]).strip()
+            entry = totals.setdefault(city.lower(), {"city": city, "hotel_count": 0})
+            entry["hotel_count"] += int(row["hotel_count"] or 0)
+
+    return sorted(
+        totals.values(),
+        key=lambda entry: (-entry["hotel_count"], entry["city"].lower()),
+    )
+
+
 def get_hotel_card(property_id: int) -> dict[str, Any] | None:
     return fetch_one(
         """
