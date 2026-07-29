@@ -10,6 +10,7 @@ from typing import Any
 from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one
+from apps.property.hotel_repository import _safe_schema_name
 from apps.b2b.models import B2BUserRole, BudgetRequestStatus, HotelBookingRequestStatus
 from apps.b2b.raw.tables import (
     B2B_COMPANY_TABLE,
@@ -2156,10 +2157,54 @@ def get_top_hotels_by_booking_count(company_id: int, limit: int = 3) -> list[dic
     )
 
 
+def _filter_verified_hotels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop hotels that haven't passed verification. Each hotel's
+    ``pms_property`` row lives in its own tenant schema, so this is a
+    cross-schema ``UNION ALL`` lookup (same pattern as
+    ``_enrich_with_pms_vouchers`` in views.py), keyed by
+    ``(tenant_schema, hotel_property_id)``. A hotel missing from
+    ``pms_property`` (deleted/unknown) is treated as unverified."""
+    by_schema: dict[str, set[int]] = {}
+    for row in rows:
+        schema = _safe_schema_name(row.get("tenant_schema"))
+        property_id = row.get("hotel_property_id")
+        if schema and property_id:
+            by_schema.setdefault(schema, set()).add(property_id)
+
+    if not by_schema:
+        return []
+
+    parts: list[str] = []
+    params: list[Any] = []
+    for schema, property_ids in by_schema.items():
+        placeholders = ", ".join(["%s"] * len(property_ids))
+        parts.append(
+            f"SELECT %s AS _schema, id, is_verified "
+            f"FROM {schema}.pms_property "
+            f"WHERE id IN ({placeholders})"
+        )
+        params.append(schema)
+        params.extend(property_ids)
+
+    try:
+        verified_map = {
+            (r["_schema"], r["id"]): bool(r["is_verified"])
+            for r in fetch_all(" UNION ALL ".join(parts), params)
+        }
+    except Exception:
+        verified_map = {}
+
+    return [
+        row
+        for row in rows
+        if verified_map.get((_safe_schema_name(row.get("tenant_schema")), row.get("hotel_property_id")))
+    ]
+
+
 def get_hotel_monthly_summary(company_id: int, year: int, month: int, limit: int = 5) -> dict[str, Any]:
-    """Money spent on hotels this calendar month, plus the top *limit* hotels
-    booked this month ordered by ``booking_count`` DESC. Only ``confirmed``
-    bookings count as actual spend."""
+    """Money spent on hotels this calendar month, plus the top *limit*
+    verified hotels booked this month ordered by ``booking_count`` DESC.
+    Only ``confirmed`` bookings count as actual spend."""
     spend_row = fetch_one(
         f"""
         SELECT COALESCE(SUM(room.total_price), 0) AS spend
@@ -2171,7 +2216,10 @@ def get_hotel_monthly_summary(company_id: int, year: int, month: int, limit: int
         [company_id, year, month],
     ) or {}
 
-    top_hotels = fetch_all(
+    # Unfiltered candidates, ranked - verification is applied afterwards, so
+    # we can't cap this query at `limit` without risking fewer than `limit`
+    # verified hotels surviving the filter.
+    candidates = fetch_all(
         f"""
         SELECT
             br.tenant_schema,
@@ -2186,10 +2234,11 @@ def get_hotel_monthly_summary(company_id: int, year: int, month: int, limit: int
           AND EXTRACT(YEAR FROM br.created_at) = %s AND EXTRACT(MONTH FROM br.created_at) = %s
         GROUP BY br.tenant_schema, br.hotel_property_id
         ORDER BY booking_count DESC, MAX(br.hotel_name) ASC
-        LIMIT %s
         """,
-        [company_id, year, month, limit],
+        [company_id, year, month],
     )
+
+    top_hotels = _filter_verified_hotels(candidates)[:limit]
 
     return {
         "month_spend": str(spend_row.get("spend") or "0"),
