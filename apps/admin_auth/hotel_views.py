@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from django.db import IntegrityError, connection
@@ -28,6 +29,7 @@ from apps.pms.repository import (
     check_out_booking,
     complain_review,
     create_booking,
+    create_room,
     find_or_create_guest,
     get_analytics,
     get_booking,
@@ -44,7 +46,7 @@ from apps.pms.repository import (
     update_property,
     update_room,
 )
-from apps.pms.repository import get_room
+from apps.pms.repository import get_room, get_room_type
 from apps.pms.serializers import (
     AnalyticsQuerySerializer,
     AnalyticsResponseSerializer,
@@ -107,6 +109,28 @@ class ClassifyPropertySerializer(serializers.Serializer):
         choices=["standard", "essential", "comfort", "comfort_plus", "business", "premium", "signature"],
         required=False,
         allow_null=True,
+    )
+
+
+class AdminHotelRoomCreateSerializer(RoomSerializer):
+    room_type_id = serializers.IntegerField(required=True, allow_null=False, min_value=1)
+    room_type_name = serializers.CharField(read_only=True)
+    room_type_preset = serializers.CharField(read_only=True)
+    area = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+        min_value=Decimal("0.01"),
+    )
+    bedroom_count = serializers.IntegerField(required=False, default=1, min_value=0)
+    capacity = serializers.IntegerField(required=False, default=2, min_value=1)
+    base_price = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+        min_value=Decimal("0"),
     )
 
 
@@ -211,6 +235,51 @@ class AdminHotelRoomInventoryView(AdminHotelBaseView):
             room_type_name=room_type_name if room_type_name else None,
         )
         return Response(RoomSerializer(rooms, many=True).data)
+
+    @swagger_auto_schema(
+        request_body=AdminHotelRoomCreateSerializer,
+        responses={201: RoomSerializer()},
+    )
+    def post(self, request, property_id):
+        if not isinstance(property_id, int):
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AdminHotelRoomCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        validated = dict(serializer.validated_data)
+        room_type_id = validated["room_type_id"]
+        room_type = get_room_type(room_type_id, property_id)
+        if not room_type or not room_type.get("is_active", False):
+            return Response(
+                {"room_type_id": ["Select an active room type belonging to this hotel."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        validated["room_type_name"] = room_type.get("name")
+        validated["room_type_preset"] = room_type.get("preset")
+
+        try:
+            room = create_room(property_id=property_id, **validated)
+        except IntegrityError as exc:
+            if "room_number" in str(exc).lower():
+                return Response(
+                    {"room_number": ["A room with this number already exists for this hotel."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            logger.exception("Failed to create room for property %s", property_id)
+            return Response(
+                {"detail": "Failed to create room."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not room:
+            return Response(
+                {"detail": "Failed to create room."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return Response(RoomSerializer(room).data, status=status.HTTP_201_CREATED)
 
 
 class AdminHotelRoomTypeView(AdminHotelBaseView):
