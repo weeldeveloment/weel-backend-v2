@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+from pathlib import PurePosixPath
 from decimal import Decimal
 from typing import Any
 
@@ -97,6 +98,26 @@ from apps.pms.serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _delete_room_storage(prefix: str) -> None:
+    try:
+        directories, files = default_storage.listdir(prefix)
+    except FileNotFoundError:
+        return
+    except Exception:
+        logger.exception("Failed to list room storage prefix %s", prefix)
+        return
+
+    for filename in files:
+        path = str(PurePosixPath(prefix, filename))
+        try:
+            default_storage.delete(path)
+        except Exception:
+            logger.exception("Failed to delete room image %s", path)
+
+    for directory in directories:
+        _delete_room_storage(str(PurePosixPath(prefix, directory)))
 
 
 class PMSBaseView(APIView):
@@ -338,10 +359,39 @@ class RoomRetrieveUpdateDestroyView(PMSBaseView):
             return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(RoomSerializer(room).data)
 
-    @swagger_auto_schema(responses={204: "Deleted"})
+    @swagger_auto_schema(
+        responses={
+            204: "Deleted",
+            404: "Room not found",
+            409: "Room has booking history",
+        }
+    )
     def delete(self, request, property_id, room_id):
-        if not delete_room(room_id):
+        org_id = _require_org(request)
+        if not org_id:
+            return Response({"detail": "Organization context required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        prop = get_property(property_id, organization_id=int(org_id))
+        if not prop or not get_room(room_id, property_id):
             return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            result = delete_room(room_id, property_id)
+        except IntegrityError:
+            result = "has_bookings"
+
+        if result == "has_bookings":
+            return Response(
+                {
+                    "code": "room_has_bookings",
+                    "detail": "Room cannot be deleted because it has booking history.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if result == "not_found":
+            return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        _delete_room_storage(f"pms/properties/{property_id}/rooms/{room_id}")
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

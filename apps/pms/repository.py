@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from django.utils import timezone
 
@@ -451,11 +451,47 @@ def update_room(room_id: int, **kwargs: Any) -> dict[str, Any] | None:
     )
 
 
-def delete_room(room_id: int) -> bool:
-    return execute(
-        f"UPDATE {_t(PMS_ROOM_TABLE)} SET is_active = FALSE, updated_at = %s WHERE id = %s",
-        [timezone.now(), room_id],
-    ) > 0
+RoomDeleteResult = Literal["deleted", "not_found", "has_bookings"]
+
+
+def delete_room(room_id: int, property_id: int) -> RoomDeleteResult:
+    result = fetch_one(
+        f"""
+        WITH target AS (
+            SELECT id
+            FROM {_t(PMS_ROOM_TABLE)}
+            WHERE id = %s AND property_id = %s
+        ),
+        booking_refs AS (
+            SELECT EXISTS (
+                SELECT 1
+                FROM {_t(PMS_BOOKING_TABLE)} b
+                JOIN target t ON t.id = b.room_id
+            ) AS has_bookings
+        ),
+        deleted AS (
+            DELETE FROM {_t(PMS_ROOM_TABLE)} r
+            WHERE r.id IN (SELECT id FROM target)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM {_t(PMS_BOOKING_TABLE)} b
+                  WHERE b.room_id = r.id
+              )
+            RETURNING r.id
+        )
+        SELECT
+            EXISTS (SELECT 1 FROM target) AS found,
+            (SELECT has_bookings FROM booking_refs) AS has_bookings,
+            EXISTS (SELECT 1 FROM deleted) AS deleted
+        """,
+        [room_id, property_id],
+    )
+
+    if not result or not result["found"]:
+        return "not_found"
+    if result["has_bookings"]:
+        return "has_bookings"
+    return "deleted" if result["deleted"] else "not_found"
 
 
 def list_room_types(property_id: int) -> list[dict[str, Any]]:
