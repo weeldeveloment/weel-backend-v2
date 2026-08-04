@@ -30,6 +30,7 @@ from apps.pms.repository import (
     complain_review,
     create_booking,
     create_room,
+    create_room_type,
     find_or_create_guest,
     get_analytics,
     get_booking,
@@ -242,7 +243,7 @@ class AdminHotelRoomInventoryView(AdminHotelBaseView):
     )
     def post(self, request, property_id):
         if not isinstance(property_id, int):
-            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "Property not found."}, status=status.HTTP_400_NOT_FOUND)
 
         serializer = AdminHotelRoomCreateSerializer(data=request.data)
         if not serializer.is_valid():
@@ -283,12 +284,22 @@ class AdminHotelRoomInventoryView(AdminHotelBaseView):
 
 
 class AdminHotelRoomTypeView(AdminHotelBaseView):
-    """Room type listing for a hotel"""
+    """Room type listing and creation for a hotel"""
 
     @swagger_auto_schema(responses={200: RoomTypeSerializer(many=True)})
     def get(self, request, property_id):
         room_types = list_room_types(property_id)
         return Response(RoomTypeSerializer(room_types, many=True).data)
+
+    @swagger_auto_schema(request_body=RoomTypeSerializer, responses={201: RoomTypeSerializer()})
+    def post(self, request, property_id):
+        serializer = RoomTypeSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        room_type = create_room_type(property_id=property_id, **serializer.validated_data)
+        if not room_type:
+            return Response({"detail": "Failed to create room type."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(RoomTypeSerializer(room_type).data, status=status.HTTP_201_CREATED)
 
 
 class AdminHotelCalendarView(AdminHotelBaseView):
