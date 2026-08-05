@@ -979,17 +979,25 @@ class AdminBookingListView(ListAPIView):
         ordering = request.query_params.get("ordering")
         usd_to_uzs_rate = None
 
-        if status_filter and status_filter not in BOOKING_ALLOWED_STATUSES:
-            raise ValidationError(
-                {
-                    "status": _(
-                        "Invalid status: {invalid_status}, allowed are: {valid_statuses}"
-                    ).format(
-                        invalid_status=status_filter,
-                        valid_statuses=", ".join(sorted(BOOKING_ALLOWED_STATUSES)),
-                    )
-                }
-            )
+        if status_filter:
+            # Comma-separated so a tab can group several statuses (e.g. the
+            # admin "Booked" tab covers both confirmed and checked_in).
+            invalid_statuses = [
+                token
+                for token in (t.strip() for t in status_filter.split(","))
+                if token and token not in BOOKING_ALLOWED_STATUSES
+            ]
+            if invalid_statuses:
+                raise ValidationError(
+                    {
+                        "status": _(
+                            "Invalid status: {invalid_status}, allowed are: {valid_statuses}"
+                        ).format(
+                            invalid_status=", ".join(invalid_statuses),
+                            valid_statuses=", ".join(sorted(BOOKING_ALLOWED_STATUSES)),
+                        )
+                    }
+                )
 
         total = count_admin_bookings(status=status_filter, search=search)
         rows = list_admin_bookings(

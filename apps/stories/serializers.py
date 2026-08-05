@@ -234,6 +234,7 @@ class AdminStorySerializer(serializers.Serializer):
     property_kind = serializers.SerializerMethodField("get_property_kind")
     property_img = serializers.SerializerMethodField("get_property_img")
     partner_user_id = serializers.IntegerField(allow_null=True)
+    partner_name = serializers.SerializerMethodField("get_partner_name")
     is_verified = serializers.BooleanField()
     verified_by_user_id = serializers.IntegerField(allow_null=True)
     verified_at = serializers.DateTimeField(allow_null=True)
@@ -259,6 +260,14 @@ class AdminStorySerializer(serializers.Serializer):
     def get_property_img(self, obj):
         request = self.context.get("request")
         return _build_media_url(request, obj.get("property_img"))
+
+    def get_partner_name(self, obj):
+        name = " ".join(
+            part
+            for part in (obj.get("partner_first_name"), obj.get("partner_last_name"))
+            if part
+        ).strip()
+        return name or None
 
     def get_media(self, obj):
         media_items = obj.get("media") or []

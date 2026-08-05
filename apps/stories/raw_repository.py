@@ -34,6 +34,8 @@ STORY_SELECT = f"""
         {PROPERTY_TITLE_EXPR} AS property_title,
         {PROPERTY_IMAGE_EXPR} AS property_img,
         {PROPERTY_PARTNER_EXPR} AS partner_user_id,
+        pu.first_name AS partner_first_name,
+        pu.last_name AS partner_last_name,
         {PROPERTY_ARCHIVED_EXPR} AS property_is_archived,
         {PROPERTY_VERIFIED_EXPR} AS property_is_verified,
         {PROPERTY_KIND_EXPR} AS property_kind,
@@ -44,6 +46,7 @@ STORY_SELECT = f"""
     FROM {get_table_name("stories")} s
     LEFT JOIN {get_table_name("apartment")} a ON a.id = s.property_apartment_id
     LEFT JOIN {get_table_name("cottage")} c ON c.id = s.property_cottage_id
+    LEFT JOIN {get_table_name("users")} pu ON pu.id = {PROPERTY_PARTNER_EXPR}
 """
 
 

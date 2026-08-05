@@ -527,6 +527,21 @@ def get_active_employee(employee_id: int, company_id: int) -> dict[str, Any] | N
     )
 
 
+def lock_employees_for_booking(employee_ids: list[int]) -> None:
+    """Take a transaction-scoped advisory lock per employee before checking
+    for overlapping hotel bookings, so two concurrent booking requests can't
+    both read "no overlap" for the same employee and double-book them. There
+    is no row on the employee to `SELECT ... FOR UPDATE`, so this uses
+    Postgres advisory locks instead; they release automatically at
+    COMMIT/ROLLBACK, no matching unlock call needed. Callers must sort/dedupe
+    ids the same way to avoid deadlocking against each other."""
+    # Namespaced with an arbitrary fixed first key so this lock space can't
+    # collide with any other advisory lock keyed by a bare integer id.
+    lock_namespace = 911001
+    for employee_id in sorted(set(employee_ids)):
+        execute("SELECT pg_advisory_xact_lock(%s, %s)", [lock_namespace, employee_id])
+
+
 def employee_has_overlapping_hotel_booking(
     employee_id: int,
     *,
@@ -2097,6 +2112,50 @@ def get_dashboard_summary(company_id: int) -> dict[str, Any]:
         "pending_limit_requests": pending_requests_row.get("cnt") or 0,
         "change_percent": round(change_percent, 1),
     }
+
+
+def get_remaining_monthly_budget(company_id: int) -> Decimal:
+    """Company-wide budget left for the current calendar month.
+
+    Mirrors ``get_dashboard_summary``'s monthly_limit/spent_this_month
+    calculation so booking creation can enforce, server-side, the same
+    number the dashboard and the booking UI already show the user — the
+    UI's own check is client-side only and can be bypassed by calling the
+    API directly.
+    """
+    now = timezone.now()
+    year, month = now.year, now.month
+
+    policy = get_or_create_travel_policy(company_id)
+    global_rule = fetch_one(
+        f"""
+        SELECT r.budget_limit
+        FROM {B2B_TRAVEL_POLICY_RULE_TABLE} r
+        WHERE r.policy_id = %s AND r.applies_to = 'all'
+        ORDER BY r.id DESC
+        LIMIT 1
+        """,
+        [policy.get("id")],
+    ) or {}
+    monthly_limit = global_rule.get("budget_limit") or policy.get("monthly_budget") or Decimal("0")
+
+    spent_row = fetch_one(
+        f"""
+        SELECT COALESCE(SUM(room.total_price), 0) AS spent
+        FROM {B2B_HOTEL_BOOKING_ROOM_TABLE} room
+        JOIN {B2B_HOTEL_BOOKING_REQUEST_TABLE} req ON req.id = room.booking_request_id
+        WHERE req.company_id = %s AND req.status = '{HotelBookingRequestStatus.CONFIRMED}'
+          AND EXTRACT(YEAR FROM COALESCE(req.reviewed_at, req.created_at)) = %s
+          AND EXTRACT(MONTH FROM COALESCE(req.reviewed_at, req.created_at)) = %s
+        """,
+        [company_id, year, month],
+    ) or {}
+    spent_this_month = spent_row.get("spent") or Decimal("0")
+
+    if monthly_limit <= 0:
+        # No limit configured for this company — unlimited, nothing to enforce.
+        return Decimal("Infinity")
+    return monthly_limit - spent_this_month
 
 
 # ─── Top employees by trip count ────────────────────────────────────────────

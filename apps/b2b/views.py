@@ -305,6 +305,18 @@ class B2BHotelRoomsView(APIView):
         if not params.is_valid():
             return Response(params.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        # `guests` here is the total number of employees picked in step 1, who
+        # may be split across several rooms (each room only needs to fit the
+        # employees assigned to it later). It must not be used as a per-room
+        # capacity filter, or hotels get zero rooms back whenever more
+        # employees are selected than any single room can hold. Only honor
+        # min_capacity/max_capacity when the caller explicitly passed them.
+        explicit_min_capacity = (
+            params.validated_data.get("min_capacity")
+            if "min_capacity" in request.query_params
+            else None
+        )
+
         try:
             rooms = _run_in_schema(
                 schema_name,
@@ -312,18 +324,23 @@ class B2BHotelRoomsView(APIView):
                     hotel_id,
                     check_in=params.validated_data["check_in"],
                     check_out=params.validated_data["check_out"],
-                    guests=params.validated_data["guests"],
+                    guests=1,
                     room_types=params.validated_data.get("room_types"),
                     room_type_presets=params.validated_data.get("room_type_presets"),
                     rate_plans=params.validated_data.get("rate_plans"),
                     meal_plans=params.validated_data.get("meal_plans"),
-                    min_capacity=params.validated_data.get("min_capacity"),
+                    min_capacity=explicit_min_capacity,
                     max_capacity=params.validated_data.get("max_capacity"),
                 ),
             )
+            payload = RoomAvailabilitySerializer(rooms, many=True).data
         except Exception:
+            # Serialization used to run outside this try block, so a bad row
+            # (e.g. an out-of-range price) surfaced as a raw 500 instead of a
+            # clean error response.
+            logger.exception("Failed to load rooms for hotel_guid=%s", hotel_guid)
             return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(RoomAvailabilitySerializer(rooms, many=True).data)
+        return Response(payload)
 
 
 class B2BHotelBookingListCreateView(APIView):
@@ -411,6 +428,15 @@ class B2BHotelBookingListCreateView(APIView):
             )
         except HotelBookingError as exc:
             return Response({"detail": exc.detail}, status=exc.status_code)
+        except Exception:
+            # A raw DB error (FK/unique violation, lock timeout, concurrent
+            # booking of the same room/employee) would otherwise bubble up as
+            # Django's generic 500 with no useful detail for the client.
+            logger.exception("Unexpected error while creating hotel booking request")
+            return Response(
+                {"detail": "Не удалось создать бронирование. Попробуйте еще раз."},
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(
             HotelBookingRequestDetailSerializer(booking_request).data,
             status=status.HTTP_201_CREATED,
@@ -469,6 +495,12 @@ class B2BHotelBookingCancelView(APIView):
             booking_request = cancel_booking_request(booking_id=booking_id, company_id=company_id)
         except HotelBookingError as exc:
             return Response({"detail": exc.detail}, status=exc.status_code)
+        except Exception:
+            logger.exception("Unexpected error while cancelling hotel booking %s", booking_id)
+            return Response(
+                {"detail": "Не удалось отменить бронирование. Попробуйте еще раз."},
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(HotelBookingRequestDetailSerializer(booking_request).data)
 
 
@@ -555,14 +587,20 @@ class B2BHotelCalendarView(APIView):
                     include_summary=include_summary,
                 ),
             )
+            if include_summary:
+                payload = {
+                    "rows": B2BHotelCalendarSerializer(calendar["rows"], many=True).data,
+                    "summary": calendar["summary"],
+                }
+            else:
+                payload = B2BHotelCalendarSerializer(calendar, many=True).data
         except Exception:
+            # Serialization used to run outside this try block, so a bad row
+            # (e.g. an out-of-range price) surfaced as a raw 500 instead of a
+            # clean error response.
+            logger.exception("Failed to load hotel calendar for hotel_guid=%s", hotel_guid)
             return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
-        if include_summary:
-            return Response({
-                "rows": B2BHotelCalendarSerializer(calendar["rows"], many=True).data,
-                "summary": calendar["summary"],
-            })
-        return Response(B2BHotelCalendarSerializer(calendar, many=True).data)
+        return Response(payload)
 
 
 class B2BCompanyView(APIView):

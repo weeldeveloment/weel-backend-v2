@@ -15,8 +15,10 @@ from apps.b2b.repository import (
     employee_has_overlapping_hotel_booking,
     get_active_employee,
     get_hotel_booking_request,
+    get_remaining_monthly_budget,
     get_trip,
     list_hotel_booking_rooms,
+    lock_employees_for_booking,
     update_booking_request_employee_statuses,
     update_hotel_booking_request_status,
     update_trip_employee_status_by_pms_booking,
@@ -144,6 +146,21 @@ def create_booking_request(
             str(trip["budget"])
         ):
             raise HotelBookingError("Booking total exceeds the selected trip budget.")
+
+        # The UI's own budget-vs-remaining-limit check (RoomBookingPanel) is
+        # client-side only, so it never actually stopped a request sent
+        # directly against this API. Re-check the same company-wide monthly
+        # limit here so it can't be bypassed.
+        remaining_budget = get_remaining_monthly_budget(company_id)
+        if total_price > remaining_budget:
+            raise HotelBookingError(
+                "Booking total exceeds the company's remaining monthly budget."
+            )
+
+        # Serialize concurrent booking requests for the same employee(s) so
+        # two requests can't both pass the overlap check below before either
+        # commits (mirrors the room-level SELECT ... FOR UPDATE above).
+        lock_employees_for_booking(employee_ids)
 
         for employee_id in employee_ids:
             if employee_has_overlapping_hotel_booking(

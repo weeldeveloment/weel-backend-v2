@@ -490,9 +490,11 @@ def count_admin_bookings(status: str | None = None, search: str | None = None) -
     params: list[Any] = []
 
     if status:
-        normalized = _normalize_statuses([status])
-        where.append("b.status = %s")
-        params.append(normalized[0])
+        # `status` may be a comma-separated list (e.g. "confirmed,checked_in")
+        # so callers can group several statuses under one filter tab.
+        normalized = _normalize_statuses(status.split(","))
+        where.append("b.status = ANY(%s)")
+        params.append(normalized)
     if search:
         like = f"%{search.strip()}%"
         where.append(
@@ -524,9 +526,9 @@ def list_admin_bookings(
     params: list[Any] = []
 
     if status:
-        normalized = _normalize_statuses([status])
-        where.append("b.status = %s")
-        params.append(normalized[0])
+        normalized = _normalize_statuses(status.split(","))
+        where.append("b.status = ANY(%s)")
+        params.append(normalized)
     if search:
         like = f"%{search.strip()}%"
         where.append(
