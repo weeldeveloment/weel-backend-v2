@@ -14,7 +14,37 @@ permissions:
   packages: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.0
+
+      - name: Install dependencies
+        run: poetry install --no-root --no-ansi
+
+      # Uses core.test_settings (sqlite, in-memory) — see pytest.ini. The
+      # integration tests that need a live PostgreSQL schema skip themselves
+      # unless WEEL_INTEGRATION_DB=1.
+      - name: Run tests
+        run: poetry run pytest -q
+
+      - name: Django deployment checks
+        env:
+          DJANGO_DEBUG: '0'
+          SECRET_KEY: ci-only-not-a-real-secret
+          DJANGO_ALLOWED_HOSTS: example.com
+          REDIS_CONNECTION_STRING: redis://localhost:6379/0
+        run: poetry run python manage.py check --deploy --fail-level ERROR
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

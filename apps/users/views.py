@@ -484,16 +484,21 @@ class ClientLogoutView(APIView):
         request_body=logout_request_body,
     )
     def post(self, request):
+        refresh_token = request.data.get("refresh")
+        if not refresh_token:
+            # Without the refresh token there is nothing to revoke, and
+            # answering "logged out" would be a lie — the token stays valid.
+            return Response(
+                {"detail": _("Refresh token is required to log out.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            refresh_token = request.data.get("refresh")
-            if refresh_token:
-                token = CustomRefreshToken(refresh_token)
-                token.blacklist()
-            return Response({"detail": _("Successfully logged out")})
+            CustomRefreshToken(refresh_token).blacklist()
         except TokenError:
             return Response(
                 {"detail": _("Invalid token")}, status=status.HTTP_400_BAD_REQUEST
             )
+        return Response({"detail": _("Successfully logged out")})
 
 
 class ClientProfileView(APIView):
@@ -910,18 +915,21 @@ class PartnerLogoutView(APIView):
         request_body=logout_request_body,
     )
     def post(self, request):
-        try:
-            refresh_token = request.data.get("refresh")
-            if refresh_token:
-                token = CustomRefreshToken(refresh_token)
-                token.blacklist()
+        refresh_token = request.data.get("refresh")
+        if not refresh_token:
             return Response(
-                {"detail": _("Successfully logged out.")}, status=status.HTTP_200_OK
+                {"detail": _("Refresh token is required to log out.")},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        except Exception as e:
+        try:
+            CustomRefreshToken(refresh_token).blacklist()
+        except TokenError:
             return Response(
                 {"detail": _("Logout failed.")}, status=status.HTTP_400_BAD_REQUEST
             )
+        return Response(
+            {"detail": _("Successfully logged out.")}, status=status.HTTP_200_OK
+        )
 
 
 class PartnerProfileView(APIView):

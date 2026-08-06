@@ -27,3 +27,4 @@ Makefile
 *.swp
 *.swo
 *~
+certificates/

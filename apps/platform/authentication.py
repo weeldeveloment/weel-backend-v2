@@ -4,7 +4,7 @@ import logging
 
 from rest_framework import exceptions
 from rest_framework.request import Request
-from rest_framework_simplejwt.authentication import JWTAuthentication
+from shared.jwt_authentication import DenylistCheckedJWTAuthentication
 
 from users.raw_repository import get_user_by_id
 
@@ -27,7 +27,7 @@ class PmsUser:
         return getattr(self, "id", None)
 
 
-class PmsJWTAuthentication(JWTAuthentication):
+class PmsJWTAuthentication(DenylistCheckedJWTAuthentication):
     def authenticate(self, request: Request):
         header = self.get_header(request)
         if header is None:

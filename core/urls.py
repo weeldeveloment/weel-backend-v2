@@ -16,6 +16,7 @@ Including another URLconf
 """
 
 import base64
+import functools
 import hmac
 import time
 
@@ -176,12 +177,22 @@ def _set_swagger_cookie(request, response):
     )
 
 
-def _swagger_with_optional_basic_auth(request, *args, **kwargs):
+def _docs_with_optional_basic_auth(request, *args, _docs_view=None, **kwargs):
+    """Gate an API-docs view behind the optional Swagger basic auth.
+
+    Takes the view to render as a keyword argument so every docs route —
+    Swagger, Redoc, and the B2B-only variants — goes through the same check.
+    Previously only /swagger/ was wrapped, so /redoc/ and /b2b/swagger/ served
+    the full API schema to anyone even when the password was configured.
+    """
+    if _docs_view is None:
+        _docs_view = schema_view.with_ui("swagger", cache_timeout=0)
+
     if not _swagger_auth_required():
-        return schema_view.with_ui("swagger", cache_timeout=0)(request, *args, **kwargs)
+        return _docs_view(request, *args, **kwargs)
 
     if _swagger_cookie_is_valid(request):
-        return schema_view.with_ui("swagger", cache_timeout=0)(request, *args, **kwargs)
+        return _docs_view(request, *args, **kwargs)
 
     ident = request.META.get("HTTP_X_FORWARDED_FOR") or request.META.get("REMOTE_ADDR") or "unknown"
     ident = ident.split(",")[0].strip()
@@ -255,9 +266,14 @@ def _swagger_with_optional_basic_auth(request, *args, **kwargs):
         cache.delete(fail_cache_key)
     except Exception:
         _SWAGGER_LOCAL_AUTH_ATTEMPTS.pop(ident, None)
-    response = schema_view.with_ui("swagger", cache_timeout=0)(request, *args, **kwargs)
+    response = _docs_view(request, *args, **kwargs)
     _set_swagger_cookie(request, response)
     return response
+
+
+def _protected_docs(docs_view):
+    """Bind `docs_view` into the basic-auth gate so it can be used as a route."""
+    return functools.partial(_docs_with_optional_basic_auth, _docs_view=docs_view)
 
 
 urlpatterns = [
@@ -284,46 +300,23 @@ urlpatterns += [
 ]
 
 if settings.ENABLE_SWAGGER_UI:
+    # Every docs route goes through _protected_docs so the basic-auth password
+    # actually covers the schema, not just the Swagger UI page.
+    _swagger_ui = _protected_docs(schema_view.with_ui("swagger", cache_timeout=0))
+    _redoc_ui = _protected_docs(schema_view.with_ui("redoc", cache_timeout=0))
+    _b2b_swagger_ui = _protected_docs(b2b_schema_view.with_ui("swagger", cache_timeout=0))
+    _b2b_redoc_ui = _protected_docs(b2b_schema_view.with_ui("redoc", cache_timeout=0))
+
     urlpatterns += [
-        path(
-            "swagger/",
-            _swagger_with_optional_basic_auth,
-            name="schema-swagger-ui",
-        ),
-        path(
-            "api/swagger/",
-            _swagger_with_optional_basic_auth,
-            name="schema-swagger-ui-api-prefix",
-        ),
-        path(
-            "redoc/",
-            schema_view.with_ui("redoc", cache_timeout=0),
-            name="schema-redoc-ui",
-        ),
-        path(
-            "api/redoc/",
-            schema_view.with_ui("redoc", cache_timeout=0),
-            name="schema-redoc-ui-api-prefix",
-        ),
+        path("swagger/", _swagger_ui, name="schema-swagger-ui"),
+        path("api/swagger/", _swagger_ui, name="schema-swagger-ui-api-prefix"),
+        path("redoc/", _redoc_ui, name="schema-redoc-ui"),
+        path("api/redoc/", _redoc_ui, name="schema-redoc-ui-api-prefix"),
         # B2B-only Swagger — shows only B2B, Documents, Hotels, Admin B2B endpoints
-        path(
-            "b2b/swagger/",
-            b2b_schema_view.with_ui("swagger", cache_timeout=0),
-            name="b2b-schema-swagger-ui",
-        ),
-        re_path(
-            r"^b2b/swagger$",
-            b2b_schema_view.with_ui("swagger", cache_timeout=0),
-        ),
-        path(
-            "b2b/redoc/",
-            b2b_schema_view.with_ui("redoc", cache_timeout=0),
-            name="b2b-schema-redoc-ui",
-        ),
-        re_path(
-            r"^b2b/redoc$",
-            b2b_schema_view.with_ui("redoc", cache_timeout=0),
-        ),
+        path("b2b/swagger/", _b2b_swagger_ui, name="b2b-schema-swagger-ui"),
+        re_path(r"^b2b/swagger$", _b2b_swagger_ui),
+        path("b2b/redoc/", _b2b_redoc_ui, name="b2b-schema-redoc-ui"),
+        re_path(r"^b2b/redoc$", _b2b_redoc_ui),
     ]
 
 if settings.DEBUG:

@@ -243,7 +243,7 @@ class AdminHotelRoomInventoryView(AdminHotelBaseView):
     )
     def post(self, request, property_id):
         if not isinstance(property_id, int):
-            return Response({"detail": "Property not found."}, status=status.HTTP_400_NOT_FOUND)
+            return Response({"detail": "Property not found."}, status=status.HTTP_404_NOT_FOUND)
 
         serializer = AdminHotelRoomCreateSerializer(data=request.data)
         if not serializer.is_valid():

@@ -35,4 +35,11 @@ EXPOSE 8000
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Drop root: nothing here needs it at runtime, and a file-read or code-exec
+# bug in the app should not come with root in the container.
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /app/logs /app/media /app/staticfiles \
+    && chown -R appuser:appuser /app
+USER appuser
+
 CMD ["/entrypoint.sh"]

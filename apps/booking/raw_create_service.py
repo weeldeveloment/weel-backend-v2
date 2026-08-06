@@ -25,6 +25,9 @@ from users.tasks import send_partner_telegram_msg
 from .guest_rules import extra_guest_fee_total
 from .raw_booking_repository import (
     create_booking_row,
+    lock_property_calendar,
+    release_calendar_for_booking,
+    update_booking_status,
 )
 from .raw_calendar_service import RawCalendarStatus
 from .raw_repository import fetch_calendar_dates_by_status, upsert_calendar_days
@@ -251,7 +254,27 @@ class RawBookingCreateService:
                 return row
         raise ValidationError(_("Unable to create booking. Please try again."))
 
-    @transaction.atomic
+    def _release_reservation(self, booking: dict[str, Any]) -> None:
+        """Undo a reservation whose payment never went through.
+
+        Best-effort by design: if this fails the booking stays `pending` and
+        `auto_cancel_booking` (queued 30 minutes out) cleans it up.
+        """
+        try:
+            with transaction.atomic():
+                release_calendar_for_booking(booking)
+                update_booking_status(
+                    booking_id=int(booking["id"]),
+                    status="cancelled",
+                    cancellation_reason="payment_failed",
+                    set_cancelled=True,
+                )
+        except Exception:
+            logger.exception(
+                "Failed to release reservation after payment failure",
+                extra={"booking_id": str(booking.get("guid"))},
+            )
+
     def create_booking(
         self,
         *,
@@ -266,21 +289,53 @@ class RawBookingCreateService:
         property_kind = str(property_row["property_kind"])
         property_id = int(property_row["property_id"])
 
-        days = self._validate_dates_availability(
-            property_guid=property_row["guid"],
-            property_kind=property_kind,
-            property_id=property_id,
-            check_in=check_in,
-            check_out=check_out,
-        )
-        booking_price = self._calculate_price(
-            property_row=property_row,
-            adults=adults,
-            children=children,
-            check_in=check_in,
-            check_out=check_out,
-        )
+        # Phase 1 — reserve the dates.
+        #
+        # Held in its own short transaction, with an advisory lock so two
+        # concurrent requests for the same property cannot both pass the
+        # availability check. The payment call is deliberately *outside* this
+        # transaction: an HTTP round trip to Plum can take seconds, and
+        # holding a Postgres connection open for that long exhausts the pool.
+        with transaction.atomic():
+            lock_property_calendar(property_kind, property_id)
 
+            days = self._validate_dates_availability(
+                property_guid=property_row["guid"],
+                property_kind=property_kind,
+                property_id=property_id,
+                check_in=check_in,
+                check_out=check_out,
+            )
+            booking_price = self._calculate_price(
+                property_row=property_row,
+                adults=adults,
+                children=children,
+                check_in=check_in,
+                check_out=check_out,
+            )
+            booking = self._insert_booking_with_retry(
+                property_kind=property_kind,
+                property_id=property_id,
+                check_in=check_in,
+                check_out=check_out,
+                adults=adults,
+                children=children,
+                babies=babies,
+            )
+            upsert_calendar_days(
+                property_kind=property_kind,
+                property_id=property_id,
+                days=days,
+                status=RawCalendarStatus.BOOKED,
+            )
+
+        # Phase 2 — take the payment hold, with no transaction open.
+        #
+        # If it fails the dates are handed back immediately rather than
+        # staying blocked until the 30-minute auto-cancel fires. Previously
+        # this ran inside the transaction, so a hold that succeeded followed
+        # by any later failure left money held on the customer's card with no
+        # booking row to trace it to.
         try:
             hold = self.plum_service.create_hold(
                 client=self.client,
@@ -288,43 +343,44 @@ class RawBookingCreateService:
                 amount=booking_price["hold_amount"],
             )
         except PlumAPIError as plum_api_error:
+            self._release_reservation(booking)
             if plum_api_error.status_code == 403:
                 raise PermissionDenied(plum_api_error.message)
             raise ValidationError(plum_api_error.message)
         except Exception as exc:
             logger.error("Payment service error: %s", exc)
+            self._release_reservation(booking)
             raise ValidationError(_("Payment service is temporarily unavailable. Please try again later."))
 
         hold_result = (hold or {}).get("result") or {}
         hold_amount = hold_result.get("totalAmount") or booking_price["hold_amount"]
 
-        booking = self._insert_booking_with_retry(
-            property_kind=property_kind,
-            property_id=property_id,
-            check_in=check_in,
-            check_out=check_out,
-            adults=adults,
-            children=children,
-            babies=babies,
-        )
-
-        create_hold_transaction(
-            booking_id=int(booking["id"]),
-            client_user_id=int(self.client.id),
-            partner_user_id=int(property_row["partner_user_id"]) if property_row.get("partner_user_id") is not None else None,
-            amount=hold_amount,
-            transaction_id=hold_result.get("transactionId"),
-            hold_id=hold_result.get("holdId"),
-            card_id=hold_result.get("cardId") or card_id,
-            extra_id=hold_result.get("extraId"),
-        )
-
-        upsert_calendar_days(
-            property_kind=property_kind,
-            property_id=property_id,
-            days=days,
-            status=RawCalendarStatus.BOOKED,
-        )
+        # Phase 3 — record the hold against the booking.
+        try:
+            with transaction.atomic():
+                create_hold_transaction(
+                    booking_id=int(booking["id"]),
+                    client_user_id=int(self.client.id),
+                    partner_user_id=int(property_row["partner_user_id"]) if property_row.get("partner_user_id") is not None else None,
+                    amount=hold_amount,
+                    transaction_id=hold_result.get("transactionId"),
+                    hold_id=hold_result.get("holdId"),
+                    card_id=hold_result.get("cardId") or card_id,
+                    extra_id=hold_result.get("extraId"),
+                )
+        except Exception:
+            # The hold exists at Plum but we could not link it to the booking.
+            # Log loudly with the ids needed to reconcile by hand, then let
+            # auto_cancel_booking release the dates.
+            logger.exception(
+                "Hold taken but not recorded — manual reconciliation needed",
+                extra={
+                    "booking_id": str(booking.get("guid")),
+                    "plum_transaction_id": hold_result.get("transactionId"),
+                    "plum_hold_id": hold_result.get("holdId"),
+                },
+            )
+            raise ValidationError(_("Payment service is temporarily unavailable. Please try again later."))
 
         NotificationService.send_to_client(
             client=SimpleNamespace(id=int(self.client.id)),

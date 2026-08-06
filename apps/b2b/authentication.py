@@ -1,7 +1,7 @@
 from django.utils.translation import gettext_lazy as _
 from rest_framework import exceptions
 from rest_framework.request import Request
-from rest_framework_simplejwt.authentication import JWTAuthentication
+from shared.jwt_authentication import DenylistCheckedJWTAuthentication
 
 from users.tokens import TokenMetadata
 from apps.b2b.repository import get_b2b_user
@@ -29,7 +29,7 @@ class B2BAuthUser:
         return self._data.get(key, default)
 
 
-class B2BJWTAuthentication(JWTAuthentication):
+class B2BJWTAuthentication(DenylistCheckedJWTAuthentication):
     def authenticate(self, request: Request):
         header = self.get_header(request)
         if header is None:

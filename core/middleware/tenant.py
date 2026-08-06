@@ -5,6 +5,8 @@ from typing import Any
 
 from django.utils.deprecation import MiddlewareMixin
 from django.db import connection
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import UntypedToken
 
 from apps.platform.raw_repository import get_organization_by_id, _org_schema_cache
 
@@ -33,35 +35,36 @@ def _schema_exists(schema_name: str) -> bool:
 
 
 def _extract_org_id_from_jwt(request) -> int | None:
+    """Read the tenant's organization id from a *verified* bearer token.
+
+    This runs before authentication and decides which PostgreSQL schema the
+    request's queries read from, so the signature has to be checked here.
+    Decoding the payload without verifying it let anyone craft a token with an
+    arbitrary `organization_id`, point `search_path` at another tenant's
+    schema, and then read it through any AllowAny endpoint.
+    """
     auth_header = request.META.get("HTTP_AUTHORIZATION", "")
     if not auth_header.startswith("Bearer "):
         return None
 
-    try:
-        token = auth_header.split(" ", 1)[1].strip()
-        parts = token.split(".")
-        if len(parts) != 3:
-            return None
-
-        import base64
-        import json
-
-        payload_b64 = parts[1]
-        padding = 4 - len(payload_b64) % 4
-        if padding != 4:
-            payload_b64 += "=" * padding
-        payload_bytes = base64.urlsafe_b64decode(payload_b64)
-        payload = json.loads(payload_bytes)
-
-        user_type = payload.get("user_type")
-        if user_type != "pms":
-            return None
-
-        org_id = payload.get("organization_id")
-        if org_id:
-            return int(org_id)
+    raw_token = auth_header.split(" ", 1)[1].strip()
+    if not raw_token:
         return None
-    except Exception:
+
+    try:
+        token = UntypedToken(raw_token)  # verifies signature and expiry
+    except TokenError:
+        return None
+
+    if token.get("user_type") != "pms":
+        return None
+
+    org_id = token.get("organization_id")
+    if not org_id:
+        return None
+    try:
+        return int(org_id)
+    except (TypeError, ValueError):
         return None
 
 
@@ -100,6 +103,7 @@ class TenantMiddleware(MiddlewareMixin):
 
             with connection.cursor() as cursor:
                 cursor.execute("SET search_path TO %s, public", [schema_name])
+            request._tenant_search_path_set = True
 
         except Exception:
             logger.exception("Failed to set tenant schema for org_id=%s", organization_id)
@@ -108,6 +112,10 @@ class TenantMiddleware(MiddlewareMixin):
         return None
 
     def process_response(self, request, response):
+        # Only worth a query when this request actually switched schemas —
+        # otherwise every single request paid for a redundant round trip.
+        if not getattr(request, "_tenant_search_path_set", False):
+            return response
         try:
             with connection.cursor() as cursor:
                 cursor.execute("SET search_path TO %s", [self.PUBLIC_SCHEMA])

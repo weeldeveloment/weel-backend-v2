@@ -23,8 +23,25 @@ celery -A core worker \
   &
 CELERY_PID=$!
 
+# Celery beat fires everything in core.celery.beat_schedule: story-view
+# persistence, exchange-rate refresh, booking and review reminders. Without it
+# those tasks are defined but never run.
+#
+# Only one beat process may exist across the whole deployment or every
+# scheduled task runs once per replica. Set RUN_CELERY_BEAT=0 on the extra
+# replicas (or move beat to its own service) when scaling past one.
+BEAT_PID=""
+if [ "${RUN_CELERY_BEAT:-1}" = "1" ]; then
+  celery -A core beat \
+    --loglevel="${CELERY_LOG_LEVEL:-info}" \
+    --schedule=/tmp/celerybeat-schedule \
+    &
+  BEAT_PID=$!
+fi
+
 stop_all() {
   kill "$CELERY_PID" 2>/dev/null || true
+  [ -n "$BEAT_PID" ] && kill "$BEAT_PID" 2>/dev/null || true
 }
 trap stop_all TERM INT
 

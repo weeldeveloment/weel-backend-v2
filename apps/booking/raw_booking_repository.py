@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import zlib
 from datetime import timedelta
 from typing import Any
 from uuid import uuid4
@@ -426,6 +427,26 @@ def update_booking_payment_reminder_stage(booking_id: int, stage: str) -> int:
         """,
         [stage, timezone.now(), booking_id],
     )
+
+
+def lock_property_calendar(property_kind: str, property_id: int) -> None:
+    """Serialize booking attempts for one property inside the current
+    transaction.
+
+    The availability check reads the calendar and the insert writes it, with
+    no row to `SELECT ... FOR UPDATE` for dates that are still free — so two
+    concurrent requests for the same dates could both see "available" and both
+    book. Advisory locks release automatically at COMMIT/ROLLBACK.
+
+    Mirrors `apps.b2b.repository.lock_employees_for_booking`; the namespace
+    differs so the two lock spaces cannot collide.
+    """
+    lock_namespace = 911002
+    # Kind is part of the key: apartment #5 and cottage #5 are different rows.
+    # crc32, not hash(): str hashing is salted per process, so two workers
+    # would derive different keys for the same property and never contend.
+    key = (zlib.crc32(str(property_kind).encode()) ^ int(property_id)) & 0x7FFFFFFF
+    execute("SELECT pg_advisory_xact_lock(%s, %s)", [lock_namespace, key])
 
 
 def release_calendar_for_booking(booking_row: dict[str, Any]) -> int:

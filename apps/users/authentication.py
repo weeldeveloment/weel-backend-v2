@@ -3,7 +3,7 @@ from django.utils.translation import gettext_lazy as _
 
 from rest_framework import exceptions
 from rest_framework.request import Request
-from rest_framework_simplejwt.authentication import JWTAuthentication
+from shared.jwt_authentication import DenylistCheckedJWTAuthentication
 from rest_framework_simplejwt.tokens import Token
 
 from .tokens import TokenMetadata
@@ -25,7 +25,7 @@ def _sanitize_raw_token(raw_token: bytes) -> bytes:
     return token_str.encode("utf-8")
 
 
-class ClientJWTAuthentication(JWTAuthentication):
+class ClientJWTAuthentication(DenylistCheckedJWTAuthentication):
     def authenticate(self, request: Request):
         header = self.get_header(request)
         if header is None:
@@ -69,7 +69,7 @@ class ClientJWTAuthentication(JWTAuthentication):
             )
 
 
-class PartnerJWTAuthentication(JWTAuthentication):
+class PartnerJWTAuthentication(DenylistCheckedJWTAuthentication):
     def authenticate(self, request: Request):
         header = self.get_header(request)
         if header is None:
@@ -113,7 +113,7 @@ class PartnerJWTAuthentication(JWTAuthentication):
             )
 
 
-class ClientOrPartnerJWTAuthentication(JWTAuthentication):
+class ClientOrPartnerJWTAuthentication(DenylistCheckedJWTAuthentication):
     """
     Try Client JWT first, then Partner JWT.
     Use for endpoints that accept either client or partner token.

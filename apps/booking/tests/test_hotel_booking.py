@@ -1,7 +1,22 @@
 """
 Integration tests for hotel booking endpoints and repository functions.
-Uses the existing database — inserts test data and cleans up afterward.
+
+These need the real raw-SQL schema (pms_property, pms_room, pms_booking, …),
+which no migration creates — so they only run against a live PostgreSQL
+database. They are skipped unless WEEL_INTEGRATION_DB=1 is set, because they
+INSERT and DELETE real rows: pointed at a production database they would
+destroy bookings.
+
+To run them:
+
+    WEEL_INTEGRATION_DB=1 \\
+    DJANGO_SETTINGS_MODULE=core.settings \\
+    DB_NAME=weel_test DB_HOST=127.0.0.1 \\
+    pytest apps/booking/tests/test_hotel_booking.py
+
+Point DB_NAME at a throwaway database — never at the one serving traffic.
 """
+import os
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -32,58 +47,74 @@ TODAY = date.today()
 TOMORROW = TODAY + timedelta(days=1)
 DAY_AFTER = TODAY + timedelta(days=2)
 
-# ─── DB access marker for all database tests ──────────────────────────────────
+# ─── DB access markers for all database tests ─────────────────────────────────
 
-pytestmark = pytest.mark.django_db(transaction=True)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.getenv("WEEL_INTEGRATION_DB") != "1",
+        reason=(
+            "Needs a live PostgreSQL database with the raw-SQL schema. "
+            "Set WEEL_INTEGRATION_DB=1 and point DB_NAME at a throwaway database."
+        ),
+    ),
+    pytest.mark.django_db(transaction=True),
+]
 
 
 # ─── Fixture: set up test hotel + rooms ───────────────────────────────────────
 
 @pytest.fixture(scope="module")
-def test_hotel():
-    execute(
-        """
-        INSERT INTO pms_property (organization_id, name, city, full_address, star_rating,
-            weel_classification, is_active, is_verified, created_at, updated_at)
-        VALUES (1, 'Test Hotel', 'Tashkent', 'Test Address 42', 5, 'Premium',
-            TRUE, TRUE, NOW(), NOW())
-        ON CONFLICT (id) DO NOTHING
-        """
-    )
-    row = fetch_one(
-        "SELECT id FROM pms_property WHERE name = 'Test Hotel' ORDER BY id DESC LIMIT 1"
-    )
-    return row
+def test_hotel(django_db_setup, django_db_blocker):
+    # Module-scoped fixtures run outside a test's django_db grant, so the
+    # blocker has to be lifted explicitly for their setup queries.
+    with django_db_blocker.unblock():
+        execute(
+            """
+            INSERT INTO pms_property (organization_id, name, city, full_address, star_rating,
+                weel_classification, is_active, is_verified, created_at, updated_at)
+            VALUES (1, 'Test Hotel', 'Tashkent', 'Test Address 42', 5, 'Premium',
+                TRUE, TRUE, NOW(), NOW())
+            ON CONFLICT (id) DO NOTHING
+            """
+        )
+        return fetch_one(
+            "SELECT id FROM pms_property WHERE name = 'Test Hotel' ORDER BY id DESC LIMIT 1"
+        )
 
 
 @pytest.fixture(scope="module")
-def test_room(test_hotel):
-    execute(
-        """
-        INSERT INTO pms_room (property_id, room_type_name, room_number, floor, display_name,
-            capacity, base_price, is_active, created_at, updated_at)
-        VALUES (%s, 'Test Suite', '101', 1, 'Test Suite 101',
-            2, 250000, TRUE, NOW(), NOW())
-        ON CONFLICT(id) DO NOTHING
-        """,
-        [test_hotel["id"]],
-    )
-    return fetch_one(
-        "SELECT id FROM pms_room WHERE property_id = %s AND room_number = '101' ORDER BY id DESC LIMIT 1",
-        [test_hotel["id"]],
-    )
+def test_room(test_hotel, django_db_blocker):
+    with django_db_blocker.unblock():
+        execute(
+            """
+            INSERT INTO pms_room (property_id, room_type_name, room_number, floor, display_name,
+                capacity, base_price, is_active, created_at, updated_at)
+            VALUES (%s, 'Test Suite', '101', 1, 'Test Suite 101',
+                2, 250000, TRUE, NOW(), NOW())
+            ON CONFLICT(id) DO NOTHING
+            """,
+            [test_hotel["id"]],
+        )
+        return fetch_one(
+            "SELECT id FROM pms_room WHERE property_id = %s AND room_number = '101' ORDER BY id DESC LIMIT 1",
+            [test_hotel["id"]],
+        )
 
 
 @pytest.fixture(scope="module")
-def test_client():
-    execute(
-        """
-        INSERT INTO public.users (phone_number, role, is_active, is_verified, first_name, last_name, created_at, updated_at)
-        VALUES ('+998991234567', 'client', TRUE, TRUE, 'Test', 'Client', NOW(), NOW())
-        ON CONFLICT(phone_number) DO UPDATE SET is_active = TRUE, is_verified = TRUE
-        """
-    )
-    return fetch_one("SELECT id, guid FROM public.users WHERE phone_number = '+998991234567' ORDER BY id DESC LIMIT 1")
+def test_client(django_db_setup, django_db_blocker):
+    with django_db_blocker.unblock():
+        execute(
+            """
+            INSERT INTO public.users (phone_number, role, is_active, is_verified, first_name, last_name, created_at, updated_at)
+            VALUES ('+998991234567', 'client', TRUE, TRUE, 'Test', 'Client', NOW(), NOW())
+            ON CONFLICT(phone_number) DO UPDATE SET is_active = TRUE, is_verified = TRUE
+            """
+        )
+        return fetch_one(
+            "SELECT id, guid FROM public.users WHERE phone_number = '+998991234567' ORDER BY id DESC LIMIT 1"
+        )
 
 
 # ─── Repository Tests ─────────────────────────────────────────────────────────
@@ -472,14 +503,21 @@ class TestHotelBookingDetailSerializer:
 # ─── Cleanup ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module", autouse=True)
-def cleanup_after_tests(request):
+def cleanup_after_tests(django_db_setup, django_db_blocker):
+    """Remove rows created by this module.
+
+    Scoped fixtures run outside a test's `django_db` grant, so the blocker has
+    to be unblocked explicitly — without it teardown raised "Database access
+    not allowed" and every test in the module errored.
+
+    The DELETEs are bounded to the far-future dates these tests use, and the
+    module only runs against an opt-in throwaway database (see module
+    docstring).
+    """
     yield
-    # Remove all test bookings (future dates to avoid touching real data)
-    execute(
-        "DELETE FROM pms_booking WHERE check_in >= %s",
-        [TODAY + timedelta(days=29)],
-    )
-    execute(
-        "DELETE FROM pms_calendar_slot WHERE date >= %s",
-        [TODAY + timedelta(days=29)],
-    )
+    if os.getenv("WEEL_INTEGRATION_DB") != "1":
+        return
+    horizon = TODAY + timedelta(days=29)
+    with django_db_blocker.unblock():
+        execute("DELETE FROM pms_booking WHERE check_in >= %s", [horizon])
+        execute("DELETE FROM pms_calendar_slot WHERE date >= %s", [horizon])

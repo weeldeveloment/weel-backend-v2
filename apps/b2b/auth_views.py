@@ -13,7 +13,10 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 
 from apps.b2b.repository import get_b2b_user_by_phone
-from apps.b2b.tokens import create_b2b_tokens
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+
+from apps.b2b.tokens import create_b2b_tokens, rotate_b2b_tokens
+from users.tokens import CustomRefreshToken
 from users.models.logs import SmsPurpose
 from users.services import EskizService, OTPRedisService
 from users.tasks import send_otp_sms_eskiz
@@ -209,3 +212,76 @@ class B2BLoginVerifyView(APIView):
                 "detail": _("Login successful"),
             }
         )
+
+
+class B2BRefreshSerializer(serializers.Serializer):
+    refresh = serializers.CharField()
+
+
+class B2BTokenRefreshView(APIView):
+    """POST /api/b2b/auth/token/refresh/
+
+    Login has always returned a refresh token, but there was no endpoint to
+    redeem it — so B2B sessions (dashboard included) died the moment the
+    access token expired and dumped the user back on the login screen.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_scope = "token_refresh"
+
+    @swagger_auto_schema(
+        tags=["B2B Auth"],
+        operation_summary="Exchange a B2B refresh token for a new token pair",
+        request_body=B2BRefreshSerializer,
+        responses={
+            200: openapi.Response(
+                description="New token pair",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "access": openapi.Schema(type=openapi.TYPE_STRING),
+                        "refresh": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            401: openapi.Response(description="Invalid or expired refresh token"),
+        },
+    )
+    def post(self, request):
+        serializer = B2BRefreshSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            tokens = rotate_b2b_tokens(serializer.validated_data["refresh"])
+        except (TokenError, InvalidToken):
+            return Response(
+                {"detail": _("Invalid or expired refresh token")},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        return Response({"access": tokens["access"], "refresh": tokens["refresh"]})
+
+
+class B2BLogoutView(APIView):
+    """POST /api/b2b/auth/logout/ — revoke the presented refresh token."""
+
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        tags=["B2B Auth"],
+        operation_summary="Log out and revoke the refresh token",
+        request_body=B2BRefreshSerializer,
+        responses={200: openapi.Response(description="Logged out")},
+    )
+    def post(self, request):
+        serializer = B2BRefreshSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            CustomRefreshToken(serializer.validated_data["refresh"]).blacklist()
+        except TokenError:
+            return Response(
+                {"detail": _("Invalid token")}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response({"detail": _("Successfully logged out")})

@@ -97,7 +97,17 @@ def test_create_serializer_rejects_duplicate_employee_across_rooms():
 @patch("apps.b2b.hotel_booking_service.get_hotel_for_public")
 @patch("apps.b2b.hotel_booking_service.resolve_hotel_guid")
 @patch("apps.b2b.hotel_booking_service.get_trip")
+# The company-wide budget re-check and the per-employee advisory lock were
+# added to create_booking_request after this test was written; both reach the
+# database, so they need stubbing like every other repository call here.
+@patch("apps.b2b.hotel_booking_service.lock_employees_for_booking")
+@patch(
+    "apps.b2b.hotel_booking_service.get_remaining_monthly_budget",
+    return_value=Decimal("1000000"),
+)
 def test_create_booking_builds_one_atomic_group(
+    remaining_budget,
+    lock_employees,
     get_trip,
     resolve_hotel_guid,
     get_hotel,

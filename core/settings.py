@@ -19,12 +19,16 @@ from core.middleware.utils import CompressedTimedRotatingFileHandler
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(os.path.join(BASE_DIR, "apps"))
 
+# override=False so a real environment variable always beats a .env file.
+# With override=True a stray .env inside the image silently won over the
+# values the container was actually started with — `DJANGO_DEBUG=0` in the
+# deployment env would be overridden back to 1 by a committed .env.
 _default_env_path = BASE_DIR / "ops" / "monitoring" / ".env"
 _found_env_path = find_dotenv()
 if _found_env_path:
-    load_dotenv(_found_env_path, override=True)
+    load_dotenv(_found_env_path, override=False)
 if _default_env_path.exists():
-    load_dotenv(_default_env_path, override=True)
+    load_dotenv(_default_env_path, override=False)
 
 from users.bin_lookup import load_bin_data
 
@@ -90,25 +94,34 @@ if DEBUG and not CORS_ALLOWED_ORIGINS:
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
-for _origin in (
+# Production origins are the defaults when CORS_ALLOWED_ORIGINS is not set;
+# localhost entries are added in DEBUG only, so a production deployment never
+# trusts a developer machine.
+_DEFAULT_PROD_ORIGINS = (
     "https://weel.uz",
     "https://www.weel.uz",
     "https://dev.weel.uz",
     "https://partners.weel.uz",
     "https://pms.weel.uz",
     "https://dashboard.weel.uz",
+)
+_DEFAULT_DEV_ORIGINS = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-):
+)
+for _origin in _DEFAULT_PROD_ORIGINS + (_DEFAULT_DEV_ORIGINS if DEBUG else ()):
     if _origin not in CORS_ALLOWED_ORIGINS:
         CORS_ALLOWED_ORIGINS.append(_origin)
 
+# Dev-server ports change constantly, so localhost is matched by regex — but
+# only in DEBUG. With CORS_ALLOW_CREDENTIALS=True these patterns would let any
+# page served from the user's own machine read authenticated API responses.
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^http://localhost:\d+$",
     r"^http://127\.0\.0\.1:\d+$",
-]
+] if DEBUG else []
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all origins in DEBUG mode
 if not DEBUG:
@@ -310,10 +323,17 @@ REST_FRAMEWORK = {
         "rest_framework.renderers.JSONRenderer",
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": (
+        "apps.b2b.workspace.authentication.WorkspaceJWTAuthentication",
         "apps.b2b.authentication.B2BJWTAuthentication",
         "users.authentication.PartnerJWTAuthentication",
         "users.authentication.ClientJWTAuthentication",
     ),
+    # Closed by default: a view that forgets `permission_classes` must fail
+    # shut, not silently serve anonymous traffic. Public endpoints opt in with
+    # an explicit `permission_classes = [AllowAny]`.
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
     "DEFAULT_THROTTLE_CLASSES": [
         "shared.throttles.SwaggerExemptAnonRateThrottle",
         "shared.throttles.SwaggerExemptUserRateThrottle",
@@ -342,12 +362,26 @@ REST_FRAMEWORK = {
         "b2b_lead_request": os.environ.get("API_B2B_LEAD_REQUEST_RATE", "5/hour"),
     },
     "UNAUTHENTICATED_USER": None,
+    # Number of reverse proxies in front of the app. Without this DRF trusts
+    # the first entry of a client-supplied X-Forwarded-For header, letting
+    # anyone rotate their apparent IP and bypass every anon rate limit.
+    "NUM_PROXIES": int((os.environ.get("NUM_PROXIES") or "1").strip() or "1"),
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        minutes=int((os.getenv("JWT_ACCESS_MINUTES") or "60").strip() or "60")
+    ),
+    # 30 days was a long window for a token that could not be revoked at all.
+    # Revocation now works (apps/shared/token_denylist.py), and rotation on
+    # every refresh keeps active sessions alive without the long tail.
+    "REFRESH_TOKEN_LIFETIME": timedelta(
+        days=int((os.getenv("JWT_REFRESH_DAYS") or "7").strip() or "7")
+    ),
     "ROTATE_REFRESH_TOKENS": True,
+    # Rotation revokes the old token through our own cache denylist, so
+    # simplejwt's DB-backed blacklist (which needs migrations we don't run)
+    # stays off.
     "BLACKLIST_AFTER_ROTATION": False,
     "UPDATE_LAST_LOGIN": False,
     "ALGORITHM": "HS256",
@@ -468,8 +502,6 @@ STORAGES = {
 }
 
 WHITENOISE_USE_FINDERS = True
-
-WHITENOISE_USE_FINDERS = True
 WHITENOISE_MANIFEST_STRICT = False
 
 STATICFILES_FINDERS = [
@@ -523,7 +555,11 @@ if USE_MINIO and HAS_DJANGO_STORAGES:
     )
     AWS_S3_REGION_NAME = os.getenv("MINIO_REGION", "us-east-1")
     AWS_S3_ADDRESSING_STYLE = os.getenv("MINIO_ADDRESSING_STYLE", "path")
-    AWS_QUERYSTRING_AUTH = env_bool("MINIO_QUERYSTRING_AUTH", default=False)
+    # Signed URLs by default: media holds passport scans and other identity
+    # documents, so an unsigned public object URL is a data leak waiting for
+    # someone to guess or share a link. Set MINIO_QUERYSTRING_AUTH=0 only for
+    # buckets that hold nothing private.
+    AWS_QUERYSTRING_AUTH = env_bool("MINIO_QUERYSTRING_AUTH", default=True)
     AWS_QUERYSTRING_EXPIRE = int(os.getenv("MINIO_QUERYSTRING_EXPIRE", "3600"))
     AWS_DEFAULT_ACL = None
     AWS_S3_FILE_OVERWRITE = False
@@ -575,8 +611,10 @@ MINIO_STORAGE_MEDIA_URL = f"{_minio_proto}://{MINIO_STORAGE_ENDPOINT}/{MINIO_STO
 # DEFAULT_FILE_STORAGE is deprecated in Django 4.2+
 
 
-# Django limits high enough to accept uploads
-FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
+# Uploads above FILE_UPLOAD_MAX_MEMORY_SIZE are streamed to a temp file
+# instead of being buffered in RAM. Keeping it at 100MB meant a handful of
+# concurrent uploads could exhaust the container's memory.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024  # 5MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 150 * 1024 * 1024  # 150MB
 
 PHOTO_SIZE_TO_COMPRESS = 5 * 1024 * 1024  # 5MB
@@ -645,31 +683,55 @@ WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL") or "https://dev.weel.uz"
 FRONTEND_LOG_TOKEN = (os.getenv("FRONTEND_LOG_TOKEN") or "").strip()
 
 # Firebase
+#
+# Credentials come from the environment, not from a file in the repo. The
+# service-account key used to live at certificates/certificate.json and was
+# committed to git — treat that key as compromised and rotate it.
+#
+# Provide exactly one of:
+#   FIREBASE_CREDENTIALS_JSON        — the service-account JSON itself
+#   GOOGLE_APPLICATION_CREDENTIALS   — path to a JSON file mounted at runtime
+#
+# The local certificates/ path is still honoured for development only.
 FIREBASE_APP = None
 FIREBASE_CREDENTIALS_PATH = BASE_DIR / "certificates" / "certificate.json"
+_firebase_credentials_json = (os.getenv("FIREBASE_CREDENTIALS_JSON") or "").strip()
+_firebase_credentials_file = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
 
-if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(FIREBASE_CREDENTIALS_PATH)
+if not _firebase_credentials_file and FIREBASE_CREDENTIALS_PATH.exists():
+    _firebase_credentials_file = str(FIREBASE_CREDENTIALS_PATH)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _firebase_credentials_file
+
+
+def _firebase_credential():
+    if _firebase_credentials_json:
+        import json as _json
+
+        return credentials.Certificate(_json.loads(_firebase_credentials_json))
+    if _firebase_credentials_file and os.path.exists(_firebase_credentials_file):
+        return credentials.Certificate(_firebase_credentials_file)
+    return None
+
 
 try:
     FIREBASE_APP = get_app()
 except ValueError:
-    if FIREBASE_CREDENTIALS_PATH.exists():
-        try:
-            FIREBASE_APP = initialize_app(
-                credentials.Certificate(str(FIREBASE_CREDENTIALS_PATH))
-            )
-        except Exception as firebase_error:
-            logging.exception(
-                "Failed to initialize Firebase app from %s: %s",
-                FIREBASE_CREDENTIALS_PATH,
-                firebase_error,
-            )
-    else:
+    _credential = None
+    try:
+        _credential = _firebase_credential()
+    except Exception:
+        logging.exception("Firebase credentials are present but could not be parsed")
+
+    if _credential is None:
         logging.warning(
-            "Firebase credentials file not found at %s. Firebase features are disabled.",
-            FIREBASE_CREDENTIALS_PATH,
+            "No Firebase credentials configured (set FIREBASE_CREDENTIALS_JSON or "
+            "GOOGLE_APPLICATION_CREDENTIALS). Push notifications are disabled."
         )
+    else:
+        try:
+            FIREBASE_APP = initialize_app(_credential)
+        except Exception:
+            logging.exception("Failed to initialize the Firebase app")
 
 # Security settings
 if DEBUG:
@@ -695,6 +757,13 @@ else:
     USE_X_FORWARDED_HOST = True
     SESSION_COOKIE_SECURE = True
     SECURE_HSTS_PRELOAD = True
+    # Off by default because the reverse proxy in front of the app normally
+    # does the HTTP→HTTPS redirect. Turn it on (SECURE_SSL_REDIRECT=1) when
+    # the app is exposed directly — but only where the proxy is trusted to
+    # set X-Forwarded-Proto, otherwise this loops.
+    SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=False)
+    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+    X_FRAME_OPTIONS = "DENY"
 
 # Logging
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
@@ -705,12 +774,17 @@ REQUEST_LOGGING_DATA_LOG_LEVEL = logging.INFO
 REQUEST_LOGGING_ENABLE_COLORIZE = False  # disable colors for JSON
 REQUEST_LOGGING_HTTP_4XX_LOG_LEVEL = logging.WARNING
 REQUEST_LOGGING_HTTP_5XX_LOG_LEVEL = logging.ERROR
-REQUEST_LOGGING_MAX_BODY_LENGTH = 50000  # log request/response body up to 50 MB
+# Request/response bodies carry OTP codes, refresh tokens, card ids and
+# passport data. Logging them shipped all of that to app.log (kept 14 days)
+# and to Loki. Bodies are off in production; in DEBUG a short prefix is kept
+# because it is genuinely useful when developing locally.
+REQUEST_LOGGING_MAX_BODY_LENGTH = 2000 if DEBUG else 0
 REQUEST_LOGGING_SENSITIVE_HEADERS = [
     "Authorization",
     "Cookie",
     "X-Csrftoken",
     "X-Telegram-InitData",
+    "X-Frontend-Log-Token",
 ]
 
 LOGGING = {

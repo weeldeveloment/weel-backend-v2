@@ -15,8 +15,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 
+from shared import token_denylist
 from apps.platform.authentication import PmsJWTAuthentication
 from apps.platform.raw_repository import (
     create_organization,
@@ -589,11 +591,15 @@ class PmsMeView(APIView):
 
             refresh_token = request.data.get("refresh")
             if refresh_token:
+                from users.tokens import CustomRefreshToken
+
                 try:
-                    token = RefreshToken(refresh_token)
-                    token.blacklist()
-                except Exception:
-                    pass
+                    CustomRefreshToken(refresh_token).blacklist()
+                except TokenError:
+                    logger.warning(
+                        "Could not revoke refresh token while deleting PMS user %s",
+                        user_id,
+                    )
 
         for org in orgs:
             drop_tenant_schema(org["schema_name"])
@@ -868,8 +874,11 @@ class PmsTokenRefreshView(APIView):
             return Response({"detail": "Refresh token is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            from rest_framework_simplejwt.tokens import RefreshToken as RT
+            from users.tokens import CustomRefreshToken as RT
             token = RT(refresh_token)
+            # Rotation revokes the presented token below, so a replayed one
+            # must not mint a fresh pair.
+            token_denylist.assert_not_revoked(token.payload)
             user_type = token.get("user_type")
             if user_type != PLATFORM_USER_TYPE:
                 return Response({"detail": "Invalid token type."}, status=status.HTTP_401_UNAUTHORIZED)
@@ -892,10 +901,7 @@ class PmsTokenRefreshView(APIView):
 
             new_tokens = _create_pms_tokens(user, organization_id=int(organization_id))
 
-            try:
-                token.blacklist()
-            except Exception:
-                pass
+            token.blacklist()
 
             return Response(new_tokens)
         except Exception:

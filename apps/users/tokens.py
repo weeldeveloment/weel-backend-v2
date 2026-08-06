@@ -7,14 +7,20 @@ from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, UntypedTo
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 from shared.raw.entities import RawUser
+from shared import token_denylist
 
 
 class CustomRefreshToken(RefreshToken):
+    """Refresh token whose revocation is tracked in the cache denylist.
+
+    ``simplejwt``'s own ``blacklist()`` needs the token_blacklist app and its
+    migrations, which this project does not run — see
+    ``apps/shared/token_denylist.py``.
+    """
+
     def blacklist(self):
-        try:
-            super().blacklist()
-        except Exception:
-            pass
+        if not token_denylist.revoke(self):
+            raise TokenError("Token cannot be revoked: missing jti claim")
 
 
 class TokenMetadata:
@@ -124,6 +130,10 @@ def create_pms_tokens(user: RawUser, request: Request):
 def rotate_tokens(refresh_token: str) -> dict:
     try:
         token = CustomRefreshToken(token=refresh_token)
+
+        # A refresh token is single-use: rotating it revokes it (below), so a
+        # replayed one must be rejected instead of minting a fresh pair.
+        token_denylist.assert_not_revoked(token.payload)
 
         new_refresh = CustomRefreshToken()
         new_access = AccessToken()

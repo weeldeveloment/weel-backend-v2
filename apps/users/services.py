@@ -2,6 +2,7 @@ import re
 import os
 import json
 import random
+import secrets
 import logging
 import time
 import urllib.parse
@@ -311,14 +312,27 @@ class OTPRedisService:
     # gives comfortable headroom above the worst observed delay (~5m50s).
     OTP_EXPIRE = 600
     MAX_ATTEMPTS = 3
-    OTP_LENGTH = 4
+    # 4 digits is only 10k combinations. Raising it means changing the OTP
+    # inputs in all three frontends and the mobile app at the same time, so
+    # the length stays configurable and the brute-force surface is closed by
+    # the per-phone lockout below instead.
+    OTP_LENGTH = int((os.getenv("OTP_LENGTH") or "4").strip() or "4")
     RESEND_COOLDOWN = 30
     REGISTRATION_DATA_EXPIRE = 600
     TEST_BYPASS_OTP = "0000"
 
+    # Failed guesses counted across resends. Without this a caller got a fresh
+    # set of MAX_ATTEMPTS every 30 seconds, which is enough to walk the whole
+    # 4-digit keyspace in about a day.
+    LOCKOUT_MAX_FAILURES = 10
+    LOCKOUT_WINDOW = 3600
+    LOCKOUT_DURATION = 3600
+
     @classmethod
     def generate_otp(cls):
-        return "".join([str(random.randint(0, 9)) for _ in range(cls.OTP_LENGTH)])
+        # secrets, not random: the module-level Mersenne Twister is
+        # predictable from a handful of observed outputs.
+        return "".join([str(secrets.randbelow(10)) for _ in range(cls.OTP_LENGTH)])
 
     @staticmethod
     def get_otp_key(phone_number: str, purpose: SmsPurpose):
@@ -457,12 +471,39 @@ class OTPRedisService:
         }
         return cls._normalize_phone(phone_number) in test_phones
 
+    @staticmethod
+    def get_lockout_key(phone_number: str, purpose: SmsPurpose):
+        return f"otp_lockout:{purpose.value}:{phone_number}"
+
+    @staticmethod
+    def get_failure_key(phone_number: str, purpose: SmsPurpose):
+        return f"otp_failures:{purpose.value}:{phone_number}"
+
+    @staticmethod
+    def _increment(key: str, ttl: int) -> int:
+        """Atomically bump a counter, creating it on first use.
+
+        ``cache.get`` + ``cache.set`` is a read-modify-write: two parallel
+        verify requests both read the same value and the limit never trips.
+        ``add``/``incr`` are atomic on both the Redis and LocMem backends.
+        """
+        cache.add(key, 0, ttl)
+        try:
+            return cache.incr(key)
+        except ValueError:
+            # Key expired between add() and incr().
+            cache.set(key, 1, ttl)
+            return 1
+
     @classmethod
     def verify_otp(cls, phone_number: str, otp_code: str, purpose: SmsPurpose):
         if cls.is_test_phone_for_purpose(phone_number, purpose):
             if otp_code == cls.TEST_BYPASS_OTP:
                 return True, _("OTP verified successfully")
             return False, _("Invalid OTP")
+
+        if cache.get(cls.get_lockout_key(phone_number, purpose)):
+            return False, _("Too many failed attempts. Please try again later.")
 
         otp_key = cls.get_otp_key(phone_number, purpose)
         attempts_key = cls.get_attempts_key(phone_number, purpose)
@@ -473,16 +514,33 @@ class OTPRedisService:
 
         otp_data = json.loads(otp_data_str)
 
-        attempts = cache.get(attempts_key, 0)
-        if attempts >= cls.MAX_ATTEMPTS:
+        attempts = cls._increment(attempts_key, cls.OTP_EXPIRE)
+        if attempts > cls.MAX_ATTEMPTS:
             cls.invalidate_otp(phone_number, purpose)
             return False, _("Too many attempts. Please resend OTP.")
 
-        if otp_data["otp_code"] == otp_code:
+        # Constant-time compare so response timing cannot leak a prefix match.
+        if secrets.compare_digest(str(otp_data["otp_code"]), str(otp_code)):
             cls.invalidate_otp(phone_number, purpose)
+            cache.delete(cls.get_failure_key(phone_number, purpose))
             return True, _("OTP verified successfully")
 
-        cache.set(attempts_key, attempts + 1, cls.OTP_EXPIRE)
+        failures = cls._increment(
+            cls.get_failure_key(phone_number, purpose), cls.LOCKOUT_WINDOW
+        )
+        if failures >= cls.LOCKOUT_MAX_FAILURES:
+            cache.set(
+                cls.get_lockout_key(phone_number, purpose), 1, cls.LOCKOUT_DURATION
+            )
+            cls.invalidate_otp(phone_number, purpose)
+            logger.warning(
+                "OTP lockout triggered for %s (purpose=%s) after %s failures",
+                phone_number,
+                purpose.value,
+                failures,
+            )
+            return False, _("Too many failed attempts. Please try again later.")
+
         return False, _("Invalid OTP")
 
     @staticmethod

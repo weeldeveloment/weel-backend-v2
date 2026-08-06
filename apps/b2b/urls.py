@@ -1,5 +1,10 @@
-from django.urls import path
-from apps.b2b.auth_views import B2BLoginSendOTPView, B2BLoginVerifyView
+from django.urls import include, path
+from apps.b2b.auth_views import (
+    B2BLoginSendOTPView,
+    B2BLoginVerifyView,
+    B2BLogoutView,
+    B2BTokenRefreshView,
+)
 from apps.b2b.views import (
     ActiveTripEmployeesView,
     B2BCompanyView,
@@ -46,8 +51,13 @@ from apps.b2b.views import (
 )
 
 urlpatterns = [
+    # The mobile app for a company's own staff — separate identity (employee,
+    # not dashboard user) and its own role rules, so it gets its own namespace.
+    path("workspace/", include("apps.b2b.workspace.urls")),
     path("auth/login/", B2BLoginSendOTPView.as_view(), name="b2b-login"),
     path("auth/login/verify/", B2BLoginVerifyView.as_view(), name="b2b-login-verify"),
+    path("auth/token/refresh/", B2BTokenRefreshView.as_view(), name="b2b-token-refresh"),
+    path("auth/logout/", B2BLogoutView.as_view(), name="b2b-logout"),
     path("lead-requests/", B2BLeadRequestCreateView.as_view(), name="b2b-lead-requests"),
     path("company/", B2BCompanyView.as_view(), name="b2b-company"),
     path("hotels/search/", B2BHotelSearchView.as_view(), name="b2b-hotel-search"),

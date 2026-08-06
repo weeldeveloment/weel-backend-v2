@@ -130,3 +130,10 @@ GEMINI.md
 AGENTS.md
 .mcp.json
 graphify-out/
+
+# Credentials — Firebase service account, Apple APNs key.
+# These were committed once; the keys they contained must be treated as
+# compromised and rotated. Never add them back.
+certificates/
+*.p8
+dump.rdb
