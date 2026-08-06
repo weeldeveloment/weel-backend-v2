@@ -72,8 +72,8 @@ def _send_b2b_lead_telegram_notification(lead_id, full_name, company_name, email
     text = (
         f"🆕 <b>Yangi hamkorlik so'rovi</b>\n\n"
         f"👤 Ism: {full_name}\n"
-        f"🏢 Kompaniya: {company_name}\n"
-        f"📧 Email: {email}\n"
+        f"🏢 Kompaniya: {company_name or '—'}\n"
+        f"📧 Email: {email or '—'}\n"
         f"📞 Tel: {phone_number}"
     )
     service = TelegramService(token=token)

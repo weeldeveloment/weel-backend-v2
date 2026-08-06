@@ -324,8 +324,12 @@ class B2BLeadRequestSerializer(serializers.Serializer):
     business owner (not yet a B2B client)."""
     id = serializers.IntegerField(read_only=True)
     full_name = serializers.CharField(max_length=200)
-    company_name = serializers.CharField(max_length=200)
-    email = serializers.EmailField()
+    # The landing page form only requires name + phone (see Footer.tsx's
+    # submit gating) and happily sends "" for these two — requiring them
+    # here made every such submission fail with a 400 the user just saw as
+    # "something went wrong", with no indication why.
+    company_name = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    email = serializers.EmailField(required=False, allow_blank=True, default="")
     phone_number = serializers.CharField(max_length=20)
     created_at = serializers.DateTimeField(read_only=True)
 
