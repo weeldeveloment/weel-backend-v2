@@ -39,6 +39,7 @@ from apps.platform.raw_repository import (
 from apps.platform.serializers import (
     AddMemberSerializer,
     AuthenticatedOrgCreateSerializer,
+    OrganizationCreateResponseSerializer,
     OrganizationCreateSerializer,
     OrganizationMemberSerializer,
     OrganizationSerializer,
@@ -691,7 +692,7 @@ class PmsOrganizationView(APIView):
 
     @swagger_auto_schema(
         request_body=AuthenticatedOrgCreateSerializer,
-        responses={201: OrganizationSerializer()},
+        responses={201: OrganizationCreateResponseSerializer()},
     )
     def post(self, request):
         serializer = AuthenticatedOrgCreateSerializer(data=request.data)
@@ -737,11 +738,7 @@ class PmsOrganizationView(APIView):
         tokens = _create_pms_tokens(user_dict, organization_id=org["id"])
 
         return Response({
-            "id": org["id"],
-            "name": org["name"],
-            "slug": org["slug"],
-            "schema_name": org["schema_name"],
-            "is_active": org["is_active"],
+            **OrganizationSerializer(org).data,
             "access": tokens["access"],
             "refresh": tokens["refresh"],
         }, status=status.HTTP_201_CREATED)

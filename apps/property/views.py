@@ -1583,6 +1583,13 @@ class PropertyServiceListView(APIView):
                 default="uz",
                 description="Preferred language for localized titles. Defaults to Uzbek.",
             ),
+            openapi.Parameter(
+                "property_type",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description="Restrict the list to services that apply to this property type (e.g. hotel, room).",
+            ),
         ],
         responses={
             200: PropertyServiceListSerializer(many=True),
@@ -3461,7 +3468,9 @@ class AdminHotelImageDeleteView(APIView):
                 description="Image URL or stored path of the image to delete.",
             ),
         ],
-        responses={204: None},
+        # `None` renders as an empty responses object, which is invalid
+        # OpenAPI and fails client generation.
+        responses={204: "Deleted"},
     )
     def delete(self, request, property_id, image_id, *args, **kwargs):
         hotel_row = get_admin_hotel(str(property_id))
@@ -4532,7 +4541,7 @@ class AdminHotelPatchView(APIView):
         tags=["Admin / Property"],
         operation_summary="Delete hotel (admin)",
         operation_description="Admin-only soft delete for hotel records in PMS tenant schemas.",
-        responses={204: None},
+        responses={204: "Deleted"},
     )
     def delete(self, request, hotel_id, *args, **kwargs):
         deleted = delete_admin_hotel(hotel_guid=str(hotel_id))

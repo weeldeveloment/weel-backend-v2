@@ -99,10 +99,11 @@ class HotelDetailView(APIView):
     authentication_classes = [OptionalClientOrPartnerJWTAuthentication]
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(
-        manual_parameters=[_GUID_PARAM],
-        responses={200: HotelDetailSerializer()},
-    )
+    # No manual_parameters here: this view is mounted twice, as /hotels/<guid>/
+    # and as /property/hotels/<hotel_guid>/. A hardcoded "guid" parameter is
+    # wrong for the second route and makes the emitted schema invalid, so let
+    # drf_yasg read the name off each URL pattern.
+    @swagger_auto_schema(responses={200: HotelDetailSerializer()})
     def get(self, request, guid=None, hotel_guid=None):
         resolved = _resolve_hotel(hotel_guid or guid)
         if not resolved:

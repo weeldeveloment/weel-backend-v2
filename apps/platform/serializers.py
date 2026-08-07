@@ -22,6 +22,18 @@ class AuthenticatedOrgCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=200)
 
 
+class OrganizationCreateResponseSerializer(OrganizationSerializer):
+    """Creating an organization also re-issues tokens scoped to it.
+
+    The endpoint used to be documented as returning a plain OrganizationSerializer,
+    which hid the tokens the client must store and promised timestamps the
+    response did not carry.
+    """
+
+    access = serializers.CharField(read_only=True)
+    refresh = serializers.CharField(read_only=True)
+
+
 class OrganizationUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=200, required=False, allow_blank=True)
     slug = serializers.CharField(max_length=100, required=False, allow_blank=True)
