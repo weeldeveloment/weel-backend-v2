@@ -31,8 +31,14 @@ class DisableMigrations(dict):
 
 MIGRATION_MODULES = DisableMigrations()
 
-# Ensure Celery in tests never tries Redis/network.
-os.environ["REDIS_CONNECTION_STRING"] = ""
+# Ensure Celery in tests never tries Redis/network. Eager mode is what
+# guarantees that — tasks run inline and the broker is never contacted.
+#
+# The URL has to be present and syntactically valid even so: core/celery.py
+# refuses to import without one. Blanking it only worked on machines with a
+# .env to fall back on; on a bare checkout (a CI runner, a fresh clone) every
+# test module that reaches a Celery task died during collection.
+os.environ["REDIS_CONNECTION_STRING"] = "redis://localhost:6379/0"
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
 

@@ -33,6 +33,13 @@ jobs:
       # integration tests that need a live PostgreSQL schema skip themselves
       # unless WEEL_INTEGRATION_DB=1.
       - name: Run tests
+        # core.test_settings imports core.settings, which refuses to start
+        # without a secret key and allowed hosts unless DEBUG is on. There is
+        # no .env on a runner, so the settings have to come from here.
+        env:
+          SECRET_KEY: ci-only-not-a-real-secret
+          DJANGO_ALLOWED_HOSTS: example.com
+          REDIS_CONNECTION_STRING: redis://localhost:6379/0
         run: poetry run pytest -q
 
       - name: Django deployment checks
