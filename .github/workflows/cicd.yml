@@ -100,6 +100,43 @@ jobs:
             echo "::warning::FRONTEND_REPOS_TOKEN yo'q — frontend typecheck o'tkazib yuborildi."
           fi
 
+      # actions/checkout huquq yetmasa shunchaki "Not Found" deydi va sababini
+      # aytmaydi. Bu qadam har bir repoga alohida urinib, aniq xabar beradi.
+      - name: Tokenning frontend repolarga huquqini tekshirish
+        if: steps.token.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+        run: |
+          missing=""
+          for repo in dashboard_weel_uz weel-admin weel-b2b; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/weeldeveloment/$repo")
+            if [ "$code" = "200" ]; then
+              echo "✅ $repo — o'qish mumkin"
+            else
+              echo "❌ $repo — HTTP $code"
+              missing="$missing $repo"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            cat <<EOF
+          ::error::FRONTEND_REPOS_TOKEN bu repolarni ko'ra olmayapti:$missing
+
+          Eng ko'p uchraydigan uchta sabab:
+            1. Fine-grained token tashkilot tasdig'ini kutmoqda.
+               Org Settings -> Third-party Access -> Personal access tokens
+               -> Pending requests dan tasdiqlang.
+            2. Token yaratilganda "Resource owner" sifatida shaxsiy hisob
+               tanlangan. U 'weeldeveloment' bo'lishi kerak.
+            3. "Repository access" da bu repolar belgilanmagan, yoki
+               "Contents: Read-only" huquqi berilmagan.
+          EOF
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
         if: steps.token.outputs.available == 'true'
         with:
