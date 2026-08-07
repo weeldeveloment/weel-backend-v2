@@ -32,8 +32,20 @@ EXEMPT_PATHS = {
 # from cache for the next ~60s, and the client kept waiting long after the
 # job had finished (measured: OCR done in 8.8s, answer delivered 61s later).
 # Path prefixes, because the job id is part of the URL.
+#
+# The B2B mobile workspace has the same problem for a different reason: the
+# version key that invalidates a cached GET is keyed by *access token*, so a
+# write only clears the cache of the person who made it. A manager creating a
+# task, or a colleague sending a chat message, leaves every other phone in the
+# company serving a stale list for up to a minute — which on a device that
+# refreshes by pull-down reads as a frozen app. Hotels and the roster stay
+# cached: they are the expensive queries and they barely change.
 EXEMPT_PATH_PREFIXES = (
     "/api/b2b/employees/passport-preview/",
+    "/api/b2b/workspace/me/",
+    "/api/b2b/workspace/tasks/",
+    "/api/b2b/workspace/events/",
+    "/api/b2b/workspace/chats/",
 )
 
 AUTH_HEADER_PREFIX = "Bearer "

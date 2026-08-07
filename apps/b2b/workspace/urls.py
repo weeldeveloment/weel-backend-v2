@@ -1,0 +1,52 @@
+from django.urls import path
+
+from apps.b2b.workspace.views import (
+    WorkspaceEventDetailView,
+    WorkspaceEventListCreateView,
+    WorkspaceHotelListView,
+    WorkspaceLoginVerifyView,
+    WorkspaceLoginView,
+    WorkspaceLogoutView,
+    WorkspaceMeView,
+    WorkspaceMessageView,
+    WorkspaceSubtaskToggleView,
+    WorkspaceTaskCommentView,
+    WorkspaceTaskDetailView,
+    WorkspaceTaskListCreateView,
+    WorkspaceTaskStatusView,
+    WorkspaceTeamView,
+    WorkspaceThreadFlagsView,
+    WorkspaceThreadListCreateView,
+    WorkspaceThreadReadView,
+    WorkspaceTokenRefreshView,
+)
+
+urlpatterns = [
+    path("auth/login/", WorkspaceLoginView.as_view(), name="ws-login"),
+    path("auth/login/verify/", WorkspaceLoginVerifyView.as_view(), name="ws-login-verify"),
+    path("auth/token/refresh/", WorkspaceTokenRefreshView.as_view(), name="ws-token-refresh"),
+    path("auth/logout/", WorkspaceLogoutView.as_view(), name="ws-logout"),
+
+    path("me/", WorkspaceMeView.as_view(), name="ws-me"),
+    path("team/", WorkspaceTeamView.as_view(), name="ws-team"),
+
+    path("tasks/", WorkspaceTaskListCreateView.as_view(), name="ws-tasks"),
+    path("tasks/<int:task_id>/", WorkspaceTaskDetailView.as_view(), name="ws-task-detail"),
+    path("tasks/<int:task_id>/status/", WorkspaceTaskStatusView.as_view(), name="ws-task-status"),
+    path("tasks/<int:task_id>/comments/", WorkspaceTaskCommentView.as_view(), name="ws-task-comments"),
+    path(
+        "tasks/<int:task_id>/subtasks/<int:subtask_id>/toggle/",
+        WorkspaceSubtaskToggleView.as_view(),
+        name="ws-subtask-toggle",
+    ),
+
+    path("events/", WorkspaceEventListCreateView.as_view(), name="ws-events"),
+    path("events/<int:event_id>/", WorkspaceEventDetailView.as_view(), name="ws-event-detail"),
+
+    path("chats/", WorkspaceThreadListCreateView.as_view(), name="ws-chats"),
+    path("chats/<int:thread_id>/messages/", WorkspaceMessageView.as_view(), name="ws-chat-messages"),
+    path("chats/<int:thread_id>/read/", WorkspaceThreadReadView.as_view(), name="ws-chat-read"),
+    path("chats/<int:thread_id>/flags/", WorkspaceThreadFlagsView.as_view(), name="ws-chat-flags"),
+
+    path("hotels/", WorkspaceHotelListView.as_view(), name="ws-hotels"),
+]

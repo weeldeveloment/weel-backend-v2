@@ -306,4 +306,169 @@ class Command(BaseCommand):
             """)
             self.stdout.write("  Created b2b_lead_request")
 
+            self._create_workspace_tables(cursor)
+
         self.stdout.write(self.style.SUCCESS("B2B tables created successfully."))
+
+    def _create_workspace_tables(self, cursor):
+        """Tables behind the B2B mobile workspace (`/api/b2b/workspace/`).
+
+        Everything here is scoped to a company and authored by a
+        ``b2b_employee`` — the mobile app's identity is always an employee row,
+        including for the owner (see ``ensure_workspace_employee``)."""
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_task (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                title VARCHAR(300) NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                status VARCHAR(20) NOT NULL DEFAULT 'todo',
+                priority VARCHAR(20) NOT NULL DEFAULT 'medium',
+                project VARCHAR(200),
+                due_date TIMESTAMPTZ,
+                author_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # The list screen always filters by company and sorts by deadline.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_task_company_due_idx "
+            "ON b2b_task (company_id, due_date);"
+        )
+        self.stdout.write("  Created b2b_task")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_task_assignee (
+                id BIGSERIAL PRIMARY KEY,
+                task_id BIGINT NOT NULL REFERENCES b2b_task(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (task_id, employee_id)
+            );
+        """)
+        # "Which tasks am I on?" is the employee role's entire task list.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_task_assignee_employee_idx "
+            "ON b2b_task_assignee (employee_id);"
+        )
+        self.stdout.write("  Created b2b_task_assignee")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_task_subtask (
+                id BIGSERIAL PRIMARY KEY,
+                task_id BIGINT NOT NULL REFERENCES b2b_task(id) ON DELETE CASCADE,
+                title VARCHAR(300) NOT NULL,
+                is_done BOOLEAN NOT NULL DEFAULT FALSE,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_task_subtask_task_idx "
+            "ON b2b_task_subtask (task_id, position);"
+        )
+        self.stdout.write("  Created b2b_task_subtask")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_task_comment (
+                id BIGSERIAL PRIMARY KEY,
+                task_id BIGINT NOT NULL REFERENCES b2b_task(id) ON DELETE CASCADE,
+                author_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                text TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_task_comment_task_idx "
+            "ON b2b_task_comment (task_id, created_at);"
+        )
+        self.stdout.write("  Created b2b_task_comment")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_calendar_event (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                title VARCHAR(300) NOT NULL,
+                event_type VARCHAR(20) NOT NULL DEFAULT 'meeting',
+                starts_at TIMESTAMPTZ NOT NULL,
+                ends_at TIMESTAMPTZ NOT NULL,
+                all_day BOOLEAN NOT NULL DEFAULT FALSE,
+                location VARCHAR(300),
+                notes TEXT,
+                author_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # The calendar always loads one month window at a time.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_calendar_event_company_start_idx "
+            "ON b2b_calendar_event (company_id, starts_at);"
+        )
+        self.stdout.write("  Created b2b_calendar_event")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_calendar_participant (
+                id BIGSERIAL PRIMARY KEY,
+                event_id BIGINT NOT NULL REFERENCES b2b_calendar_event(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (event_id, employee_id)
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_calendar_participant_employee_idx "
+            "ON b2b_calendar_participant (employee_id);"
+        )
+        self.stdout.write("  Created b2b_calendar_participant")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_chat_thread (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                group_name VARCHAR(200),
+                created_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                last_message_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        self.stdout.write("  Created b2b_chat_thread")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_chat_member (
+                id BIGSERIAL PRIMARY KEY,
+                thread_id BIGINT NOT NULL REFERENCES b2b_chat_thread(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+                is_muted BOOLEAN NOT NULL DEFAULT FALSE,
+                last_read_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (thread_id, employee_id)
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_chat_member_employee_idx "
+            "ON b2b_chat_member (employee_id);"
+        )
+        self.stdout.write("  Created b2b_chat_member")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_chat_message (
+                id BIGSERIAL PRIMARY KEY,
+                thread_id BIGINT NOT NULL REFERENCES b2b_chat_thread(id) ON DELETE CASCADE,
+                sender_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                text TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # Room history pages backwards from the newest message.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_chat_message_thread_idx "
+            "ON b2b_chat_message (thread_id, id DESC);"
+        )
+        self.stdout.write("  Created b2b_chat_message")
