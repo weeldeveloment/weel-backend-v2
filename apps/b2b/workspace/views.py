@@ -48,6 +48,7 @@ from apps.b2b.workspace.serializers import (
 )
 from apps.b2b.workspace.tokens import create_workspace_tokens, rotate_workspace_tokens
 from apps.hotels.repository import search_hotels
+from apps.hotels.serializers import HotelCardSerializer
 from users.models.logs import SmsPurpose
 from users.services import EskizService, OTPRedisService
 from users.tasks import send_otp_sms_eskiz
@@ -956,7 +957,14 @@ class WorkspaceHotelListView(APIView):
         city = (request.query_params.get("city") or "").strip() or None
         search = (request.query_params.get("search") or "").strip().lower()
 
-        hotels = search_hotels(city=city, sort_by="weel_recommended", limit=limit, offset=offset)
+        rows = search_hotels(city=city, sort_by="weel_recommended", limit=limit, offset=offset)
+
+        # Project from the serialized card, never from the raw row. The raw row
+        # calls the name `name`, the images `photos`, and carries a description
+        # per language — reading `title`, `img` and `description` off it, as
+        # this view used to, produced a list where every hotel was nameless and
+        # imageless, and where searching by name matched nothing.
+        hotels = HotelCardSerializer(rows, many=True, context={"request": request}).data
 
         if search:
             hotels = [
