@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Push'dan oldin API kontraktini tekshiradi: frontendlarni buzadigan
+# o'zgarish bo'lsa push'ni to'xtatadi.
+#
+# O'rnatish:  bash tools/hooks/install.sh
+# Chetlab o'tish (bilib turib):  git push --no-verify
+set -uo pipefail
+
+REPO="$(git rev-parse --show-toplevel)"
+
+# Sxema eksporti Django'ni yuklaydi — venv bo'lmasa tekshirib o'tirmaymiz.
+if [ ! -x "$REPO/venv/bin/python" ]; then
+  echo "⏭  pre-push: venv topilmadi, API kontrakti tekshirilmadi."
+  exit 0
+fi
+
+echo "▶ API kontrakti tekshirilmoqda..."
+if python3 "$REPO/tools/api_contract_check.py"; then
+  exit 0
+fi
+
+cat <<'EOF'
+
+🚫 Push to'xtatildi: yuqoridagi o'zgarishlar frontendlarni buzadi.
+
+Nima qilish kerak:
+  1. Backendni orqaga moslashadigan qilib tuzating (maydonni o'chirmang,
+     eskisini `deprecated` qilib qoldiring), YOKI
+  2. Tegishli frontendni ham yangilang va birga deploy qiling.
+
+O'zgarish ataylab qilingan bo'lsa:  git push --no-verify
+EOF
+exit 1

@@ -3,6 +3,9 @@ name: CI/CD to Dokploy (zero downtime)
 on:
   push:
     branches: [main]
+  # PR'da ham ishlaydi, lekin faqat tekshiruv qismi: build/deploy joblari
+  # `if: github.event_name != 'pull_request'` bilan cheklangan.
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -50,8 +53,97 @@ jobs:
           REDIS_CONNECTION_STRING: redis://localhost:6379/0
         run: poetry run python manage.py check --deploy --fail-level ERROR
 
+  # Backend o'zgarishi frontendlarni buzmasligini tekshiradi. Ikki bosqich:
+  #   1. Kontrakt farqi — tez, baseline bilan solishtiradi (frontend repolarsiz).
+  #   2. Har bir frontendda tiplarni backenddan qayta generatsiya qilib typecheck.
+  # 2-bosqich uchun org repolarini o'qiy oladigan token kerak: FRONTEND_REPOS_TOKEN
+  # secret'i yo'q bo'lsa, bu bosqich o'tkazib yuboriladi (1-bosqich baribir ishlaydi).
+  frontend-contract:
+    runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: ci-only-not-a-real-secret
+      DJANGO_ALLOWED_HOSTS: example.com
+      REDIS_CONNECTION_STRING: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: weel-backend-v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.0
+
+      - name: Install backend dependencies
+        working-directory: weel-backend-v2
+        run: poetry install --no-root --no-ansi
+
+      # Generatsiya skriptlari `${PYTHON:-venv/bin/python}` ishlatadi; CI'da venv
+      # yo'q, shuning uchun poetry muhitidagi python'ni ko'rsatamiz.
+      - name: Resolve Python path
+        working-directory: weel-backend-v2
+        run: echo "PYTHON=$(poetry env info --path)/bin/python" >> $GITHUB_ENV
+
+      - name: API kontrakti — buzuvchi o'zgarishlar
+        working-directory: weel-backend-v2
+        run: poetry run python tools/api_contract_check.py
+
+      - name: Check for frontend repo token
+        id: token
+        run: |
+          if [ -n "${{ secrets.FRONTEND_REPOS_TOKEN }}" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "::warning::FRONTEND_REPOS_TOKEN yo'q — frontend typecheck o'tkazib yuborildi."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.available == 'true'
+        with:
+          repository: weeldeveloment/dashboard_weel_uz
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: dashboard_weel_uz
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.available == 'true'
+        with:
+          repository: weeldeveloment/weel-admin
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel-admin
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.available == 'true'
+        with:
+          repository: weeldeveloment/weel-b2b
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel-b2b
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.token.outputs.available == 'true'
+
+      # Har biri alohida qadam: qaysi frontend yiqilgani bir qarashda ko'rinsin.
+      # `continue-on-error` yo'q — birinchi yiqilgani deploy'ni to'xtatadi.
+      - name: dashboard_weel_uz — tiplarni qayta generatsiya + typecheck
+        if: steps.token.outputs.available == 'true'
+        working-directory: dashboard_weel_uz
+        run: bun install --frozen-lockfile && bun run gen:spec && bun run typecheck
+
+      - name: weel-admin — tiplarni qayta generatsiya + typecheck
+        if: steps.token.outputs.available == 'true'
+        working-directory: weel-admin
+        run: bun install --frozen-lockfile && bun run generate:openapi-types && bunx tsc --noEmit
+
+      - name: weel-b2b — tiplarni qayta generatsiya + typecheck
+        if: steps.token.outputs.available == 'true'
+        working-directory: weel-b2b
+        run: bun install --frozen-lockfile && bun run gen:api && bunx tsc -b --noEmit
+
   build-and-push:
-    needs: test
+    needs: [test, frontend-contract]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +176,7 @@ jobs:
 
   deploy:
     needs: build-and-push
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
     env:
