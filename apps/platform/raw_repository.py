@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from psycopg2.extensions import quote_ident
 
+from django.core.cache import cache
 from django.db import connection
 from django.utils import timezone
 
@@ -19,11 +20,43 @@ from apps.platform.raw.tables import (
     ORGANIZATION_MEMBER_TABLE,
 )
 
-_org_schema_cache: dict[int, dict[str, Any] | None] = {}
+# Which PostgreSQL schema each organization's requests read from. This used to
+# be a module-level dict, which meant a per-process cache: invalidating it in
+# the worker that renamed or deactivated an organization left every other
+# worker serving the stale mapping until it restarted. Redis is shared, so an
+# invalidation now reaches all of them, and the TTL bounds how wrong any
+# instance can be if an invalidation is ever missed.
+_ORG_SCHEMA_CACHE_TTL = 300
+# Misses are cached far more briefly: a lookup that failed once should not keep
+# a real organization locked out for five minutes.
+_ORG_SCHEMA_MISS_TTL = 30
+_ORG_SCHEMA_MISS = "__miss__"
+
+
+def _org_schema_cache_key(organization_id: int) -> str:
+    return f"tenant:org-schema:{organization_id}"
 
 
 def invalidate_org_schema_cache(organization_id: int) -> None:
-    _org_schema_cache.pop(organization_id, None)
+    cache.delete(_org_schema_cache_key(organization_id))
+
+
+def get_cached_organization(organization_id: int) -> dict[str, Any] | None:
+    """Organization row for tenant routing, cached across workers."""
+    key = _org_schema_cache_key(organization_id)
+    cached = cache.get(key)
+    if cached == _ORG_SCHEMA_MISS:
+        return None
+    if cached is not None:
+        return cached
+
+    org = get_organization_by_id(organization_id)
+    if org is None:
+        cache.set(key, _ORG_SCHEMA_MISS, _ORG_SCHEMA_MISS_TTL)
+        return None
+
+    cache.set(key, org, _ORG_SCHEMA_CACHE_TTL)
+    return org
 
 
 def _table(name: str) -> str:
@@ -193,9 +226,21 @@ def create_tenant_schema(schema_name: str) -> None:
                 voucher_number VARCHAR(50),
                 notes TEXT,
                 created_by BIGINT,
+                external_provider VARCHAR(50),
+                external_reservation_id VARCHAR(255),
+                external_room_id VARCHAR(255),
+                external_payload_ref TEXT,
+                imported_at TIMESTAMPTZ,
+                last_synced_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
+        """)
+
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS pms_booking_external_ref_uidx
+            ON pms_booking (property_id, external_provider, external_reservation_id)
+            WHERE external_provider IS NOT NULL AND external_reservation_id IS NOT NULL;
         """)
 
         cursor.execute("""
@@ -224,6 +269,76 @@ def create_tenant_schema(schema_name: str) -> None:
                 response_date TIMESTAMPTZ,
                 is_complained BOOLEAN DEFAULT FALSE,
                 complaint_reason TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        # Booking.com channel manager. These lived only in the
+        # `create_tenant_schema` management command, so tenants provisioned the
+        # normal way — by registering — never got them and every Booking.com
+        # sync failed against a missing table.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_bookingcom_connection (
+                id BIGSERIAL PRIMARY KEY,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE UNIQUE,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                bookingcom_property_id VARCHAR(255) NOT NULL,
+                api_url VARCHAR(500) NOT NULL,
+                api_token TEXT,
+                username VARCHAR(255),
+                password TEXT,
+                last_successful_sync_at TIMESTAMPTZ,
+                last_synced_at TIMESTAMPTZ,
+                last_sync_status VARCHAR(30),
+                last_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_bookingcom_room_mapping (
+                id BIGSERIAL PRIMARY KEY,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                external_room_id VARCHAR(255) NOT NULL,
+                room_id BIGINT REFERENCES pms_room(id) ON DELETE SET NULL,
+                room_type_id BIGINT REFERENCES pms_room_type(id) ON DELETE SET NULL,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(property_id, external_room_id)
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_bookingcom_sync_run (
+                id BIGSERIAL PRIMARY KEY,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                connection_id BIGINT REFERENCES pms_bookingcom_connection(id) ON DELETE SET NULL,
+                triggered_by VARCHAR(50) NOT NULL,
+                status VARCHAR(30) NOT NULL,
+                stats JSONB DEFAULT '{}',
+                error_message TEXT,
+                sync_cursor_from TIMESTAMPTZ,
+                sync_cursor_to TIMESTAMPTZ,
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pms_bookingcom_sync_error (
+                id BIGSERIAL PRIMARY KEY,
+                sync_run_id BIGINT REFERENCES pms_bookingcom_sync_run(id) ON DELETE CASCADE,
+                property_id BIGINT NOT NULL REFERENCES pms_property(id) ON DELETE CASCADE,
+                external_reservation_id VARCHAR(255),
+                external_room_id VARCHAR(255),
+                code VARCHAR(100) NOT NULL,
+                message TEXT NOT NULL,
+                payload JSONB DEFAULT '{}',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );

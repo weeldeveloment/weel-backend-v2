@@ -5,7 +5,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from shared.raw.choices import ChoiceEnum, build_choices
-from shared.models import HardDeleteBaseModel, VerifiedByMixin
+from shared.models import BaseModel, HardDeleteBaseModel, VerifiedByMixin
 
 
 class MediaType(ChoiceEnum):

@@ -88,9 +88,9 @@ def test_room(test_hotel, django_db_blocker):
     with django_db_blocker.unblock():
         execute(
             """
-            INSERT INTO pms_room (property_id, room_type_name, room_number, floor, display_name,
-                capacity, base_price, is_active, created_at, updated_at)
-            VALUES (%s, 'Test Suite', '101', 1, 'Test Suite 101',
+            INSERT INTO pms_room (property_id, room_type_name, room_type_preset, room_number,
+                floor, display_name, capacity, base_price, is_active, created_at, updated_at)
+            VALUES (%s, 'Test Suite', 'SUITE', '101', 1, 'Test Suite 101',
                 2, 250000, TRUE, NOW(), NOW())
             ON CONFLICT(id) DO NOTHING
             """,
@@ -379,7 +379,9 @@ class TestGetRoomWithDetails:
     def test_get_room_details(self, test_room):
         room = get_room_with_details(test_room["id"])
         assert room is not None
-        assert room["price_per_night"] == 250000
+        # The query returns the row as stored (`r.*`); `price_per_night` is a
+        # derived name that only calculate_stay_price() produces.
+        assert room["base_price"] == 250000
         assert room["room_type_name"] == "Test Suite"
         assert room["preset"] == "SUITE"
         assert room["meal_plan"] == "BB"
@@ -451,17 +453,19 @@ class TestHotelBookingListSerializer:
         booking = {
             "id": 1, "booking_number": "H26070123456", "status": "pending",
             "check_in": "2026-07-10", "check_out": "2026-07-12",
-            "guests": 2, "total_price": "250000", "hold_amount": "75000",
-            "remaining_on_arrival": "175000", "created_at": "2026-07-01T00:00:00Z",
+            "adult_count": 2, "child_count": 0,
+            "total_cost": "250000", "hold_amount": "75000",
+            "created_at": "2026-07-01T00:00:00Z",
             "hotel_name": "Test", "hotel_city": "Tashkent",
             "hotel_star_rating": 5, "room_number": "101", "room_name": "Suite",
             "room_type_name": "Suite", "room_type_preset": "SUITE",
+            "room_price_per_night": "250000",
         }
         s = HotelBookingListSerializer(booking)
         data = s.data
         assert data["id"] == 1
         assert data["booking_number"] == "H26070123456"
-        assert data["total_price"] == "250000.00"
+        assert data["total_cost"] == "250000.00"
         assert data["hold_amount"] == "75000.00"
         assert data["hotel_name"] == "Test"
 
@@ -473,8 +477,9 @@ class TestHotelBookingDetailSerializer:
         booking = {
             "id": 1, "booking_number": "H26070123456", "status": "pending",
             "check_in": "2026-07-10", "check_out": "2026-07-12",
-            "guests": 2, "total_price": "250000", "hold_amount": "75000",
-            "remaining_on_arrival": "175000", "created_at": "2026-07-01T00:00:00Z",
+            "adult_count": 2, "child_count": 0,
+            "total_cost": "250000", "hold_amount": "75000",
+            "created_at": "2026-07-01T00:00:00Z",
             "hotel_name": "Test Hotel", "hotel_city": "Tashkent",
             "hotel_address": "Street 1", "hotel_star_rating": 5,
             "hotel_check_in_time": "14:00", "hotel_check_out_time": "12:00",
@@ -491,7 +496,7 @@ class TestHotelBookingDetailSerializer:
         data = s.data
         assert data["id"] == 1
         assert data["booking_number"] == "H26070123456"
-        assert data["total_price"] == "250000.00"
+        assert data["total_cost"] == "250000.00"
         assert data["hold_amount"] == "75000.00"
         assert data["hotel_name"] == "Test Hotel"
         assert data["room_type_name"] == "Suite"

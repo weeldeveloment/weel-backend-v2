@@ -275,8 +275,8 @@ class HotelBookingRoomSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     room_id = serializers.IntegerField()
     room_name = serializers.CharField(allow_null=True)
-    price_per_night = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
-    total_price = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
+    price_per_night = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
+    total_price = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
     pms_booking_id = serializers.IntegerField(allow_null=True)
     employees = HotelBookingRoomEmployeeSerializer(many=True)
 

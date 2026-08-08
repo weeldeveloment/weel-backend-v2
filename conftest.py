@@ -30,3 +30,62 @@ os.environ["DJANGO_SETTINGS_MODULE"] = "core.test_settings"
 import django  # noqa: E402
 
 django.setup()
+
+
+# ─── Integration schema bootstrap ────────────────────────────────────────────
+#
+# The integration suites (booking, endpoint smoke) read raw-SQL tables that no
+# Django migration owns: `pms_*`, the b2b tables, and `users`. pytest-django
+# builds its own database and applies migrations to it, which leaves all of
+# them missing — that is why those suites errored out and ended up skipped.
+#
+# This only runs when WEEL_INTEGRATION_DB=1, so the default sqlite suite is
+# untouched.
+
+import pytest  # noqa: E402
+
+# `users` has no DDL anywhere in the repository — it exists only in the live
+# database. This is the shape the code touches (see
+# users/raw_repository._insert_user), reconstructed so the integration suites
+# can run. It is a test scaffold, not a schema of record.
+_USERS_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS public.users (
+    id BIGSERIAL PRIMARY KEY,
+    guid UUID NOT NULL DEFAULT gen_random_uuid(),
+    role VARCHAR(32) NOT NULL,
+    email VARCHAR(254),
+    phone_number VARCHAR(32) UNIQUE,
+    username VARCHAR(150),
+    password VARCHAR(128),
+    first_name VARCHAR(150),
+    last_name VARCHAR(150),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
+
+
+@pytest.fixture(scope="session")
+def django_db_setup(django_db_setup, django_db_blocker):
+    if os.getenv("WEEL_INTEGRATION_DB") != "1":
+        yield
+        return
+
+    from django.core.management import call_command
+    from django.db import connection
+
+    with django_db_blocker.unblock():
+        # Migrations already ran when pytest-django built this database.
+        call_command("bootstrap_schema", "--skip-migrate", verbosity=0)
+
+        # Only until schema/public_baseline.sql is committed — after that the
+        # baseline carries the real `users` definition and this goes away.
+        # See schema/README.md.
+        baseline = Path(__file__).parent / "schema" / "public_baseline.sql"
+        if not baseline.exists():
+            with connection.cursor() as cursor:
+                cursor.execute(_USERS_TABLE_DDL)
+
+    yield

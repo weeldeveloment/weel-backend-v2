@@ -55,8 +55,14 @@ class PlatformUserUpdateSerializer(serializers.Serializer):
 
 
 class PmsOtpRegisterSerializer(serializers.Serializer):
+    """Registration collects the person only.
+
+    The organization used to be created here too, which forced the client to name
+    the hotel at sign-up and then again on the property step. It is now created
+    separately via POST /platform/organization/.
+    """
+
     phone_number = serializers.CharField(max_length=32)
-    org_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
     first_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
 
@@ -139,7 +145,9 @@ class PmsLoginResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
     refresh = serializers.CharField()
     user = PlatformUserSerializer()
-    organization = OrganizationSerializer()
+    # Null right after registration, and for an account whose organization step
+    # is still pending.
+    organization = OrganizationSerializer(allow_null=True, required=False, default=None)
     organizations = OrganizationSerializer(many=True, required=False)
     has_properties = serializers.BooleanField(required=False, default=False)
 

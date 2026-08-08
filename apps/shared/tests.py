@@ -8,7 +8,7 @@ import re
 from datetime import date
 from unittest.mock import patch, MagicMock
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from rest_framework import status
@@ -281,21 +281,47 @@ class IsPartnerOwnerPropertyPermissionTests(TestCase):
 
 
 class FrontendLogViewTests(TestCase):
+    """The endpoint takes attacker-reachable text straight into the log
+    pipeline, so it is gated on a shared token. These tests predated that gate
+    and posted without one."""
+
+    TOKEN = "test-frontend-log-token"
+
     def setUp(self):
         self.client = APIClient()
 
-    def test_post_returns_201_with_level_and_message(self):
-        response = self.client.post(
-            "/api/logs/frontend/",
-            data={"level": "info", "message": "Test message"},
-            format="json",
+    def _post(self, data, token=TOKEN):
+        headers = {"HTTP_X_FRONTEND_LOG_TOKEN": token} if token is not None else {}
+        return self.client.post(
+            "/api/logs/frontend/", data=data, format="json", **headers
         )
+
+    @override_settings(FRONTEND_LOG_TOKEN=TOKEN)
+    def test_post_returns_201_with_level_and_message(self):
+        response = self._post({"level": "info", "message": "Test message"})
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data.get("ok"), True)
 
+    @override_settings(FRONTEND_LOG_TOKEN=TOKEN)
     def test_post_defaults_level_and_message(self):
-        response = self.client.post("/api/logs/frontend/", data={}, format="json")
+        response = self._post({})
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    @override_settings(FRONTEND_LOG_TOKEN=TOKEN)
+    def test_post_without_the_token_is_rejected(self):
+        response = self._post({"message": "hi"}, token=None)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    @override_settings(FRONTEND_LOG_TOKEN=TOKEN)
+    def test_post_with_a_wrong_token_is_rejected(self):
+        response = self._post({"message": "hi"}, token="not-the-token")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    @override_settings(FRONTEND_LOG_TOKEN="")
+    def test_ingest_is_closed_when_no_token_is_configured(self):
+        """An unset token must close the endpoint, not open it."""
+        response = self._post({"message": "hi"}, token=None)
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
 # ──────────────────────────────────────────────

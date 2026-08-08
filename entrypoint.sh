@@ -1,21 +1,79 @@
 #!/bin/sh
 set -e
 
-# Collect static files at runtime (needs SECRET_KEY + ALLOWED_HOSTS from env)
-python manage.py collectstatic --noinput 2>/dev/null || true
+# What this container runs. Splitting the roles lets the web API scale without
+# also multiplying Celery beat, which must exist exactly once across the whole
+# deployment or every scheduled task fires once per replica.
+#
+#   all    — web + worker + beat in one process tree (default, single-container
+#            deploys; keep RUN_CELERY_BEAT=0 on every replica past the first)
+#   web    — API only
+#   worker — Celery worker only
+#   beat   — Celery beat only
+WEEL_ROLE="${WEEL_ROLE:-all}"
 
-WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
+run_web() {
+  exec uvicorn core.asgi:application \
+    --host 0.0.0.0 --port 8000 \
+    --workers "${UVICORN_WORKERS:-4}" \
+    --ws websockets
+}
+
+run_worker() {
+  exec celery -A core worker \
+    --loglevel="${CELERY_LOG_LEVEL:-info}" \
+    --concurrency="${CELERY_CONCURRENCY:-2}" \
+    --max-tasks-per-child="${CELERY_MAX_TASKS_PER_CHILD:-1000}"
+}
+
+run_beat() {
+  exec celery -A core beat \
+    --loglevel="${CELERY_LOG_LEVEL:-info}" \
+    --schedule=/tmp/celerybeat-schedule
+}
+
+# Workers and beat attach to an already-migrated database; only the roles that
+# serve or bootstrap the schema should touch it.
+if [ "$WEEL_ROLE" = "worker" ]; then
+  run_worker
+fi
+
+if [ "$WEEL_ROLE" = "beat" ]; then
+  run_beat
+fi
+
+# Schema first, and it must succeed. Ten apps carry real Django migrations
+# (users, property, payment, chat, platform, ...). Starting the API against an
+# un-migrated database fails later, at request time, as "column does not exist".
+echo "Applying database migrations..."
+python manage.py migrate --noinput
 
 python manage.py create_b2b_tables
 
-# Run webhook setup in background so the web server starts immediately
+# Non-fatal, but never silent: a failure here means unstyled admin pages, and
+# hiding it behind `2>/dev/null || true` is why that goes unnoticed for weeks.
+if ! python manage.py collectstatic --noinput; then
+  echo "WARNING: collectstatic failed — static assets may be missing" >&2
+fi
+
+WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
+
+# Backgrounded so the web server starts immediately; Telegram being slow or
+# down must not hold up the API.
 (
   echo "Setting up hotel bot webhook: $WEBHOOK_BASE"
-  python manage.py setup_hotel_bot_webhook "$WEBHOOK_BASE" 2>/dev/null || echo "Warning: hotel bot webhook setup failed"
-  echo "Hotel bot webhook setup complete"
+  if python manage.py setup_hotel_bot_webhook "$WEBHOOK_BASE"; then
+    echo "Hotel bot webhook setup complete"
+  else
+    echo "WARNING: hotel bot webhook setup failed — the bot will not receive updates" >&2
+  fi
 ) &
 
-# Start Celery worker in background for async task processing (SMS, notifications, etc.)
+if [ "$WEEL_ROLE" = "web" ]; then
+  run_web
+fi
+
+# WEEL_ROLE=all — everything in this container.
 celery -A core worker \
   --loglevel="${CELERY_LOG_LEVEL:-info}" \
   --concurrency="${CELERY_CONCURRENCY:-2}" \
@@ -26,10 +84,6 @@ CELERY_PID=$!
 # Celery beat fires everything in core.celery.beat_schedule: story-view
 # persistence, exchange-rate refresh, booking and review reminders. Without it
 # those tasks are defined but never run.
-#
-# Only one beat process may exist across the whole deployment or every
-# scheduled task runs once per replica. Set RUN_CELERY_BEAT=0 on the extra
-# replicas (or move beat to its own service) when scaling past one.
 BEAT_PID=""
 if [ "${RUN_CELERY_BEAT:-1}" = "1" ]; then
   celery -A core beat \
@@ -45,4 +99,4 @@ stop_all() {
 }
 trap stop_all TERM INT
 
-exec uvicorn core.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws websockets
+run_web

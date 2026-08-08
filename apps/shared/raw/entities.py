@@ -62,14 +62,6 @@ class RawUser(RowEntity):
     def is_partner(self) -> bool:
         return self.role == "partner"
 
-    @property
-    def is_authenticated(self) -> bool:
-        return True
-
-    @property
-    def is_anonymous(self) -> bool:
-        return False
-
 
 @dataclass(slots=True)
 class RawUserMap(RowEntity):
