@@ -47,7 +47,10 @@ class PropertyRepositoryHelpersTests(SimpleTestCase):
     def test_parse_property_kind_returns_none_for_unknown(self):
         self.assertIsNone(parse_property_kind("unknown-kind"))
 
-    def test_list_property_types_returns_two_types(self):
+    # `list_property_types` looks up icon overrides in the database; this is a
+    # SimpleTestCase, so that lookup has to be stubbed rather than executed.
+    @patch("property.apartment_repository._load_db_icons", return_value={})
+    def test_list_property_types_returns_two_types(self, _mock_icons):
         rows = list_property_types()
         self.assertEqual(len(rows), 3)
         self.assertIn(str(APARTMENT_TYPE_GUID), {str(row["guid"]) for row in rows})
@@ -91,7 +94,8 @@ class PropertyRepositoryHelpersTests(SimpleTestCase):
                     captured["params"] = params
 
                 def fetchone(self):
-                    return [10]
+                    # The insert RETURNINGs (id, guid).
+                    return [10, "tenant1:10"]
 
             class CursorContext:
                 def __enter__(self_inner):
@@ -119,6 +123,9 @@ class PropertyRepositoryHelpersTests(SimpleTestCase):
         )
 
         self.assertEqual(result, {"guid": "tenant1:10"})
+        # The point of the test: organization_id comes from the schema's own
+        # organization (5), not from the caller-supplied 999. It is the first
+        # bound parameter — the guid column is filled by gen_random_uuid().
         self.assertEqual(captured["params"][0], 5)
         mock_get_admin_hotel.assert_called_once_with("tenant1:10")
 

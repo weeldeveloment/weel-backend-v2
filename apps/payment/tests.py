@@ -46,27 +46,56 @@ class ExchangeRateFlowTests(SimpleTestCase):
     def test_exchange_rate_returns_cached_value(self, _mock_cache_get):
         self.assertEqual(exchange_rate(), Decimal("12600"))
 
+    # A cold cache no longer blocks on the exchange API: that call sat on a
+    # Daphne worker thread for as long as the upstream took. It now answers
+    # with the fallback and refreshes out of band, so the two tests below
+    # describe that contract rather than the old synchronous fetch.
+
+    @patch("payment.exchange_rate.threading.Thread")
+    @patch("payment.exchange_rate.cache.get", return_value=None)
+    def test_exchange_rate_returns_the_fallback_and_refreshes_in_background(
+        self,
+        _mock_cache_get,
+        mock_thread,
+    ):
+        self.assertEqual(exchange_rate(), Decimal("12500"))
+        mock_thread.assert_called_once()
+        self.assertTrue(mock_thread.return_value.start.called)
+
     @patch("payment.exchange_rate.cache.set")
     @patch("payment.exchange_rate.cache.get", return_value=None)
     @patch("payment.exchange_rate._fetch_live_rate", return_value=Decimal("12777.7"))
-    def test_exchange_rate_fetches_and_caches_when_missing(
+    def test_the_background_refresh_caches_the_live_rate(
         self,
         _mock_fetch_live_rate,
         _mock_cache_get,
         mock_cache_set,
     ):
-        self.assertEqual(exchange_rate(), Decimal("12777.7"))
-        self.assertGreaterEqual(mock_cache_set.call_count, 2)
+        from payment.exchange_rate import _refresh_rate_in_background
 
+        _refresh_rate_in_background()
+
+        # The rate itself and the date it was fetched on.
+        self.assertGreaterEqual(mock_cache_set.call_count, 2)
+        cached_rate = mock_cache_set.call_args_list[0][0][1]
+        self.assertEqual(cached_rate, Decimal("12777.7"))
+
+    @patch("payment.exchange_rate.cache.set")
     @patch("payment.exchange_rate.cache.get", return_value=None)
     @patch("payment.exchange_rate._fetch_live_rate", side_effect=Exception("network"))
-    def test_exchange_rate_raises_validation_error_on_fetch_failure(
+    def test_a_failed_fetch_does_not_reach_the_caller(
         self,
         _mock_fetch_live_rate,
         _mock_cache_get,
+        mock_cache_set,
     ):
-        with self.assertRaises(ValidationError):
-            exchange_rate()
+        """The upstream being down must not turn into a failed payment."""
+        from payment.exchange_rate import _refresh_rate_in_background
+
+        _refresh_rate_in_background()  # must not raise
+        mock_cache_set.assert_not_called()
+
+        self.assertEqual(exchange_rate(), Decimal("12500"))
 
     def test_round_amount_rounds_to_nearest_10000(self):
         self.assertEqual(round_amount(Decimal("124999")), Decimal("120000"))

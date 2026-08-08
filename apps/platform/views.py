@@ -26,7 +26,6 @@ from apps.platform.raw_repository import (
     create_tenant_schema,
     drop_tenant_schema,
     hard_delete_organization,
-    delete_orphaned_pms_user,
     get_organization_by_id,
     get_organization_by_slug,
     get_user_organizations,
@@ -34,7 +33,6 @@ from apps.platform.raw_repository import (
     remove_organization_member,
     update_member_role,
     update_organization,
-    user_has_org_membership,
 )
 from apps.platform.serializers import (
     AddMemberSerializer,
@@ -133,7 +131,13 @@ def _get_primary_organization(
     return None
 
 
-def _create_pms_tokens(user: dict[str, Any], organization_id: int) -> dict[str, str]:
+def _create_pms_tokens(user: dict[str, Any], organization_id: int | None) -> dict[str, str]:
+    """Mint a PMS token pair.
+
+    ``organization_id`` is None for accounts that have registered but have not
+    created an organization yet: registration no longer creates one, so the
+    account exists for a while before it is scoped to a tenant.
+    """
     user_data = _user_claims(user)
     refresh = RefreshToken()
     access = AccessToken()
@@ -170,23 +174,24 @@ class PmsSendOTPRegisterView(APIView):
             required=["phone_number"],
             properties={
                 "phone_number": openapi.Schema(type=openapi.TYPE_STRING, description="Phone number"),
-                "org_name": openapi.Schema(type=openapi.TYPE_STRING, description="Organization name"),
                 "first_name": openapi.Schema(type=openapi.TYPE_STRING, description="First name"),
                 "last_name": openapi.Schema(type=openapi.TYPE_STRING, description="Last name"),
             },
         ),
         responses={200: PmsOtpSendResponseSerializer()},
+        operation_description=(
+            "Start PMS registration. This only creates the personal account; "
+            "the organization is created afterwards via POST /platform/organization/."
+        ),
     )
     def post(self, request):
         serializer = PmsOtpRegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         phone_number = serializer.validated_data["phone_number"]
-        org_name = serializer.validated_data.get("org_name", "")
 
         registration_data = {
             "phone_number": phone_number,
-            "org_name": org_name,
             "first_name": serializer.validated_data.get("first_name", ""),
             "last_name": serializer.validated_data.get("last_name", ""),
         }
@@ -223,6 +228,11 @@ class PmsVerifyOTPRegisterView(APIView):
             },
         ),
         responses={201: PmsLoginResponseSerializer()},
+        operation_description=(
+            "Finish PMS registration. Creates the personal account only and returns "
+            "tokens that are not scoped to any organization yet: `organization` is "
+            "null until the client calls POST /platform/organization/."
+        ),
     )
     def post(self, request):
         serializer = PmsOtpVerifySerializer(data=request.data)
@@ -231,53 +241,19 @@ class PmsVerifyOTPRegisterView(APIView):
         phone_number = serializer.validated_data["phone_number"]
         registration_data = serializer.validated_data["registration_data"]
 
-        existing_user = get_active_user_by_phone(phone_number, role="pms")
-        if existing_user:
-            if user_has_org_membership(existing_user.id):
-                return Response(
-                    {"detail": "User with this phone number already exists."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            else:
-                delete_orphaned_pms_user(existing_user.id)
-                logger.info("Deleted orphaned PMS user %s for phone %s", existing_user.id, phone_number)
-
-        org_name = registration_data.get("org_name", "").strip()
-        if not org_name:
+        if get_active_user_by_phone(phone_number, role="pms"):
             return Response(
-                {"org_name": "Organization name is required for registration."},
+                {"detail": "User with this phone number already exists."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        slug_base = org_name.lower().replace(" ", "-").replace("_", "-")
-        slug = slug_base
-        counter = 1
-        while get_organization_by_slug(slug):
-            slug = f"{slug_base}-{counter}"
-            counter += 1
-
-        schema_name = f"tenant_{uuid4().hex[:12]}"
-
-        with transaction.atomic():
-            create_tenant_schema(schema_name)
-
-            user = create_pms_user(
-                phone_number=phone_number,
-                first_name=registration_data.get("first_name", ""),
-                last_name=registration_data.get("last_name", ""),
-            )
-            if not user:
-                raise RuntimeError("Failed to create PMS user")
-
-            org = create_organization(name=org_name, slug=slug, schema_name=schema_name)
-            if not org:
-                raise RuntimeError("Failed to create organization")
-
-            create_organization_member(
-                organization_id=org["id"],
-                user_id=user.id,
-                role="owner",
-            )
+        user = create_pms_user(
+            phone_number=phone_number,
+            first_name=registration_data.get("first_name", ""),
+            last_name=registration_data.get("last_name", ""),
+        )
+        if not user:
+            raise RuntimeError("Failed to create PMS user")
 
         user_dict = {
             "id": user.id,
@@ -286,14 +262,15 @@ class PmsVerifyOTPRegisterView(APIView):
             "last_name": user.last_name,
         }
 
-        tokens = _create_pms_tokens(user_dict, organization_id=org["id"])
+        tokens = _create_pms_tokens(user_dict, organization_id=None)
 
         return Response(
             PmsLoginResponseSerializer({
                 "access": tokens["access"],
                 "refresh": tokens["refresh"],
                 "user": PlatformUserSerializer(user_dict).data,
-                "organization": OrganizationSerializer(org).data,
+                "organization": None,
+                "organizations": [],
                 "has_properties": False,
             }).data,
             status=status.HTTP_201_CREATED,
@@ -376,11 +353,19 @@ class PmsVerifyOTPLoginView(APIView):
 
         orgs = get_user_organizations(user["id"])
         if not orgs:
-            delete_orphaned_pms_user(user["id"])
-            logger.info("Deleted orphaned PMS user %s during login attempt", user["id"])
+            # Registration creates the account without an organization, so having
+            # none is a normal state: log the user in unscoped and let the client
+            # send them to the organization step.
+            tokens = _create_pms_tokens(user, organization_id=None)
             return Response(
-                {"detail": "Your account is incomplete. Please register again."},
-                status=status.HTTP_410_GONE,
+                PmsLoginResponseSerializer({
+                    "access": tokens["access"],
+                    "refresh": tokens["refresh"],
+                    "user": PlatformUserSerializer(user).data,
+                    "organization": None,
+                    "organizations": [],
+                    "has_properties": False,
+                }).data,
             )
 
         org_id = serializer.validated_data.get("organization_id")
@@ -890,13 +875,12 @@ class PmsTokenRefreshView(APIView):
             if not user:
                 return Response({"detail": "User not found."}, status=status.HTTP_401_UNAUTHORIZED)
 
-            if not organization_id:
-                return Response(
-                    {"detail": "No organization available for refresh token."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            new_tokens = _create_pms_tokens(user, organization_id=int(organization_id))
+            # A freshly registered account has no organization yet; refreshing must
+            # keep working so it can reach the organization step.
+            new_tokens = _create_pms_tokens(
+                user,
+                organization_id=int(organization_id) if organization_id else None,
+            )
 
             token.blacklist()
 

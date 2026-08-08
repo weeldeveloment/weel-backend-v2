@@ -89,7 +89,7 @@ class HotelSearchMatchingRoomSerializer(serializers.Serializer):
     display_name = serializers.CharField(allow_null=True, read_only=True)
     room_type_id = serializers.IntegerField(allow_null=True, required=False, read_only=True)
     bedroom_count = serializers.IntegerField(default=1, read_only=True)
-    price_per_night = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True, read_only=True)
+    price_per_night = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True, read_only=True)
     currency = serializers.CharField(allow_null=True, read_only=True)
     beds = serializers.JSONField(read_only=True)
     amenities = serializers.ListField(child=serializers.CharField(), read_only=True)
@@ -267,7 +267,11 @@ class RoomAvailabilitySerializer(serializers.Serializer):
     display_name = serializers.CharField(allow_null=True)
     room_type_id = serializers.IntegerField(allow_null=True, required=False)
     bedroom_count = serializers.IntegerField(default=1)
-    price_per_night = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    # Prices reach here already converted to UZS, where a nightly rate runs to
+    # eight or nine digits; max_digits=10 rejected those rows and took the
+    # whole room list down with them. Match the 14 digits `total_price` and the
+    # hotel card's `min_price` already allow.
+    price_per_night = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
     currency = serializers.CharField(allow_null=True)
     beds = serializers.JSONField(default=list)
     amenities = serializers.ListField(child=serializers.CharField(), default=list)
@@ -325,7 +329,7 @@ class RoomSelectParamsSerializer(serializers.Serializer):
 
 class StayPriceSerializer(serializers.Serializer):
     nights = serializers.IntegerField()
-    price_per_night = serializers.DecimalField(max_digits=10, decimal_places=2)
+    price_per_night = serializers.DecimalField(max_digits=14, decimal_places=2)
     total_price = serializers.DecimalField(max_digits=12, decimal_places=2)
     hold_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     remaining_on_arrival = serializers.DecimalField(max_digits=12, decimal_places=2)

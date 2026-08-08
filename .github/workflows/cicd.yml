@@ -32,9 +32,16 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-root --no-ansi
 
+      # Lint before tests: a syntax-level mistake should not wait for the whole
+      # suite to report it. Scoped to the code we own — `venv/`, migrations and
+      # vendored trees are excluded in pyproject.
+      - name: Lint (ruff)
+        run: poetry run ruff check .
+
       # Uses core.test_settings (sqlite, in-memory) — see pytest.ini. The
       # integration tests that need a live PostgreSQL schema skip themselves
-      # unless WEEL_INTEGRATION_DB=1.
+      # unless WEEL_INTEGRATION_DB=1; the `integration-test` job below runs
+      # those against a real PostgreSQL service.
       - name: Run tests
         # core.test_settings imports core.settings, which refuses to start
         # without a secret key and allowed hosts unless DEBUG is on. There is
@@ -52,6 +59,83 @@ jobs:
           DJANGO_ALLOWED_HOSTS: example.com
           REDIS_CONNECTION_STRING: redis://localhost:6379/0
         run: poetry run python manage.py check --deploy --fail-level ERROR
+
+  # The booking engine is the money path: advisory locks, double-booking
+  # prevention, server-side price checks. Its tests need the raw-SQL schema
+  # (pms_property, pms_room, pms_booking), which no Django migration creates,
+  # so the `test` job above skips every one of them. Without this job that
+  # code ships with zero automated coverage.
+  integration-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: weel
+          POSTGRES_PASSWORD: weel
+          POSTGRES_DB: weel_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DJANGO_SETTINGS_MODULE: core.settings
+      DJANGO_DEBUG: '0'
+      SECRET_KEY: ci-only-not-a-real-secret
+      DJANGO_ALLOWED_HOSTS: example.com
+      REDIS_CONNECTION_STRING: redis://localhost:6379/0
+      DB_NAME: weel_test
+      DB_USER: weel
+      DB_PASSWORD: weel
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.0
+
+      - name: Install dependencies
+        run: poetry install --no-root --no-ansi
+
+      # postgis/postgis ships PostGIS but not pgvector, and the recommendation
+      # migration creates the `vector` extension. Both are needed, and no
+      # public image carries the pair.
+      - name: Install pgvector into the database container
+        run: |
+          docker exec ${{ job.services.postgres.id }} sh -c \
+            "apt-get update -qq && apt-get install -y -qq postgresql-16-pgvector"
+
+      # Extensions, migrations, the raw-schema baseline and the code-owned
+      # pms_*/b2b_* DDL, in that order. Once schema/public_baseline.sql is
+      # committed (see schema/README.md) this step also builds `users`,
+      # `booking`, `property` and the rest, and the smoke suite can be turned
+      # on here with WEEL_SMOKE_DB=1.
+      - name: Build the schema
+        run: poetry run python manage.py bootstrap_schema
+
+      - name: Run integration tests
+        env:
+          WEEL_INTEGRATION_DB: '1'
+        run: poetry run pytest -q -m integration
 
   # Backend o'zgarishi frontendlarni buzmasligini tekshiradi. Ikki bosqich:
   #   1. Kontrakt farqi — tez, baseline bilan solishtiradi (frontend repolarsiz).
@@ -178,8 +262,31 @@ jobs:
         working-directory: weel-b2b
         run: bun install --frozen-lockfile && bun run gen:api && bunx tsc -b --noEmit
 
+      # Typecheck alone misses unused variables, bad hook dependencies and
+      # dead branches — and it never runs a single assertion. Lint and unit
+      # tests were passing locally but nothing enforced them on the way in.
+      - name: dashboard_weel_uz — lint
+        if: steps.token.outputs.available == 'true'
+        working-directory: dashboard_weel_uz
+        run: bunx eslint .
+
+      - name: weel-admin — lint
+        if: steps.token.outputs.available == 'true'
+        working-directory: weel-admin
+        run: bunx eslint .
+
+      - name: weel-b2b — lint
+        if: steps.token.outputs.available == 'true'
+        working-directory: weel-b2b
+        run: bunx eslint .
+
+      - name: weel-b2b — unit testlar
+        if: steps.token.outputs.available == 'true'
+        working-directory: weel-b2b
+        run: bunx vitest run
+
   build-and-push:
-    needs: [test, frontend-contract]
+    needs: [test, integration-test, frontend-contract]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:

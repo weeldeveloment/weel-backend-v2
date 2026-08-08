@@ -291,7 +291,7 @@ class B2BHotelRoomsView(APIView):
         responses={
             200: RoomAvailabilitySerializer(many=True),
             400: openapi.Response(description="Invalid hotel_guid / validation error."),
-            404: openapi.Response(description="Hotel not found."),
+            500: openapi.Response(description="A room row could not be loaded or serialized."),
         },
         tags=["B2B / Executer"],
     )
@@ -334,12 +334,16 @@ class B2BHotelRoomsView(APIView):
                 ),
             )
             payload = RoomAvailabilitySerializer(rooms, many=True).data
-        except Exception:
-            # Serialization used to run outside this try block, so a bad row
-            # (e.g. an out-of-range price) surfaced as a raw 500 instead of a
-            # clean error response.
+        except Exception as exc:
+            # resolve_hotel_guid() already found the hotel, so anything failing
+            # here is a broken room row (e.g. an out-of-range price), not a
+            # missing hotel. Reporting it as 404 sent the frontend hunting for
+            # a hotel that exists and hid the real cause; say what broke.
             logger.exception("Failed to load rooms for hotel_guid=%s", hotel_guid)
-            return Response({"detail": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": f"Failed to load rooms for this hotel: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response(payload)
 
 
