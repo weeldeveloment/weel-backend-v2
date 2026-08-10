@@ -13,6 +13,20 @@ class OrganizationSerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
 
 
+class NullableOrganizationSerializer(OrganizationSerializer):
+    """Same shape as OrganizationSerializer, but a separate schema definition.
+
+    Swagger 2.0 cannot put `x-nullable` next to a `$ref`, so drf-yasg moves it
+    onto the referenced definition instead. Passing `allow_null=True` to
+    OrganizationSerializer therefore marked *every* Organization in the schema
+    nullable — including the items of `organizations`, which are never null —
+    and the generated frontend types became `(Organization | null)[]`.
+
+    Nullable fields reference this subclass so only its own definition carries
+    the flag.
+    """
+
+
 class OrganizationCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=200)
     slug = serializers.SlugField(max_length=100)
@@ -147,7 +161,7 @@ class PmsLoginResponseSerializer(serializers.Serializer):
     user = PlatformUserSerializer()
     # Null right after registration, and for an account whose organization step
     # is still pending.
-    organization = OrganizationSerializer(allow_null=True, required=False, default=None)
+    organization = NullableOrganizationSerializer(allow_null=True, required=False, default=None)
     organizations = OrganizationSerializer(many=True, required=False)
     has_properties = serializers.BooleanField(required=False, default=False)
 
@@ -196,7 +210,7 @@ class PmsOtpSendResponseSerializer(serializers.Serializer):
 
 class PmsMeResponseSerializer(serializers.Serializer):
     user = PlatformUserSerializer()
-    organization = OrganizationSerializer(allow_null=True, required=False, default=None)
+    organization = NullableOrganizationSerializer(allow_null=True, required=False, default=None)
     organizations = OrganizationSerializer(many=True)
     has_properties = serializers.BooleanField(required=False, default=False)
 
