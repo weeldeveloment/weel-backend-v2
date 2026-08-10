@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
+from apps.b2b.models import LeadStatus
 from apps.b2b.repository import get_company
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace.permissions import HasCapability, IsWorkspaceManager, IsWorkspaceUser
@@ -31,6 +32,9 @@ from apps.b2b.workspace.serializers import (
     ChatThreadSerializer,
     EventPatchSerializer,
     EventWriteSerializer,
+    LeadListSerializer,
+    LeadSerializer,
+    LeadWriteSerializer,
     MeSerializer,
     MessageWriteSerializer,
     TaskCommentWriteSerializer,
@@ -909,6 +913,158 @@ class WorkspaceThreadReadView(APIView):
             return Response({"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND)
         repo.mark_thread_read(thread_id, request.user.id)
         return Response({"detail": _("Marked as read")})
+
+
+# ─── Leads ────────────────────────────────────────────────────────────────────
+
+def _lead_payload(lead: dict, user) -> dict:
+    """Shapes a lead for one viewer.
+
+    Once someone claims a lead, the contact — the person and phone number an
+    employee would actually call — is only sent back to whoever claimed it (and
+    to the manager who posted it). Everyone else on the board still sees the
+    row (company, product, status) so they know it is taken, just not who to
+    call, which is what stops two employees from working the same contact.
+    """
+    is_owner = lead.get("claimed_by_id") == user.id
+    can_view_details = (
+        lead.get("status") == LeadStatus.NEW or is_owner or user.is_manager
+    )
+    payload = {
+        **lead,
+        "can_claim": lead.get("status") == LeadStatus.NEW,
+        "can_complete": lead.get("status") == LeadStatus.IN_PROGRESS and is_owner,
+        "can_view_details": can_view_details,
+    }
+    if not can_view_details:
+        payload["contact_full_name"] = None
+        payload["contact_phone"] = None
+    return payload
+
+
+class WorkspaceDeviceTokenView(APIView):
+    """POST /api/b2b/workspace/me/device-token/ — register this device for push."""
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Register the FCM token for push notifications")
+    def post(self, request):
+        token = (request.data.get("fcm_token") or "").strip() or None
+        repo.set_employee_fcm_token(request.user.id, token)
+        return Response({"detail": _("Saved")})
+
+
+class WorkspaceLeadListCreateView(APIView):
+    """GET  /api/b2b/workspace/leads/ — every lead in the company, any employee
+    may see the board and claim an open one.
+    POST /api/b2b/workspace/leads/ — owner/performer only."""
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="List leads",
+        manual_parameters=[
+            openapi.Parameter("status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                              enum=list(repo.LEAD_STATUSES)),
+        ],
+        responses={200: LeadListSerializer()},
+    )
+    def get(self, request):
+        leads = repo.list_leads(
+            request.user.company_id,
+            status=request.query_params.get("status") or None,
+        )
+        return Response({"results": [_lead_payload(lead, request.user) for lead in leads]})
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Create a lead (owner/manager only)",
+        request_body=LeadWriteSerializer,
+        responses={201: LeadSerializer(), 403: openapi.Response(description="Employees cannot create leads")},
+    )
+    def post(self, request):
+        if not request.user.is_manager:
+            return Response(
+                {"detail": _("Your role does not allow creating leads.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = LeadWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        lead = repo.create_lead(
+            company_id=request.user.company_id,
+            author_id=request.user.id,
+            company_name=data["company_name"],
+            contact_full_name=data["contact_full_name"],
+            contact_phone=data["contact_phone"],
+            product_name=data["product_name"],
+            quantity=data["quantity"],
+        )
+
+        tokens = repo.list_employee_fcm_tokens(
+            request.user.company_id, exclude_employee_id=request.user.id
+        )
+        if tokens:
+            try:
+                from apps.notification.service import FCMService
+
+                FCMService.send_to_tokens(
+                    tokens=tokens,
+                    title=_("New lead"),
+                    body=f"{data['company_name']} — {data['product_name']} ({data['quantity']})",
+                    data={"type": "lead", "lead_id": str(lead["id"])},
+                )
+            except Exception:
+                logger.exception("Failed to push new-lead notification for lead %s.", lead["id"])
+
+        return Response(_lead_payload(lead, request.user), status=status.HTTP_201_CREATED)
+
+
+class WorkspaceLeadClaimView(APIView):
+    """POST /api/b2b/workspace/leads/<id>/claim/ — any employee takes a 'new' lead."""
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Claim a lead", responses={200: LeadSerializer()})
+    def post(self, request, lead_id: int):
+        if not repo.get_lead(lead_id, request.user.company_id):
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        lead = repo.claim_lead(lead_id, request.user.company_id, request.user.id)
+        if not lead:
+            return Response(
+                {"detail": _("This lead has already been claimed.")},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(_lead_payload(lead, request.user))
+
+
+class WorkspaceLeadCompleteView(APIView):
+    """POST /api/b2b/workspace/leads/<id>/complete/ — the claiming employee
+    marks it resolved."""
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Complete a lead", responses={200: LeadSerializer()})
+    def post(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+        if lead.get("claimed_by_id") != request.user.id:
+            return Response(
+                {"detail": _("Only the employee who claimed this lead can complete it.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        updated = repo.complete_lead(lead_id, request.user.company_id, request.user.id)
+        if not updated:
+            return Response(
+                {"detail": _("Lead is not in progress.")}, status=status.HTTP_409_CONFLICT
+            )
+        return Response(_lead_payload(updated, request.user))
 
 
 # ─── Hotels ───────────────────────────────────────────────────────────────────

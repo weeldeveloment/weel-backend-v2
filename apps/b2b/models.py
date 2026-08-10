@@ -59,6 +59,16 @@ class EmployeeRole:
     CHOICES = [OWNER, PERFORMER, EMPLOYEE]
 
 
+class LeadStatus:
+    """A sales lead a manager posts to the workspace board for any employee
+    to claim and work: company + contact + what they want to buy."""
+    NEW = "new"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+    CHOICES = [NEW, IN_PROGRESS, COMPLETED]
+
+
 class DepartmentBudgetStatus:
     """Where a department stands against its owner-set budget limit,
     based on how much of ``budget_limit`` remains unspent.

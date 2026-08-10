@@ -124,6 +124,29 @@ class ChatMessageSerializer(serializers.Serializer):
         ref_name = "WorkspaceChatMessage"
 
 
+class LeadSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    company_name = serializers.CharField()
+    # Null once claimed, for anyone but the claimer and the manager who
+    # posted it — see `_lead_payload`.
+    contact_full_name = serializers.CharField(allow_null=True)
+    contact_phone = serializers.CharField(allow_null=True)
+    product_name = serializers.CharField()
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=2)
+    status = serializers.CharField()
+    author_id = serializers.IntegerField()
+    claimed_by_id = serializers.IntegerField(allow_null=True, required=False)
+    claimed_at = serializers.DateTimeField(allow_null=True, required=False)
+    created_at = serializers.DateTimeField()
+    can_claim = serializers.BooleanField()
+    can_complete = serializers.BooleanField()
+    can_view_details = serializers.BooleanField()
+
+
+class LeadListSerializer(serializers.Serializer):
+    results = LeadSerializer(many=True)
+
+
 class ChatThreadSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     group_name = serializers.CharField(allow_null=True, required=False)
@@ -147,6 +170,17 @@ class TaskWriteSerializer(serializers.Serializer):
     subtasks = serializers.ListField(
         child=serializers.CharField(max_length=300), required=False, default=list
     )
+
+
+class LeadWriteSerializer(serializers.Serializer):
+    company_name = serializers.CharField(max_length=300)
+    contact_full_name = serializers.CharField(max_length=300)
+    contact_phone = serializers.CharField(max_length=20)
+    product_name = serializers.CharField(max_length=300)
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
+
+    def validate_contact_phone(self, value: str) -> str:
+        return _clean_phone(value)
 
 
 class TaskPatchSerializer(TaskWriteSerializer):
