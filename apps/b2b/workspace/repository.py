@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one
 
-from apps.b2b.models import EmployeeRole
+from apps.b2b.models import EmployeeRole, LeadStatus
 from apps.b2b.raw.tables import (
     B2B_CALENDAR_EVENT_TABLE,
     B2B_CALENDAR_PARTICIPANT_TABLE,
@@ -27,6 +27,7 @@ from apps.b2b.raw.tables import (
     B2B_TASK_SUBTASK_TABLE,
     B2B_TASK_TABLE,
     B2B_USER_TABLE,
+    B2B_WORKSPACE_LEAD_TABLE,
 )
 
 # ─── Identity ─────────────────────────────────────────────────────────────────
@@ -124,6 +125,26 @@ def ensure_workspace_employee(b2b_user: dict[str, Any]) -> dict[str, Any] | None
             now,
         ],
     )
+
+
+def set_employee_fcm_token(employee_id: int, token: str | None) -> None:
+    execute(
+        f"UPDATE {B2B_EMPLOYEE_TABLE} SET fcm_token = %s, updated_at = %s WHERE id = %s",
+        [token, timezone.now(), employee_id],
+    )
+
+
+def list_employee_fcm_tokens(company_id: int, *, exclude_employee_id: int | None = None) -> list[str]:
+    """Push targets for 'notify the whole roster' events (e.g. a new lead)."""
+    sql = (
+        f"SELECT fcm_token FROM {B2B_EMPLOYEE_TABLE} "
+        f"WHERE company_id = %s AND is_active = TRUE AND fcm_token IS NOT NULL"
+    )
+    params: list[Any] = [company_id]
+    if exclude_employee_id is not None:
+        sql += " AND id <> %s"
+        params.append(exclude_employee_id)
+    return [row["fcm_token"] for row in fetch_all(sql, params)]
 
 
 def update_employee_role(employee_id: int, role: str) -> dict[str, Any] | None:
@@ -770,3 +791,83 @@ def total_unread(company_id: int, employee_id: int) -> int:
         [employee_id, company_id, employee_id],
     )
     return int((row or {}).get("unread") or 0)
+
+
+# ─── Leads ────────────────────────────────────────────────────────────────────
+
+LEAD_STATUSES = tuple(LeadStatus.CHOICES)
+
+
+def list_leads(company_id: int, *, status: str | None = None) -> list[dict[str, Any]]:
+    sql = f"SELECT * FROM {B2B_WORKSPACE_LEAD_TABLE} WHERE company_id = %s"
+    params: list[Any] = [company_id]
+    if status:
+        sql += " AND status = %s"
+        params.append(status)
+    sql += " ORDER BY created_at DESC, id DESC"
+    return fetch_all(sql, params)
+
+
+def get_lead(lead_id: int, company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {B2B_WORKSPACE_LEAD_TABLE} WHERE id = %s AND company_id = %s",
+        [lead_id, company_id],
+    )
+
+
+def create_lead(
+    *,
+    company_id: int,
+    author_id: int,
+    company_name: str,
+    contact_full_name: str,
+    contact_phone: str,
+    product_name: str,
+    quantity,
+) -> dict[str, Any] | None:
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_WORKSPACE_LEAD_TABLE}
+            (company_id, author_id, company_name, contact_full_name, contact_phone,
+             product_name, quantity, status, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [
+            company_id, author_id, company_name, contact_full_name, contact_phone,
+            product_name, quantity, LeadStatus.NEW, now, now,
+        ],
+    )
+
+
+def claim_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, Any] | None:
+    """Atomically hand the lead to the first employee to ask for it.
+
+    The ``WHERE status = 'new'`` on the UPDATE is the whole guard: two
+    employees racing to claim the same lead only ever leaves one row updated,
+    so the loser's request simply matches zero rows instead of overwriting
+    the winner.
+    """
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        UPDATE {B2B_WORKSPACE_LEAD_TABLE}
+        SET status = %s, claimed_by_id = %s, claimed_at = %s, updated_at = %s
+        WHERE id = %s AND company_id = %s AND status = %s
+        RETURNING *
+        """,
+        [LeadStatus.IN_PROGRESS, employee_id, now, now, lead_id, company_id, LeadStatus.NEW],
+    )
+
+
+def complete_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        UPDATE {B2B_WORKSPACE_LEAD_TABLE}
+        SET status = %s, updated_at = %s
+        WHERE id = %s AND company_id = %s AND status = %s AND claimed_by_id = %s
+        RETURNING *
+        """,
+        [LeadStatus.COMPLETED, timezone.now(), lead_id, company_id, LeadStatus.IN_PROGRESS, employee_id],
+    )

@@ -133,6 +133,9 @@ class Command(BaseCommand):
             cursor.execute("""
                 ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'employee';
             """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS fcm_token VARCHAR(500);
+            """)
             self.stdout.write("  Created b2b_employee")
 
             cursor.execute("""
@@ -472,3 +475,27 @@ class Command(BaseCommand):
             "ON b2b_chat_message (thread_id, id DESC);"
         )
         self.stdout.write("  Created b2b_chat_message")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_lead (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                author_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                company_name VARCHAR(300) NOT NULL,
+                contact_full_name VARCHAR(300) NOT NULL,
+                contact_phone VARCHAR(20) NOT NULL,
+                product_name VARCHAR(300) NOT NULL,
+                quantity NUMERIC(12, 2) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'new',
+                claimed_by_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                claimed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # The board always filters by company and status.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_lead_company_status_idx "
+            "ON b2b_workspace_lead (company_id, status);"
+        )
+        self.stdout.write("  Created b2b_workspace_lead")

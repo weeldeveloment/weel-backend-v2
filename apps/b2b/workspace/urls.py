@@ -1,9 +1,13 @@
 from django.urls import path
 
 from apps.b2b.workspace.views import (
+    WorkspaceDeviceTokenView,
     WorkspaceEventDetailView,
     WorkspaceEventListCreateView,
     WorkspaceHotelListView,
+    WorkspaceLeadClaimView,
+    WorkspaceLeadCompleteView,
+    WorkspaceLeadListCreateView,
     WorkspaceLoginVerifyView,
     WorkspaceLoginView,
     WorkspaceLogoutView,
@@ -28,6 +32,7 @@ urlpatterns = [
     path("auth/logout/", WorkspaceLogoutView.as_view(), name="ws-logout"),
 
     path("me/", WorkspaceMeView.as_view(), name="ws-me"),
+    path("me/device-token/", WorkspaceDeviceTokenView.as_view(), name="ws-device-token"),
     path("team/", WorkspaceTeamView.as_view(), name="ws-team"),
 
     path("tasks/", WorkspaceTaskListCreateView.as_view(), name="ws-tasks"),
@@ -49,4 +54,8 @@ urlpatterns = [
     path("chats/<int:thread_id>/flags/", WorkspaceThreadFlagsView.as_view(), name="ws-chat-flags"),
 
     path("hotels/", WorkspaceHotelListView.as_view(), name="ws-hotels"),
+
+    path("leads/", WorkspaceLeadListCreateView.as_view(), name="ws-leads"),
+    path("leads/<int:lead_id>/claim/", WorkspaceLeadClaimView.as_view(), name="ws-lead-claim"),
+    path("leads/<int:lead_id>/complete/", WorkspaceLeadCompleteView.as_view(), name="ws-lead-complete"),
 ]
