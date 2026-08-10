@@ -32,20 +32,26 @@ har bir dasturchi bitta buyruq bilan bir xil himoyani oladi.
 **2. GitHub Actions — `frontend-contract` job (`.github/workflows/cicd.yml`).**
 Har PR va har `main` push'da ishlaydi:
 
+- 4 ta frontend reponi checkout qiladi;
 - kontrakt farqini tekshiradi (baseline bilan);
-- 3 ta frontend reponi checkout qilib, tiplarni backenddan **qayta generatsiya
-  qiladi** va typecheck qiladi.
+- 3 ta web frontendda tiplarni backenddan **qayta generatsiya qiladi**, so'ng
+  typecheck, lint va unit testlarni ishlatadi;
+- mobil ilovada `flutter analyze` va testlarni ishlatadi (u tiplarni
+  generatsiya qilmaydi — Dart modellari qo'lda yozilgan).
+
+Checkout tartibi muhim: kontrakt farqi frontend kodini o'qib, qaysi frontend
+buzilishini aytadi. Ilgari u birinchi qadam edi va hech qanday frontend kodini
+ko'rmasdan "hech kim ishlatmaydi" degan xulosaga kelardi.
 
 Yiqilsa `build-and-push` va `deploy` joblari umuman ishga tushmaydi — ya'ni
 buzuqi backend Dokploy'ga chiqmaydi.
 
-> **Sozlash kerak:** 2-bosqich uchun org repolarini o'qiy oladigan token kerak.
+> **Sozlash kerak:** org repolarini o'qiy oladigan token kerak.
 > GitHub'da `weeldeveloment/weel-backend-v2` → Settings → Secrets → Actions →
-> `FRONTEND_REPOS_TOKEN` nomi bilan `repo:read` huquqli PAT qo'shing.
-> Secret bo'lmasa job ogohlantirish berib, faqat kontrakt farqini tekshiradi.
-
-`weel-b2b-mobile` CI'ga kirmaydi — uning git remote'i yo'q (faqat lokal).
-Uni `tools/predeploy.sh` lokal ravishda tekshiradi.
+> `FRONTEND_REPOS_TOKEN`, `Contents: Read-only` huquqi bilan, va u to'rtala
+> frontend repoga ham berilgan bo'lishi kerak.
+> **Secret bo'lmasa job yiqiladi.** Ilgari u faqat ogohlantirib o'tkazib
+> yuborardi — ya'ni sekret tasodifan o'chsa, himoya jimgina yo'qolardi.
 
 ## Qo'lda ishga tushirish
 
@@ -83,9 +89,16 @@ endpointni ishlatishini ko'rsatadi:
      ta'sir: weel-b2b (src/lib/generated-api.ts); weel-b2b-mobile (lib/data/api/workspace_api.dart)
 ```
 
-🔴 = frontend ishlatadi, tuzatish shart. 🟡 = hech kim ishlatmaydi, xavfsiz.
+- 🔴 — frontend ishlatadi, tuzatish shart.
+- 🟡 — hech bir frontend ishlatmaydi, xavfsiz.
+- 🟠 — **tekshirib bo'lmadi**: o'sha frontendning kodi joyida yo'q, demak u
+  buziladimi-yo'qmi noma'lum. Bu ham exit code 1 beradi. Ilgari bunday holat
+  🟡 deb belgilanardi, ya'ni kodi yo'q frontend har doim "xavfsiz" ko'rinardi —
+  aynan eng qimmat xato.
 
-Deploy muvaffaqiyatli bo'lgach baseline'ni yangilang:
+Baseline (`tools/api-baseline/main.json`) muvaffaqiyatli deploydan keyin
+`update-contract-baseline` job'i tomonidan **avtomatik** yangilanadi va main'ga
+push qilinadi. Qo'lda kerak bo'lsa:
 
 ```bash
 python3 tools/api_contract_check.py --update
@@ -97,6 +110,29 @@ python3 tools/api_contract_check.py --update
 so'ng typecheck/build qiladi. Eski, qotib qolgan tiplar bilan emas — bugungi backend
 bilan tekshiradi. Kontrakt farqi sezmagan nozik o'zgarishlar (nullable → optional,
 ichma-ich obyekt shakli) shu bosqichda chiqadi.
+
+**3-qatlam: teskari yo'nalish — frontend repolarining `contract` job'i.**
+
+Yuqoridagi ikki qatlam faqat *backend* o'zgarganda ishlaydi. Lekin frontendlar
+alohida deploy bo'ladi: backend oldinga ketgan bo'lsa ham, frontendning o'z CI'si
+committed tiplarga qarab yashil qolaveradi va nomuvofiqlik faqat prodda ko'rinadi.
+
+Shuning uchun uchala web frontendning CI'sida `contract` degan job bor. U
+`weel-backend-v2` ni `main` dan checkout qilib, o'sha repodagi odatdagi
+generatsiya buyrug'ini ishlatadi va ikki narsani tekshiradi:
+
+1. kod yangi kontraktga mos keladimi (typecheck);
+2. committed tiplar eskirmaganmi (`git diff` bo'sh bo'lishi kerak).
+
+Ikkalasi ham deployni to'xtatadi. Har bir frontend repoda `BACKEND_REPO_TOKEN`
+sekreti kerak (`Contents: Read-only`, `weel-backend-v2` ga). `deploy.yml` /
+`docker-publish.yml` CI'ni `workflow_call` orqali chaqirgani uchun ularda
+`secrets: inherit` bo'lishi shart — usiz token bo'sh ko'rinadi.
+
+Buning ishlashi generatsiyaning **deterministik** bo'lishiga bog'liq: `weel-b2b`
+da orval va swagger2openapi versiyalari `scripts/gen-api.sh` da qotirilgan, aks
+holda generator versiyasi ko'tarilishi 750 ta faylni o'zgartirib, "tiplar
+eskirgan" degan soxta xato berardi.
 
 ## Hozircha ishlamayotgan bosqich: smoke testlar
 
@@ -132,6 +168,17 @@ Har bir frontendda generatsiya buyrug'i:
 
 Flutter ilovasida tip generatsiyasi yo'q: `lib/data/api/` da yo'llar va JSON
 maydonlari qo'lda yozilgan, shuning uchun kompilyator backend o'zgarishini sezmaydi.
-Hozircha himoya — `api_contract_check.py` dart fayllaridagi yo'l satrlarini sxema
-bilan solishtiradi. Maydon darajasidagi drift esa faqat `flutter test` dagi
-model testlari orqali ushlanadi.
+Himoya — `api_contract_check.py` dart fayllaridagi yo'l satrlarini sxema bilan
+solishtiradi. Maydon darajasidagi drift esa `flutter analyze` va `flutter test`
+dagi model testlari orqali ushlanadi; ikkalasi ham `frontend-contract` job'ida
+ishlaydi.
+
+`flutter test` CI'da `--exclude-tags screenshots` bilan chaqiriladi. Golden
+rasmlar ularni yaratgan mashinaning shrift renderiga bog'liq, runner esa
+boshqacha chizadi — hech narsa o'zgarmagan holda ham bir necha foiz farq
+chiqadi. Ular dizayn regressiyasi uchun qo'lda ishlatiladi:
+
+```bash
+flutter test --tags screenshots                  # tekshirish
+flutter test --update-goldens --tags screenshots # rasmlarni yangilash
+```

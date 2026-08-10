@@ -181,14 +181,21 @@ def diff(old: dict, new: dict) -> list[dict]:
     return findings
 
 
-def frontend_usage() -> dict[str, dict[str, list[str]]]:
-    """Har bir frontend uchun: normallashtirilgan yo'l -> ishlatilgan fayllar."""
+def frontend_usage() -> tuple[dict[str, dict[str, list[str]]], list[str]]:
+    """Har bir frontend uchun: normallashtirilgan yo'l -> ishlatilgan fayllar.
+
+    Ikkinchi qiymat — kodi topilmagan frontendlar ro'yxati. Ular uchun "bu
+    endpointni ishlatmaydi" deb xulosa qilib bo'lmaydi: kod yo'q, demak
+    javob noma'lum.
+    """
     usage: dict[str, dict[str, list[str]]] = {}
+    missing: list[str] = []
     for fe in FRONTENDS:
         src = ROOT / fe["dir"]
         found: dict[str, list[str]] = {}
         if not src.exists():
             usage[fe["name"]] = found
+            missing.append(fe["name"])
             continue
         for pattern in fe["ext"]:
             for file in src.rglob(pattern):
@@ -205,7 +212,7 @@ def frontend_usage() -> dict[str, dict[str, list[str]]]:
                         if rel not in found[key]:
                             found[key].append(rel)
         usage[fe["name"]] = found
-    return usage
+    return usage, missing
 
 
 def main() -> int:
@@ -237,8 +244,14 @@ def main() -> int:
         print("✅ Buzuvchi o'zgarish yo'q — frontendlar uchun xavfsiz.")
         return 0
 
-    usage = frontend_usage()
+    usage, missing = frontend_usage()
     print(f"⚠️  {len(findings)} ta buzuvchi o'zgarish topildi:\n")
+
+    if missing:
+        print(f"❗ Kodi topilmagan frontendlar: {', '.join(missing)}")
+        print("   Ular bu o'zgarishlardan ta'sirlanadimi — bilib bo'lmaydi.")
+        print(f"   Kutilgan joy: {ROOT}/<frontend>\n")
+
     exit_code = 0
     for finding in findings:
         normalized = norm_path(finding["path"])
@@ -246,15 +259,26 @@ def main() -> int:
         for name, paths in usage.items():
             if normalized in paths:
                 affected.append(f"{name} ({', '.join(paths[normalized][:3])})")
-        marker = "🔴" if affected else "🟡"
+        marker = "🔴" if affected else ("🟠" if missing else "🟡")
         if affected:
             exit_code = 1
         print(f"{marker} {finding['method'].upper():6} {finding['path']}")
         print(f"     {finding['detail']}")
-        print(f"     ta'sir: {'; '.join(affected) if affected else 'hech bir frontend ishlatmaydi'}\n")
+        if affected:
+            ta_sir = "; ".join(affected)
+        elif missing:
+            ta_sir = f"tekshirilgan frontendlarda ishlatilmaydi; {', '.join(missing)} noma'lum"
+        else:
+            ta_sir = "hech bir frontend ishlatmaydi"
+        print(f"     ta'sir: {ta_sir}\n")
 
     if exit_code:
         print("🔴 = frontend kodida ishlatiladi, deploydan oldin tuzatilishi kerak.")
+    elif missing:
+        # Bu yerda "xavfsiz" deb chiqib ketish — eng qimmat xato: aynan kodi
+        # yo'q frontend buziladi va buni hech kim deploygacha ko'rmaydi.
+        print("🟠 = tekshirib bo'lmadi, chunki yuqoridagi frontendlarning kodi yo'q.")
+        exit_code = 1
     else:
         print("🟡 lar hech bir frontendda ishlatilmaydi — deploy xavfsiz.")
     return exit_code

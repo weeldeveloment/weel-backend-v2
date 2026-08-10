@@ -170,29 +170,25 @@ jobs:
         working-directory: weel-backend-v2
         run: echo "PYTHON=$(poetry env info --path)/bin/python" >> $GITHUB_ENV
 
-      - name: API kontrakti — buzuvchi o'zgarishlar
-        working-directory: weel-backend-v2
-        run: poetry run python tools/api_contract_check.py
-
+      # Token yo'q bo'lsa job yiqiladi. Ilgari u faqat ogohlantirib, tekshiruvni
+      # o'tkazib yuborardi — ya'ni sekret tasodifan o'chib qolsa, himoya jimgina
+      # yo'qolib, deploy davom etaverardi. Buzilgan gate — gate emas.
       - name: Check for frontend repo token
-        id: token
         run: |
-          if [ -n "${{ secrets.FRONTEND_REPOS_TOKEN }}" ]; then
-            echo "available=true" >> $GITHUB_OUTPUT
-          else
-            echo "available=false" >> $GITHUB_OUTPUT
-            echo "::warning::FRONTEND_REPOS_TOKEN yo'q — frontend typecheck o'tkazib yuborildi."
+          if [ -z "${{ secrets.FRONTEND_REPOS_TOKEN }}" ]; then
+            echo "::error::FRONTEND_REPOS_TOKEN sekreti yo'q. Usiz frontendlarni"
+            echo "::error::tekshirib bo'lmaydi, shuning uchun deploy to'xtatildi."
+            exit 1
           fi
 
       # actions/checkout huquq yetmasa shunchaki "Not Found" deydi va sababini
       # aytmaydi. Bu qadam har bir repoga alohida urinib, aniq xabar beradi.
       - name: Tokenning frontend repolarga huquqini tekshirish
-        if: steps.token.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ secrets.FRONTEND_REPOS_TOKEN }}
         run: |
           missing=""
-          for repo in dashboard_weel_uz weel-admin weel-b2b; do
+          for repo in dashboard_weel_uz weel-admin weel-b2b weel-b2b-mobile; do
             code=$(curl -s -o /dev/null -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "Accept: application/vnd.github+json" \
@@ -222,43 +218,50 @@ jobs:
           fi
 
       - uses: actions/checkout@v4
-        if: steps.token.outputs.available == 'true'
         with:
           repository: weeldeveloment/dashboard_weel_uz
           token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
           path: dashboard_weel_uz
 
       - uses: actions/checkout@v4
-        if: steps.token.outputs.available == 'true'
         with:
           repository: weeldeveloment/weel-admin
           token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
           path: weel-admin
 
       - uses: actions/checkout@v4
-        if: steps.token.outputs.available == 'true'
         with:
           repository: weeldeveloment/weel-b2b
           token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
           path: weel-b2b
 
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/weel-b2b-mobile
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel-b2b-mobile
+
+      # Kontrakt farqi frontendlar checkout qilingandan KEYIN ishlaydi. Ilgari u
+      # birinchi qadam edi, ya'ni skript hech qanday frontend kodini ko'rmasdan
+      # "hech bir frontend bu endpointni ishlatmaydi" degan xulosaga kelardi —
+      # buzuvchi o'zgarish har doim xavfsiz ko'rinardi.
+      - name: API kontrakti — buzuvchi o'zgarishlar
+        working-directory: weel-backend-v2
+        run: poetry run python tools/api_contract_check.py
+
       - uses: oven-sh/setup-bun@v2
-        if: steps.token.outputs.available == 'true'
 
       # Har biri alohida qadam: qaysi frontend yiqilgani bir qarashda ko'rinsin.
       # `continue-on-error` yo'q — birinchi yiqilgani deploy'ni to'xtatadi.
       - name: dashboard_weel_uz — tiplarni qayta generatsiya + typecheck
-        if: steps.token.outputs.available == 'true'
         working-directory: dashboard_weel_uz
         run: bun install --frozen-lockfile && bun run gen:spec && bun run typecheck
 
       - name: weel-admin — tiplarni qayta generatsiya + typecheck
-        if: steps.token.outputs.available == 'true'
         working-directory: weel-admin
         run: bun install --frozen-lockfile && bun run generate:openapi-types && bunx tsc --noEmit
 
       - name: weel-b2b — tiplarni qayta generatsiya + typecheck
-        if: steps.token.outputs.available == 'true'
         working-directory: weel-b2b
         run: bun install --frozen-lockfile && bun run gen:api && bunx tsc -b --noEmit
 
@@ -266,24 +269,44 @@ jobs:
       # dead branches — and it never runs a single assertion. Lint and unit
       # tests were passing locally but nothing enforced them on the way in.
       - name: dashboard_weel_uz — lint
-        if: steps.token.outputs.available == 'true'
         working-directory: dashboard_weel_uz
         run: bunx eslint .
 
       - name: weel-admin — lint
-        if: steps.token.outputs.available == 'true'
         working-directory: weel-admin
         run: bunx eslint .
 
       - name: weel-b2b — lint
-        if: steps.token.outputs.available == 'true'
         working-directory: weel-b2b
         run: bunx eslint .
 
       - name: weel-b2b — unit testlar
-        if: steps.token.outputs.available == 'true'
         working-directory: weel-b2b
         run: bunx vitest run
+
+      # Mobil ilova tiplarni OpenAPI'dan generatsiya qilmaydi — Dart modellari
+      # qo'lda yozilgan. Shuning uchun uni typecheck emas, analyzer va o'z test
+      # to'plami himoya qiladi; endpoint darajasidagi buzilishni esa yuqoridagi
+      # kontrakt farqi ko'radi, endi uning kodi shu yerda mavjud.
+      # Versiya qotirilgan: pubspec'da `flutter:` cheklovi yo'q, shuning uchun
+      # flutter-version-file ishlamaydi, `channel: stable` esa har hafta boshqa
+      # analyzer bilan kelib, kontraktga aloqasi yo'q xatolarni chiqarishi mumkin.
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.35.5
+          channel: stable
+
+      - name: weel-b2b-mobile — analyze
+        working-directory: weel-b2b-mobile
+        run: flutter pub get && flutter analyze
+
+      # --exclude-tags screenshots: golden rasmlar ularni yaratgan mashinaning
+      # shrift renderiga bog'liq, runner esa boshqacha chizadi — ular gate'ni
+      # kontraktga aloqasi yo'q sabab bilan qizil qilardi. Dizayn regressiyasi
+      # uchun ular qo'lda `flutter test --tags screenshots` bilan ishlatiladi.
+      - name: weel-b2b-mobile — testlar
+        working-directory: weel-b2b-mobile
+        run: flutter test --exclude-tags screenshots
 
   build-and-push:
     needs: [test, integration-test, frontend-contract]
@@ -346,3 +369,50 @@ jobs:
         if: env.DOKPLOY_WEBHOOK == '' && (env.DOKPLOY_URL == '' || env.DOKPLOY_APP_ID == '' || env.DOKPLOY_API_KEY == '')
         run: |
           echo "Deploy skipped: no Dokploy webhook or API secrets configured."
+
+  # Baseline — "oxirgi deploy qilingan kontrakt". U faqat qo'lda yangilanadigan
+  # bo'lsa, ataylab kiritilgan buzuvchi o'zgarish deploydan keyin ham baseline'da
+  # eski bo'lib qolaveradi va keyingi har bir push shu bir xato bilan yiqiladi.
+  # Bir necha kundan keyin kimdir gate'ni butunlay o'chirib qo'yadi. Shuning
+  # uchun muvaffaqiyatli deploydan keyin baseline main'ga o'zi surib qo'yiladi.
+  update-contract-baseline:
+    needs: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      SECRET_KEY: ci-only-not-a-real-secret
+      DJANGO_ALLOWED_HOSTS: example.com
+      REDIS_CONNECTION_STRING: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.0
+
+      - name: Install dependencies
+        run: poetry install --no-root --no-ansi
+
+      - name: Baseline'ni deploy qilingan sxema bilan almashtirish
+        run: poetry run python tools/api_contract_check.py --update
+
+      # [skip ci] bo'lmasa bu commit yana shu workflow'ni ishga tushirib,
+      # cheksiz deploy tsikliga olib keladi.
+      - name: Commit
+        run: |
+          if git diff --quiet tools/api-baseline/main.json; then
+            echo "Baseline o'zgarmadi — commit qilinmadi."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/api-baseline/main.json
+          git commit -m "Move the API contract baseline to the deployed schema [skip ci]"
+          git push origin main
