@@ -60,7 +60,7 @@ from apps.pms.serializers import (
     RoomSerializer,
     RoomTypeSerializer,
 )
-from apps.b2b.repository import list_b2b_users, get_company
+from apps.b2b.repository import list_b2b_users, get_company, create_company, create_b2b_user, get_b2b_user_by_phone
 from apps.b2b.serializers import B2BCompanySerializer, B2BUserSerializer
 from property.hotel_repository import resolve_hotel_guid, _fetch_hotel_rows_for_schema
 from apps.platform.raw_repository import list_organizations
@@ -520,12 +520,20 @@ class AdminReviewHideView(AdminHotelBaseView):
 
 
 class AdminB2BCompaniesView(AdminBaseView):
-    """List all B2B companies — admin view"""
+    """List/create B2B companies — admin view"""
 
     @swagger_auto_schema(responses={200: B2BCompanySerializer(many=True)})
     def get(self, request):
         companies = fetch_all("SELECT * FROM b2b_company WHERE is_active = TRUE ORDER BY name ASC")
         return Response(B2BCompanySerializer(companies, many=True).data)
+
+    @swagger_auto_schema(request_body=B2BCompanySerializer, responses={201: B2BCompanySerializer()})
+    def post(self, request):
+        serializer = B2BCompanySerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        company = create_company(**serializer.validated_data)
+        return Response(B2BCompanySerializer(company).data, status=status.HTTP_201_CREATED)
 
 
 class AdminB2BCompanyDetailView(AdminBaseView):
@@ -544,6 +552,25 @@ class AdminB2BUsersView(AdminBaseView):
     def get(self, request, company_id):
         users = list_b2b_users(company_id)
         return Response(B2BUserSerializer(users, many=True).data)
+
+    @swagger_auto_schema(request_body=B2BUserSerializer, responses={201: B2BUserSerializer()})
+    def post(self, request, company_id):
+        company = get_company(company_id)
+        if not company:
+            return Response({"detail": "Company not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = B2BUserSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        if get_b2b_user_by_phone(serializer.validated_data["phone"]):
+            return Response(
+                {"detail": "Bu telefon raqam bilan foydalanuvchi allaqachon mavjud."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = create_b2b_user(company_id=company_id, **serializer.validated_data)
+        return Response(B2BUserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 
 class AdminHotelAnalyticsView(AdminHotelBaseView):
