@@ -4,6 +4,8 @@ from apps.b2b.workspace.views import (
     WorkspaceDeviceTokenView,
     WorkspaceEventDetailView,
     WorkspaceEventListCreateView,
+    WorkspaceFileDetailView,
+    WorkspaceFileListCreateView,
     WorkspaceHotelListView,
     WorkspaceLeadClaimView,
     WorkspaceLeadCompleteView,
@@ -58,4 +60,7 @@ urlpatterns = [
     path("leads/", WorkspaceLeadListCreateView.as_view(), name="ws-leads"),
     path("leads/<int:lead_id>/claim/", WorkspaceLeadClaimView.as_view(), name="ws-lead-claim"),
     path("leads/<int:lead_id>/complete/", WorkspaceLeadCompleteView.as_view(), name="ws-lead-complete"),
+
+    path("files/", WorkspaceFileListCreateView.as_view(), name="ws-files"),
+    path("files/<int:file_id>/", WorkspaceFileDetailView.as_view(), name="ws-file-detail"),
 ]

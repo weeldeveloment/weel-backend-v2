@@ -12,6 +12,7 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.files.storage import default_storage
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -46,6 +47,8 @@ from apps.b2b.workspace.serializers import (
     TeamMemberSerializer,
     ThreadCreateSerializer,
     ThreadFlagsSerializer,
+    WorkspaceFileListSerializer,
+    WorkspaceFileSerializer,
     WorkspaceLoginSerializer,
     WorkspaceLoginVerifySerializer,
     WorkspaceRefreshSerializer,
@@ -1063,6 +1066,67 @@ class WorkspaceLeadCompleteView(APIView):
                 {"detail": _("Lead is not in progress.")}, status=status.HTTP_409_CONFLICT
             )
         return Response(_lead_payload(updated, request.user))
+
+
+# ─── Files ────────────────────────────────────────────────────────────────────
+
+def _file_payload(file: dict) -> dict:
+    return {**file, "url": default_storage.url(file["path"])}
+
+
+class WorkspaceFileListCreateView(APIView):
+    """GET/POST /api/b2b/workspace/files/ — the company's shared folder.
+
+    Everyone may read and add; nothing here is scoped to a role, so a driver
+    can send a photographed waybill without asking anyone to do it for them.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="List files", responses={200: WorkspaceFileListSerializer()})
+    def get(self, request):
+        files = repo.list_files(request.user.company_id)
+        return Response({"results": [_file_payload(f) for f in files]})
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Upload a file",
+        consumes=["multipart/form-data"],
+        manual_parameters=[
+            openapi.Parameter("file", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
+        ],
+        responses={201: WorkspaceFileSerializer()},
+    )
+    def post(self, request):
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": _("No file provided.")}, status=status.HTTP_400_BAD_REQUEST)
+
+        path = default_storage.save(f"b2b/workspace/{request.user.company_id}/{upload.name}", upload)
+        file = repo.create_file(
+            company_id=request.user.company_id,
+            author_id=request.user.id,
+            name=upload.name,
+            path=path,
+            size=upload.size,
+        )
+        return Response(_file_payload(file), status=status.HTTP_201_CREATED)
+
+
+class WorkspaceFileDetailView(APIView):
+    """DELETE /api/b2b/workspace/files/<id>/"""
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Delete a file", responses={204: "Deleted"})
+    def delete(self, request, file_id: int):
+        file = repo.get_file(file_id, request.user.company_id)
+        if not file:
+            return Response({"detail": _("File not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        repo.delete_file(file_id, request.user.company_id)
+        default_storage.delete(file["path"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ─── Hotels ───────────────────────────────────────────────────────────────────

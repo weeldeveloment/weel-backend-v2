@@ -499,3 +499,20 @@ class Command(BaseCommand):
             "ON b2b_workspace_lead (company_id, status);"
         )
         self.stdout.write("  Created b2b_workspace_lead")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_file (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                author_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                name VARCHAR(300) NOT NULL,
+                path VARCHAR(500) NOT NULL,
+                size BIGINT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_file_company_idx "
+            "ON b2b_workspace_file (company_id, created_at DESC);"
+        )
+        self.stdout.write("  Created b2b_workspace_file")
