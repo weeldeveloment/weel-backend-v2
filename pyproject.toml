@@ -63,6 +63,38 @@ opentelemetry-exporter-otlp-proto-http = "^1.43.0"
 black = "^25.9.0"
 django-stubs = "^6.0.3"
 djangorestframework-stubs = "^3.16.9"
+ruff = "^0.16.2"
+
+[tool.ruff]
+target-version = "py312"
+exclude = [
+    "venv",
+    "staticfiles",
+    "static",
+    "node_modules",
+    "**/migrations",
+    "backups",
+]
+
+[tool.ruff.lint]
+# Deliberately narrow: these rules only fire on code that is broken, not on
+# code that is untidy. Every one of them found a live defect on the first run
+# (an UnboundLocalError on an admin endpoint, two functions calling an
+# unimported `fetch_one`, a models module that raised NameError on import), so
+# the gate stays cheap and stays meaningful.
+#
+# Style and unused-import rules (F401, E501, I) are intentionally left out for
+# now: there are ~85 unused imports, and some are side-effect imports that a
+# blanket autofix would silently delete. Clean those in a separate pass, then
+# add "F401" here.
+select = [
+    "E9",    # syntax / IO errors
+    "F63",   # comparison and assertion mistakes
+    "F7",    # misplaced statements (break outside loop, ...)
+    "F82",   # undefined names
+    "F811",  # redefinition of an unused name
+    "F823",  # local variable referenced before assignment
+]
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

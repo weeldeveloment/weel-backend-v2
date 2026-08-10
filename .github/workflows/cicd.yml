@@ -3,6 +3,9 @@ name: CI/CD to Dokploy (zero downtime)
 on:
   push:
     branches: [main]
+  # PR'da ham ishlaydi, lekin faqat tekshiruv qismi: build/deploy joblari
+  # `if: github.event_name != 'pull_request'` bilan cheklangan.
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -29,9 +32,16 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-root --no-ansi
 
+      # Lint before tests: a syntax-level mistake should not wait for the whole
+      # suite to report it. Scoped to the code we own — `venv/`, migrations and
+      # vendored trees are excluded in pyproject.
+      - name: Lint (ruff)
+        run: poetry run ruff check .
+
       # Uses core.test_settings (sqlite, in-memory) — see pytest.ini. The
       # integration tests that need a live PostgreSQL schema skip themselves
-      # unless WEEL_INTEGRATION_DB=1.
+      # unless WEEL_INTEGRATION_DB=1; the `integration-test` job below runs
+      # those against a real PostgreSQL service.
       - name: Run tests
         # core.test_settings imports core.settings, which refuses to start
         # without a secret key and allowed hosts unless DEBUG is on. There is
@@ -50,8 +60,303 @@ jobs:
           REDIS_CONNECTION_STRING: redis://localhost:6379/0
         run: poetry run python manage.py check --deploy --fail-level ERROR
 
+  # The booking engine is the money path: advisory locks, double-booking
+  # prevention, server-side price checks. Its tests need the raw-SQL schema
+  # (pms_property, pms_room, pms_booking), which no Django migration creates,
+  # so the `test` job above skips every one of them. Without this job that
+  # code ships with zero automated coverage.
+  integration-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: weel
+          POSTGRES_PASSWORD: weel
+          POSTGRES_DB: weel_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DJANGO_SETTINGS_MODULE: core.settings
+      DJANGO_DEBUG: '0'
+      SECRET_KEY: ci-only-not-a-real-secret
+      DJANGO_ALLOWED_HOSTS: example.com
+      REDIS_CONNECTION_STRING: redis://localhost:6379/0
+      DB_NAME: weel_test
+      DB_USER: weel
+      DB_PASSWORD: weel
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.0
+
+      - name: Install dependencies
+        run: poetry install --no-root --no-ansi
+
+      # postgis/postgis ships PostGIS but not pgvector, and the recommendation
+      # migration creates the `vector` extension. Both are needed, and no
+      # public image carries the pair.
+      - name: Install pgvector into the database container
+        run: |
+          docker exec ${{ job.services.postgres.id }} sh -c \
+            "apt-get update -qq && apt-get install -y -qq postgresql-16-pgvector"
+
+      # Extensions, migrations, the raw-schema baseline and the code-owned
+      # pms_*/b2b_* DDL, in that order. Once schema/public_baseline.sql is
+      # committed (see schema/README.md) this step also builds `users`,
+      # `booking`, `property` and the rest, and the smoke suite can be turned
+      # on here with WEEL_SMOKE_DB=1.
+      - name: Build the schema
+        run: poetry run python manage.py bootstrap_schema
+
+      - name: Run integration tests
+        env:
+          WEEL_INTEGRATION_DB: '1'
+        run: poetry run pytest -q -m integration
+
+  # Backend o'zgarishi frontendlarni buzmasligini tekshiradi. Ikki bosqich:
+  #   1. Kontrakt farqi — tez, baseline bilan solishtiradi (frontend repolarsiz).
+  #   2. Har bir frontendda tiplarni backenddan qayta generatsiya qilib typecheck.
+  # 2-bosqich uchun org repolarini o'qiy oladigan token kerak: FRONTEND_REPOS_TOKEN
+  # secret'i yo'q bo'lsa, bu bosqich o'tkazib yuboriladi (1-bosqich baribir ishlaydi).
+  frontend-contract:
+    runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: ci-only-not-a-real-secret
+      DJANGO_ALLOWED_HOSTS: example.com
+      REDIS_CONNECTION_STRING: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: weel-backend-v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.0
+
+      - name: Install backend dependencies
+        working-directory: weel-backend-v2
+        run: poetry install --no-root --no-ansi
+
+      # Generatsiya skriptlari `${PYTHON:-venv/bin/python}` ishlatadi; CI'da venv
+      # yo'q, shuning uchun poetry muhitidagi python'ni ko'rsatamiz.
+      - name: Resolve Python path
+        working-directory: weel-backend-v2
+        run: echo "PYTHON=$(poetry env info --path)/bin/python" >> $GITHUB_ENV
+
+      # Token yo'q bo'lsa job yiqiladi. Ilgari u faqat ogohlantirib, tekshiruvni
+      # o'tkazib yuborardi — ya'ni sekret tasodifan o'chib qolsa, himoya jimgina
+      # yo'qolib, deploy davom etaverardi. Buzilgan gate — gate emas.
+      - name: Check for frontend repo token
+        run: |
+          if [ -z "${{ secrets.FRONTEND_REPOS_TOKEN }}" ]; then
+            echo "::error::FRONTEND_REPOS_TOKEN sekreti yo'q. Usiz frontendlarni"
+            echo "::error::tekshirib bo'lmaydi, shuning uchun deploy to'xtatildi."
+            exit 1
+          fi
+
+      # actions/checkout huquq yetmasa shunchaki "Not Found" deydi va sababini
+      # aytmaydi. Bu qadam har bir repoga alohida urinib, aniq xabar beradi.
+      - name: Tokenning frontend repolarga huquqini tekshirish
+        env:
+          GH_TOKEN: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+        run: |
+          missing=""
+          for repo in dashboard_weel_uz weel-admin weel-b2b weel-b2b-mobile Flutter weel-mobile weel.uz; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/weeldeveloment/$repo")
+            if [ "$code" = "200" ]; then
+              echo "✅ $repo — o'qish mumkin"
+            else
+              echo "❌ $repo — HTTP $code"
+              missing="$missing $repo"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            cat <<EOF
+          ::error::FRONTEND_REPOS_TOKEN bu repolarni ko'ra olmayapti:$missing
+
+          Eng ko'p uchraydigan uchta sabab:
+            1. Fine-grained token tashkilot tasdig'ini kutmoqda.
+               Org Settings -> Third-party Access -> Personal access tokens
+               -> Pending requests dan tasdiqlang.
+            2. Token yaratilganda "Resource owner" sifatida shaxsiy hisob
+               tanlangan. U 'weeldeveloment' bo'lishi kerak.
+            3. "Repository access" da bu repolar belgilanmagan, yoki
+               "Contents: Read-only" huquqi berilmagan.
+          EOF
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/dashboard_weel_uz
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: dashboard_weel_uz
+
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/weel-admin
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel-admin
+
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/weel-b2b
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel-b2b
+
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/weel-b2b-mobile
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel-b2b-mobile
+
+      # Bu uchtasi ham backendni iste'mol qiladi. Ular tiplarni generatsiya
+      # qilmaydi, shuning uchun asosiy himoya — kontrakt farqi: u shu kodni
+      # o'qib, o'zgargan endpointni qaysi ilova ishlatishini aytadi. Shuning
+      # uchun ular checkout qilinishi shart, garchi hammasida build bosqichi
+      # bo'lmasa ham (pastdagi izohga qarang).
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/Flutter
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: Flutter
+
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/weel-mobile
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel-mobile
+
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/weel.uz
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel.uz
+
+      # Kontrakt farqi frontendlar checkout qilingandan KEYIN ishlaydi. Ilgari u
+      # birinchi qadam edi, ya'ni skript hech qanday frontend kodini ko'rmasdan
+      # "hech bir frontend bu endpointni ishlatmaydi" degan xulosaga kelardi —
+      # buzuvchi o'zgarish har doim xavfsiz ko'rinardi.
+      - name: API kontrakti — buzuvchi o'zgarishlar
+        working-directory: weel-backend-v2
+        run: poetry run python tools/api_contract_check.py
+
+      - uses: oven-sh/setup-bun@v2
+
+      # Har biri alohida qadam: qaysi frontend yiqilgani bir qarashda ko'rinsin.
+      # `continue-on-error` yo'q — birinchi yiqilgani deploy'ni to'xtatadi.
+      - name: dashboard_weel_uz — tiplarni qayta generatsiya + typecheck
+        working-directory: dashboard_weel_uz
+        run: bun install --frozen-lockfile && bun run gen:spec && bun run typecheck
+
+      - name: weel-admin — tiplarni qayta generatsiya + typecheck
+        working-directory: weel-admin
+        run: bun install --frozen-lockfile && bun run generate:openapi-types && bunx tsc --noEmit
+
+      - name: weel-b2b — tiplarni qayta generatsiya + typecheck
+        working-directory: weel-b2b
+        run: bun install --frozen-lockfile && bun run gen:api && bunx tsc -b --noEmit
+
+      # Typecheck alone misses unused variables, bad hook dependencies and
+      # dead branches — and it never runs a single assertion. Lint and unit
+      # tests were passing locally but nothing enforced them on the way in.
+      - name: dashboard_weel_uz — lint
+        working-directory: dashboard_weel_uz
+        run: bunx eslint .
+
+      - name: weel-admin — lint
+        working-directory: weel-admin
+        run: bunx eslint .
+
+      - name: weel-b2b — lint
+        working-directory: weel-b2b
+        run: bunx eslint .
+
+      - name: weel-b2b — unit testlar
+        working-directory: weel-b2b
+        run: bunx vitest run
+
+      - name: weel.uz — lint
+        working-directory: weel.uz
+        run: bun install --frozen-lockfile && bun run lint
+
+      - name: weel.uz — build
+        working-directory: weel.uz
+        run: bun run build
+
+      # weel-mobile va Flutter (weel_booking) uchun bu yerda build bosqichi
+      # yo'q — ataylab. Ikkalasida ham bu ish boshlanishidan oldin mavjud
+      # nosozliklar bor va ularni gate qilish backend deployini o'zga
+      # repodagi qarz uchun to'xtatib qo'yardi:
+      #
+      #   weel-mobile — `bun run typecheck` 6 ta xato beradi. To'g'ri yechim
+      #     `bun run api:types` bilan tiplarni yangilash, lekin u 32 ming
+      #     qatorlik farq va yana ko'proq xato beradi: committed tiplar juda
+      #     eski spec'dan. Bu alohida migratsiya ishi.
+      #   Flutter (weel_booking) — Flutter SDK 3.44.9 talab qiladi (b2b-mobile
+      #     esa 3.35.5 da), va uning analyze holati tekshirilmagan.
+      #
+      # Ikkalasi ham kontrakt farqidan chetda qolmaydi: yuqorida checkout
+      # qilingani uchun o'zgargan endpointni ular ishlatsa, job qizil bo'ladi.
+
+      # Mobil ilova tiplarni OpenAPI'dan generatsiya qilmaydi — Dart modellari
+      # qo'lda yozilgan. Shuning uchun uni typecheck emas, analyzer va o'z test
+      # to'plami himoya qiladi; endpoint darajasidagi buzilishni esa yuqoridagi
+      # kontrakt farqi ko'radi, endi uning kodi shu yerda mavjud.
+      # Versiya qotirilgan: pubspec'da `flutter:` cheklovi yo'q, shuning uchun
+      # flutter-version-file ishlamaydi, `channel: stable` esa har hafta boshqa
+      # analyzer bilan kelib, kontraktga aloqasi yo'q xatolarni chiqarishi mumkin.
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.35.5
+          channel: stable
+
+      - name: weel-b2b-mobile — analyze
+        working-directory: weel-b2b-mobile
+        run: flutter pub get && flutter analyze
+
+      # --exclude-tags screenshots: golden rasmlar ularni yaratgan mashinaning
+      # shrift renderiga bog'liq, runner esa boshqacha chizadi — ular gate'ni
+      # kontraktga aloqasi yo'q sabab bilan qizil qilardi. Dizayn regressiyasi
+      # uchun ular qo'lda `flutter test --tags screenshots` bilan ishlatiladi.
+      - name: weel-b2b-mobile — testlar
+        working-directory: weel-b2b-mobile
+        run: flutter test --exclude-tags screenshots
+
   build-and-push:
-    needs: test
+    needs: [test, integration-test, frontend-contract]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +389,7 @@ jobs:
 
   deploy:
     needs: build-and-push
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -109,3 +415,50 @@ jobs:
         if: env.DOKPLOY_WEBHOOK == '' && (env.DOKPLOY_URL == '' || env.DOKPLOY_APP_ID == '' || env.DOKPLOY_API_KEY == '')
         run: |
           echo "Deploy skipped: no Dokploy webhook or API secrets configured."
+
+  # Baseline — "oxirgi deploy qilingan kontrakt". U faqat qo'lda yangilanadigan
+  # bo'lsa, ataylab kiritilgan buzuvchi o'zgarish deploydan keyin ham baseline'da
+  # eski bo'lib qolaveradi va keyingi har bir push shu bir xato bilan yiqiladi.
+  # Bir necha kundan keyin kimdir gate'ni butunlay o'chirib qo'yadi. Shuning
+  # uchun muvaffaqiyatli deploydan keyin baseline main'ga o'zi surib qo'yiladi.
+  update-contract-baseline:
+    needs: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      SECRET_KEY: ci-only-not-a-real-secret
+      DJANGO_ALLOWED_HOSTS: example.com
+      REDIS_CONNECTION_STRING: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pipx install poetry==2.1.0
+
+      - name: Install dependencies
+        run: poetry install --no-root --no-ansi
+
+      - name: Baseline'ni deploy qilingan sxema bilan almashtirish
+        run: poetry run python tools/api_contract_check.py --update
+
+      # [skip ci] bo'lmasa bu commit yana shu workflow'ni ishga tushirib,
+      # cheksiz deploy tsikliga olib keladi.
+      - name: Commit
+        run: |
+          if git diff --quiet tools/api-baseline/main.json; then
+            echo "Baseline o'zgarmadi — commit qilinmadi."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/api-baseline/main.json
+          git commit -m "Move the API contract baseline to the deployed schema [skip ci]"
+          git push origin main

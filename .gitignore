@@ -137,3 +137,11 @@ graphify-out/
 certificates/
 *.p8
 dump.rdb
+
+# Frontend tip generatsiyasi uchun eksport qilinadigan sxemalar — artefakt,
+# `make export-schema` yoki frontendlarning gen skriptlari qayta yaratadi.
+# Deploy kontraktining "yodda saqlangan" nusxasi esa tools/api-baseline/ da
+# turadi va u ataylab commit qilinadi.
+/openapi.json
+/b2b-openapi.json
+tools/api-baseline/.fresh.json

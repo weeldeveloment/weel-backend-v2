@@ -4,6 +4,7 @@ import logging
 from collections import defaultdict
 from datetime import date, timedelta, datetime
 from decimal import Decimal, InvalidOperation
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 from uuid import uuid4
 
@@ -4111,7 +4112,11 @@ class PartnerAllPropertyListView(APIView):
             partner_user_id=partner_id,
             default_limit=None,
         )
-        hotel_rows, _ = list_admin_hotels(
+        # Not `_`: binding it here would make gettext's `_` a local for the
+        # whole method, and the `_("...")` calls above it — the validation
+        # errors for owner_id — would raise UnboundLocalError instead of
+        # returning 400.
+        hotel_rows, _total = list_admin_hotels(
             search=request.query_params.get("search"),
             partner_user_id=partner_id,
         )

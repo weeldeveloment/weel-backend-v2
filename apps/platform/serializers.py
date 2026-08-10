@@ -13,6 +13,20 @@ class OrganizationSerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
 
 
+class NullableOrganizationSerializer(OrganizationSerializer):
+    """Same shape as OrganizationSerializer, but a separate schema definition.
+
+    Swagger 2.0 cannot put `x-nullable` next to a `$ref`, so drf-yasg moves it
+    onto the referenced definition instead. Passing `allow_null=True` to
+    OrganizationSerializer therefore marked *every* Organization in the schema
+    nullable — including the items of `organizations`, which are never null —
+    and the generated frontend types became `(Organization | null)[]`.
+
+    Nullable fields reference this subclass so only its own definition carries
+    the flag.
+    """
+
+
 class OrganizationCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=200)
     slug = serializers.SlugField(max_length=100)
@@ -55,8 +69,14 @@ class PlatformUserUpdateSerializer(serializers.Serializer):
 
 
 class PmsOtpRegisterSerializer(serializers.Serializer):
+    """Registration collects the person only.
+
+    The organization used to be created here too, which forced the client to name
+    the hotel at sign-up and then again on the property step. It is now created
+    separately via POST /platform/organization/.
+    """
+
     phone_number = serializers.CharField(max_length=32)
-    org_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
     first_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
 
@@ -139,7 +159,9 @@ class PmsLoginResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
     refresh = serializers.CharField()
     user = PlatformUserSerializer()
-    organization = OrganizationSerializer()
+    # Null right after registration, and for an account whose organization step
+    # is still pending.
+    organization = NullableOrganizationSerializer(allow_null=True, required=False, default=None)
     organizations = OrganizationSerializer(many=True, required=False)
     has_properties = serializers.BooleanField(required=False, default=False)
 
@@ -188,7 +210,7 @@ class PmsOtpSendResponseSerializer(serializers.Serializer):
 
 class PmsMeResponseSerializer(serializers.Serializer):
     user = PlatformUserSerializer()
-    organization = OrganizationSerializer(allow_null=True, required=False, default=None)
+    organization = NullableOrganizationSerializer(allow_null=True, required=False, default=None)
     organizations = OrganizationSerializer(many=True)
     has_properties = serializers.BooleanField(required=False, default=False)
 

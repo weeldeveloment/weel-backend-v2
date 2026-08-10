@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.raw.db import fetch_all
+from shared.raw.db import fetch_all, fetch_one
 
 from .graph import get_booked_properties
 
