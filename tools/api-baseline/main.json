@@ -13608,6 +13608,60 @@
    "type": "object",
    "x-nullable": true
   },
+  "WorkspaceFile": {
+   "properties": {
+    "author_id": {
+     "title": "Author id",
+     "type": "integer"
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "size": {
+     "title": "Size",
+     "type": "integer"
+    },
+    "url": {
+     "minLength": 1,
+     "title": "Url",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "size",
+    "author_id",
+    "created_at",
+    "url"
+   ],
+   "type": "object"
+  },
+  "WorkspaceFileList": {
+   "properties": {
+    "results": {
+     "items": {
+      "$ref": "#/definitions/WorkspaceFile"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results"
+   ],
+   "type": "object"
+  },
   "WorkspaceLogin": {
    "properties": {
     "phone": {
@@ -17951,6 +18005,77 @@
      "B2B / Workspace (mobile)"
     ]
    }
+  },
+  "/b2b/workspace/files/": {
+   "get": {
+    "description": "GET/POST /api/b2b/workspace/files/ — the company's shared folder.\n\nEveryone may read and add; nothing here is scoped to a role, so a driver\ncan send a photographed waybill without asking anyone to do it for them.",
+    "operationId": "b2b_workspace_files_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceFileList"
+      }
+     }
+    },
+    "summary": "List files",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "consumes": [
+     "multipart/form-data"
+    ],
+    "description": "GET/POST /api/b2b/workspace/files/ — the company's shared folder.\n\nEveryone may read and add; nothing here is scoped to a role, so a driver\ncan send a photographed waybill without asking anyone to do it for them.",
+    "operationId": "b2b_workspace_files_create",
+    "parameters": [
+     {
+      "in": "formData",
+      "name": "file",
+      "required": true,
+      "type": "file"
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceFile"
+      }
+     }
+    },
+    "summary": "Upload a file",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/files/{file_id}/": {
+   "delete": {
+    "description": "DELETE /api/b2b/workspace/files/<id>/",
+    "operationId": "b2b_workspace_files_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": "Deleted"
+     }
+    },
+    "summary": "Delete a file",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "file_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
   },
   "/b2b/workspace/hotels/": {
    "get": {
