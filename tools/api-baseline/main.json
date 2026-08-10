@@ -8167,6 +8167,148 @@
    ],
    "type": "object"
   },
+  "Lead": {
+   "properties": {
+    "author_id": {
+     "title": "Author id",
+     "type": "integer"
+    },
+    "can_claim": {
+     "title": "Can claim",
+     "type": "boolean"
+    },
+    "can_complete": {
+     "title": "Can complete",
+     "type": "boolean"
+    },
+    "can_view_details": {
+     "title": "Can view details",
+     "type": "boolean"
+    },
+    "claimed_at": {
+     "format": "date-time",
+     "title": "Claimed at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "claimed_by_id": {
+     "title": "Claimed by id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "company_name": {
+     "minLength": 1,
+     "title": "Company name",
+     "type": "string"
+    },
+    "contact_full_name": {
+     "minLength": 1,
+     "title": "Contact full name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "contact_phone": {
+     "minLength": 1,
+     "title": "Contact phone",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "product_name": {
+     "minLength": 1,
+     "title": "Product name",
+     "type": "string"
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    },
+    "status": {
+     "minLength": 1,
+     "title": "Status",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "company_name",
+    "contact_full_name",
+    "contact_phone",
+    "product_name",
+    "quantity",
+    "status",
+    "author_id",
+    "created_at",
+    "can_claim",
+    "can_complete",
+    "can_view_details"
+   ],
+   "type": "object"
+  },
+  "LeadList": {
+   "properties": {
+    "results": {
+     "items": {
+      "$ref": "#/definitions/Lead"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results"
+   ],
+   "type": "object"
+  },
+  "LeadWrite": {
+   "properties": {
+    "company_name": {
+     "maxLength": 300,
+     "minLength": 1,
+     "title": "Company name",
+     "type": "string"
+    },
+    "contact_full_name": {
+     "maxLength": 300,
+     "minLength": 1,
+     "title": "Contact full name",
+     "type": "string"
+    },
+    "contact_phone": {
+     "maxLength": 20,
+     "minLength": 1,
+     "title": "Contact phone",
+     "type": "string"
+    },
+    "product_name": {
+     "maxLength": 300,
+     "minLength": 1,
+     "title": "Product name",
+     "type": "string"
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    }
+   },
+   "required": [
+    "company_name",
+    "contact_full_name",
+    "contact_phone",
+    "product_name",
+    "quantity"
+   ],
+   "type": "object"
+  },
   "LocationDistrictList": {
    "properties": {
     "guid": {
@@ -17848,6 +17990,120 @@
    },
    "parameters": []
   },
+  "/b2b/workspace/leads/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/leads/ — every lead in the company, any employee\nmay see the board and claim an open one.\nPOST /api/b2b/workspace/leads/ — owner/performer only.",
+    "operationId": "b2b_workspace_leads_list",
+    "parameters": [
+     {
+      "enum": [
+       "new",
+       "in_progress",
+       "completed"
+      ],
+      "in": "query",
+      "name": "status",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/LeadList"
+      }
+     }
+    },
+    "summary": "List leads",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET  /api/b2b/workspace/leads/ — every lead in the company, any employee\nmay see the board and claim an open one.\nPOST /api/b2b/workspace/leads/ — owner/performer only.",
+    "operationId": "b2b_workspace_leads_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Lead"
+      }
+     },
+     "403": {
+      "description": "Employees cannot create leads"
+     }
+    },
+    "summary": "Create a lead (owner/manager only)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/leads/{lead_id}/claim/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/leads/<id>/claim/ — any employee takes a 'new' lead.",
+    "operationId": "b2b_workspace_leads_claim_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Lead"
+      }
+     }
+    },
+    "summary": "Claim a lead",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/leads/{lead_id}/complete/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/leads/<id>/complete/ — the claiming employee\nmarks it resolved.",
+    "operationId": "b2b_workspace_leads_complete_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Lead"
+      }
+     }
+    },
+    "summary": "Complete a lead",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/me/": {
    "get": {
     "description": "GET /api/b2b/workspace/me/ — profile plus the permission map the app\nbuilds its UI from.",
@@ -17867,6 +18123,23 @@
     ]
    },
    "parameters": []
+  },
+  "/b2b/workspace/me/device-token/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/me/device-token/ — register this device for push.",
+    "operationId": "b2b_workspace_me_device-token_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Register the FCM token for push notifications",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/tasks/": {
    "get": {
