@@ -8449,6 +8449,63 @@
    ],
    "type": "object"
   },
+  "NullableOrganization": {
+   "properties": {
+    "created_at": {
+     "format": "date-time",
+     "readOnly": true,
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "readOnly": true,
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_active": {
+     "readOnly": true,
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "name": {
+     "maxLength": 200,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "schema_name": {
+     "minLength": 1,
+     "readOnly": true,
+     "title": "Schema name",
+     "type": "string"
+    },
+    "slug": {
+     "format": "slug",
+     "maxLength": 100,
+     "minLength": 1,
+     "pattern": "^[-a-zA-Z0-9_]+$",
+     "title": "Slug",
+     "type": "string"
+    },
+    "updated_at": {
+     "format": "date-time",
+     "readOnly": true,
+     "title": "Updated at",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "slug",
+    "schema_name",
+    "is_active",
+    "created_at",
+    "updated_at"
+   ],
+   "type": "object",
+   "x-nullable": true
+  },
   "Organization": {
    "properties": {
     "created_at": {
@@ -8984,7 +9041,7 @@
      "type": "boolean"
     },
     "organization": {
-     "$ref": "#/definitions/Organization"
+     "$ref": "#/definitions/NullableOrganization"
     },
     "organizations": {
      "items": {
@@ -9004,8 +9061,7 @@
    "required": [
     "access",
     "refresh",
-    "user",
-    "organization"
+    "user"
    ],
    "type": "object"
   },
@@ -9017,7 +9073,7 @@
      "type": "boolean"
     },
     "organization": {
-     "$ref": "#/definitions/Organization"
+     "$ref": "#/definitions/NullableOrganization"
     },
     "organizations": {
      "items": {
@@ -16590,8 +16646,8 @@
      "400": {
       "description": "Invalid hotel_guid / validation error."
      },
-     "404": {
-      "description": "Hotel not found."
+     "500": {
+      "description": "A room row could not be loaded or serialized."
      }
     },
     "summary": "List hotel rooms (owner or performer, step 2)",
@@ -20740,7 +20796,7 @@
   "/platform/register/": {
    "parameters": [],
    "post": {
-    "description": "",
+    "description": "Start PMS registration. This only creates the personal account; the organization is created afterwards via POST /platform/organization/.",
     "operationId": "platform_register_create",
     "parameters": [
      {
@@ -20755,10 +20811,6 @@
         },
         "last_name": {
          "description": "Last name",
-         "type": "string"
-        },
-        "org_name": {
-         "description": "Organization name",
          "type": "string"
         },
         "phone_number": {
@@ -20789,7 +20841,7 @@
   "/platform/register/verify/": {
    "parameters": [],
    "post": {
-    "description": "",
+    "description": "Finish PMS registration. Creates the personal account only and returns tokens that are not scoped to any organization yet: `organization` is null until the client calls POST /platform/organization/.",
     "operationId": "platform_register_verify_create",
     "parameters": [
      {
