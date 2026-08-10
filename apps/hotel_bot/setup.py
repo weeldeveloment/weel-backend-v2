@@ -74,7 +74,9 @@ async def set_webhook(base_url: str) -> None:
 
     secret = get_webhook_secret()
     webhook_url = f"{base_url.rstrip('/')}/api/hotel-bot/webhook/{secret}/"
-    pms_url = getattr(settings, "PMS_MINIAPP_URL", "https://pms.weel.uz")
+    # Falls back to the same host as the setting itself, so the two cannot
+    # drift apart and quietly point the menu button somewhere dead.
+    pms_url = getattr(settings, "PMS_MINIAPP_URL", None) or "https://weelrooms.uz"
 
     request = HTTPXRequest(
         connect_timeout=10.0,
