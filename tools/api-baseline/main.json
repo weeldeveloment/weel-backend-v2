@@ -5858,6 +5858,103 @@
    ],
    "type": "object"
   },
+  "EmployeeMonthlyStat": {
+   "properties": {
+    "completed_count": {
+     "title": "Completed count",
+     "type": "integer"
+    },
+    "due_count": {
+     "title": "Due count",
+     "type": "integer"
+    },
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "on_time_count": {
+     "title": "On time count",
+     "type": "integer"
+    },
+    "on_time_rate": {
+     "readOnly": true,
+     "title": "On time rate",
+     "type": "number",
+     "x-nullable": true
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "employee_id",
+    "full_name",
+    "completed_count",
+    "due_count",
+    "on_time_count"
+   ],
+   "type": "object"
+  },
+  "EmployeeOfMonth": {
+   "properties": {
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "month": {
+     "title": "Month",
+     "type": "integer"
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "selected_at": {
+     "format": "date-time",
+     "title": "Selected at",
+     "type": "string"
+    },
+    "year": {
+     "title": "Year",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "employee_id",
+    "full_name",
+    "year",
+    "month",
+    "selected_at"
+   ],
+   "type": "object"
+  },
+  "EmployeeOfMonthSelect": {
+   "properties": {
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "employee_id"
+   ],
+   "type": "object"
+  },
   "EventPatch": {
    "properties": {
     "all_day": {
@@ -14294,7 +14391,7 @@
   },
   "/admin-auth/b2b/companies/": {
    "get": {
-    "description": "List all B2B companies — admin view",
+    "description": "List/create B2B companies — admin view",
     "operationId": "admin-auth_b2b_companies_list",
     "parameters": [],
     "responses": {
@@ -14312,7 +14409,32 @@
      "api"
     ]
    },
-   "parameters": []
+   "parameters": [],
+   "post": {
+    "description": "List/create B2B companies — admin view",
+    "operationId": "admin-auth_b2b_companies_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/B2BCompany"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/B2BCompany"
+      }
+     }
+    },
+    "tags": [
+     "api"
+    ]
+   }
   },
   "/admin-auth/b2b/companies/{company_id}/": {
    "get": {
@@ -14367,7 +14489,32 @@
      "required": true,
      "type": "string"
     }
-   ]
+   ],
+   "post": {
+    "description": "",
+    "operationId": "admin-auth_b2b_companies_users_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/B2BUser"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/B2BUser"
+      }
+     }
+    },
+    "tags": [
+     "api"
+    ]
+   }
   },
   "/admin-auth/hotels/": {
    "get": {
@@ -17876,6 +18023,81 @@
      "B2B / Workspace (mobile)"
     ]
    }
+  },
+  "/b2b/workspace/employee-of-month/": {
+   "get": {
+    "description": "GET/POST /api/b2b/workspace/employee-of-month/\n\nAnyone can see this month's pick; only the owner can make or change it.",
+    "operationId": "b2b_workspace_employee-of-month_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/EmployeeOfMonth"
+      }
+     },
+     "204": {
+      "description": "Not chosen yet this month"
+     }
+    },
+    "summary": "This month's employee of the month",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET/POST /api/b2b/workspace/employee-of-month/\n\nAnyone can see this month's pick; only the owner can make or change it.",
+    "operationId": "b2b_workspace_employee-of-month_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/EmployeeOfMonthSelect"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/EmployeeOfMonth"
+      }
+     },
+     "403": {
+      "description": "Owner only"
+     }
+    },
+    "summary": "Pick this month's employee of the month (owner only)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/employee-of-month/stats/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/employee-of-month/stats/ — owner only.\n\nEvery active employee's completed-task count and on-time rate for the\ncurrent calendar month, sorted best-first — what the owner picks the\nwinner from.",
+    "operationId": "b2b_workspace_employee-of-month_stats_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/EmployeeMonthlyStat"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "Monthly task stats per employee (owner only)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
   },
   "/b2b/workspace/events/": {
    "get": {
