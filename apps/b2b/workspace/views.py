@@ -927,9 +927,7 @@ def _lead_payload(lead: dict, user) -> dict:
     call, which is what stops two employees from working the same contact.
     """
     is_owner = lead.get("claimed_by_id") == user.id
-    can_view_details = (
-        lead.get("status") == LeadStatus.NEW or is_owner or user.is_manager
-    )
+    can_view_details = is_owner or user.is_manager
     payload = {
         **lead,
         "can_claim": lead.get("status") == LeadStatus.NEW,
