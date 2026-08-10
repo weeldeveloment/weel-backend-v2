@@ -267,3 +267,34 @@ class MessageWriteSerializer(serializers.Serializer):
 class ThreadFlagsSerializer(serializers.Serializer):
     is_pinned = serializers.BooleanField(required=False)
     is_muted = serializers.BooleanField(required=False)
+
+
+# ─── Employee of the month ──────────────────────────────────────────────────
+
+class EmployeeMonthlyStatSerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    photo = serializers.CharField(allow_null=True, required=False)
+    completed_count = serializers.IntegerField()
+    due_count = serializers.IntegerField()
+    on_time_count = serializers.IntegerField()
+    on_time_rate = serializers.SerializerMethodField()
+
+    def get_on_time_rate(self, obj) -> float | None:
+        # None rather than 0 when nobody had a deadline this month — a 0% rate
+        # would read as "always late", which nothing in the data supports.
+        due = obj["due_count"]
+        return round(obj["on_time_count"] / due, 4) if due else None
+
+
+class EmployeeOfMonthSerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    photo = serializers.CharField(allow_null=True, required=False)
+    year = serializers.IntegerField()
+    month = serializers.IntegerField()
+    selected_at = serializers.DateTimeField()
+
+
+class EmployeeOfMonthSelectSerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()

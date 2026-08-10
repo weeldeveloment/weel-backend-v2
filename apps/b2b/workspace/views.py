@@ -13,6 +13,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core.files.storage import default_storage
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -31,6 +32,9 @@ from apps.b2b.workspace.serializers import (
     CalendarEventSerializer,
     ChatMessageSerializer,
     ChatThreadSerializer,
+    EmployeeMonthlyStatSerializer,
+    EmployeeOfMonthSelectSerializer,
+    EmployeeOfMonthSerializer,
     EventPatchSerializer,
     EventWriteSerializer,
     LeadListSerializer,
@@ -509,8 +513,17 @@ class WorkspaceTaskStatusView(APIView):
 
         serializer = TaskStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        new_status = serializer.validated_data["status"]
+
+        # `updated_at` moves on every edit, so it can't say whether a done task
+        # was ever touched again after finishing — employee-of-the-month's
+        # on-time rate needs a timestamp that only changes when the task
+        # actually finishes. Reopening a task (done -> anything else) clears
+        # it, so a task re-completed later is judged on that completion, not
+        # a stale one.
+        completed_at = timezone.now() if new_status == "done" else None
         updated = repo.update_task(
-            task_id, request.user.company_id, status=serializer.validated_data["status"]
+            task_id, request.user.company_id, status=new_status, completed_at=completed_at
         )
         return Response(_task_payload(updated, request.user))
 
@@ -1210,3 +1223,86 @@ class WorkspaceHotelListView(APIView):
             "latitude": hotel.get("latitude"),
             "longitude": hotel.get("longitude"),
         } for hotel in hotels]})
+
+
+# ─── Employee of the month ──────────────────────────────────────────────────
+
+def _current_year_month() -> tuple[int, int]:
+    now = timezone.localtime(timezone.now())
+    return now.year, now.month
+
+
+class WorkspaceEmployeeMonthlyStatsView(APIView):
+    """GET /api/b2b/workspace/employee-of-month/stats/ — owner only.
+
+    Every active employee's completed-task count and on-time rate for the
+    current calendar month, sorted best-first — what the owner picks the
+    winner from.
+    """
+
+    permission_classes = [IsAuthenticated, HasCapability]
+    required_capability = "can_pick_employee_of_month"
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Monthly task stats per employee (owner only)",
+        responses={200: EmployeeMonthlyStatSerializer(many=True)},
+    )
+    def get(self, request):
+        year, month = _current_year_month()
+        stats = repo.monthly_employee_stats(request.user.company_id, year, month)
+        return Response(EmployeeMonthlyStatSerializer(stats, many=True).data)
+
+
+class WorkspaceEmployeeOfMonthView(APIView):
+    """GET/POST /api/b2b/workspace/employee-of-month/
+
+    Anyone can see this month's pick; only the owner can make or change it.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="This month's employee of the month",
+        responses={200: EmployeeOfMonthSerializer(), 204: "Not chosen yet this month"},
+    )
+    def get(self, request):
+        year, month = _current_year_month()
+        winner = repo.get_employee_of_month(request.user.company_id, year, month)
+        if not winner:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(EmployeeOfMonthSerializer(winner).data)
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Pick this month's employee of the month (owner only)",
+        request_body=EmployeeOfMonthSelectSerializer,
+        responses={200: EmployeeOfMonthSerializer(), 403: openapi.Response(description="Owner only")},
+    )
+    def post(self, request):
+        if not request.user.capabilities["can_pick_employee_of_month"]:
+            return Response(
+                {"detail": _("Only the owner can pick the employee of the month.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = EmployeeOfMonthSelectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        employee_id = serializer.validated_data["employee_id"]
+
+        if employee_id not in repo.employee_ids_in_company(request.user.company_id, [employee_id]):
+            return Response(
+                {"employee_id": [_("This employee is not in your company.")]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        year, month = _current_year_month()
+        winner = repo.set_employee_of_month(
+            company_id=request.user.company_id,
+            year=year,
+            month=month,
+            employee_id=employee_id,
+            selected_by_id=request.user.id,
+        )
+        return Response(EmployeeOfMonthSerializer(winner).data)

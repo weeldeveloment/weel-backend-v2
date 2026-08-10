@@ -42,6 +42,8 @@ def capabilities_for(role: str | None) -> dict[str, bool]:
         # Team & hotels
         "can_view_team": True,
         "can_manage_team": owner,
+        # Owner picks who gets the badge; everyone can see who won it.
+        "can_pick_employee_of_month": owner,
         "can_view_hotels": True,
         "can_book_hotel": manager,
         # Whether this person sees the whole company or only their own work.
