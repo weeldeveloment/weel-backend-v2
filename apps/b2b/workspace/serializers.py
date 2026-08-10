@@ -147,6 +147,19 @@ class LeadListSerializer(serializers.Serializer):
     results = LeadSerializer(many=True)
 
 
+class WorkspaceFileSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    size = serializers.IntegerField()
+    author_id = serializers.IntegerField()
+    created_at = serializers.DateTimeField()
+    url = serializers.CharField()
+
+
+class WorkspaceFileListSerializer(serializers.Serializer):
+    results = WorkspaceFileSerializer(many=True)
+
+
 class ChatThreadSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     group_name = serializers.CharField(allow_null=True, required=False)

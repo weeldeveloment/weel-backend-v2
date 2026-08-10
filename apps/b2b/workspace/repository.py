@@ -27,6 +27,7 @@ from apps.b2b.raw.tables import (
     B2B_TASK_SUBTASK_TABLE,
     B2B_TASK_TABLE,
     B2B_USER_TABLE,
+    B2B_WORKSPACE_FILE_TABLE,
     B2B_WORKSPACE_LEAD_TABLE,
 )
 
@@ -871,3 +872,41 @@ def complete_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, 
         """,
         [LeadStatus.COMPLETED, timezone.now(), lead_id, company_id, LeadStatus.IN_PROGRESS, employee_id],
     )
+
+
+# ─── Files ────────────────────────────────────────────────────────────────────
+
+def list_files(company_id: int) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE company_id = %s "
+        "ORDER BY created_at DESC, id DESC",
+        [company_id],
+    )
+
+
+def get_file(file_id: int, company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE id = %s AND company_id = %s",
+        [file_id, company_id],
+    )
+
+
+def create_file(
+    *, company_id: int, author_id: int, name: str, path: str, size: int
+) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_WORKSPACE_FILE_TABLE}
+            (company_id, author_id, name, path, size, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [company_id, author_id, name, path, size, timezone.now()],
+    )
+
+
+def delete_file(file_id: int, company_id: int) -> bool:
+    return execute(
+        f"DELETE FROM {B2B_WORKSPACE_FILE_TABLE} WHERE id = %s AND company_id = %s",
+        [file_id, company_id],
+    ) > 0
