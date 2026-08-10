@@ -516,3 +516,25 @@ class Command(BaseCommand):
             "ON b2b_workspace_file (company_id, created_at DESC);"
         )
         self.stdout.write("  Created b2b_workspace_file")
+
+        # Set/cleared by WorkspaceTaskStatusView whenever a task's status
+        # transitions to/from "done" — `updated_at` moves on every edit, so it
+        # can't tell whether a done task was ever touched again after finishing.
+        # Employee-of-the-month's "on time" rate depends on this timestamp.
+        cursor.execute("""
+            ALTER TABLE b2b_task ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_employee_of_month (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                year INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                selected_by_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                selected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (company_id, year, month)
+            );
+        """)
+        self.stdout.write("  Created b2b_employee_of_month")

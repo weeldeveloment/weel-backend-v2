@@ -2,6 +2,8 @@ from django.urls import path
 
 from apps.b2b.workspace.views import (
     WorkspaceDeviceTokenView,
+    WorkspaceEmployeeMonthlyStatsView,
+    WorkspaceEmployeeOfMonthView,
     WorkspaceEventDetailView,
     WorkspaceEventListCreateView,
     WorkspaceFileDetailView,
@@ -36,6 +38,13 @@ urlpatterns = [
     path("me/", WorkspaceMeView.as_view(), name="ws-me"),
     path("me/device-token/", WorkspaceDeviceTokenView.as_view(), name="ws-device-token"),
     path("team/", WorkspaceTeamView.as_view(), name="ws-team"),
+
+    path("employee-of-month/", WorkspaceEmployeeOfMonthView.as_view(), name="ws-employee-of-month"),
+    path(
+        "employee-of-month/stats/",
+        WorkspaceEmployeeMonthlyStatsView.as_view(),
+        name="ws-employee-of-month-stats",
+    ),
 
     path("tasks/", WorkspaceTaskListCreateView.as_view(), name="ws-tasks"),
     path("tasks/<int:task_id>/", WorkspaceTaskDetailView.as_view(), name="ws-task-detail"),

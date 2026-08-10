@@ -21,6 +21,7 @@ from apps.b2b.raw.tables import (
     B2B_CHAT_MESSAGE_TABLE,
     B2B_CHAT_THREAD_TABLE,
     B2B_DEPARTMENT_TABLE,
+    B2B_EMPLOYEE_OF_MONTH_TABLE,
     B2B_EMPLOYEE_TABLE,
     B2B_TASK_ASSIGNEE_TABLE,
     B2B_TASK_COMMENT_TABLE,
@@ -910,3 +911,75 @@ def delete_file(file_id: int, company_id: int) -> bool:
         f"DELETE FROM {B2B_WORKSPACE_FILE_TABLE} WHERE id = %s AND company_id = %s",
         [file_id, company_id],
     ) > 0
+
+
+# ─── Employee of the month ──────────────────────────────────────────────────
+
+def _month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
+    tz = timezone.get_current_timezone()
+    start = datetime(year, month, 1, tzinfo=tz)
+    end = datetime(year + 1, 1, 1, tzinfo=tz) if month == 12 else datetime(year, month + 1, 1, tzinfo=tz)
+    return start, end
+
+
+def monthly_employee_stats(company_id: int, year: int, month: int) -> list[dict[str, Any]]:
+    """Every active employee's completed-task activity for one calendar month.
+
+    ``on_time_count`` is out of ``due_count`` — tasks that had a due date —
+    not out of every completed task: one with no deadline was never late by
+    definition, and counting it either way would just dilute the rate.
+    """
+    start, end = _month_bounds(year, month)
+    return fetch_all(
+        f"""
+        SELECT
+            e.id                                                 AS employee_id,
+            e.full_name,
+            e.photo,
+            COUNT(t.id)                                           AS completed_count,
+            COUNT(t.id) FILTER (WHERE t.due_date IS NOT NULL)     AS due_count,
+            COUNT(t.id) FILTER (WHERE t.due_date IS NOT NULL
+                                 AND t.completed_at <= t.due_date) AS on_time_count
+        FROM {B2B_EMPLOYEE_TABLE} e
+        LEFT JOIN {B2B_TASK_ASSIGNEE_TABLE} ta ON ta.employee_id = e.id
+        LEFT JOIN {B2B_TASK_TABLE} t
+            ON t.id = ta.task_id
+            AND t.status = 'done'
+            AND t.completed_at >= %s AND t.completed_at < %s
+        WHERE e.company_id = %s AND e.is_active = TRUE
+        GROUP BY e.id, e.full_name, e.photo
+        ORDER BY completed_count DESC, e.full_name ASC
+        """,
+        [start, end, company_id],
+    )
+
+
+def get_employee_of_month(company_id: int, year: int, month: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        SELECT eom.year, eom.month, eom.selected_at, e.id AS employee_id, e.full_name, e.photo
+        FROM {B2B_EMPLOYEE_OF_MONTH_TABLE} eom
+        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = eom.employee_id
+        WHERE eom.company_id = %s AND eom.year = %s AND eom.month = %s
+        """,
+        [company_id, year, month],
+    )
+
+
+def set_employee_of_month(
+    *, company_id: int, year: int, month: int, employee_id: int, selected_by_id: int
+) -> dict[str, Any] | None:
+    fetch_one(
+        f"""
+        INSERT INTO {B2B_EMPLOYEE_OF_MONTH_TABLE}
+            (company_id, year, month, employee_id, selected_by_id, selected_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (company_id, year, month) DO UPDATE
+            SET employee_id = EXCLUDED.employee_id,
+                selected_by_id = EXCLUDED.selected_by_id,
+                selected_at = EXCLUDED.selected_at
+        RETURNING *
+        """,
+        [company_id, year, month, employee_id, selected_by_id, timezone.now()],
+    )
+    return get_employee_of_month(company_id, year, month)
