@@ -46,6 +46,12 @@ EXEMPT_PATH_PREFIXES = (
     "/api/b2b/workspace/tasks/",
     "/api/b2b/workspace/events/",
     "/api/b2b/workspace/chats/",
+    # A lead board is first-come-first-served: two people looking at it must
+    # see the same thing, or one of them spends a minute working a lead that
+    # was claimed before they opened it. Files are the same argument more
+    # mildly — a colleague uploads a waybill and nobody else can see it yet.
+    "/api/b2b/workspace/leads/",
+    "/api/b2b/workspace/files/",
 )
 
 AUTH_HEADER_PREFIX = "Bearer "
