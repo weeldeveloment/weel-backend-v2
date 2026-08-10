@@ -188,7 +188,7 @@ jobs:
           GH_TOKEN: ${{ secrets.FRONTEND_REPOS_TOKEN }}
         run: |
           missing=""
-          for repo in dashboard_weel_uz weel-admin weel-b2b weel-b2b-mobile; do
+          for repo in dashboard_weel_uz weel-admin weel-b2b weel-b2b-mobile Flutter weel-mobile weel.uz; do
             code=$(curl -s -o /dev/null -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "Accept: application/vnd.github+json" \
@@ -241,6 +241,29 @@ jobs:
           token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
           path: weel-b2b-mobile
 
+      # Bu uchtasi ham backendni iste'mol qiladi. Ular tiplarni generatsiya
+      # qilmaydi, shuning uchun asosiy himoya — kontrakt farqi: u shu kodni
+      # o'qib, o'zgargan endpointni qaysi ilova ishlatishini aytadi. Shuning
+      # uchun ular checkout qilinishi shart, garchi hammasida build bosqichi
+      # bo'lmasa ham (pastdagi izohga qarang).
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/Flutter
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: Flutter
+
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/weel-mobile
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel-mobile
+
+      - uses: actions/checkout@v4
+        with:
+          repository: weeldeveloment/weel.uz
+          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
+          path: weel.uz
+
       # Kontrakt farqi frontendlar checkout qilingandan KEYIN ishlaydi. Ilgari u
       # birinchi qadam edi, ya'ni skript hech qanday frontend kodini ko'rmasdan
       # "hech bir frontend bu endpointni ishlatmaydi" degan xulosaga kelardi —
@@ -283,6 +306,29 @@ jobs:
       - name: weel-b2b — unit testlar
         working-directory: weel-b2b
         run: bunx vitest run
+
+      - name: weel.uz — lint
+        working-directory: weel.uz
+        run: bun install --frozen-lockfile && bun run lint
+
+      - name: weel.uz — build
+        working-directory: weel.uz
+        run: bun run build
+
+      # weel-mobile va Flutter (weel_booking) uchun bu yerda build bosqichi
+      # yo'q — ataylab. Ikkalasida ham bu ish boshlanishidan oldin mavjud
+      # nosozliklar bor va ularni gate qilish backend deployini o'zga
+      # repodagi qarz uchun to'xtatib qo'yardi:
+      #
+      #   weel-mobile — `bun run typecheck` 6 ta xato beradi. To'g'ri yechim
+      #     `bun run api:types` bilan tiplarni yangilash, lekin u 32 ming
+      #     qatorlik farq va yana ko'proq xato beradi: committed tiplar juda
+      #     eski spec'dan. Bu alohida migratsiya ishi.
+      #   Flutter (weel_booking) — Flutter SDK 3.44.9 talab qiladi (b2b-mobile
+      #     esa 3.35.5 da), va uning analyze holati tekshirilmagan.
+      #
+      # Ikkalasi ham kontrakt farqidan chetda qolmaydi: yuqorida checkout
+      # qilingani uchun o'zgargan endpointni ular ishlatsa, job qizil bo'ladi.
 
       # Mobil ilova tiplarni OpenAPI'dan generatsiya qilmaydi — Dart modellari
       # qo'lda yozilgan. Shuning uchun uni typecheck emas, analyzer va o'z test

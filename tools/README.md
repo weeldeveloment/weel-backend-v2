@@ -1,6 +1,7 @@
 # Deploydan oldingi tekshiruv (pre-deploy)
 
-Muammo: `weel-backend-v2` o'zgaradi, 4 ta frontend esa alohida repolarda yashaydi.
+Muammo: `weel-backend-v2` o'zgaradi, uni iste'mol qiladigan 7 ta ilova esa
+alohida repolarda yashaydi.
 Backenddagi maydon nomi o'zgarsa yoki endpoint o'chsa, buni faqat prodda foydalanuvchi
 ko'radi. Bu papkadagi vositalar ana shuni deploydan **oldin** ushlaydi.
 
@@ -13,8 +14,14 @@ weel/
 ├── dashboard_weel_uz/
 ├── weel-admin/
 ├── weel-b2b/
-└── weel-b2b-mobile/
+├── weel-b2b-mobile/
+├── weel.uz/
+├── weel-mobile/
+└── Flutter/           ← weel_booking
 ```
+
+Yettalasi ham shu yerda turishi kerak. Bittasi yetishmasa, skript uni jimgina
+"ishlatmaydi" deb hisoblamaydi — 🟠 deb belgilab, exit 1 qaytaradi.
 
 ## Avtomatik nazorat (o'rnatib qo'yilgan)
 
@@ -32,12 +39,34 @@ har bir dasturchi bitta buyruq bilan bir xil himoyani oladi.
 **2. GitHub Actions — `frontend-contract` job (`.github/workflows/cicd.yml`).**
 Har PR va har `main` push'da ishlaydi:
 
-- 4 ta frontend reponi checkout qiladi;
-- kontrakt farqini tekshiradi (baseline bilan);
-- 3 ta web frontendda tiplarni backenddan **qayta generatsiya qiladi**, so'ng
-  typecheck, lint va unit testlarni ishlatadi;
-- mobil ilovada `flutter analyze` va testlarni ishlatadi (u tiplarni
-  generatsiya qilmaydi — Dart modellari qo'lda yozilgan).
+- backendni iste'mol qiladigan 7 ta reponi checkout qiladi;
+- kontrakt farqini tekshiradi (baseline bilan) — **yettalasi uchun ham**;
+- ularning bir qismida build darajasidagi tekshiruvni ham ishlatadi.
+
+Qamrov bir xil emas, chunki repolarning imkoniyatlari bir xil emas:
+
+| Repo | Kontrakt farqi | Build darajasi |
+|---|---|---|
+| dashboard_weel_uz | ✅ | qayta generatsiya + typecheck + lint |
+| weel-admin | ✅ | qayta generatsiya + typecheck + lint |
+| weel-b2b | ✅ | qayta generatsiya + typecheck + lint + testlar |
+| weel-b2b-mobile | ✅ | `flutter analyze` + testlar |
+| weel.uz | ✅ | lint + build (tip generatsiyasi yo'q) |
+| weel-mobile | ✅ | — (pastga qarang) |
+| Flutter (weel_booking) | ✅ | — (pastga qarang) |
+
+Oxirgi ikkitasida build bosqichi ataylab yo'q. `weel-mobile` da `bun run
+typecheck` bu ish boshlanishidan oldin ham 6 ta xato berardi; to'g'ri yechim
+`bun run api:types` bilan tiplarni yangilash, lekin u 32 ming qatorlik farq va
+yana ko'proq xato beradi — committed tiplar juda eski spec'dan olingan, bu
+alohida migratsiya ishi. `Flutter` esa Flutter SDK 3.44.9 talab qiladi
+(`weel-b2b-mobile` 3.35.5 da) va uning analyze holati tekshirilmagan.
+Ikkalasini ham gate qilish backend deployini o'zga repodagi qarz uchun
+to'xtatib qo'yardi.
+
+Ular baribir himoyasiz emas: kontrakt farqi ularning kodini o'qiydi, shuning
+uchun o'zgargan endpointni ular ishlatsa, job qizil bo'ladi. Bu eng ko'p
+uchraydigan buzilish turi.
 
 Checkout tartibi muhim: kontrakt farqi frontend kodini o'qib, qaysi frontend
 buzilishini aytadi. Ilgari u birinchi qadam edi va hech qanday frontend kodini
@@ -48,8 +77,8 @@ buzuqi backend Dokploy'ga chiqmaydi.
 
 > **Sozlash kerak:** org repolarini o'qiy oladigan token kerak.
 > GitHub'da `weeldeveloment/weel-backend-v2` → Settings → Secrets → Actions →
-> `FRONTEND_REPOS_TOKEN`, `Contents: Read-only` huquqi bilan, va u to'rtala
-> frontend repoga ham berilgan bo'lishi kerak.
+> `FRONTEND_REPOS_TOKEN`, `Contents: Read-only` huquqi bilan, va u yettala
+> repoga ham berilgan bo'lishi kerak.
 > **Secret bo'lmasa job yiqiladi.** Ilgari u faqat ogohlantirib o'tkazib
 > yuborardi — ya'ni sekret tasodifan o'chsa, himoya jimgina yo'qolardi.
 

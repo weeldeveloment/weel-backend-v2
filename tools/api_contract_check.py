@@ -38,7 +38,18 @@ FRONTENDS = [
     {"name": "weel-admin", "dir": "weel-admin/src", "ext": ("*.ts", "*.tsx"), "prefixes": [""]},
     {"name": "weel-b2b", "dir": "weel-b2b/src", "ext": ("*.ts", "*.tsx"), "prefixes": [""]},
     {"name": "weel-b2b-mobile", "dir": "weel-b2b-mobile/lib", "ext": ("*.dart",), "prefixes": ["/b2b/workspace", ""]},
+    # Bu uchtasi tiplarni backenddan generatsiya qilmaydi — yo'llar qo'lda
+    # yozilgan, `baseURL` esa `/api` bilan tugaydi, shuning uchun kodda yo'llar
+    # sxemadagidek turadi va qo'shimcha prefiks kerak emas.
+    {"name": "Flutter (weel_booking)", "dir": "Flutter/lib", "ext": ("*.dart",), "prefixes": [""]},
+    {"name": "weel-mobile", "dir": "weel-mobile", "ext": ("*.ts", "*.tsx"), "prefixes": [""]},
+    {"name": "weel.uz", "dir": "weel.uz/src", "ext": ("*.ts", "*.tsx", "*.js", "*.jsx"), "prefixes": [""]},
 ]
+
+# Generatsiya natijalari va bog'liqliklar: ular ichida minglab yo'lga o'xshash
+# satrlar bor va skan sekinlashadi. weel-mobile uchun `dir` repo ildizi
+# bo'lgani uchun bu ayniqsa muhim.
+SKIP_DIRS = {"node_modules", "build", ".dart_tool", "Pods", "dist", ".next", ".expo"}
 
 METHODS = ("get", "post", "put", "patch", "delete")
 # Kod ichidagi string literallar: "/foo/", '/foo/', `/foo/${id}/`
@@ -199,6 +210,8 @@ def frontend_usage() -> tuple[dict[str, dict[str, list[str]]], list[str]]:
             continue
         for pattern in fe["ext"]:
             for file in src.rglob(pattern):
+                if SKIP_DIRS.intersection(file.parts):
+                    continue
                 try:
                     text = file.read_text(errors="ignore")
                 except OSError:
