@@ -7245,6 +7245,14 @@
      "readOnly": true,
      "type": "array"
     },
+    "amenity_ids": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "readOnly": true,
+     "type": "array"
+    },
     "available_rooms": {
      "default": 0,
      "readOnly": true,
@@ -7574,6 +7582,7 @@
     "booking_count",
     "available_rooms",
     "amenities",
+    "amenity_ids",
     "legal_info",
     "check_in_time",
     "check_out_time",
@@ -7643,6 +7652,14 @@
       "minLength": 1,
       "type": "string"
      },
+     "type": "array"
+    },
+    "amenity_ids": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "readOnly": true,
      "type": "array"
     },
     "available_rooms": {
@@ -7989,6 +8006,7 @@
     "booking_count",
     "available_rooms",
     "amenities",
+    "amenity_ids",
     "legal_info",
     "check_in_time",
     "check_out_time",
@@ -9778,6 +9796,15 @@
      "readOnly": true,
      "type": "array"
     },
+    "amenity_ids": {
+     "default": [],
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "readOnly": true,
+     "type": "array"
+    },
     "available_rooms": {
      "default": 0,
      "readOnly": true,
@@ -10064,6 +10091,15 @@
      "x-nullable": true
     },
     "amenities": {
+     "default": [],
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "readOnly": true,
+     "type": "array"
+    },
+    "amenity_ids": {
      "default": [],
      "items": {
       "minLength": 1,
