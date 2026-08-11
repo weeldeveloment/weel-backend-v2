@@ -8,6 +8,8 @@ from django.utils.translation import gettext_lazy as _
 from payment.exchange_rate import to_uzs
 from rest_framework import serializers
 
+from apps.property.apartment_repository import resolve_amenity_titles
+
 
 def _preferred_language(request: Any) -> str:
     if request is None:
@@ -116,6 +118,7 @@ class HotelCardSerializer(serializers.Serializer):
     booking_count = serializers.IntegerField(read_only=True, default=0)
     available_rooms = serializers.IntegerField(read_only=True, default=0)
     amenities = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
+    amenity_ids = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
     legal_info = serializers.DictField(read_only=True, default=dict)
     check_in_time = serializers.CharField(allow_null=True, read_only=True)
     check_out_time = serializers.CharField(allow_null=True, read_only=True)
@@ -160,7 +163,14 @@ class HotelCardSerializer(serializers.Serializer):
         row["img"] = _build_media_url(request, row.get("img") or [])
         row["currency"] = row.get("min_price_currency") or row.get("currency")
         row["min_price"] = _convert_price_for_output(row.get("min_price"), row.get("currency"))
-        row["amenities"] = row.get("amenities") or []
+        # Stored amenities are raw `services.id` GUIDs (that is what the admin
+        # form writes), so the display list is resolved to titles here while
+        # `amenity_ids` keeps the raw values the edit forms round-trip.
+        raw_amenities = [
+            str(value).strip() for value in row.get("amenities") or [] if str(value).strip()
+        ]
+        row["amenity_ids"] = raw_amenities
+        row["amenities"] = resolve_amenity_titles(raw_amenities, language=lang)
         row["rating"] = row.get("rating")
         row["review_count"] = int(row.get("review_count") or 0)
         row["booking_count"] = int(row.get("booking_count") or 0)
@@ -203,7 +213,10 @@ class HotelCardSerializer(serializers.Serializer):
             "check_out_time": row.get("check_out_time") or None,
             "cancellation_policy": row.get("cancellation_policy") or None,
             "timezone": row.get("timezone") or None,
-            "amenities": row.get("amenities") or [],
+            # Raw GUIDs, not titles: this block is what the admin edit form
+            # reads back and PATCHes, and titles would not survive the trip.
+            "amenities": raw_amenities,
+            "amenity_titles": row["amenities"],
             "is_allowed_alcohol": bool(row.get("alcohol_allowed", False)),
             "is_allowed_pets": bool(row.get("pets_allowed", False)),
             "is_quiet_hours": bool(row.get("quiet_hours", True)),

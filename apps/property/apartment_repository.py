@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
+from django.core.cache import cache
 from django.utils import timezone
 from django.db.utils import ProgrammingError
 
@@ -236,6 +237,52 @@ def list_property_services(
             pass
 
     return []
+
+
+_AMENITY_TITLE_CACHE_KEY = "property:amenity-titles:{language}"
+
+
+def amenity_title_lookup(language: str = "uz") -> dict[str, str]:
+    """GUID -> display title map built from the `services` reference table.
+
+    Amenity columns (`pms_property.amenities`, `pms_room.amenities`,
+    apartment/cottage services) store whatever the writing form sent: the admin
+    edit forms write raw `services.id` GUIDs, older/demo rows hold titles. Read
+    paths therefore have to resolve before handing anything to a client.
+    """
+    cache_key = _AMENITY_TITLE_CACHE_KEY.format(language=language)
+    titles = cache.get(cache_key)
+    if titles is None:
+        titles = {}
+        try:
+            for row in list_property_services(language=language):
+                guid = str(row.get("guid") or "").strip()
+                title = str(row.get("title") or "").strip()
+                if guid and title:
+                    titles[guid] = title
+        except Exception:
+            logger.warning("amenity title lookup failed", exc_info=True)
+            titles = {}
+        cache.set(cache_key, titles, timeout=600)
+    return titles
+
+
+def resolve_amenity_titles(
+    values: list[Any] | None, language: str = "uz"
+) -> list[str]:
+    """Translate stored amenity values into display titles, passing through
+    anything that isn't a known GUID (already-a-title rows). Idempotent, so it
+    is safe to call on a list another layer may have resolved already."""
+    if not values:
+        return []
+    lookup = amenity_title_lookup(language)
+    resolved: list[str] = []
+    for value in values:
+        item = str(value).strip()
+        if not item:
+            continue
+        resolved.append(lookup.get(item, item))
+    return resolved
 
 
 def list_regions() -> list[dict[str, Any]]:

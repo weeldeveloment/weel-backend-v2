@@ -6,6 +6,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from apps.property.apartment_repository import resolve_amenity_titles
 from apps.property.hotel_serializers import (
     _build_media_url,
     _convert_price_for_output,
@@ -131,6 +132,7 @@ class HotelCardSerializer(serializers.Serializer):
     verification_status = serializers.CharField(allow_null=True, required=False, read_only=True)
     themes = serializers.ListField(child=serializers.CharField(), read_only=True)
     amenities = serializers.ListField(child=serializers.CharField(), read_only=True)
+    amenity_ids = serializers.ListField(child=serializers.CharField(), read_only=True)
     legal_info = serializers.DictField(read_only=True)
     booking_count = serializers.IntegerField(default=0, read_only=True)
     rating = serializers.DecimalField(max_digits=3, decimal_places=2, allow_null=True, read_only=True)
@@ -175,7 +177,13 @@ class HotelCardSerializer(serializers.Serializer):
             row["longitude"] = float(row.get("longitude") or 0)
         except (TypeError, ValueError):
             row["longitude"] = None
-        row["amenities"] = row.get("amenities") or []
+        # `pms_property.amenities` holds raw `services.id` GUIDs, so resolve to
+        # titles for display and keep the raw values under `amenity_ids`.
+        raw_amenities = [
+            str(value).strip() for value in row.get("amenities") or [] if str(value).strip()
+        ]
+        row["amenity_ids"] = raw_amenities
+        row["amenities"] = resolve_amenity_titles(raw_amenities, language=lang)
         row["rating"] = row.get("rating")
         row["review_count"] = int(row.get("review_count") or 0)
         row["booking_count"] = int(row.get("booking_count") or 0)
@@ -220,6 +228,14 @@ class HotelCardSerializer(serializers.Serializer):
     def _build_room_summary(room: dict, request: Any) -> dict:
         room = dict(room)
         room["img"] = _build_media_url(request, room.get("images") or [])
+        # Room rows read straight from `pms_room` still carry GUIDs; resolving
+        # is idempotent, so rows another layer already resolved pass through.
+        room["amenity_ids"] = [
+            str(value).strip() for value in room.get("amenities") or [] if str(value).strip()
+        ]
+        room["amenities"] = resolve_amenity_titles(
+            room["amenity_ids"], language=_preferred_language(request)
+        )
         return room
 
 

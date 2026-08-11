@@ -6,48 +6,19 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
-from django.core.cache import cache
 from django.core.files.storage import default_storage
 
 from shared.raw.db import execute, fetch_all, fetch_one
 from payment.exchange_rate import to_uzs
-from apps.property.apartment_repository import list_property_services
+from apps.property.apartment_repository import resolve_amenity_titles
 
 logger = logging.getLogger(__name__)
 
-_AMENITY_TITLE_CACHE_KEY = "hotels:amenity-titles:{language}"
-
-
-def _load_amenity_title_lookup(language: str = "ru") -> dict[str, str]:
-    """GUID -> human title lookup, built from the `services`/`property_service`
-    reference table. `pms_room.amenities`/`pms_property.amenities` are meant to
-    hold display titles, but the admin edit form writes raw `services.id`
-    GUIDs verbatim, so callers must resolve before showing them to a client.
-    Dashboard UI text is Russian, so that's the default language resolved."""
-    cache_key = _AMENITY_TITLE_CACHE_KEY.format(language=language)
-    titles = cache.get(cache_key)
-    if titles is None:
-        titles = {}
-        try:
-            for row in list_property_services(language=language):
-                guid = str(row.get("guid") or "").strip()
-                title = str(row.get("title") or "").strip()
-                if guid and title:
-                    titles[guid] = title
-        except Exception:
-            logger.warning("amenity title lookup failed", exc_info=True)
-            titles = {}
-        cache.set(cache_key, titles, timeout=600)
-    return titles
-
-
 def _resolve_amenities(values: list[Any] | None, language: str = "ru") -> list[str]:
-    """Translate stored amenity values into display titles, passing through
-    anything that isn't a known GUID (e.g. already-a-title demo data)."""
-    if not values:
-        return []
-    lookup = _load_amenity_title_lookup(language)
-    return [lookup.get(str(v).strip(), str(v).strip()) for v in values]
+    """Translate stored amenity values into display titles. Thin alias kept so
+    existing call sites here keep their Russian default (this repository feeds
+    the Russian-language dashboard); the lookup itself is shared."""
+    return resolve_amenity_titles(values, language=language)
 
 
 def _normalize_photos(photos: list[Any] | None) -> list[str]:
