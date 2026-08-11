@@ -239,32 +239,69 @@ def list_property_services(
     return []
 
 
-_AMENITY_TITLE_CACHE_KEY = "property:amenity-titles:{language}"
+_AMENITY_SERVICE_CACHE_KEY = "property:amenity-services:{language}"
 
 
-def amenity_title_lookup(language: str = "uz") -> dict[str, str]:
-    """GUID -> display title map built from the `services` reference table.
+def amenity_service_lookup(language: str = "uz") -> dict[str, dict[str, str]]:
+    """GUID -> service row (`guid`, `title`, `icon_url`) from the `services`
+    reference table.
 
     Amenity columns (`pms_property.amenities`, `pms_room.amenities`,
     apartment/cottage services) store whatever the writing form sent: the admin
     edit forms write raw `services.id` GUIDs, older/demo rows hold titles. Read
     paths therefore have to resolve before handing anything to a client.
+    ``icon_url`` is the stored path — callers turn it into an absolute URL.
     """
-    cache_key = _AMENITY_TITLE_CACHE_KEY.format(language=language)
-    titles = cache.get(cache_key)
-    if titles is None:
-        titles = {}
+    cache_key = _AMENITY_SERVICE_CACHE_KEY.format(language=language)
+    services = cache.get(cache_key)
+    if services is None:
+        services = {}
         try:
             for row in list_property_services(language=language):
                 guid = str(row.get("guid") or "").strip()
                 title = str(row.get("title") or "").strip()
                 if guid and title:
-                    titles[guid] = title
+                    services[guid] = {
+                        "guid": guid,
+                        "title": title,
+                        "icon_url": str(row.get("icon_url") or "").strip(),
+                    }
         except Exception:
-            logger.warning("amenity title lookup failed", exc_info=True)
-            titles = {}
-        cache.set(cache_key, titles, timeout=600)
-    return titles
+            logger.warning("amenity service lookup failed", exc_info=True)
+            services = {}
+        cache.set(cache_key, services, timeout=600)
+    return services
+
+
+def amenity_title_lookup(language: str = "uz") -> dict[str, str]:
+    """GUID -> display title map. See [amenity_service_lookup]."""
+    return {
+        guid: service["title"]
+        for guid, service in amenity_service_lookup(language).items()
+    }
+
+
+def resolve_amenity_services(
+    values: list[Any] | None, language: str = "uz"
+) -> list[dict[str, str]]:
+    """Expand stored amenity values into `{guid, title, icon_url}` rows — the
+    shape clients need to render an amenity with its icon rather than bare
+    text. Values that aren't known GUIDs (rows that already store a title)
+    come back as title-only entries with no guid to look an icon up by."""
+    if not values:
+        return []
+    lookup = amenity_service_lookup(language)
+    services: list[dict[str, str]] = []
+    for value in values:
+        item = str(value).strip()
+        if not item:
+            continue
+        service = lookup.get(item)
+        if service is None:
+            services.append({"guid": "", "title": item, "icon_url": ""})
+        else:
+            services.append(dict(service))
+    return services
 
 
 def resolve_amenity_titles(

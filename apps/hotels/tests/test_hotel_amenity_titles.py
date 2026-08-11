@@ -10,8 +10,8 @@ WIFI_GUID = "9c193c41-b0b0-491a-92c1-8e55f7dda511"
 PARKING_GUID = "235a12b2-2e26-4c3a-9720-4cf6a75ae9be"
 
 SERVICES = [
-    {"guid": WIFI_GUID, "title": "Wi-Fi"},
-    {"guid": PARKING_GUID, "title": "Parking"},
+    {"guid": WIFI_GUID, "title": "Wi-Fi", "icon_url": "services/wifi.svg"},
+    {"guid": PARKING_GUID, "title": "Parking", "icon_url": "https://cdn.example/p.svg"},
 ]
 
 
@@ -67,6 +67,30 @@ def test_hotel_detail_resolves_hotel_and_room_amenities(service_titles):
 
     assert data["amenities"] == ["Wi-Fi", "Parking", "Konditsioner"]
     assert data["room_types"][0]["amenities"] == ["Wi-Fi"]
+
+
+def test_hotel_card_exposes_services_with_icons(service_titles):
+    """Clients draw an amenity's icon from `services`; a bare title list gives
+    them nothing to render but a generic placeholder."""
+    data = HotelCardSerializer(_hotel_row(), context={}).data
+
+    assert data["services"] == [
+        {"guid": WIFI_GUID, "title": "Wi-Fi", "icon_url": "/media/services/wifi.svg"},
+        {"guid": PARKING_GUID, "title": "Parking", "icon_url": "https://cdn.example/p.svg"},
+        # No guid to look an icon up by: the row stores a title, not a service.
+        {"guid": "", "title": "Konditsioner", "icon_url": ""},
+    ]
+    assert data["property_services"] == data["services"]
+
+
+def test_hotel_detail_room_services_keep_their_guids(service_titles):
+    """Detail builds room summaries and the card serializer builds them again;
+    the second pass must not re-read `amenities` after it holds titles."""
+    data = HotelDetailSerializer(_hotel_row(), context={}).data
+
+    assert data["room_types"][0]["services"] == [
+        {"guid": WIFI_GUID, "title": "Wi-Fi", "icon_url": "/media/services/wifi.svg"},
+    ]
 
 
 def test_unknown_guid_passes_through(service_titles):

@@ -8,6 +8,7 @@ from rest_framework import serializers
 
 from apps.property.apartment_repository import resolve_amenity_titles
 from apps.property.hotel_serializers import (
+    _build_amenity_services,
     _build_media_url,
     _convert_price_for_output,
     _favorite_guid_set,
@@ -133,6 +134,8 @@ class HotelCardSerializer(serializers.Serializer):
     themes = serializers.ListField(child=serializers.CharField(), read_only=True)
     amenities = serializers.ListField(child=serializers.CharField(), read_only=True)
     amenity_ids = serializers.ListField(child=serializers.CharField(), read_only=True)
+    services = serializers.ListField(child=serializers.DictField(), read_only=True)
+    property_services = serializers.ListField(child=serializers.DictField(), read_only=True)
     legal_info = serializers.DictField(read_only=True)
     booking_count = serializers.IntegerField(default=0, read_only=True)
     rating = serializers.DecimalField(max_digits=3, decimal_places=2, allow_null=True, read_only=True)
@@ -180,10 +183,16 @@ class HotelCardSerializer(serializers.Serializer):
         # `pms_property.amenities` holds raw `services.id` GUIDs, so resolve to
         # titles for display and keep the raw values under `amenity_ids`.
         raw_amenities = [
-            str(value).strip() for value in row.get("amenities") or [] if str(value).strip()
+            str(value).strip()
+            for value in row.get("amenity_ids") or row.get("amenities") or []
+            if str(value).strip()
         ]
         row["amenity_ids"] = raw_amenities
         row["amenities"] = resolve_amenity_titles(raw_amenities, language=lang)
+        # Same list as objects, under the keys apartments and cottages already
+        # use, so a client can draw each amenity's icon without a second call.
+        row["services"] = _build_amenity_services(raw_amenities, lang, request)
+        row["property_services"] = row["services"]
         row["rating"] = row.get("rating")
         row["review_count"] = int(row.get("review_count") or 0)
         row["booking_count"] = int(row.get("booking_count") or 0)
@@ -228,14 +237,18 @@ class HotelCardSerializer(serializers.Serializer):
     def _build_room_summary(room: dict, request: Any) -> dict:
         room = dict(room)
         room["img"] = _build_media_url(request, room.get("images") or [])
-        # Room rows read straight from `pms_room` still carry GUIDs; resolving
-        # is idempotent, so rows another layer already resolved pass through.
+        # Room rows read straight from `pms_room` still carry GUIDs. The detail
+        # serializer builds its room summaries and then hands them to the card
+        # serializer, which builds them again, so keep the GUIDs from the first
+        # pass instead of re-reading `amenities` after it holds titles.
         room["amenity_ids"] = [
-            str(value).strip() for value in room.get("amenities") or [] if str(value).strip()
+            str(value).strip()
+            for value in room.get("amenity_ids") or room.get("amenities") or []
+            if str(value).strip()
         ]
-        room["amenities"] = resolve_amenity_titles(
-            room["amenity_ids"], language=_preferred_language(request)
-        )
+        lang = _preferred_language(request)
+        room["amenities"] = resolve_amenity_titles(room["amenity_ids"], language=lang)
+        room["services"] = _build_amenity_services(room["amenity_ids"], lang, request)
         return room
 
 

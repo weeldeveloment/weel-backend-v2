@@ -8,7 +8,23 @@ from django.utils.translation import gettext_lazy as _
 from payment.exchange_rate import to_uzs
 from rest_framework import serializers
 
-from apps.property.apartment_repository import resolve_amenity_titles
+from apps.property.apartment_repository import (
+    resolve_amenity_services,
+    resolve_amenity_titles,
+)
+
+
+def _build_amenity_services(
+    raw_amenities: list[str], language: str, request: Any
+) -> list[dict[str, str]]:
+    """Amenities as `{guid, title, icon_url}` rows with browser-loadable icon
+    URLs. Clients render the icon from this list; a bare title list leaves them
+    nothing to draw but a generic placeholder."""
+    services = resolve_amenity_services(raw_amenities, language=language)
+    for service in services:
+        icon_urls = _build_media_url(request, service.get("icon_url"))
+        service["icon_url"] = icon_urls[0] if icon_urls else ""
+    return services
 
 
 def _preferred_language(request: Any) -> str:
@@ -119,6 +135,10 @@ class HotelCardSerializer(serializers.Serializer):
     available_rooms = serializers.IntegerField(read_only=True, default=0)
     amenities = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
     amenity_ids = serializers.ListField(child=serializers.CharField(), read_only=True, default=list)
+    services = serializers.ListField(child=serializers.DictField(), read_only=True, default=list)
+    property_services = serializers.ListField(
+        child=serializers.DictField(), read_only=True, default=list
+    )
     legal_info = serializers.DictField(read_only=True, default=dict)
     check_in_time = serializers.CharField(allow_null=True, read_only=True)
     check_out_time = serializers.CharField(allow_null=True, read_only=True)
@@ -167,10 +187,16 @@ class HotelCardSerializer(serializers.Serializer):
         # form writes), so the display list is resolved to titles here while
         # `amenity_ids` keeps the raw values the edit forms round-trip.
         raw_amenities = [
-            str(value).strip() for value in row.get("amenities") or [] if str(value).strip()
+            str(value).strip()
+            for value in row.get("amenity_ids") or row.get("amenities") or []
+            if str(value).strip()
         ]
         row["amenity_ids"] = raw_amenities
         row["amenities"] = resolve_amenity_titles(raw_amenities, language=lang)
+        # Same list as objects, under the keys apartments and cottages already
+        # use, so a client can draw each amenity's icon without a second call.
+        row["services"] = _build_amenity_services(raw_amenities, lang, request)
+        row["property_services"] = row["services"]
         row["rating"] = row.get("rating")
         row["review_count"] = int(row.get("review_count") or 0)
         row["booking_count"] = int(row.get("booking_count") or 0)
