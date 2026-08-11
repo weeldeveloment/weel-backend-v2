@@ -2088,12 +2088,19 @@ def get_dashboard_summary(company_id: int) -> dict[str, Any]:
         [company_id],
     ) or {}
 
+    # `trip_id` is optional on a budget request — most are raised for an
+    # employee or a department with no trip attached. Inner-joining the trip
+    # dropped exactly those, so the card read 0 while the review queue was
+    # full. Scope the company the same way `list_budget_requests` does.
     pending_requests_row = fetch_one(
         f"""
         SELECT COUNT(*) AS cnt
         FROM {B2B_BUDGET_REQUEST_TABLE} br
-        JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = br.trip_id
-        WHERE t.company_id = %s AND br.status = 'pending'
+        LEFT JOIN {B2B_BUSINESS_TRIP_TABLE} t ON t.id = br.trip_id
+        LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = br.employee_id
+        LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = br.department_id
+        WHERE COALESCE(t.company_id, e.company_id, d.company_id) = %s
+          AND br.status = 'pending'
         """,
         [company_id],
     ) or {}
