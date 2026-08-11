@@ -50,6 +50,13 @@ python manage.py migrate --noinput
 
 python manage.py create_b2b_tables
 
+# Amenity icons. Only rows still on the placeholder are touched, so this is a
+# no-op once applied and hand-uploaded artwork survives it. Non-fatal: a
+# missing icon is a cosmetic problem, not a reason to refuse to serve.
+if ! python manage.py seed_service_icons --apply; then
+  echo "WARNING: amenity icon seeding failed — some amenities will show the placeholder icon" >&2
+fi
+
 # Non-fatal, but never silent: a failure here means unstyled admin pages, and
 # hiding it behind `2>/dev/null || true` is why that goes unnoticed for weeks.
 if ! python manage.py collectstatic --noinput; then
