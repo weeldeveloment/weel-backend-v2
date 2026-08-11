@@ -104,17 +104,14 @@ app.conf.beat_schedule = {
         "task": "bookingcom.sync_reservations",
         "schedule": crontab(minute="*/15"),
     },
-    # Corporate mail. Both no-op unless B2B_MAIL_ENABLED is on.
+    # Connected mail accounts. No-ops unless B2B_MAIL_ENABLED is on.
     "b2b_mail_sync": {
-        "task": "b2b.mail.sync_all_mailboxes",
-        # Every minute: this is how fast a reply from Gmail shows up in the
-        # apps until the Mailcow sieve webhook is in place, and a minute is
-        # about the longest an inbox can lag before it feels broken.
+        "task": "b2b.mail.sync_all_accounts",
+        # Every minute. This is how fast a reply lands in the chat section, and
+        # a minute is about the longest an inbox can lag before it feels
+        # broken. Providers rate-limit IMAP per account, not per client, so the
+        # cost of this scales with connected accounts rather than with us.
         "schedule": crontab(minute="*"),
-    },
-    "b2b_mail_recheck_domains": {
-        "task": "b2b.mail.recheck_domains",
-        "schedule": crontab(minute=17),  # hourly, off the top of the hour
     },
 }
 

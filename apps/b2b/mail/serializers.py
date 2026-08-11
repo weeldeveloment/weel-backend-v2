@@ -1,4 +1,4 @@
-"""Request/response shapes for the corporate mail API.
+"""Request/response shapes for the mail API.
 
 Read serializers exist so drf-yasg can describe the endpoints — the dashboard
 regenerates its TypeScript from that schema, and an endpoint documented only as
@@ -15,16 +15,8 @@ from rest_framework import serializers
 
 # Deliberately permissive: anything with a local part, an @, and a dotted
 # domain. Stricter regexes reject valid addresses more often than they catch
-# typos, and the SMTP server is the real authority on deliverability.
+# typos, and the provider is the real authority on deliverability.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-# A domain label per RFC 1035, no leading/trailing hyphens, at least two parts.
-_DOMAIN_RE = re.compile(
-    r"^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$"
-)
-
-# Mailbox local part. Kept to what every mail client handles without quoting.
-_LOCAL_PART_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$")
 
 
 def _clean_addresses(values: list[str], field: str) -> list[str]:
@@ -34,105 +26,76 @@ def _clean_addresses(values: list[str], field: str) -> list[str]:
         if not address:
             continue
         if not _EMAIL_RE.match(address):
-            raise serializers.ValidationError({field: [_("«%(value)s» is not a valid email address.") % {"value": address}]})
+            raise serializers.ValidationError({
+                field: [_("«%(value)s» is not a valid email address.") % {"value": address}]
+            })
         if address not in cleaned:
             cleaned.append(address)
     return cleaned
 
 
-# ─── Domains ──────────────────────────────────────────────────────────────────
+# ─── Connected accounts ───────────────────────────────────────────────────────
 
-class MailDnsRecordSerializer(serializers.Serializer):
-    kind = serializers.CharField()
-    host = serializers.CharField()
-    value = serializers.CharField()
-    priority = serializers.IntegerField(required=False)
-    note = serializers.CharField(required=False)
+class MailAccountSerializer(serializers.Serializer):
+    """One connected inbox. The credential is never part of this."""
 
-
-class MailDomainSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    domain = serializers.CharField()
-    status = serializers.CharField()
-    dkim_selector = serializers.CharField()
-    mx_ok = serializers.BooleanField()
-    spf_ok = serializers.BooleanField()
-    dkim_ok = serializers.BooleanField()
-    dmarc_ok = serializers.BooleanField()
-    last_error = serializers.CharField(allow_null=True, required=False)
-    last_checked_at = serializers.DateTimeField(allow_null=True, required=False)
-    verified_at = serializers.DateTimeField(allow_null=True, required=False)
-    dns_records = MailDnsRecordSerializer(many=True, required=False)
-
-
-class MailDomainCreateSerializer(serializers.Serializer):
-    domain = serializers.CharField(max_length=253)
-
-    def validate_domain(self, value: str) -> str:
-        domain = (value or "").strip().lower().rstrip(".")
-        # People paste what they see in a browser; strip it back to the name.
-        domain = re.sub(r"^https?://", "", domain).split("/")[0].strip()
-        if domain.startswith("www."):
-            domain = domain[4:]
-        if not _DOMAIN_RE.match(domain):
-            raise serializers.ValidationError(
-                _("Enter a domain like «kompaniya.com», without http:// or a path.")
-            )
-        return domain
-
-
-# ─── Mailboxes ────────────────────────────────────────────────────────────────
-
-class MailboxSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     address = serializers.CharField()
-    local_part = serializers.CharField()
     display_name = serializers.CharField(allow_null=True, required=False)
-    employee_id = serializers.IntegerField()
-    employee_name = serializers.CharField(required=False)
-    domain_name = serializers.CharField(required=False)
-    domain_status = serializers.CharField(required=False)
-    quota_bytes = serializers.IntegerField()
-    daily_send_limit = serializers.IntegerField()
+    provider = serializers.CharField()
+    auth_type = serializers.CharField()
+    imap_host = serializers.CharField()
+    smtp_host = serializers.CharField()
     is_active = serializers.BooleanField()
     last_sync_at = serializers.DateTimeField(allow_null=True, required=False)
+    # Set when the provider stopped accepting us. The apps read it to show
+    # "reconnect" rather than an empty inbox.
     sync_error = serializers.CharField(allow_null=True, required=False)
+    unread = serializers.IntegerField(required=False)
 
 
-class MailboxCreateSerializer(serializers.Serializer):
-    employee_id = serializers.IntegerField()
-    domain_id = serializers.IntegerField()
-    local_part = serializers.CharField(max_length=64)
-    display_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+class MailProviderHintSerializer(serializers.Serializer):
+    """What the connect screen shows once an address has been typed."""
 
-    def validate_local_part(self, value: str) -> str:
-        local_part = (value or "").strip().lower()
-        if not _LOCAL_PART_RE.match(local_part):
-            raise serializers.ValidationError(
-                _("Use latin letters, digits, dot, dash or underscore — for example «aziz.karimov».")
-            )
-        # Addresses every domain is expected to answer on, or that would let
-        # someone impersonate the company's own automated mail.
-        if local_part in {"postmaster", "abuse", "hostmaster", "webmaster", "noreply", "no-reply", "mailer-daemon"}:
-            raise serializers.ValidationError(_("This address is reserved."))
-        return local_part
-
-
-class MailboxPatchSerializer(serializers.Serializer):
-    display_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    is_active = serializers.BooleanField(required=False)
-    daily_send_limit = serializers.IntegerField(required=False, min_value=1, max_value=5000)
-
-
-class MailboxCredentialSerializer(serializers.Serializer):
-    """The one and only time a mailbox password is ever returned."""
-
-    address = serializers.CharField()
-    password = serializers.CharField()
+    provider = serializers.CharField()
+    label = serializers.CharField()
     imap_host = serializers.CharField()
     imap_port = serializers.IntegerField()
     smtp_host = serializers.CharField()
     smtp_port = serializers.IntegerField()
+    requires_app_password = serializers.BooleanField()
+    help_url = serializers.CharField(allow_null=True, required=False)
+    supports_oauth = serializers.BooleanField()
+
+
+class MailAccountConnectSerializer(serializers.Serializer):
+    """Connecting an inbox with an app password.
+
+    The server settings are optional: they are guessed from the address for
+    every provider we know, and only a self-hosted or unusual domain needs
+    them typed in.
+    """
+
+    address = serializers.EmailField()
+    password = serializers.CharField(trim_whitespace=False)
+    display_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    imap_host = serializers.CharField(max_length=253, required=False, allow_blank=True)
+    imap_port = serializers.IntegerField(required=False, min_value=1, max_value=65535)
+    smtp_host = serializers.CharField(max_length=253, required=False, allow_blank=True)
+    smtp_port = serializers.IntegerField(required=False, min_value=1, max_value=65535)
+
+    def validate_address(self, value: str) -> str:
+        return value.strip().lower()
+
+    def validate_password(self, value: str) -> str:
+        # App passwords are shown grouped in fours ("abcd efgh ijkl mnop") and
+        # people paste them that way; the spaces are presentation, not part of
+        # the secret, and leaving them in makes a correct password fail.
+        return value.replace(" ", "").strip()
+
+
+class MailAccountPatchSerializer(serializers.Serializer):
+    display_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
 
 
 # ─── Threads & messages ───────────────────────────────────────────────────────
@@ -153,6 +116,7 @@ class MailAttachmentSerializer(serializers.Serializer):
 
 class MailThreadSerializer(serializers.Serializer):
     id = serializers.IntegerField()
+    account_id = serializers.IntegerField()
     subject = serializers.CharField()
     snippet = serializers.CharField()
     folder = serializers.CharField()
@@ -182,6 +146,7 @@ class MailMessageSerializer(serializers.Serializer):
 
 
 class MailSendSerializer(serializers.Serializer):
+    account_id = serializers.IntegerField(required=False, allow_null=True)
     to = serializers.ListField(child=serializers.CharField(), allow_empty=False)
     cc = serializers.ListField(child=serializers.CharField(), required=False, default=list)
     bcc = serializers.ListField(child=serializers.CharField(), required=False, default=list)
@@ -205,10 +170,11 @@ class MailSendSerializer(serializers.Serializer):
         max_recipients = getattr(settings, "B2B_MAIL_MAX_RECIPIENTS", 25)
         if total > max_recipients:
             # A single message to hundreds of addresses is what mailing-list
-            # software is for; through a personal mailbox it reads as spam to
-            # the receiving side and costs the sending IP its reputation.
+            # software is for. Sent through somebody's personal inbox it reads
+            # as spam to the receiving side and risks their own account.
             raise serializers.ValidationError({
-                "to": [_("A message may not have more than %(n)d recipients.") % {"n": max_recipients}]
+                "to": [_("A message may not have more than %(n)d recipients.")
+                       % {"n": max_recipients}]
             })
 
         if not (attrs.get("body_text") or attrs.get("body_html")):
@@ -218,9 +184,7 @@ class MailSendSerializer(serializers.Serializer):
 
 class MailThreadFlagsSerializer(serializers.Serializer):
     is_starred = serializers.BooleanField(required=False)
-    folder = serializers.ChoiceField(
-        choices=["inbox", "archive", "trash"], required=False
-    )
+    folder = serializers.ChoiceField(choices=["inbox", "archive", "trash"], required=False)
 
 
 # ─── Notifications ────────────────────────────────────────────────────────────

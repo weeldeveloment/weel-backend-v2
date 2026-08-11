@@ -1,12 +1,15 @@
-"""Raw-SQL data access for corporate mail.
+"""Raw-SQL data access for the mail that shows up in the chat section.
 
 Same conventions as ``apps/b2b/workspace/repository.py``: plain dicts in and
-out, no ORM, and every read reachable only through a mailbox the caller owns.
+out, no ORM, and every read reachable only through an account the caller
+connected themselves.
 
 The tenancy rule this file enforces everywhere: a thread or message is looked
-up **by id together with its mailbox id**, never by id alone. That way a
-guessed id from another company returns nothing rather than someone else's
-mail, and no view has to remember to check.
+up **by id together with its account id**, never by id alone. That way a
+guessed id belonging to somebody else returns nothing rather than their mail,
+and no view has to remember to check. This matters more here than anywhere
+else in the codebase — these rows are a person's private correspondence, not
+company data their colleagues may also see.
 """
 from __future__ import annotations
 
@@ -19,13 +22,12 @@ from shared.raw.db import execute, fetch_all, fetch_one
 
 from apps.b2b.raw.tables import (
     B2B_EMPLOYEE_TABLE,
+    B2B_MAIL_ACCOUNT_TABLE,
     B2B_MAIL_ATTACHMENT_TABLE,
-    B2B_MAIL_DOMAIN_TABLE,
     B2B_MAIL_MESSAGE_TABLE,
     B2B_MAIL_OUTBOX_TABLE,
     B2B_MAIL_RECIPIENT_TABLE,
     B2B_MAIL_THREAD_TABLE,
-    B2B_MAILBOX_TABLE,
     B2B_NOTIFICATION_TABLE,
 )
 
@@ -43,182 +45,167 @@ def normalize_subject(subject: str | None) -> str:
     return re.sub(r"\s+", " ", cleaned).strip().lower()[:500]
 
 
-# ─── Domains ──────────────────────────────────────────────────────────────────
+# ─── Connected accounts ───────────────────────────────────────────────────────
 
-def list_domains(company_id: int) -> list[dict]:
-    return fetch_all(
-        f"SELECT * FROM {B2B_MAIL_DOMAIN_TABLE} WHERE company_id = %s ORDER BY id",
-        [company_id],
-    )
-
-
-def get_domain(domain_id: int, company_id: int) -> dict | None:
-    return fetch_one(
-        f"SELECT * FROM {B2B_MAIL_DOMAIN_TABLE} WHERE id = %s AND company_id = %s",
-        [domain_id, company_id],
-    )
-
-
-def find_domain_by_name(domain: str) -> dict | None:
-    return fetch_one(
-        f"SELECT * FROM {B2B_MAIL_DOMAIN_TABLE} WHERE domain = %s",
-        [domain.lower()],
-    )
-
-
-def create_domain(company_id: int, domain: str, dkim_selector: str) -> dict | None:
-    now = timezone.now()
-    return fetch_one(
-        f"INSERT INTO {B2B_MAIL_DOMAIN_TABLE} "
-        "(company_id, domain, dkim_selector, status, created_at, updated_at) "
-        "VALUES (%s, %s, %s, 'pending', %s, %s) __RETURNING_MARKER__",
-        [company_id, domain.lower(), dkim_selector, now, now],
-    )
-
-
-def update_domain(domain_id: int, **fields: Any) -> dict | None:
-    if not fields:
-        return None
-    fields["updated_at"] = timezone.now()
-    assignments = ", ".join(f"{key} = %s" for key in fields)
-    return fetch_one(
-        f"UPDATE {B2B_MAIL_DOMAIN_TABLE} SET {assignments} WHERE id = %s __RETURNING_MARKER__",
-        [*fields.values(), domain_id],
-    )
-
-
-def delete_domain(domain_id: int, company_id: int) -> int:
-    return execute(
-        f"DELETE FROM {B2B_MAIL_DOMAIN_TABLE} WHERE id = %s AND company_id = %s",
-        [domain_id, company_id],
-    )
-
-
-def list_verifiable_domains() -> list[dict]:
-    """Every domain the hourly recheck should look at.
-
-    Verified ones are included too: a customer who moves DNS providers breaks
-    their own mail silently otherwise, and we would rather tell them.
-    """
-    return fetch_all(
-        f"SELECT * FROM {B2B_MAIL_DOMAIN_TABLE} WHERE status <> 'disabled' ORDER BY id"
-    )
-
-
-# ─── Mailboxes ────────────────────────────────────────────────────────────────
-
-_MAILBOX_SELECT = f"""
-    SELECT m.*, e.full_name AS employee_name, e.role AS employee_role,
-           d.domain AS domain_name, d.status AS domain_status
-      FROM {B2B_MAILBOX_TABLE} m
-      JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = m.employee_id
-      JOIN {B2B_MAIL_DOMAIN_TABLE} d ON d.id = m.domain_id
+_ACCOUNT_SELECT = f"""
+    SELECT a.*, e.full_name AS employee_name
+      FROM {B2B_MAIL_ACCOUNT_TABLE} a
+      JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = a.employee_id
 """
 
 
-def get_mailbox_for_employee(employee_id: int) -> dict | None:
-    return fetch_one(f"{_MAILBOX_SELECT} WHERE m.employee_id = %s", [employee_id])
-
-
-def get_mailbox(mailbox_id: int, company_id: int) -> dict | None:
-    return fetch_one(
-        f"{_MAILBOX_SELECT} WHERE m.id = %s AND m.company_id = %s",
-        [mailbox_id, company_id],
+def list_accounts(employee_id: int) -> list[dict]:
+    """Every inbox this person has connected, oldest first."""
+    return fetch_all(
+        f"{_ACCOUNT_SELECT} WHERE a.employee_id = %s ORDER BY a.id",
+        [employee_id],
     )
 
 
-def get_mailbox_by_id(mailbox_id: int) -> dict | None:
-    """Unscoped lookup, for background tasks that already hold a mailbox id.
+def get_account(account_id: int, employee_id: int) -> dict | None:
+    """Scoped to the owner — this is the check that keeps mail private."""
+    return fetch_one(
+        f"{_ACCOUNT_SELECT} WHERE a.id = %s AND a.employee_id = %s",
+        [account_id, employee_id],
+    )
 
-    Views must use ``get_mailbox`` instead — this one performs no tenancy
+
+def get_account_by_id(account_id: int) -> dict | None:
+    """Unscoped lookup, for background tasks that already hold an account id.
+
+    Views must use ``get_account`` instead — this one performs no ownership
     check, because a Celery task has no caller to check against.
     """
-    return fetch_one(f"{_MAILBOX_SELECT} WHERE m.id = %s", [mailbox_id])
+    return fetch_one(f"{_ACCOUNT_SELECT} WHERE a.id = %s", [account_id])
 
 
-def find_mailbox_by_address(address: str) -> dict | None:
-    return fetch_one(f"{_MAILBOX_SELECT} WHERE m.address = %s", [address.lower()])
-
-
-def list_mailboxes(company_id: int) -> list[dict]:
-    return fetch_all(f"{_MAILBOX_SELECT} WHERE m.company_id = %s ORDER BY m.address", [company_id])
-
-
-def list_company_addresses(company_id: int) -> list[str]:
-    """Every address inside the company — used to tell internal mail from external."""
-    rows = fetch_all(
-        f"SELECT address FROM {B2B_MAILBOX_TABLE} WHERE company_id = %s AND is_active = TRUE",
-        [company_id],
+def find_account(employee_id: int, address: str) -> dict | None:
+    return fetch_one(
+        f"{_ACCOUNT_SELECT} WHERE a.employee_id = %s AND a.address = %s",
+        [employee_id, address.lower()],
     )
-    return [row["address"] for row in rows]
 
 
-def create_mailbox(
+def create_account(
     *,
     company_id: int,
-    domain_id: int,
     employee_id: int,
     address: str,
-    local_part: str,
     display_name: str,
-    smtp_password_enc: str,
-    quota_bytes: int,
-    daily_send_limit: int,
+    provider: str,
+    auth_type: str,
+    secret_enc: str,
+    imap_host: str,
+    imap_port: int,
+    smtp_host: str,
+    smtp_port: int,
+    oauth_access_enc: str | None = None,
+    oauth_expires_at=None,
 ) -> dict | None:
     now = timezone.now()
     return fetch_one(
-        f"INSERT INTO {B2B_MAILBOX_TABLE} "
-        "(company_id, domain_id, employee_id, address, local_part, display_name, "
-        " smtp_password_enc, quota_bytes, daily_send_limit, created_at, updated_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) __RETURNING_MARKER__",
-        [company_id, domain_id, employee_id, address.lower(), local_part, display_name,
-         smtp_password_enc, quota_bytes, daily_send_limit, now, now],
+        f"INSERT INTO {B2B_MAIL_ACCOUNT_TABLE} "
+        "(company_id, employee_id, address, display_name, provider, auth_type, "
+        " secret_enc, oauth_access_enc, oauth_expires_at, imap_host, imap_port, "
+        " smtp_host, smtp_port, created_at, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "__RETURNING_MARKER__",
+        [company_id, employee_id, address.lower(), display_name, provider, auth_type,
+         secret_enc, oauth_access_enc, oauth_expires_at, imap_host, imap_port,
+         smtp_host, smtp_port, now, now],
     )
 
 
-def update_mailbox(mailbox_id: int, **fields: Any) -> dict | None:
+def update_account(account_id: int, **fields: Any) -> dict | None:
     if not fields:
         return None
     fields["updated_at"] = timezone.now()
     assignments = ", ".join(f"{key} = %s" for key in fields)
     return fetch_one(
-        f"UPDATE {B2B_MAILBOX_TABLE} SET {assignments} WHERE id = %s __RETURNING_MARKER__",
-        [*fields.values(), mailbox_id],
+        f"UPDATE {B2B_MAIL_ACCOUNT_TABLE} SET {assignments} WHERE id = %s "
+        "__RETURNING_MARKER__",
+        [*fields.values(), account_id],
     )
 
 
-def list_syncable_mailboxes(limit: int = 500) -> list[dict]:
-    """Active mailboxes on active domains, least-recently-synced first.
+def delete_account(account_id: int, employee_id: int) -> int:
+    """Disconnect. The stored copy of the mail goes with it, by cascade.
 
-    Ordering by `last_sync_at` is what keeps one perpetually failing mailbox
-    from starving the rest when the batch is smaller than the fleet.
+    Deliberate: someone removing their personal Gmail from a work app is
+    asking for it to be gone, not archived where their employer could still
+    reach it.
+    """
+    return execute(
+        f"DELETE FROM {B2B_MAIL_ACCOUNT_TABLE} WHERE id = %s AND employee_id = %s",
+        [account_id, employee_id],
+    )
+
+
+def list_syncable_accounts(limit: int = 500) -> list[dict]:
+    """Active accounts, least-recently-synced first.
+
+    Ordering by `last_sync_at` keeps one perpetually failing account from
+    starving the rest when the batch is smaller than the fleet.
     """
     return fetch_all(
-        f"""
-        SELECT m.* FROM {B2B_MAILBOX_TABLE} m
-          JOIN {B2B_MAIL_DOMAIN_TABLE} d ON d.id = m.domain_id
-         WHERE m.is_active = TRUE AND d.status = 'active'
-         ORDER BY m.last_sync_at NULLS FIRST
-         LIMIT %s
-        """,
+        f"SELECT * FROM {B2B_MAIL_ACCOUNT_TABLE} "
+        "WHERE is_active = TRUE ORDER BY last_sync_at NULLS FIRST LIMIT %s",
         [limit],
     )
 
 
-def count_sent_today(mailbox_id: int) -> int:
+def count_sent_today(account_id: int) -> int:
     row = fetch_one(
         f"SELECT COUNT(*) AS total FROM {B2B_MAIL_OUTBOX_TABLE} "
-        "WHERE mailbox_id = %s AND created_at >= NOW() - INTERVAL '24 hours' "
+        "WHERE account_id = %s AND created_at >= NOW() - INTERVAL '24 hours' "
         "AND status <> 'failed'",
-        [mailbox_id],
+        [account_id],
     )
     return int(row["total"]) if row else 0
 
 
 # ─── Threads ──────────────────────────────────────────────────────────────────
 
+def list_threads_for_accounts(
+    account_ids: list[int],
+    *,
+    folder: str = "inbox",
+    query: str | None = None,
+    unread_only: bool = False,
+    starred_only: bool = False,
+    limit: int = 30,
+) -> list[dict]:
+    """One merged list across every inbox the caller connected.
+
+    Somebody with a personal and a work address wants a single stream, not two
+    screens to check. Sorting happens across the union rather than per account,
+    so the newest message is first no matter which inbox it arrived in.
+    """
+    if not account_ids:
+        return []
+
+    sql = [
+        f"SELECT * FROM {B2B_MAIL_THREAD_TABLE} "
+        "WHERE account_id = __ANY_MARKER__(%s) AND folder = %s"
+    ]
+    params: list[Any] = [account_ids, folder]
+
+    if unread_only:
+        sql.append("AND unread_count > 0")
+    if starred_only:
+        sql.append("AND is_starred = TRUE")
+    if query:
+        sql.append("AND (subject ILIKE %s OR participants ILIKE %s OR snippet ILIKE %s)")
+        pattern = f"%{query}%"
+        params += [pattern, pattern, pattern]
+
+    sql.append("ORDER BY last_message_at DESC NULLS LAST, id DESC LIMIT %s")
+    params.append(limit)
+    return fetch_all(" ".join(sql), params)
+
+
 def list_threads(
-    mailbox_id: int,
+    account_id: int,
     *,
     folder: str = "inbox",
     query: str | None = None,
@@ -227,8 +214,8 @@ def list_threads(
     before_id: int | None = None,
     limit: int = 30,
 ) -> list[dict]:
-    sql = [f"SELECT * FROM {B2B_MAIL_THREAD_TABLE} WHERE mailbox_id = %s AND folder = %s"]
-    params: list[Any] = [mailbox_id, folder]
+    sql = [f"SELECT * FROM {B2B_MAIL_THREAD_TABLE} WHERE account_id = %s AND folder = %s"]
+    params: list[Any] = [account_id, folder]
 
     if unread_only:
         sql.append("AND unread_count > 0")
@@ -247,15 +234,32 @@ def list_threads(
     return fetch_all(" ".join(sql), params)
 
 
-def get_thread(thread_id: int, mailbox_id: int) -> dict | None:
+def get_thread(thread_id: int, account_id: int) -> dict | None:
     return fetch_one(
-        f"SELECT * FROM {B2B_MAIL_THREAD_TABLE} WHERE id = %s AND mailbox_id = %s",
-        [thread_id, mailbox_id],
+        f"SELECT * FROM {B2B_MAIL_THREAD_TABLE} WHERE id = %s AND account_id = %s",
+        [thread_id, account_id],
+    )
+
+
+def get_thread_for_employee(thread_id: int, employee_id: int) -> dict | None:
+    """A thread, only if it belongs to an inbox this person connected.
+
+    The join is the whole access check. Views take a thread id straight from
+    the URL, and this is what makes a guessed id belonging to a colleague — or
+    to another company — return nothing instead of their mail.
+    """
+    return fetch_one(
+        f"""
+        SELECT t.* FROM {B2B_MAIL_THREAD_TABLE} t
+          JOIN {B2B_MAIL_ACCOUNT_TABLE} a ON a.id = t.account_id
+         WHERE t.id = %s AND a.employee_id = %s
+        """,
+        [thread_id, employee_id],
     )
 
 
 def find_thread_for_message(
-    mailbox_id: int,
+    account_id: int,
     *,
     folder: str,
     references: Iterable[str],
@@ -274,10 +278,10 @@ def find_thread_for_message(
             f"""
             SELECT t.* FROM {B2B_MAIL_THREAD_TABLE} t
               JOIN {B2B_MAIL_MESSAGE_TABLE} m ON m.thread_id = t.id
-             WHERE t.mailbox_id = %s AND m.message_id_header = __ANY_MARKER__(%s)
+             WHERE t.account_id = %s AND m.message_id_header = __ANY_MARKER__(%s)
              ORDER BY t.id DESC LIMIT 1
             """,
-            [mailbox_id, reference_ids],
+            [account_id, reference_ids],
         )
         if row:
             return row
@@ -285,17 +289,17 @@ def find_thread_for_message(
     if subject_key:
         return fetch_one(
             f"SELECT * FROM {B2B_MAIL_THREAD_TABLE} "
-            "WHERE mailbox_id = %s AND folder = %s AND subject_key = %s "
+            "WHERE account_id = %s AND folder = %s AND subject_key = %s "
             "AND last_message_at > NOW() - INTERVAL '30 days' "
             "ORDER BY id DESC LIMIT 1",
-            [mailbox_id, folder, subject_key],
+            [account_id, folder, subject_key],
         )
     return None
 
 
 def create_thread(
     *,
-    mailbox_id: int,
+    account_id: int,
     subject: str,
     folder: str,
     participants: str,
@@ -305,10 +309,10 @@ def create_thread(
     now = timezone.now()
     return fetch_one(
         f"INSERT INTO {B2B_MAIL_THREAD_TABLE} "
-        "(mailbox_id, subject, subject_key, folder, participants, snippet, "
+        "(account_id, subject, subject_key, folder, participants, snippet, "
         " last_message_at, created_at, updated_at) "
         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) __RETURNING_MARKER__",
-        [mailbox_id, subject[:500], normalize_subject(subject), folder,
+        [account_id, subject[:500], normalize_subject(subject), folder,
          participants[:2000], snippet[:500], last_message_at, now, now],
     )
 
@@ -344,11 +348,11 @@ def refresh_thread_counters(thread_id: int) -> dict | None:
     )
 
 
-def mark_thread_read(thread_id: int, mailbox_id: int) -> None:
+def mark_thread_read(thread_id: int, account_id: int) -> None:
     execute(
         f"UPDATE {B2B_MAIL_MESSAGE_TABLE} SET is_read = TRUE, updated_at = NOW() "
-        "WHERE thread_id = %s AND mailbox_id = %s AND is_read = FALSE",
-        [thread_id, mailbox_id],
+        "WHERE thread_id = %s AND account_id = %s AND is_read = FALSE",
+        [thread_id, account_id],
     )
     execute(
         f"UPDATE {B2B_MAIL_THREAD_TABLE} SET unread_count = 0, updated_at = NOW() WHERE id = %s",
@@ -358,7 +362,7 @@ def mark_thread_read(thread_id: int, mailbox_id: int) -> None:
 
 def set_thread_flags(
     thread_id: int,
-    mailbox_id: int,
+    account_id: int,
     *,
     is_starred: bool | None = None,
     folder: str | None = None,
@@ -369,31 +373,31 @@ def set_thread_flags(
     if folder is not None:
         fields["folder"] = folder
     if not fields:
-        return get_thread(thread_id, mailbox_id)
+        return get_thread(thread_id, account_id)
 
     fields["updated_at"] = timezone.now()
     assignments = ", ".join(f"{key} = %s" for key in fields)
     return fetch_one(
         f"UPDATE {B2B_MAIL_THREAD_TABLE} SET {assignments} "
-        "WHERE id = %s AND mailbox_id = %s __RETURNING_MARKER__",
-        [*fields.values(), thread_id, mailbox_id],
+        "WHERE id = %s AND account_id = %s __RETURNING_MARKER__",
+        [*fields.values(), thread_id, account_id],
     )
 
 
-def total_unread(mailbox_id: int) -> int:
+def total_unread(account_id: int) -> int:
     row = fetch_one(
         f"SELECT COALESCE(SUM(unread_count), 0) AS total FROM {B2B_MAIL_THREAD_TABLE} "
-        "WHERE mailbox_id = %s AND folder = 'inbox'",
-        [mailbox_id],
+        "WHERE account_id = %s AND folder = 'inbox'",
+        [account_id],
     )
     return int(row["total"]) if row else 0
 
 
-def folder_counts(mailbox_id: int) -> dict[str, int]:
+def folder_counts(account_id: int) -> dict[str, int]:
     rows = fetch_all(
         f"SELECT folder, COUNT(*) AS total, COALESCE(SUM(unread_count), 0) AS unread "
-        f"FROM {B2B_MAIL_THREAD_TABLE} WHERE mailbox_id = %s GROUP BY folder",
-        [mailbox_id],
+        f"FROM {B2B_MAIL_THREAD_TABLE} WHERE account_id = %s GROUP BY folder",
+        [account_id],
     )
     return {row["folder"]: {"total": int(row["total"]), "unread": int(row["unread"])}
             for row in rows}
@@ -403,14 +407,14 @@ def folder_counts(mailbox_id: int) -> dict[str, int]:
 
 def list_messages(
     thread_id: int,
-    mailbox_id: int,
+    account_id: int,
     *,
     before_id: int | None = None,
     limit: int = 50,
 ) -> list[dict]:
     """Newest-end page of a thread, returned oldest-first for display."""
-    sql = [f"SELECT * FROM {B2B_MAIL_MESSAGE_TABLE} WHERE thread_id = %s AND mailbox_id = %s"]
-    params: list[Any] = [thread_id, mailbox_id]
+    sql = [f"SELECT * FROM {B2B_MAIL_MESSAGE_TABLE} WHERE thread_id = %s AND account_id = %s"]
+    params: list[Any] = [thread_id, account_id]
     if before_id:
         sql.append("AND id < %s")
         params.append(before_id)
@@ -422,20 +426,20 @@ def list_messages(
     return messages
 
 
-def get_message(message_id: int, mailbox_id: int) -> dict | None:
+def get_message(message_id: int, account_id: int) -> dict | None:
     return fetch_one(
-        f"SELECT * FROM {B2B_MAIL_MESSAGE_TABLE} WHERE id = %s AND mailbox_id = %s",
-        [message_id, mailbox_id],
+        f"SELECT * FROM {B2B_MAIL_MESSAGE_TABLE} WHERE id = %s AND account_id = %s",
+        [message_id, account_id],
     )
 
 
-def message_exists(mailbox_id: int, message_id_header: str) -> bool:
+def message_exists(account_id: int, message_id_header: str) -> bool:
     if not message_id_header:
         return False
     row = fetch_one(
         f"SELECT 1 AS hit FROM {B2B_MAIL_MESSAGE_TABLE} "
-        "WHERE mailbox_id = %s AND message_id_header = %s",
-        [mailbox_id, message_id_header],
+        "WHERE account_id = %s AND message_id_header = %s",
+        [account_id, message_id_header],
     )
     return row is not None
 
@@ -443,7 +447,7 @@ def message_exists(mailbox_id: int, message_id_header: str) -> bool:
 def create_message(
     *,
     thread_id: int,
-    mailbox_id: int,
+    account_id: int,
     direction: str,
     status: str = "delivered",
     imap_uid: int | None = None,
@@ -462,13 +466,13 @@ def create_message(
     now = timezone.now()
     return fetch_one(
         f"INSERT INTO {B2B_MAIL_MESSAGE_TABLE} "
-        "(thread_id, mailbox_id, direction, status, imap_uid, message_id_header, "
+        "(thread_id, account_id, direction, status, imap_uid, message_id_header, "
         " in_reply_to, references_header, from_address, from_name, subject, "
         " body_text, body_html_sanitized, has_attachments, is_read, sent_at, "
         " created_at, updated_at) "
         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "__RETURNING_MARKER__",
-        [thread_id, mailbox_id, direction, status, imap_uid, message_id_header,
+        [thread_id, account_id, direction, status, imap_uid, message_id_header,
          in_reply_to, references_header, from_address[:320], from_name[:300],
          subject[:500], body_text, body_html_sanitized, has_attachments, is_read,
          sent_at or now, now, now],
@@ -519,7 +523,7 @@ def list_recipients(message_ids: list[int]) -> dict[int, list[dict]]:
 
 def create_attachment(
     *,
-    mailbox_id: int,
+    account_id: int,
     message_id: int | None,
     filename: str,
     content_type: str,
@@ -530,10 +534,10 @@ def create_attachment(
 ) -> dict | None:
     return fetch_one(
         f"INSERT INTO {B2B_MAIL_ATTACHMENT_TABLE} "
-        "(mailbox_id, message_id, filename, content_type, size_bytes, storage_key, "
+        "(account_id, message_id, filename, content_type, size_bytes, storage_key, "
         " content_id, is_inline) "
         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) __RETURNING_MARKER__",
-        [mailbox_id, message_id, filename[:300], content_type[:200], size_bytes,
+        [account_id, message_id, filename[:300], content_type[:200], size_bytes,
          storage_key[:500], content_id, is_inline],
     )
 
@@ -552,40 +556,56 @@ def list_attachments(message_ids: list[int]) -> dict[int, list[dict]]:
     return grouped
 
 
-def claim_attachments(attachment_ids: list[int], mailbox_id: int, message_id: int) -> list[dict]:
+def claim_attachments(attachment_ids: list[int], account_id: int, message_id: int) -> list[dict]:
     """Bind uploads to the message that is finally sending them.
 
-    Scoped to the uploader's own mailbox, so passing someone else's attachment
+    Scoped to the uploader's own account, so passing someone else's attachment
     id attaches nothing rather than exfiltrating their file.
     """
     if not attachment_ids:
         return []
     return fetch_all(
         f"UPDATE {B2B_MAIL_ATTACHMENT_TABLE} SET message_id = %s "
-        "WHERE id = __ANY_MARKER__(%s) AND mailbox_id = %s AND message_id IS NULL "
+        "WHERE id = __ANY_MARKER__(%s) AND account_id = %s AND message_id IS NULL "
         "__RETURNING_MARKER__",
-        [message_id, attachment_ids, mailbox_id],
+        [message_id, attachment_ids, account_id],
     )
 
 
-def get_attachment(attachment_id: int, mailbox_id: int) -> dict | None:
+def get_attachment(attachment_id: int, account_id: int) -> dict | None:
     return fetch_one(
-        f"SELECT * FROM {B2B_MAIL_ATTACHMENT_TABLE} WHERE id = %s AND mailbox_id = %s",
-        [attachment_id, mailbox_id],
+        f"SELECT * FROM {B2B_MAIL_ATTACHMENT_TABLE} WHERE id = %s AND account_id = %s",
+        [attachment_id, account_id],
+    )
+
+
+def get_attachment_for_employee(attachment_id: int, employee_id: int) -> dict | None:
+    """An attachment, only if it hangs off an inbox this person connected.
+
+    The download endpoint takes a bare id, so this join is what stops one
+    employee reading a file out of another's mail by guessing.
+    """
+    return fetch_one(
+        f"""
+        SELECT att.* FROM {B2B_MAIL_ATTACHMENT_TABLE} att
+          JOIN {B2B_MAIL_ACCOUNT_TABLE} a ON a.id = att.account_id
+         WHERE att.id = %s AND a.employee_id = %s
+        """,
+        [attachment_id, employee_id],
     )
 
 
 # ─── Outbox ───────────────────────────────────────────────────────────────────
 
-def create_outbox_entry(mailbox_id: int, message_id: int, payload: dict) -> dict | None:
+def create_outbox_entry(account_id: int, message_id: int, payload: dict) -> dict | None:
     import json
 
     now = timezone.now()
     return fetch_one(
         f"INSERT INTO {B2B_MAIL_OUTBOX_TABLE} "
-        "(mailbox_id, message_id, payload, status, created_at, updated_at) "
+        "(account_id, message_id, payload, status, created_at, updated_at) "
         "VALUES (%s, %s, %s, 'pending', %s, %s) __RETURNING_MARKER__",
-        [mailbox_id, message_id, json.dumps(payload), now, now],
+        [account_id, message_id, json.dumps(payload), now, now],
     )
 
 
@@ -676,14 +696,6 @@ def list_chat_recipients(thread_id: int, sender_id: int) -> list[dict]:
            AND m.is_muted = FALSE AND e.is_active = TRUE
         """,
         [thread_id, sender_id],
-    )
-
-
-def get_employee(employee_id: int, company_id: int) -> dict | None:
-    """Company-scoped employee lookup, so a foreign id cannot be given a mailbox."""
-    return fetch_one(
-        f"SELECT * FROM {B2B_EMPLOYEE_TABLE} WHERE id = %s AND company_id = %s AND is_active = TRUE",
-        [employee_id, company_id],
     )
 
 

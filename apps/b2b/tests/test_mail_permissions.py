@@ -1,14 +1,18 @@
-"""Who may do what with corporate mail, and what one company can see of another.
+"""Who can see whose mail.
 
-Mail is the first B2B feature where a bug leaks *content written by outsiders
-to a named person*, so the cases worth pinning down are the refusals: an
-employee administering domains, a mailbox nobody owns, and above all a thread
-id from a different company.
+A connected account is somebody's *personal* inbox — often their private Gmail
+— living inside a work app. That makes the access rules here stricter than
+anywhere else in this codebase: not "can this company see it" but "can this
+person see it", with no administrative override, not even for the owner.
 
-The repository is mocked throughout — these rules live in the views, not in
-SQL, so no database is involved.
+So the cases worth pinning down are the refusals: a colleague's thread, a
+colleague's attachment, and an owner who is still just another employee where
+mail is concerned.
+
+The repository is mocked throughout — these rules live in the views and in the
+SQL joins, not in business logic, so no database is involved.
 """
-from unittest.mock import PropertyMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.conf import settings
@@ -18,21 +22,22 @@ if not settings.configured:
 
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from apps.b2b.mail import providers
+from apps.b2b.mail.views import (
+    MailAccountDetailView,
+    MailAccountListCreateView,
+    MailAttachmentDownloadView,
+    MailSendView,
+    MailThreadListView,
+    MailThreadMessagesView,
+)
 from apps.b2b.workspace.authentication import WorkspaceUser
 from apps.b2b.workspace.roles import capabilities_for
 
-from apps.b2b.mail.views import (
-    MailboxListCreateView,
-    MailDomainListCreateView,
-    MailMeView,
-    MailSendView,
-    MailThreadMessagesView,
-)
-
 COMPANY_ID = 55
-OTHER_COMPANY_ID = 66
 OWNER_ID = 1
 EMPLOYEE_ID = 2
+ACCOUNT_ID = 7
 
 factory = APIRequestFactory()
 
@@ -51,28 +56,28 @@ OWNER = _user("owner", OWNER_ID)
 EMPLOYEE = _user("employee", EMPLOYEE_ID)
 
 
-def _mailbox(**overrides):
-    mailbox = {
-        "id": 7,
+def _account(**overrides):
+    account = {
+        "id": ACCOUNT_ID,
         "company_id": COMPANY_ID,
-        "domain_id": 3,
         "employee_id": EMPLOYEE_ID,
-        "address": "aziz@kompaniya.com",
-        "local_part": "aziz",
+        "address": "aziz@gmail.com",
         "display_name": "Aziz Karimov",
         "employee_name": "Aziz Karimov",
-        "smtp_password_enc": "enc",
-        "quota_bytes": 2147483648,
-        "daily_send_limit": 200,
+        "provider": "gmail",
+        "auth_type": "app_password",
+        "secret_enc": "enc",
+        "imap_host": "imap.gmail.com",
+        "imap_port": 993,
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
         "is_active": True,
         "last_seen_uid": 0,
         "last_sync_at": None,
         "sync_error": None,
-        "domain_name": "kompaniya.com",
-        "domain_status": "active",
     }
-    mailbox.update(overrides)
-    return mailbox
+    account.update(overrides)
+    return account
 
 
 def _call(view_class, request, user, **kwargs):
@@ -80,62 +85,63 @@ def _call(view_class, request, user, **kwargs):
     return view_class.as_view()(request, **kwargs)
 
 
+def _enabled():
+    return patch.object(settings, "B2B_MAIL_ENABLED", True, create=True)
+
+
 # ─── Capability map ───────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("role", ["owner", "performer", "employee"])
-def test_everyone_may_use_mail_and_write_to_the_outside_world(role):
-    # The whole point of a corporate address is that the employee holding it
-    # can correspond with customers, not only with colleagues.
+def test_mail_is_open_to_every_role(role):
+    # The inbox belongs to the person, not the company, so there is no role
+    # that should be prevented from connecting one.
+    assert capabilities_for(role)["can_use_mail"] is True
+
+
+@pytest.mark.parametrize("role", ["owner", "performer", "employee"])
+def test_there_is_no_administrative_mail_capability(role):
+    """Guards against re-introducing an owner-level override.
+
+    Mail is the one workspace feature an owner must *not* be able to
+    administer: doing so would mean reading an employee's private
+    correspondence.
+    """
     caps = capabilities_for(role)
-    assert caps["can_use_mail"] is True
-    assert caps["can_send_external_mail"] is True
+    for flag in caps:
+        assert flag in ("can_use_mail",) or "mail" not in flag, (
+            f"{flag} would give a role power over somebody else's inbox"
+        )
 
 
-@pytest.mark.parametrize("role, allowed", [("owner", True), ("performer", False), ("employee", False)])
-def test_only_the_owner_administers_domains_and_mailboxes(role, allowed):
-    caps = capabilities_for(role)
-    assert caps["can_manage_mail_domain"] is allowed
-    assert caps["can_manage_mailboxes"] is allowed
+# ─── Feature flag and empty state ─────────────────────────────────────────────
 
-
-# ─── Mail disabled / no mailbox ───────────────────────────────────────────────
-
-def test_mail_endpoints_report_503_when_the_feature_is_off():
+def test_endpoints_report_503_when_mail_is_disabled():
     with patch.object(settings, "B2B_MAIL_ENABLED", False, create=True):
-        response = _call(MailMeView, factory.get("/mail/me/"), EMPLOYEE)
+        response = _call(MailAccountListCreateView, factory.get("/mail/accounts/"), EMPLOYEE)
     assert response.status_code == 503
 
 
-def test_an_employee_without_a_mailbox_gets_a_recognisable_code():
-    # The apps render an empty state from this rather than an error toast, so
-    # the machine-readable code matters as much as the status.
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True), \
-         patch("apps.b2b.mail.views.repo.get_mailbox_for_employee", return_value=None):
-        response = _call(MailMeView, factory.get("/mail/me/"), EMPLOYEE)
-    assert response.status_code == 404
-    assert response.data["code"] == "no_mailbox"
+def test_a_person_with_no_account_gets_an_empty_list_not_an_error():
+    # The apps render a "connect your inbox" prompt from this, so it must not
+    # arrive as a failure.
+    with _enabled(), patch("apps.b2b.mail.views.repo.list_accounts", return_value=[]):
+        response = _call(MailThreadListView, factory.get("/mail/threads/"), EMPLOYEE)
+    assert response.status_code == 200
+    assert response.data["results"] == []
+    assert response.data["code"] == "no_account"
 
 
-def test_a_disabled_mailbox_is_refused_rather_than_silently_empty():
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True), \
-         patch("apps.b2b.mail.views.repo.get_mailbox_for_employee",
-               return_value=_mailbox(is_active=False)):
-        response = _call(MailMeView, factory.get("/mail/me/"), EMPLOYEE)
-    assert response.status_code == 403
+# ─── Privacy between colleagues ───────────────────────────────────────────────
 
+def test_a_colleagues_thread_is_not_found():
+    """The core privacy guarantee in one test.
 
-# ─── Tenant isolation ─────────────────────────────────────────────────────────
-
-def test_a_thread_from_another_company_is_not_found():
-    """The whole tenancy guarantee in one test.
-
-    ``get_thread`` is called with the caller's own mailbox id, so a thread id
-    belonging to someone else matches nothing. If this ever returns 200 the
-    feature is leaking other companies' mail.
+    ``get_thread_for_employee`` joins through the account's owner, so a thread
+    id belonging to somebody else matches nothing. If this ever returns 200,
+    the feature is leaking private mail between colleagues.
     """
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True), \
-         patch("apps.b2b.mail.views.repo.get_mailbox_for_employee", return_value=_mailbox()), \
-         patch("apps.b2b.mail.views.repo.get_thread", return_value=None) as get_thread:
+    with _enabled(), \
+         patch("apps.b2b.mail.views.repo.get_thread_for_employee", return_value=None) as lookup:
         response = _call(
             MailThreadMessagesView,
             factory.get("/mail/threads/999/messages/"),
@@ -144,111 +150,155 @@ def test_a_thread_from_another_company_is_not_found():
         )
 
     assert response.status_code == 404
-    # Scoped by mailbox, not looked up by id alone.
-    get_thread.assert_called_once_with(999, 7)
+    # Scoped by the signed-in employee, never by company.
+    lookup.assert_called_once_with(999, EMPLOYEE_ID)
 
 
-def test_reading_a_thread_marks_it_read_only_on_the_newest_page():
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True), \
-         patch("apps.b2b.mail.views.repo.get_mailbox_for_employee", return_value=_mailbox()), \
-         patch("apps.b2b.mail.views.repo.get_thread", return_value={"id": 4}), \
-         patch("apps.b2b.mail.views.repo.list_messages", return_value=[]), \
-         patch("apps.b2b.mail.views.repo.list_recipients", return_value={}), \
-         patch("apps.b2b.mail.views.repo.list_attachments", return_value={}), \
-         patch("apps.b2b.mail.views.repo.mark_thread_read") as mark_read:
-        _call(MailThreadMessagesView, factory.get("/mail/threads/4/messages/"),
-              EMPLOYEE, thread_id=4)
-        assert mark_read.called
-
-        mark_read.reset_mock()
-        # Paging back through history must not clear messages that arrived
-        # since the reader opened the thread.
-        _call(MailThreadMessagesView, factory.get("/mail/threads/4/messages/?before_id=10"),
-              EMPLOYEE, thread_id=4)
-        assert not mark_read.called
-
-
-# ─── Administration ───────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("user", [EMPLOYEE, _user("performer", 3)])
-def test_a_non_owner_may_not_list_or_connect_domains(user):
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True):
-        listed = _call(MailDomainListCreateView, factory.get("/mail/domains/"), user)
-        created = _call(
-            MailDomainListCreateView,
-            factory.post("/mail/domains/", {"domain": "kompaniya.com"}, format="json"),
-            user,
-        )
-    assert listed.status_code == 403
-    assert created.status_code == 403
-
-
-def test_a_non_owner_may_not_create_mailboxes():
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True):
+def test_an_owner_has_no_special_access_to_a_thread():
+    with _enabled(), \
+         patch("apps.b2b.mail.views.repo.get_thread_for_employee", return_value=None) as lookup:
         response = _call(
-            MailboxListCreateView,
-            factory.post("/mail/mailboxes/",
-                         {"employee_id": 3, "domain_id": 1, "local_part": "aziz"},
+            MailThreadMessagesView,
+            factory.get("/mail/threads/42/messages/"),
+            OWNER,
+            thread_id=42,
+        )
+
+    assert response.status_code == 404
+    # The owner is looked up by their own id like anybody else — there is no
+    # company-wide branch to fall back on.
+    lookup.assert_called_once_with(42, OWNER_ID)
+
+
+def test_an_attachment_is_scoped_to_its_owner():
+    with _enabled(), \
+         patch("apps.b2b.mail.views.repo.get_attachment_for_employee",
+               return_value=None) as lookup:
+        response = _call(
+            MailAttachmentDownloadView,
+            factory.get("/mail/attachments/12/"),
+            EMPLOYEE,
+            attachment_id=12,
+        )
+
+    assert response.status_code == 404
+    lookup.assert_called_once_with(12, EMPLOYEE_ID)
+
+
+def test_another_persons_account_cannot_be_renamed_or_disconnected():
+    with _enabled(), patch("apps.b2b.mail.views.repo.get_account", return_value=None) as lookup:
+        patched = _call(
+            MailAccountDetailView,
+            factory.patch("/mail/accounts/7/", {"display_name": "x"}, format="json"),
+            EMPLOYEE,
+            account_id=7,
+        )
+        deleted = _call(
+            MailAccountDetailView,
+            factory.delete("/mail/accounts/7/"),
+            EMPLOYEE,
+            account_id=7,
+        )
+
+    assert patched.status_code == 404
+    assert deleted.status_code == 404
+    assert lookup.call_args_list == [((7, EMPLOYEE_ID),), ((7, EMPLOYEE_ID),)]
+
+
+# ─── Connecting ───────────────────────────────────────────────────────────────
+
+def test_an_account_is_verified_before_it_is_stored():
+    """A credential that cannot log in must never be saved.
+
+    Otherwise the account sits in the list looking connected and silently
+    never syncs, which reads as "the app is broken" rather than "the password
+    is wrong".
+    """
+    from cryptography.fernet import Fernet
+
+    from apps.b2b.mail.connection import MailAuthError
+
+    with _enabled(), \
+         patch.object(settings, "B2B_MAIL_SECRET_KEY",
+                      Fernet.generate_key().decode(), create=True), \
+         patch("apps.b2b.mail.views.repo.find_account", return_value=None), \
+         patch("apps.b2b.mail.views.verify", side_effect=MailAuthError("bad password")), \
+         patch("apps.b2b.mail.views.repo.create_account") as create:
+        response = _call(
+            MailAccountListCreateView,
+            factory.post("/mail/accounts/",
+                         {"address": "aziz@gmail.com", "password": "wrong"},
                          format="json"),
             EMPLOYEE,
         )
-    assert response.status_code == 403
+
+    assert response.status_code == 400
+    assert not create.called
+    # Gmail's app-password requirement is explained rather than left to guess.
+    assert response.data["help_url"]
 
 
-def test_a_mailbox_cannot_be_created_on_an_unverified_domain():
-    # Sending from a domain whose SPF/DKIM is not published yet lands in spam
-    # and damages the sending IP — better to refuse than to look broken later.
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True), \
-         patch("apps.b2b.mail.views.repo.get_domain",
-               return_value={"id": 1, "domain": "kompaniya.com", "status": "pending"}):
+def test_the_same_inbox_cannot_be_connected_twice():
+    with _enabled(), \
+         patch("apps.b2b.mail.views.repo.find_account", return_value=_account()):
         response = _call(
-            MailboxListCreateView,
-            factory.post("/mail/mailboxes/",
-                         {"employee_id": 3, "domain_id": 1, "local_part": "aziz"},
+            MailAccountListCreateView,
+            factory.post("/mail/accounts/",
+                         {"address": "aziz@gmail.com", "password": "abcd efgh ijkl mnop"},
                          format="json"),
-            OWNER,
-        )
-    assert response.status_code == 400
-    assert "domain_id" in response.data
-
-
-def test_an_employee_from_another_company_cannot_be_given_a_mailbox():
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True), \
-         patch("apps.b2b.mail.views.repo.get_domain",
-               return_value={"id": 1, "domain": "kompaniya.com", "status": "active"}), \
-         patch("apps.b2b.mail.views.repo.get_employee", return_value=None) as get_employee:
-        response = _call(
-            MailboxListCreateView,
-            factory.post("/mail/mailboxes/",
-                         {"employee_id": 999, "domain_id": 1, "local_part": "aziz"},
-                         format="json"),
-            OWNER,
-        )
-    assert response.status_code == 400
-    get_employee.assert_called_once_with(999, COMPANY_ID)
-
-
-def test_a_domain_already_connected_elsewhere_is_refused():
-    # Two companies cannot both own delivery for one domain; letting the second
-    # one through would route a competitor's mail to them.
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True), \
-         patch("apps.b2b.mail.views.repo.find_domain_by_name",
-               return_value={"id": 1, "company_id": OTHER_COMPANY_ID}):
-        response = _call(
-            MailDomainListCreateView,
-            factory.post("/mail/domains/", {"domain": "kompaniya.com"}, format="json"),
-            OWNER,
+            EMPLOYEE,
         )
     assert response.status_code == 400
 
 
-# ─── Send limits ──────────────────────────────────────────────────────────────
+def test_app_password_spaces_are_stripped():
+    """Google shows app passwords in groups of four and people paste them so.
+
+    The spaces are presentation, not part of the secret — leaving them in makes
+    a correct password fail.
+    """
+    from apps.b2b.mail.serializers import MailAccountConnectSerializer
+
+    serializer = MailAccountConnectSerializer(data={
+        "address": "aziz@gmail.com",
+        "password": "abcd efgh ijkl mnop",
+    })
+    assert serializer.is_valid(), serializer.errors
+    assert serializer.validated_data["password"] == "abcdefghijklmnop"
+
+
+# ─── Provider guessing ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("address, host", [
+    ("aziz@gmail.com", "imap.gmail.com"),
+    ("aziz@googlemail.com", "imap.gmail.com"),
+    ("aziz@yandex.ru", "imap.yandex.ru"),
+    ("aziz@mail.ru", "imap.mail.ru"),
+    ("aziz@outlook.com", "outlook.office365.com"),
+    ("aziz@hotmail.com", "outlook.office365.com"),
+])
+def test_known_providers_fill_in_their_own_servers(address, host):
+    assert providers.for_address(address).imap_host == host
+
+
+def test_an_unknown_domain_falls_back_to_the_usual_convention():
+    settings_for = providers.for_address("aziz@kompaniya.uz")
+    assert settings_for.imap_host == "imap.kompaniya.uz"
+    assert settings_for.smtp_host == "smtp.kompaniya.uz"
+    assert settings_for.requires_app_password is False
+
+
+def test_gmail_is_flagged_as_needing_an_app_password():
+    assert providers.for_address("aziz@gmail.com").requires_app_password is True
+    assert providers.for_address("aziz@gmail.com").help_url
+
+
+# ─── Sending ──────────────────────────────────────────────────────────────────
 
 def test_sending_stops_at_the_daily_limit():
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True), \
-         patch("apps.b2b.mail.views.repo.get_mailbox_for_employee", return_value=_mailbox()), \
-         patch("apps.b2b.mail.views.repo.list_company_addresses", return_value=[]), \
-         patch("apps.b2b.mail.views.repo.count_sent_today", return_value=200):
+    with _enabled(), \
+         patch("apps.b2b.mail.views.repo.list_accounts", return_value=[_account()]), \
+         patch("apps.b2b.mail.views.repo.count_sent_today", return_value=999):
         response = _call(
             MailSendView,
             factory.post("/mail/messages/",
@@ -259,27 +309,31 @@ def test_sending_stops_at_the_daily_limit():
     assert response.status_code == 429
 
 
-def test_a_role_denied_external_mail_may_still_write_to_colleagues():
-    """Guards the internal/external split itself.
-
-    ``can_send_external_mail`` is True for every role today, so this drives the
-    check with the capability forced off — the branch has to keep working if
-    that policy is ever tightened.
-    """
-    restricted = _user("employee", EMPLOYEE_ID)
-    denied = {**capabilities_for("employee"), "can_send_external_mail": False}
-
-    with patch.object(settings, "B2B_MAIL_ENABLED", True, create=True), \
-         patch.object(WorkspaceUser, "capabilities", PropertyMock(return_value=denied)), \
-         patch("apps.b2b.mail.views.repo.get_mailbox_for_employee", return_value=_mailbox()), \
-         patch("apps.b2b.mail.views.repo.list_company_addresses",
-               return_value=["boshliq@kompaniya.com"]), \
-         patch("apps.b2b.mail.views.repo.count_sent_today", return_value=0):
-        outside = _call(
+def test_sending_from_a_broken_account_asks_for_a_reconnect():
+    # Distinct from a generic error: the apps branch on this code to show the
+    # reconnect sheet instead of a failure toast.
+    with _enabled(), \
+         patch("apps.b2b.mail.views.repo.list_accounts",
+               return_value=[_account(is_active=False, sync_error="revoked")]):
+        response = _call(
             MailSendView,
             factory.post("/mail/messages/",
                          {"to": ["mijoz@gmail.com"], "body_text": "salom"},
                          format="json"),
-            restricted,
+            EMPLOYEE,
         )
-    assert outside.status_code == 403
+    assert response.status_code == 409
+    assert response.data["code"] == "reconnect"
+
+
+def test_sending_uses_a_named_account_only_if_the_caller_owns_it():
+    with _enabled(), patch("apps.b2b.mail.views.repo.get_account", return_value=None) as lookup:
+        response = _call(
+            MailSendView,
+            factory.post("/mail/messages/",
+                         {"account_id": 999, "to": ["mijoz@gmail.com"], "body_text": "salom"},
+                         format="json"),
+            EMPLOYEE,
+        )
+    assert response.status_code == 404
+    lookup.assert_called_once_with(999, EMPLOYEE_ID)

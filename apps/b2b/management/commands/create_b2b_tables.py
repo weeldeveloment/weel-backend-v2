@@ -541,53 +541,35 @@ class Command(BaseCommand):
         self.stdout.write("  Created b2b_employee_of_month")
 
     def _create_mail_tables(self, cursor):
-        """Corporate mail (`/api/b2b/workspace/mail/`).
+        """Mail inside the workspace (`/api/b2b/workspace/mail/`).
 
-        The mail server (Mailcow) is the system of record for the messages
-        themselves; these tables are the copy the web dashboard and the phone
-        read, so neither has to speak IMAP. A row here is only ever reachable
-        through the mailbox that owns it, and a mailbox belongs to exactly one
-        employee — that is what keeps one company out of another's mail.
+        We do not host mail. An employee connects an inbox they already have —
+        their Gmail, their company address — and it appears in the chat section
+        beside their colleagues. The provider stays the system of record; these
+        tables are the copy the web dashboard and the phone read, so neither
+        has to speak IMAP or hold a credential.
+
+        Everything hangs off `b2b_mail_account`, which belongs to exactly one
+        employee. That is what keeps one person out of another's mail, and one
+        company out of another's.
         """
 
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS b2b_mail_domain (
+            CREATE TABLE IF NOT EXISTS b2b_mail_account (
                 id BIGSERIAL PRIMARY KEY,
                 company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
-                domain VARCHAR(253) NOT NULL UNIQUE,
-                status VARCHAR(20) NOT NULL DEFAULT 'pending',
-                dkim_selector VARCHAR(63) NOT NULL DEFAULT 'weel',
-                dkim_public_key TEXT,
-                mx_ok BOOLEAN NOT NULL DEFAULT FALSE,
-                spf_ok BOOLEAN NOT NULL DEFAULT FALSE,
-                dkim_ok BOOLEAN NOT NULL DEFAULT FALSE,
-                dmarc_ok BOOLEAN NOT NULL DEFAULT FALSE,
-                last_error TEXT,
-                last_checked_at TIMESTAMPTZ,
-                verified_at TIMESTAMPTZ,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
-        # A company's mail settings screen looks its domains up by company.
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS b2b_mail_domain_company_idx "
-            "ON b2b_mail_domain (company_id);"
-        )
-        self.stdout.write("  Created b2b_mail_domain")
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS b2b_mailbox (
-                id BIGSERIAL PRIMARY KEY,
-                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
-                domain_id BIGINT NOT NULL REFERENCES b2b_mail_domain(id) ON DELETE CASCADE,
                 employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
-                address VARCHAR(320) NOT NULL UNIQUE,
-                local_part VARCHAR(64) NOT NULL,
+                address VARCHAR(320) NOT NULL,
                 display_name VARCHAR(200),
-                smtp_password_enc TEXT NOT NULL,
-                quota_bytes BIGINT NOT NULL DEFAULT 2147483648,
-                daily_send_limit INTEGER NOT NULL DEFAULT 200,
+                provider VARCHAR(20) NOT NULL DEFAULT 'imap',
+                auth_type VARCHAR(20) NOT NULL DEFAULT 'app_password',
+                secret_enc TEXT NOT NULL,
+                oauth_access_enc TEXT,
+                oauth_expires_at TIMESTAMPTZ,
+                imap_host VARCHAR(253) NOT NULL,
+                imap_port INTEGER NOT NULL DEFAULT 993,
+                smtp_host VARCHAR(253) NOT NULL,
+                smtp_port INTEGER NOT NULL DEFAULT 587,
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
                 last_seen_uid BIGINT NOT NULL DEFAULT 0,
                 uid_validity BIGINT,
@@ -595,21 +577,27 @@ class Command(BaseCommand):
                 sync_error TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                UNIQUE (employee_id)
+                -- One person may connect several inboxes (a personal Gmail and
+                -- a work address), but not the same one twice.
+                UNIQUE (employee_id, address)
             );
         """)
-        # The sync beat walks every active mailbox; `/mail/me/` looks one up by
-        # the signed-in employee.
+        # The sync beat walks every active account, least-recently-synced
+        # first; the chat screen looks them up by employee.
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS b2b_mailbox_active_idx "
-            "ON b2b_mailbox (is_active, last_sync_at);"
+            "CREATE INDEX IF NOT EXISTS b2b_mail_account_employee_idx "
+            "ON b2b_mail_account (employee_id);"
         )
-        self.stdout.write("  Created b2b_mailbox")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_account_sync_idx "
+            "ON b2b_mail_account (is_active, last_sync_at);"
+        )
+        self.stdout.write("  Created b2b_mail_account")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_mail_thread (
                 id BIGSERIAL PRIMARY KEY,
-                mailbox_id BIGINT NOT NULL REFERENCES b2b_mailbox(id) ON DELETE CASCADE,
+                account_id BIGINT NOT NULL REFERENCES b2b_mail_account(id) ON DELETE CASCADE,
                 subject VARCHAR(500) NOT NULL DEFAULT '',
                 subject_key VARCHAR(500) NOT NULL DEFAULT '',
                 snippet VARCHAR(500) NOT NULL DEFAULT '',
@@ -623,15 +611,15 @@ class Command(BaseCommand):
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
-        # The inbox list is "this mailbox, this folder, newest first".
+        # The inbox list is "this account, this folder, newest first".
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS b2b_mail_thread_mailbox_idx "
-            "ON b2b_mail_thread (mailbox_id, folder, last_message_at DESC);"
+            "CREATE INDEX IF NOT EXISTS b2b_mail_thread_account_idx "
+            "ON b2b_mail_thread (account_id, folder, last_message_at DESC);"
         )
         # Mail with no References header is threaded on the normalised subject.
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS b2b_mail_thread_subject_key_idx "
-            "ON b2b_mail_thread (mailbox_id, subject_key);"
+            "ON b2b_mail_thread (account_id, subject_key);"
         )
         self.stdout.write("  Created b2b_mail_thread")
 
@@ -639,7 +627,7 @@ class Command(BaseCommand):
             CREATE TABLE IF NOT EXISTS b2b_mail_message (
                 id BIGSERIAL PRIMARY KEY,
                 thread_id BIGINT NOT NULL REFERENCES b2b_mail_thread(id) ON DELETE CASCADE,
-                mailbox_id BIGINT NOT NULL REFERENCES b2b_mailbox(id) ON DELETE CASCADE,
+                account_id BIGINT NOT NULL REFERENCES b2b_mail_account(id) ON DELETE CASCADE,
                 direction VARCHAR(10) NOT NULL DEFAULT 'inbound',
                 status VARCHAR(20) NOT NULL DEFAULT 'delivered',
                 imap_uid BIGINT,
@@ -666,11 +654,11 @@ class Command(BaseCommand):
             "ON b2b_mail_message (thread_id, id DESC);"
         )
         # Re-fetching the same UID must not duplicate a message. The header is
-        # globally unique per RFC 5322, but only within one mailbox's copy —
-        # two employees on the same thread each keep their own row.
+        # globally unique per RFC 5322, but only within one account's copy —
+        # two colleagues on the same thread each keep their own row.
         cursor.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS b2b_mail_message_dedup_idx "
-            "ON b2b_mail_message (mailbox_id, message_id_header) "
+            "ON b2b_mail_message (account_id, message_id_header) "
             "WHERE message_id_header IS NOT NULL;"
         )
         self.stdout.write("  Created b2b_mail_message")
@@ -694,7 +682,7 @@ class Command(BaseCommand):
             CREATE TABLE IF NOT EXISTS b2b_mail_attachment (
                 id BIGSERIAL PRIMARY KEY,
                 message_id BIGINT REFERENCES b2b_mail_message(id) ON DELETE CASCADE,
-                mailbox_id BIGINT NOT NULL REFERENCES b2b_mailbox(id) ON DELETE CASCADE,
+                account_id BIGINT NOT NULL REFERENCES b2b_mail_account(id) ON DELETE CASCADE,
                 filename VARCHAR(300) NOT NULL,
                 content_type VARCHAR(200) NOT NULL DEFAULT 'application/octet-stream',
                 size_bytes BIGINT NOT NULL DEFAULT 0,
@@ -715,7 +703,7 @@ class Command(BaseCommand):
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_mail_outbox (
                 id BIGSERIAL PRIMARY KEY,
-                mailbox_id BIGINT NOT NULL REFERENCES b2b_mailbox(id) ON DELETE CASCADE,
+                account_id BIGINT NOT NULL REFERENCES b2b_mail_account(id) ON DELETE CASCADE,
                 message_id BIGINT REFERENCES b2b_mail_message(id) ON DELETE CASCADE,
                 payload JSONB NOT NULL,
                 status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -727,10 +715,10 @@ class Command(BaseCommand):
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
-        # The per-mailbox daily send limit counts rows in this window.
+        # The per-account daily send limit counts rows in this window.
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS b2b_mail_outbox_mailbox_idx "
-            "ON b2b_mail_outbox (mailbox_id, created_at DESC);"
+            "CREATE INDEX IF NOT EXISTS b2b_mail_outbox_account_idx "
+            "ON b2b_mail_outbox (account_id, created_at DESC);"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS b2b_mail_outbox_pending_idx "

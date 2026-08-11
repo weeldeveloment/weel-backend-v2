@@ -1,17 +1,17 @@
-"""Pulls new mail out of a mailbox and into ``b2b_mail_*``.
+"""Pulls new mail out of a connected inbox and into ``b2b_mail_*``.
 
 Neither client speaks IMAP — the dashboard is a browser and the phone would
-have to hold mailbox credentials — so this is what makes an arriving message
-visible in the apps.
+have to hold the account's credential — so this is what makes an arriving
+message visible in the chat section.
 
 Sync is incremental and idempotent, on two independent guards:
 
 * ``last_seen_uid`` — IMAP UIDs only ever increase within a mailbox, so
   ``UID SEARCH UID <last+1>:*`` asks for exactly the messages we have not
-  looked at. ``UIDVALIDITY`` is checked alongside it, because a mailbox rebuilt
-  on the server resets its UID sequence and the stored watermark then points at
-  the wrong messages.
-* ``message_id_header`` — unique per mailbox in the database, so a message that
+  looked at. ``UIDVALIDITY`` is checked alongside it, because a mailbox the
+  provider rebuilds resets its UID sequence, and the stored watermark then
+  points at the wrong messages.
+* ``message_id_header`` — unique per account in the database, so a message that
   slips through the first guard twice still cannot be stored twice.
 
 Both matter: the first keeps the sync cheap, the second keeps it correct.
@@ -32,7 +32,8 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.utils import timezone
 
-from apps.b2b.mail import crypto, repository as repo
+from apps.b2b.mail import repository as repo
+from apps.b2b.mail.connection import MailAuthError, open_imap
 from apps.b2b.mail.sanitize import html_to_text, make_snippet, sanitize_html
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ def _bodies(message: Message) -> tuple[str, str, list[dict]]:
     return "\n".join(text_parts).strip(), "\n".join(html_parts).strip(), attachments
 
 
-def _store_attachment(mailbox_id: int, message_row_id: int, attachment: dict) -> None:
+def _store_attachment(account_id: int, message_row_id: int, attachment: dict) -> None:
     max_mb = getattr(settings, "B2B_MAIL_MAX_ATTACHMENT_MB", 20)
     payload = attachment["payload"]
     if len(payload) > max_mb * 1024 * 1024:
@@ -133,11 +134,11 @@ def _store_attachment(mailbox_id: int, message_row_id: int, attachment: dict) ->
 
     # The filename came from the sender, so it never becomes part of the path.
     safe_name = re.sub(r"[^\w.\-]", "_", attachment["filename"])[:120] or "file"
-    storage_key = f"b2b/mail/{mailbox_id}/{uuid.uuid4().hex}/{safe_name}"
+    storage_key = f"b2b/mail/{account_id}/{uuid.uuid4().hex}/{safe_name}"
     default_storage.save(storage_key, ContentFile(payload))
 
     repo.create_attachment(
-        mailbox_id=mailbox_id,
+        account_id=account_id,
         message_id=message_row_id,
         filename=attachment["filename"],
         content_type=attachment["content_type"],
@@ -148,12 +149,12 @@ def _store_attachment(mailbox_id: int, message_row_id: int, attachment: dict) ->
     )
 
 
-def store_message(mailbox: dict, raw: bytes, *, imap_uid: int | None = None) -> dict | None:
+def store_message(account: dict, raw: bytes, *, imap_uid: int | None = None) -> dict | None:
     """Parse one RFC 822 message and persist it. Returns the stored row, or None if a duplicate."""
     message = email.message_from_bytes(raw)
 
     message_id_header = (message.get("Message-ID") or "").strip() or None
-    if message_id_header and repo.message_exists(mailbox["id"], message_id_header):
+    if message_id_header and repo.message_exists(account["id"], message_id_header):
         return None
 
     subject = _decode(message.get("Subject"))
@@ -174,7 +175,7 @@ def store_message(mailbox: dict, raw: bytes, *, imap_uid: int | None = None) -> 
 
     references = _reference_ids(message)
     thread = repo.find_thread_for_message(
-        mailbox["id"],
+        account["id"],
         folder="inbox",
         references=references,
         subject_key=repo.normalize_subject(subject),
@@ -184,7 +185,7 @@ def store_message(mailbox: dict, raw: bytes, *, imap_uid: int | None = None) -> 
             filter(None, [from_address, *(addr for _, addr in _addresses(message, "To"))])
         )
         thread = repo.create_thread(
-            mailbox_id=mailbox["id"],
+            account_id=account["id"],
             subject=subject or "(mavzusiz)",
             folder="inbox",
             participants=participants,
@@ -196,7 +197,7 @@ def store_message(mailbox: dict, raw: bytes, *, imap_uid: int | None = None) -> 
 
     stored = repo.create_message(
         thread_id=thread["id"],
-        mailbox_id=mailbox["id"],
+        account_id=account["id"],
         direction="inbound",
         status="delivered",
         imap_uid=imap_uid,
@@ -224,7 +225,7 @@ def store_message(mailbox: dict, raw: bytes, *, imap_uid: int | None = None) -> 
 
     for attachment in attachments:
         try:
-            _store_attachment(mailbox["id"], stored["id"], attachment)
+            _store_attachment(account["id"], stored["id"], attachment)
         except Exception:  # noqa: BLE001 - one bad attachment must not lose the message
             logger.exception("Failed to store attachment on message %s", stored["id"])
 
@@ -233,41 +234,40 @@ def store_message(mailbox: dict, raw: bytes, *, imap_uid: int | None = None) -> 
     return stored
 
 
-def sync_mailbox(mailbox: dict) -> list[dict]:
-    """Fetch everything new in one mailbox. Returns the messages that were stored."""
-    host = getattr(settings, "B2B_MAIL_IMAP_HOST", "")
-    port = getattr(settings, "B2B_MAIL_IMAP_PORT", 993)
+def sync_account(account: dict) -> list[dict]:
+    """Fetch everything new in one inbox. Returns the messages that were stored."""
     batch = getattr(settings, "B2B_MAIL_SYNC_BATCH", 50)
-    if not host:
-        raise MailSyncError("B2B_MAIL_IMAP_HOST is not configured.")
-
-    password = crypto.decrypt(mailbox["smtp_password_enc"])
     stored: list[dict] = []
+    client = None
 
     try:
-        with imaplib.IMAP4_SSL(host, port, timeout=30) as client:
-            client.login(mailbox["address"], password)
+        # Authentication — app password or Google token — is settled in
+        # `connection`, so nothing below branches on how this account was
+        # connected.
+        client = open_imap(account)
+        try:
             status, data = client.select("INBOX", readonly=True)
             if status != "OK":
-                raise MailSyncError(f"Could not open INBOX for {mailbox['address']}.")
+                raise MailSyncError(f"Could not open INBOX for {account['address']}.")
 
             uid_validity = _uid_validity(client)
-            last_seen = int(mailbox.get("last_seen_uid") or 0)
-            stored_validity = mailbox.get("uid_validity")
+            last_seen = int(account.get("last_seen_uid") or 0)
+            stored_validity = account.get("uid_validity")
 
-            # The server rebuilt the mailbox: UIDs restart, so our watermark now
-            # points into a different sequence and would skip real mail. Start
-            # over — the Message-ID guard stops that re-importing duplicates.
+            # The provider rebuilt the mailbox: UIDs restart, so our watermark
+            # now points into a different sequence and would skip real mail.
+            # Start over — the Message-ID guard stops that re-importing
+            # duplicates.
             if stored_validity is not None and uid_validity != stored_validity:
                 logger.warning(
                     "UIDVALIDITY changed for %s (%s → %s); resyncing from the start",
-                    mailbox["address"], stored_validity, uid_validity,
+                    account["address"], stored_validity, uid_validity,
                 )
                 last_seen = 0
 
             status, data = client.uid("SEARCH", None, f"UID {last_seen + 1}:*")
             if status != "OK":
-                raise MailSyncError(f"UID SEARCH failed for {mailbox['address']}.")
+                raise MailSyncError(f"UID SEARCH failed for {account['address']}.")
 
             # `<last+1>:*` always returns at least the newest message even when
             # nothing is new, because `*` is clamped to the highest existing
@@ -278,25 +278,35 @@ def sync_mailbox(mailbox: dict) -> list[dict]:
             for uid in sorted(uids)[:batch]:
                 status, payload = client.uid("FETCH", str(uid), "(RFC822)")
                 if status != "OK" or not payload or not isinstance(payload[0], tuple):
-                    logger.warning("Could not fetch UID %s for %s", uid, mailbox["address"])
+                    logger.warning("Could not fetch UID %s for %s", uid, account["address"])
                     continue
                 try:
-                    message = store_message(mailbox, payload[0][1], imap_uid=uid)
+                    message = store_message(account, payload[0][1], imap_uid=uid)
                 except Exception:  # noqa: BLE001 - a single unparseable message must not
-                    # stall the mailbox forever; the watermark still advances.
-                    logger.exception("Failed to store UID %s for %s", uid, mailbox["address"])
+                    # stall the account forever; the watermark still advances.
+                    logger.exception("Failed to store UID %s for %s", uid, account["address"])
                 else:
                     if message:
                         stored.append(message)
                 highest = max(highest, uid)
+        finally:
+            try:
+                client.logout()
+            except (OSError, imaplib.IMAP4.error):
+                pass
 
+    except MailAuthError:
+        # The credential stopped working. Distinct from a transient failure:
+        # the caller deactivates the account and asks the person to reconnect,
+        # rather than retrying a password that has been revoked.
+        raise
     except imaplib.IMAP4.error as exc:
-        raise MailSyncError(f"IMAP error for {mailbox['address']}: {exc}") from exc
-    except OSError as exc:
+        raise MailSyncError(f"IMAP error for {account['address']}: {exc}") from exc
+    except (OSError, ConnectionError) as exc:
         raise MailSyncError(f"Mail server unreachable: {exc}") from exc
 
-    repo.update_mailbox(
-        mailbox["id"],
+    repo.update_account(
+        account["id"],
         last_seen_uid=highest,
         uid_validity=uid_validity,
         last_sync_at=timezone.now(),

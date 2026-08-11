@@ -1,14 +1,15 @@
-"""Builds and submits an outgoing message.
+"""Builds and submits an outgoing message through the sender's own provider.
 
-The message is submitted authenticating **as the sending mailbox**, not through
-a shared application account. That is what makes the envelope sender, the
-``From`` header and the DKIM signature all agree on ``aziz@kompaniya.com`` —
-alignment is what Gmail actually checks, and a shared relay account would fail
-it for every company at once.
+We are a client of the person's existing inbox, not a mail host, so an outgoing
+message is submitted to *their* provider as *them* — Gmail sends it as Gmail,
+with Gmail's reputation, SPF and DKIM. There is no deliverability problem for
+us to solve, which is the main practical advantage of connecting an account
+over hosting one.
 
-After a successful send the message is also ``APPEND``-ed to the mailbox's
-Sent folder. Our own database already has it, but a mailbox is a real mailbox:
-somebody reading it from the Gmail app must see their sent mail there too.
+After a successful send the message is also ``APPEND``-ed to the account's
+Sent folder. Our own database already has it, but this is somebody's real
+inbox: opening the Gmail app afterwards must show the message there too, or it
+will look like it was never sent.
 """
 from __future__ import annotations
 
@@ -21,8 +22,9 @@ from email.header import Header
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 
-from django.conf import settings
 from django.core.files.storage import default_storage
+
+from apps.b2b.mail.connection import MailAuthError, open_imap, open_smtp
 
 logger = logging.getLogger(__name__)
 
@@ -105,58 +107,72 @@ def _attach(message: EmailMessage, attachment: dict) -> None:
 
 def send_message(
     *,
-    address: str,
-    password: str,
+    account: dict,
     message: EmailMessage,
     envelope_recipients: list[str],
 ) -> str:
-    """Submit over SMTP. Returns the Message-ID that went out."""
-    host = getattr(settings, "B2B_MAIL_SMTP_HOST", "")
-    port = getattr(settings, "B2B_MAIL_SMTP_PORT", 587)
-    if not host:
-        raise MailSendError("B2B_MAIL_SMTP_HOST is not configured.", permanent=True)
+    """Submit through the account's own provider. Returns the Message-ID sent."""
+    try:
+        client = open_smtp(account)
+    except MailAuthError as exc:
+        raise MailSendError(str(exc), permanent=True) from exc
+    except ConnectionError as exc:
+        raise MailSendError(str(exc)) from exc
 
     try:
-        with smtplib.SMTP(host, port, timeout=30) as client:
-            client.ehlo()
-            client.starttls()
-            client.ehlo()
-            client.login(address, password)
-            client.send_message(message, from_addr=address, to_addrs=envelope_recipients)
-    except smtplib.SMTPAuthenticationError as exc:
-        raise MailSendError(
-            f"Mailbox {address} was rejected by the mail server. Its password "
-            f"may need resetting: {exc}",
-            permanent=True,
-        ) from exc
+        client.send_message(
+            message,
+            from_addr=account["address"],
+            to_addrs=envelope_recipients,
+        )
     except smtplib.SMTPRecipientsRefused as exc:
         # Every recipient bounced at submission time — almost always a typo in
         # the address, which no amount of retrying fixes.
         raise MailSendError(f"No recipient was accepted: {exc.recipients}", permanent=True) from exc
     except smtplib.SMTPSenderRefused as exc:
-        raise MailSendError(f"Sender {address} refused: {exc}", permanent=True) from exc
+        raise MailSendError(f"Sender {account['address']} refused: {exc}", permanent=True) from exc
+    except smtplib.SMTPDataError as exc:
+        # 5xx is the provider rejecting the message itself (too large, judged
+        # spammy); 4xx is a "try later".
+        permanent = 500 <= exc.smtp_code < 600
+        raise MailSendError(f"Message rejected: {exc}", permanent=permanent) from exc
     except (smtplib.SMTPException, OSError) as exc:
         raise MailSendError(f"Mail server unavailable: {exc}") from exc
+    finally:
+        try:
+            client.quit()
+        except (OSError, smtplib.SMTPException):
+            pass
 
     return message["Message-ID"]
 
 
-def append_to_sent(*, address: str, password: str, message: EmailMessage) -> None:
-    """Best-effort copy into the mailbox's Sent folder.
+def append_to_sent(*, account: dict, message: EmailMessage) -> None:
+    """Best-effort copy into the account's Sent folder.
 
-    Failure is logged and swallowed: the message has already been delivered to
-    the outside world, and reporting the send as failed here would invite the
-    user to send it a second time.
+    Failure is logged and swallowed: the message has already gone out, and
+    reporting the send as failed here would invite the user to send it twice.
+    Providers also disagree on what the folder is called, so several names are
+    tried before giving up.
     """
-    host = getattr(settings, "B2B_MAIL_IMAP_HOST", "") or getattr(settings, "B2B_MAIL_SMTP_HOST", "")
-    port = getattr(settings, "B2B_MAIL_IMAP_PORT", 993)
-    if not host:
+    try:
+        client = open_imap(account)
+    except (MailAuthError, ConnectionError):
+        logger.warning("Could not open IMAP to file sent mail for %s", account["address"])
         return
 
     try:
-        with imaplib.IMAP4_SSL(host, port, timeout=30) as client:
-            client.login(address, password)
-            client.append("Sent", "\\Seen", imaplib.Time2Internaldate(time.time()),
-                          message.as_bytes())
+        payload = message.as_bytes()
+        stamp = imaplib.Time2Internaldate(time.time())
+        for folder in ('"[Gmail]/Sent Mail"', "Sent", '"Sent Items"', '"&BB4EQgQ,BEAEMAQyBDsENQQ9BD0ESwQ1-"'):
+            status, _ = client.append(folder, "\\Seen", stamp, payload)
+            if status == "OK":
+                return
+        logger.info("No Sent folder accepted the copy for %s", account["address"])
     except Exception:  # noqa: BLE001 - see docstring
-        logger.warning("Could not copy sent mail into %s's Sent folder", address, exc_info=True)
+        logger.warning("Could not copy sent mail for %s", account["address"], exc_info=True)
+    finally:
+        try:
+            client.logout()
+        except (OSError, imaplib.IMAP4.error):
+            pass
