@@ -26,6 +26,10 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from apps.b2b.models import LeadStatus
 from apps.b2b.repository import get_company
 from apps.b2b.workspace import repository as repo
+from apps.b2b.workspace.authentication import (
+    DashboardWorkspaceAuthentication,
+    WorkspaceJWTAuthentication,
+)
 from apps.b2b.workspace.permissions import HasCapability, IsWorkspaceManager, IsWorkspaceUser
 from apps.b2b.workspace.roles import capabilities_for
 from apps.b2b.workspace.serializers import (
@@ -68,6 +72,22 @@ from users.tokens import CustomRefreshToken
 logger = logging.getLogger(__name__)
 
 WORKSPACE_TAG = ["B2B / Workspace (mobile)"]
+
+
+class WorkspaceAPIView(APIView):
+    """Base for every signed-in workspace endpoint.
+
+    Two logins lead here — the mobile app's employee token and the web
+    dashboard's ``b2b`` token — and both arrive as a ``WorkspaceUser``, so
+    nothing below this line has to care which screen the request came from.
+    The dashboard bridge is listed only here rather than in the project-wide
+    authentication chain; see ``DashboardWorkspaceAuthentication``.
+    """
+
+    authentication_classes = [
+        WorkspaceJWTAuthentication,
+        DashboardWorkspaceAuthentication,
+    ]
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -268,7 +288,7 @@ def _me_payload(employee: dict) -> dict:
     }
 
 
-class WorkspaceMeView(APIView):
+class WorkspaceMeView(WorkspaceAPIView):
     """GET /api/b2b/workspace/me/ — profile plus the permission map the app
     builds its UI from."""
 
@@ -283,7 +303,7 @@ class WorkspaceMeView(APIView):
         return Response(_me_payload(employee))
 
 
-class WorkspaceTeamView(APIView):
+class WorkspaceTeamView(WorkspaceAPIView):
     """GET /api/b2b/workspace/team/ — the company roster.
 
     Everyone can read it: names are needed to render assignees, chat rows and
@@ -324,7 +344,7 @@ def _task_payload(task: dict, user) -> dict:
     }
 
 
-class WorkspaceTaskListCreateView(APIView):
+class WorkspaceTaskListCreateView(WorkspaceAPIView):
     """GET  /api/b2b/workspace/tasks/ — tasks the caller may see.
     POST /api/b2b/workspace/tasks/ — managers only."""
 
@@ -406,7 +426,7 @@ def _validated_employee_ids(company_id: int, ids) -> list[int] | None:
     return ids if len(valid) == len(ids) else None
 
 
-class WorkspaceTaskDetailView(APIView):
+class WorkspaceTaskDetailView(WorkspaceAPIView):
     """GET / PATCH / DELETE a single task."""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -484,7 +504,7 @@ class WorkspaceTaskDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class WorkspaceTaskStatusView(APIView):
+class WorkspaceTaskStatusView(WorkspaceAPIView):
     """POST /api/b2b/workspace/tasks/<id>/status/
 
     The one write an employee always has: moving a task they were given from
@@ -528,7 +548,7 @@ class WorkspaceTaskStatusView(APIView):
         return Response(_task_payload(updated, request.user))
 
 
-class WorkspaceSubtaskToggleView(APIView):
+class WorkspaceSubtaskToggleView(WorkspaceAPIView):
     """POST /api/b2b/workspace/tasks/<id>/subtasks/<sid>/toggle/"""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -564,7 +584,7 @@ class WorkspaceSubtaskToggleView(APIView):
         return Response(_task_payload(updated, request.user))
 
 
-class WorkspaceTaskCommentView(APIView):
+class WorkspaceTaskCommentView(WorkspaceAPIView):
     """POST /api/b2b/workspace/tasks/<id>/comments/"""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -601,7 +621,7 @@ def _event_payload(event: dict, user) -> dict:
     }
 
 
-class WorkspaceEventListCreateView(APIView):
+class WorkspaceEventListCreateView(WorkspaceAPIView):
     """GET  /api/b2b/workspace/events/ — the calendar window.
     POST /api/b2b/workspace/events/ — managers create shared events; employees
     may create personal ones for themselves."""
@@ -686,7 +706,7 @@ class WorkspaceEventListCreateView(APIView):
         return Response(_event_payload(event, request.user), status=status.HTTP_201_CREATED)
 
 
-class WorkspaceEventDetailView(APIView):
+class WorkspaceEventDetailView(WorkspaceAPIView):
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     def _load(self, request, event_id: int):
@@ -780,7 +800,7 @@ def _thread_payload(thread: dict) -> dict:
     }
 
 
-class WorkspaceThreadListCreateView(APIView):
+class WorkspaceThreadListCreateView(WorkspaceAPIView):
     """GET  /api/b2b/workspace/chats/ — the caller's conversations.
     POST /api/b2b/workspace/chats/ — open a direct chat, or a group (managers)."""
 
@@ -842,7 +862,7 @@ class WorkspaceThreadListCreateView(APIView):
         return Response(_thread_payload(thread), status=status.HTTP_201_CREATED)
 
 
-class WorkspaceMessageView(APIView):
+class WorkspaceMessageView(WorkspaceAPIView):
     """GET / POST messages in a thread the caller belongs to."""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -898,7 +918,7 @@ class WorkspaceMessageView(APIView):
         return Response(ChatMessageSerializer(message).data, status=status.HTTP_201_CREATED)
 
 
-class WorkspaceThreadFlagsView(APIView):
+class WorkspaceThreadFlagsView(WorkspaceAPIView):
     """POST /api/b2b/workspace/chats/<id>/flags/ — pin / mute for this member."""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -917,7 +937,7 @@ class WorkspaceThreadFlagsView(APIView):
         return Response(_thread_payload(thread))
 
 
-class WorkspaceThreadReadView(APIView):
+class WorkspaceThreadReadView(WorkspaceAPIView):
     """POST /api/b2b/workspace/chats/<id>/read/"""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -956,7 +976,7 @@ def _lead_payload(lead: dict, user) -> dict:
     return payload
 
 
-class WorkspaceDeviceTokenView(APIView):
+class WorkspaceDeviceTokenView(WorkspaceAPIView):
     """POST /api/b2b/workspace/me/device-token/ — register this device for push."""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -968,7 +988,7 @@ class WorkspaceDeviceTokenView(APIView):
         return Response({"detail": _("Saved")})
 
 
-class WorkspaceLeadListCreateView(APIView):
+class WorkspaceLeadListCreateView(WorkspaceAPIView):
     """GET  /api/b2b/workspace/leads/ — every lead in the company, any employee
     may see the board and claim an open one.
     POST /api/b2b/workspace/leads/ — owner/performer only."""
@@ -1037,7 +1057,7 @@ class WorkspaceLeadListCreateView(APIView):
         return Response(_lead_payload(lead, request.user), status=status.HTTP_201_CREATED)
 
 
-class WorkspaceLeadClaimView(APIView):
+class WorkspaceLeadClaimView(WorkspaceAPIView):
     """POST /api/b2b/workspace/leads/<id>/claim/ — any employee takes a 'new' lead."""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -1056,7 +1076,7 @@ class WorkspaceLeadClaimView(APIView):
         return Response(_lead_payload(lead, request.user))
 
 
-class WorkspaceLeadCompleteView(APIView):
+class WorkspaceLeadCompleteView(WorkspaceAPIView):
     """POST /api/b2b/workspace/leads/<id>/complete/ — the claiming employee
     marks it resolved."""
 
@@ -1087,7 +1107,7 @@ def _file_payload(file: dict) -> dict:
     return {**file, "url": default_storage.url(file["path"])}
 
 
-class WorkspaceFileListCreateView(APIView):
+class WorkspaceFileListCreateView(WorkspaceAPIView):
     """GET/POST /api/b2b/workspace/files/ — the company's shared folder.
 
     Everyone may read and add; nothing here is scoped to a role, so a driver
@@ -1126,7 +1146,7 @@ class WorkspaceFileListCreateView(APIView):
         return Response(_file_payload(file), status=status.HTTP_201_CREATED)
 
 
-class WorkspaceFileDetailView(APIView):
+class WorkspaceFileDetailView(WorkspaceAPIView):
     """DELETE /api/b2b/workspace/files/<id>/"""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -1154,7 +1174,7 @@ def _hotel_status(hotel: dict) -> str:
     return "active"
 
 
-class WorkspaceHotelListView(APIView):
+class WorkspaceHotelListView(WorkspaceAPIView):
     """GET /api/b2b/workspace/hotels/ — partner hotels, shaped for the phone.
 
     A thin projection of the platform hotel card: the mobile list only renders
@@ -1232,7 +1252,7 @@ def _current_year_month() -> tuple[int, int]:
     return now.year, now.month
 
 
-class WorkspaceEmployeeMonthlyStatsView(APIView):
+class WorkspaceEmployeeMonthlyStatsView(WorkspaceAPIView):
     """GET /api/b2b/workspace/employee-of-month/stats/ — owner only.
 
     Every active employee's completed-task count and on-time rate for the
@@ -1254,7 +1274,7 @@ class WorkspaceEmployeeMonthlyStatsView(APIView):
         return Response(EmployeeMonthlyStatSerializer(stats, many=True).data)
 
 
-class WorkspaceEmployeeOfMonthView(APIView):
+class WorkspaceEmployeeOfMonthView(WorkspaceAPIView):
     """GET/POST /api/b2b/workspace/employee-of-month/
 
     Anyone can see this month's pick; only the owner can make or change it.

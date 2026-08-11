@@ -101,7 +101,15 @@ from apps.b2b.hotel_booking_service import (
 from apps.b2b.permissions import IsB2BOwner, IsB2BOwnerOrPerformer
 from apps.b2b.tasks import _send_b2b_lead_telegram_notification, run_passport_ocr_job
 from apps.property.hotel_repository import _run_in_schema, _safe_schema_name, get_hotel_for_public, resolve_hotel_guid
-from apps.hotels.repository import count_hotels, get_available_rooms, get_hotel_calendar, get_hotel_card_by_guid, list_hotel_cities, search_hotels
+from apps.hotels.repository import (
+    count_hotels,
+    get_available_rooms,
+    get_hotel_calendar,
+    get_hotel_card_by_guid,
+    list_hotel_cities,
+    search_hotels,
+    search_hotels_page,
+)
 from shared.raw.db import fetch_all
 from apps.hotels.serializers import (
     HotelCardSerializer,
@@ -215,8 +223,10 @@ class B2BHotelSearchView(APIView):
         d.pop("children", None)
         d.pop("babies", None)
 
-        hotels = search_hotels(**d, limit=page_size, offset=offset)
-        count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"})
+        # One pass: the page and its total come from the same search. Asking
+        # `search_hotels` then `count_hotels` ran the whole cross-schema query
+        # twice for every page view.
+        hotels, count = search_hotels_page(**d, limit=page_size, offset=offset)
         return Response({
             "count": count,
             "page": page,

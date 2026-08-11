@@ -97,13 +97,21 @@ if DEBUG and not CORS_ALLOWED_ORIGINS:
 # Production origins are the defaults when CORS_ALLOWED_ORIGINS is not set;
 # localhost entries are added in DEBUG only, so a production deployment never
 # trusts a developer machine.
+#
+# Checked against what the server actually serves. `business.weel.uz` (the B2B
+# dashboard) and `admin.weel.uz` (the admin panel) were missing from this list,
+# while `dashboard.weel.uz` and `pms.weel.uz` resolve to the host but have no
+# route on it — the proxy answers `404 page not found`. Nothing was broken by
+# that, because the deployment sets CORS_ALLOWED_ORIGINS explicitly. The danger
+# is the day that variable goes missing: this list is the safety net, and it
+# would have caught the two dead names while dropping the two live ones.
 _DEFAULT_PROD_ORIGINS = (
     "https://weel.uz",
     "https://www.weel.uz",
     "https://dev.weel.uz",
+    "https://business.weel.uz",
+    "https://admin.weel.uz",
     "https://partners.weel.uz",
-    "https://pms.weel.uz",
-    "https://dashboard.weel.uz",
     "https://weelrooms.uz",
     "https://www.weelrooms.uz",
 )
@@ -680,7 +688,11 @@ MINIAPP_URL = os.getenv("MINIAPP_URL", "https://partners.weel.uz/")
 HOTEL_BOT_TOKEN = os.getenv("HOTEL_BOT_TOKEN")
 B2B_LEAD_BOT_TOKEN = os.getenv("B2B_LEAD_BOT_TOKEN")
 B2B_LEAD_TELEGRAM_CHAT_ID = os.getenv("B2B_LEAD_TELEGRAM_CHAT_ID")
-PMS_MINIAPP_URL = os.getenv("PMS_MINIAPP_URL", "https://pms.weel.uz")
+# The hotel bot's "PMS ochish" menu button opens this. `pms.weel.uz` was the
+# old name and no longer has a route on the server — it answers the proxy's
+# `404 page not found` — so a deployment that did not override this sent every
+# hotel to a dead page. The PMS is served from weelrooms.uz.
+PMS_MINIAPP_URL = os.getenv("PMS_MINIAPP_URL", "https://weelrooms.uz")
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL") or "https://dev.weel.uz"
 FRONTEND_LOG_TOKEN = (os.getenv("FRONTEND_LOG_TOKEN") or "").strip()
 
@@ -746,9 +758,9 @@ else:
         "https://weel.uz",
         "https://www.weel.uz",
         "https://dev.weel.uz",
-        "https://partner.weel.uz",
-        "https://pms.weel.uz",
-        "https://dashboard.weel.uz",
+        "https://business.weel.uz",
+        "https://admin.weel.uz",
+        "https://partners.weel.uz",
         "https://weelrooms.uz",
         "https://www.weelrooms.uz",
         "http://localhost:3000",

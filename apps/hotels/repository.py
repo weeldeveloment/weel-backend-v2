@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -132,6 +133,12 @@ def _split_filter_values(values: list[str] | tuple[str, ...] | str | None) -> li
 
 
 def _has_rate_plan_tables() -> bool:
+    """Whether the *current* schema has the rate-plan tables.
+
+    Resolves through ``search_path``, so it only answers for whichever schema
+    the caller is standing in — see :func:`_rate_plan_tables_by_schema` for the
+    cross-schema question.
+    """
     row = fetch_one(
         """
         SELECT (
@@ -141,6 +148,30 @@ def _has_rate_plan_tables() -> bool:
         """
     )
     return bool(row and row["exists_flag"])
+
+
+def _rate_plan_tables_by_schema(schema_names: list[str]) -> dict[str, bool]:
+    """The same answer for many schemas, in one query.
+
+    A cross-schema search builds its SQL without standing in any schema, so it
+    cannot ask ``_has_rate_plan_tables``: that would resolve against ``public``
+    and quietly give every tenant the fallback clause. Schemas are not
+    guaranteed to be migrated in step, so each is asked about separately.
+    """
+    if not schema_names:
+        return {}
+    rows = fetch_all(
+        """
+        SELECT s.schema_name,
+               (
+                   to_regclass(format('%%I.pms_rate_plan', s.schema_name)) IS NOT NULL
+                   AND to_regclass(format('%%I.pms_room_type_rate_plan', s.schema_name)) IS NOT NULL
+               ) AS exists_flag
+        FROM unnest(%s::text[]) AS s(schema_name)
+        """,
+        [schema_names],
+    )
+    return {row["schema_name"]: bool(row["exists_flag"]) for row in rows}
 
 
 def _room_filter_clause(
@@ -153,6 +184,7 @@ def _room_filter_clause(
     max_capacity: int | None = None,
     min_price: Decimal | None = None,
     max_price: Decimal | None = None,
+    rate_plan_tables: bool | None = None,
 ) -> tuple[list[str], list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -184,7 +216,10 @@ def _room_filter_clause(
         clauses.append("COALESCE(r.base_price, 0) <= %s")
         params.append(max_price)
     if rate_plans:
-        if _has_rate_plan_tables():
+        has_rate_plan_tables = (
+            _has_rate_plan_tables() if rate_plan_tables is None else rate_plan_tables
+        )
+        if has_rate_plan_tables:
             clauses.append(
                 """
                 (
@@ -598,28 +633,30 @@ def release_hotel_booking_calendar_slots(
     )
 
 
-def list_client_hotel_bookings(
+def _client_bookings_sql(
     client_user_id: int,
     statuses: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    room_type_name = (
-        "r.room_type_name"
-        if _pms_room_has_column("room_type_name")
-        else "rt.name"
-    )
-    room_type_preset = (
-        "r.room_type_preset"
-        if _pms_room_has_column("room_type_preset")
-        else "rt.preset"
-    )
+    *,
+    room_columns: set[str] | None = None,
+) -> tuple[str, list[Any]]:
+    """The bookings SELECT for one schema, with its parameters.
+
+    `room_columns` says which optional ``pms_room`` columns that schema has;
+    when omitted the current schema is asked directly, which is what the
+    single-schema caller wants.
+    """
+    def has(column: str) -> bool:
+        return column in room_columns if room_columns is not None else _pms_room_has_column(column)
+
+    room_type_name = "r.room_type_name" if has("room_type_name") else "rt.name"
+    room_type_preset = "r.room_type_preset" if has("room_type_preset") else "rt.preset"
     conditions = ["b.created_by = %s"]
     params: list[Any] = [client_user_id]
     if statuses:
         conditions.append("b.status = ANY(%s)")
         params.append(statuses)
     where = " AND ".join(conditions)
-    return fetch_all(
-        f"""
+    sql = f"""
         SELECT
             b.id, b.booking_number, b.status, b.check_in, b.check_out,
             b.adult_count, b.child_count, b.total_cost, b.hold_amount,
@@ -637,27 +674,32 @@ def list_client_hotel_bookings(
         LEFT JOIN pms_room_type rt ON rt.id = r.room_type_id
         WHERE {where}
         ORDER BY b.created_at DESC, b.id DESC
-        """,
-        params,
-    )
+    """
+    return sql, params
 
 
-def get_client_hotel_booking(
+def list_client_hotel_bookings(
+    client_user_id: int,
+    statuses: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    sql, params = _client_bookings_sql(client_user_id, statuses)
+    return fetch_all(sql, params)
+
+
+def _client_booking_sql(
     booking_id: int,
     client_user_id: int,
-) -> dict[str, Any] | None:
-    room_type_name = (
-        "r.room_type_name"
-        if _pms_room_has_column("room_type_name")
-        else "rt.name"
-    )
-    room_type_preset = (
-        "r.room_type_preset"
-        if _pms_room_has_column("room_type_preset")
-        else "rt.preset"
-    )
-    return fetch_one(
-        f"""
+    *,
+    room_columns: set[str] | None = None,
+) -> tuple[str, list[Any]]:
+    """One guest's booking, for one schema. See :func:`_client_bookings_sql`
+    for why the optional columns are passed in rather than looked up."""
+    def has(column: str) -> bool:
+        return column in room_columns if room_columns is not None else _pms_room_has_column(column)
+
+    room_type_name = "r.room_type_name" if has("room_type_name") else "rt.name"
+    room_type_preset = "r.room_type_preset" if has("room_type_preset") else "rt.preset"
+    sql = f"""
         SELECT
             b.id, b.booking_number, b.status, b.check_in, b.check_out,
             b.adult_count, b.child_count, b.total_cost, b.hold_amount,
@@ -681,9 +723,16 @@ def get_client_hotel_booking(
         JOIN pms_room r ON r.id = b.room_id
         LEFT JOIN pms_room_type rt ON rt.id = r.room_type_id
         WHERE b.id = %s AND b.created_by = %s
-        """,
-        [booking_id, client_user_id],
-    )
+    """
+    return sql, [booking_id, client_user_id]
+
+
+def get_client_hotel_booking(
+    booking_id: int,
+    client_user_id: int,
+) -> dict[str, Any] | None:
+    sql, params = _client_booking_sql(booking_id, client_user_id)
+    return fetch_one(sql, params)
 
 
 def _pms_room_has_column(column_name: str) -> bool:
@@ -702,8 +751,35 @@ def _pms_room_has_column(column_name: str) -> bool:
     return bool(row and row["exists_flag"])
 
 
-def get_hotel_booking_by_id(booking_id: int) -> dict[str, Any] | None:
-    return fetch_one(
+def _pms_room_columns_by_schema(
+    schema_names: list[str], column_names: list[str]
+) -> dict[str, set[str]]:
+    """Which of `column_names` each schema's ``pms_room`` actually has.
+
+    ``_pms_room_has_column`` answers only for ``current_schema()``, so a query
+    that spans schemas cannot use it. One statement covers the whole roster,
+    and schemas migrated at different times still each get the right answer.
+    """
+    if not schema_names:
+        return {}
+    rows = fetch_all(
+        """
+        SELECT table_schema, column_name
+        FROM information_schema.columns
+        WHERE table_name = 'pms_room'
+          AND table_schema = ANY(%s::text[])
+          AND column_name = ANY(%s::text[])
+        """,
+        [schema_names, column_names],
+    )
+    found: dict[str, set[str]] = {name: set() for name in schema_names}
+    for row in rows:
+        found.setdefault(row["table_schema"], set()).add(row["column_name"])
+    return found
+
+
+def _hotel_booking_by_id_sql(booking_id: int) -> tuple[str, list[Any]]:
+    return (
         """
         SELECT
             b.id, b.booking_number, b.status, b.check_in, b.check_out,
@@ -717,29 +793,70 @@ def get_hotel_booking_by_id(booking_id: int) -> dict[str, Any] | None:
     )
 
 
+def get_hotel_booking_by_id(booking_id: int) -> dict[str, Any] | None:
+    sql, params = _hotel_booking_by_id_sql(booking_id)
+    return fetch_one(sql, params)
+
+
 def list_client_hotel_bookings_across_schemas(
     client_user_id: int,
     statuses: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    from apps.property.hotel_repository import _run_in_schema, list_hotel_organizations
+    from apps.property.hotel_repository import (
+        _run_in_schema,
+        _safe_schema_name,
+        list_hotel_organizations,
+    )
 
-    bookings: list[dict[str, Any]] = []
-    for organization in list_hotel_organizations():
-        schema_name = organization["schema_name"]
-        try:
-            rows = _run_in_schema(
-                schema_name,
-                lambda: list_client_hotel_bookings(client_user_id, statuses),
-            )
-        except Exception:
-            logger.exception(
-                "Failed to list client hotel bookings in tenant schema",
-                extra={"tenant_schema": schema_name, "client_user_id": client_user_id},
-            )
-            continue
-        for row in rows:
-            row["tenant_schema"] = schema_name
-        bookings.extend(rows)
+    schema_names = [
+        name
+        for org in list_hotel_organizations()
+        if (name := _safe_schema_name(org.get("schema_name")))
+    ]
+    if not schema_names:
+        return []
+
+    # A guest's bookings can be spread across any hotel they have stayed at,
+    # so this had to visit every schema — three round trips each, on a page
+    # the guest opens to see a handful of rows. One statement now covers them.
+    room_columns = _pms_room_columns_by_schema(
+        schema_names, ["room_type_name", "room_type_preset"]
+    )
+    branches: list[str] = []
+    union_params: list[Any] = []
+    for schema_name in schema_names:
+        sql, params = _client_bookings_sql(
+            client_user_id, statuses, room_columns=room_columns.get(schema_name, set())
+        )
+        branches.append(
+            f"SELECT %s::text AS tenant_schema, * FROM ("
+            f"{_qualify_tenant_tables(sql, schema_name)}) AS b_{len(branches)}"
+        )
+        union_params.append(schema_name)
+        union_params.extend(params)
+
+    try:
+        bookings = fetch_all("\n UNION ALL \n".join(branches), union_params)
+    except Exception:
+        logger.warning(
+            "Cross-schema client bookings failed; falling back per schema.", exc_info=True
+        )
+        bookings = []
+        for schema_name in schema_names:
+            try:
+                rows = _run_in_schema(
+                    schema_name,
+                    lambda: list_client_hotel_bookings(client_user_id, statuses),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to list client hotel bookings in tenant schema",
+                    extra={"tenant_schema": schema_name, "client_user_id": client_user_id},
+                )
+                continue
+            for row in rows:
+                row["tenant_schema"] = schema_name
+            bookings.extend(rows)
 
     return sorted(
         bookings,
@@ -748,29 +865,98 @@ def list_client_hotel_bookings_across_schemas(
     )
 
 
+def _first_match_across_schemas(
+    schema_names: list[str],
+    build_sql,
+    *,
+    what: str,
+) -> dict[str, Any] | None:
+    """Run a single-row lookup against every schema in one statement.
+
+    A booking id is only unique *within* a schema, so two tenants can each have
+    a row with the same id. Walking the schemas in order and taking the first
+    hit is the rule this replaces, and `_schema_rank` preserves it exactly:
+    the branches are ranked by their position in the roster and the lowest rank
+    wins, which is the same answer the loop gave.
+    """
+    branches: list[str] = []
+    union_params: list[Any] = []
+    for rank, schema_name in enumerate(schema_names):
+        sql, params = build_sql(schema_name)
+        branches.append(
+            f"SELECT %s::int AS _schema_rank, %s::text AS tenant_schema, * FROM ("
+            f"{_qualify_tenant_tables(sql, schema_name)}) AS m_{rank}"
+        )
+        union_params.extend([rank, schema_name])
+        union_params.extend(params)
+
+    union = "\n UNION ALL \n".join(branches)
+    rows = fetch_all(
+        f"SELECT * FROM ({union}) AS matches ORDER BY matches._schema_rank LIMIT 1",
+        union_params,
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    row.pop("_schema_rank", None)
+    logger.debug("%s resolved to schema %s", what, row.get("tenant_schema"))
+    return row
+
+
 def find_client_hotel_booking_across_schemas(
     booking_id: int,
     client_user_id: int,
 ) -> tuple[str, dict[str, Any]] | None:
-    from apps.property.hotel_repository import _run_in_schema, list_hotel_organizations
+    from apps.property.hotel_repository import (
+        _run_in_schema,
+        _safe_schema_name,
+        list_hotel_organizations,
+    )
 
-    for organization in list_hotel_organizations():
-        schema_name = organization["schema_name"]
-        try:
-            booking = _run_in_schema(
-                schema_name,
-                lambda: get_client_hotel_booking(booking_id, client_user_id),
-            )
-        except Exception:
-            logger.exception(
-                "Failed to find client hotel booking in tenant schema",
-                extra={"tenant_schema": schema_name, "booking_id": booking_id},
-            )
-            continue
-        if booking:
-            booking["tenant_schema"] = schema_name
-            return schema_name, booking
-    return None
+    schema_names = [
+        name
+        for org in list_hotel_organizations()
+        if (name := _safe_schema_name(org.get("schema_name")))
+    ]
+    if not schema_names:
+        return None
+
+    room_columns = _pms_room_columns_by_schema(
+        schema_names, ["room_type_name", "room_type_preset"]
+    )
+    try:
+        row = _first_match_across_schemas(
+            schema_names,
+            lambda schema: _client_booking_sql(
+                booking_id, client_user_id, room_columns=room_columns.get(schema, set())
+            ),
+            what=f"client booking {booking_id}",
+        )
+    except Exception:
+        logger.warning(
+            "Cross-schema client booking lookup failed; falling back per schema.",
+            exc_info=True,
+        )
+        for schema_name in schema_names:
+            try:
+                booking = _run_in_schema(
+                    schema_name,
+                    lambda: get_client_hotel_booking(booking_id, client_user_id),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to find client hotel booking in tenant schema",
+                    extra={"tenant_schema": schema_name, "booking_id": booking_id},
+                )
+                continue
+            if booking:
+                booking["tenant_schema"] = schema_name
+                return schema_name, booking
+        return None
+
+    if not row:
+        return None
+    return row["tenant_schema"], row
 
 
 def find_hotel_booking_across_schemas(
@@ -785,6 +971,24 @@ def find_hotel_booking_across_schemas(
         if schema_name
         else [organization["schema_name"] for organization in list_hotel_organizations()]
     )
+    # A caller that already knows the schema (a Celery task carrying it, say)
+    # has nothing to search — go straight there rather than building a union
+    # of one.
+    if len(schema_names) > 1:
+        try:
+            row = _first_match_across_schemas(
+                schema_names,
+                lambda _schema: _hotel_booking_by_id_sql(booking_id),
+                what=f"booking {booking_id}",
+            )
+        except Exception:
+            logger.warning(
+                "Cross-schema booking lookup failed; falling back per schema.",
+                exc_info=True,
+            )
+        else:
+            return (row["tenant_schema"], row) if row else None
+
     for candidate_schema in schema_names:
         try:
             booking = _run_in_schema(
@@ -825,12 +1029,42 @@ def update_hotel_booking_status(
 # ─── Hotel Search & Details ───────────────────────────────────────────────────
 #
 # Hotels live one-per-organization, each in its own Postgres schema (see
-# apps/property/hotel_repository.py). Search/list must loop every hotel
-# organization's schema (via ``_run_in_schema``) and merge the results —
-# there is no single global ``pms_property`` table to query directly.
-def _search_hotels_in_schema(
-    schema_name: str,
-    organization: dict[str, Any],
+# apps/property/hotel_repository.py) — there is no single global
+# ``pms_property`` table to query directly.
+#
+# Search used to visit those schemas one at a time: per organization, two
+# ``SET search_path`` statements and a query, all merged in Python. That is
+# three round trips per organization for every search, so the cost of finding
+# a hotel grew with the number of hotels signed up — the one thing a search
+# must not do. The schemas are now stitched into a single ``UNION ALL``
+# instead: one query, whatever the roster looks like. The per-schema builder
+# below is still the source of that SQL, so both paths ask exactly the same
+# question; ``test_hotel_search_union.py`` holds them to that.
+
+#: Tenant-local tables the search reads. A cross-schema UNION cannot lean on
+#: ``search_path``, so every one of these is qualified with its schema.
+_TENANT_TABLES = (
+    "pms_property",
+    "pms_room_type_rate_plan",
+    "pms_rate_plan",
+    "pms_room_type",
+    "pms_room",
+    "pms_booking",
+    "pms_review",
+)
+
+# `(?<![\w.])` skips names already qualified or embedded in a longer
+# identifier; the trailing `\b` stops `pms_room` from matching inside
+# `pms_room_type_rate_plan`.
+_TENANT_TABLE_RE = re.compile(r"(?<![\w.])(" + "|".join(_TENANT_TABLES) + r")\b")
+
+
+def _qualify_tenant_tables(sql: str, schema_name: str) -> str:
+    """Point every tenant table in `sql` at `schema_name`."""
+    return _TENANT_TABLE_RE.sub(lambda m: f'"{schema_name}".{m.group(1)}', sql)
+
+
+def _build_schema_search_sql(
     *,
     city: str | None,
     check_in: date | None,
@@ -850,7 +1084,14 @@ def _search_hotels_in_schema(
     min_capacity: int | None,
     max_capacity: int | None,
     allow_multi_room: bool = False,
-) -> list[dict[str, Any]]:
+    rate_plan_tables: bool | None = None,
+) -> tuple[str, list[Any]]:
+    """The search SELECT for one tenant schema, with its parameters.
+
+    Returns SQL rather than rows so the same statement can be run on its own
+    or stitched into a cross-schema UNION — the two callers must never drift
+    into asking different questions.
+    """
 
     conditions = ["p.is_active = TRUE", "COALESCE(p.is_verified, FALSE) = TRUE"]
     params: list[Any] = []
@@ -943,6 +1184,7 @@ def _search_hotels_in_schema(
             max_capacity=max_capacity,
             min_price=None,
             max_price=None,
+            rate_plan_tables=rate_plan_tables,
         )
         if filter_clauses:
             room_filter_sql = " AND " + " AND ".join(filter_clauses)
@@ -997,6 +1239,7 @@ def _search_hotels_in_schema(
             max_capacity=max_capacity,
             min_price=None,
             max_price=None,
+            rate_plan_tables=rate_plan_tables,
         )
         if filter_clauses:
             room_filter_sql = " AND " + " AND ".join(filter_clauses)
@@ -1084,32 +1327,63 @@ def _search_hotels_in_schema(
         )}
         {where}
     """
-    all_params = avail_params + params
-    rows = fetch_all(sql, all_params)
+    return sql, avail_params + params
+
+
+def _finish_hotel_row(
+    row: dict[str, Any], schema_name: str, organization: dict[str, Any]
+) -> dict[str, Any]:
+    """Turn a raw search row into what the API returns.
+
+    Price conversion lives here rather than in SQL because rooms are priced in
+    whatever currency the hotel sells in, and the list is sorted on the
+    converted figure — comparing raw amounts across currencies would order the
+    results by nothing in particular.
+    """
     import json as _json
 
-    for row in rows:
-        row["organization_id"] = organization.get("id")
-        row["organization_name"] = organization.get("name")
-        row["organization_slug"] = organization.get("slug")
-        row["tenant_schema"] = schema_name
-        row["guid"] = str(row["guid"]) if row.get("guid") else None
-        row["min_price"], row["currency"] = _to_uzs_amount(
-            row.get("min_price"), row.get("min_price_currency")
-        )
-        row["photos"] = _normalize_photos(row.get("photos"))
-        raw_legal = row.get("legal_info")
-        if isinstance(raw_legal, str):
-            try:
-                row["legal_info"] = _json.loads(raw_legal)
-            except Exception:
-                row["legal_info"] = {}
-        elif not isinstance(raw_legal, dict):
+    row["organization_id"] = organization.get("id")
+    row["organization_name"] = organization.get("name")
+    row["organization_slug"] = organization.get("slug")
+    row["tenant_schema"] = schema_name
+    row["guid"] = str(row["guid"]) if row.get("guid") else None
+    row["min_price"], row["currency"] = _to_uzs_amount(
+        row.get("min_price"), row.get("min_price_currency")
+    )
+    row["photos"] = _normalize_photos(row.get("photos"))
+    raw_legal = row.get("legal_info")
+    if isinstance(raw_legal, str):
+        try:
+            row["legal_info"] = _json.loads(raw_legal)
+        except Exception:
             row["legal_info"] = {}
+    elif not isinstance(raw_legal, dict):
+        row["legal_info"] = {}
+    return row
 
-    if not allow_multi_room:
-        return rows
 
+def _filter_multi_room(
+    rows: list[dict[str, Any]],
+    *,
+    check_in: date | None,
+    check_out: date | None,
+    guests: int,
+    budget_max: Decimal | None,
+    room_types: list[str] | None,
+    room_type_presets: list[str] | None,
+    rate_plans: list[str] | None,
+    meal_plans: list[str] | None,
+    max_capacity: int | None,
+    price_min: Decimal | None,
+    price_max: Decimal | None,
+) -> list[dict[str, Any]]:
+    """Keep only hotels that can house the whole party, across several rooms.
+
+    Costs a query per hotel, so it runs over the already-filtered result set
+    and only when the caller asked for multi-room allocation. Must be called
+    inside the schema context of the rows it is given — ``get_available_rooms``
+    reads tenant-local tables through ``search_path``.
+    """
     filtered_rows: list[dict[str, Any]] = []
     for row in rows:
         try:
@@ -1147,6 +1421,94 @@ def _search_hotels_in_schema(
     return filtered_rows
 
 
+def _collect_hotel_rows_per_schema(
+    organizations: list[dict[str, Any]],
+    *,
+    city: str | None,
+    check_in: date | None,
+    check_out: date | None,
+    guests: int,
+    star_rating: int | None,
+    weel_classification: str | None,
+    is_recommended: bool | None,
+    themes: list[str] | None,
+    price_min: Decimal | None,
+    price_max: Decimal | None,
+    budget_max: Decimal | None,
+    room_types: list[str] | None,
+    room_type_presets: list[str] | None,
+    rate_plans: list[str] | None,
+    meal_plans: list[str] | None,
+    min_capacity: int | None,
+    max_capacity: int | None,
+    allow_multi_room: bool,
+    lat: float | None,
+    lon: float | None,
+    radius_km: float,
+) -> list[dict[str, Any]]:
+    """One schema at a time — the old path, kept for when the union cannot run.
+
+    Slower by a factor of the number of organizations, but it survives a
+    single schema being broken or mid-migration, which the union does not.
+    The SQL is built inside each schema's context so ``_has_rate_plan_tables``
+    answers for that tenant, exactly as it did before the union existed.
+    """
+    from apps.property.hotel_repository import _run_in_schema, _haversine_km
+
+    all_rows: list[dict[str, Any]] = []
+    for organization in organizations:
+        schema_name = organization["schema_name"]
+
+        def _run(sn=schema_name, org=organization) -> list[dict[str, Any]]:
+            sql, params = _build_schema_search_sql(
+                city=city, check_in=check_in, check_out=check_out, guests=guests,
+                star_rating=star_rating, weel_classification=weel_classification,
+                is_recommended=is_recommended, themes=themes,
+                price_min=price_min, price_max=price_max, budget_max=budget_max,
+                room_types=room_types, room_type_presets=room_type_presets,
+                rate_plans=rate_plans, meal_plans=meal_plans,
+                min_capacity=min_capacity, max_capacity=max_capacity,
+                allow_multi_room=allow_multi_room,
+            )
+            rows = [_finish_hotel_row(row, sn, org) for row in fetch_all(sql, params)]
+            if not allow_multi_room:
+                return rows
+            return _filter_multi_room(
+                rows,
+                check_in=check_in, check_out=check_out, guests=guests,
+                budget_max=budget_max, room_types=room_types,
+                room_type_presets=room_type_presets, rate_plans=rate_plans,
+                meal_plans=meal_plans, max_capacity=max_capacity,
+                price_min=price_min, price_max=price_max,
+            )
+
+        try:
+            all_rows.extend(_run_in_schema(schema_name, _run))
+        except Exception:
+            continue
+
+    if lat is not None and lon is not None:
+        all_rows = [
+            row for row in all_rows if _row_within_radius(row, lat, lon, radius_km, _haversine_km)
+        ]
+    return all_rows
+
+
+def _row_within_radius(
+    row: dict[str, Any], lat: float, lon: float, radius_km: float, haversine
+) -> bool:
+    try:
+        row_lat = float(row.get("latitude") or 0)
+        row_lon = float(row.get("longitude") or 0)
+    except (TypeError, ValueError):
+        return False
+    # 0,0 is the Atlantic, not a hotel — it is what an unset coordinate reads
+    # as, and it must never pass a radius filter.
+    if row_lat == 0.0 and row_lon == 0.0:
+        return False
+    return haversine(lat, lon, row_lat, row_lon) <= radius_km
+
+
 def _collect_hotel_rows(
     *,
     city: str | None = None,
@@ -1171,42 +1533,104 @@ def _collect_hotel_rows(
     radius_km: float = 10.0,
     allow_multi_room: bool = False,
 ) -> list[dict[str, Any]]:
-    from apps.property.hotel_repository import _run_in_schema, list_hotel_organizations, _haversine_km
+    from apps.property.hotel_repository import (
+        _haversine_km,
+        _run_in_schema,
+        _safe_schema_name,
+        list_hotel_organizations,
+    )
+
+    organizations = [
+        org for org in list_hotel_organizations() if _safe_schema_name(org.get("schema_name"))
+    ]
+    if not organizations:
+        return []
+
+    schema_names = [org["schema_name"] for org in organizations]
+    # Only worth asking when a rate-plan filter is actually in play — it is the
+    # one clause whose shape depends on how far a tenant has been migrated.
+    rate_plan_tables = (
+        _rate_plan_tables_by_schema(schema_names) if rate_plans else {}
+    )
+
+    # One branch per schema, each asking the identical question of its own
+    # tables. `_tenant_schema` rides along so the rows can be attributed back
+    # to their organization without a second lookup.
+    branches: list[str] = []
+    union_params: list[Any] = []
+    for organization in organizations:
+        schema_name = organization["schema_name"]
+        sql, params = _build_schema_search_sql(
+            city=city, check_in=check_in, check_out=check_out, guests=guests,
+            star_rating=star_rating, weel_classification=weel_classification,
+            is_recommended=is_recommended, themes=themes,
+            price_min=price_min, price_max=price_max, budget_max=budget_max,
+            room_types=room_types, room_type_presets=room_type_presets,
+            rate_plans=rate_plans, meal_plans=meal_plans,
+            min_capacity=min_capacity, max_capacity=max_capacity,
+            allow_multi_room=allow_multi_room,
+            rate_plan_tables=rate_plan_tables.get(schema_name, False) if rate_plans else None,
+        )
+        branches.append(
+            f"SELECT %s::text AS _tenant_schema, * FROM ("
+            f"{_qualify_tenant_tables(sql, schema_name)}) AS s_{len(branches)}"
+        )
+        union_params.append(schema_name)
+        union_params.extend(params)
+
+    try:
+        raw_rows = fetch_all("\n UNION ALL \n".join(branches), union_params)
+    except Exception:
+        # A schema mid-migration used to cost only its own results; in one
+        # statement it would cost the whole search. Fall back to visiting the
+        # schemas one at a time, which skips just the broken one.
+        logger.warning("Cross-schema hotel search failed; falling back per schema.", exc_info=True)
+        return _collect_hotel_rows_per_schema(
+            organizations,
+            city=city, check_in=check_in, check_out=check_out, guests=guests,
+            star_rating=star_rating, weel_classification=weel_classification,
+            is_recommended=is_recommended, themes=themes,
+            price_min=price_min, price_max=price_max, budget_max=budget_max,
+            room_types=room_types, room_type_presets=room_type_presets,
+            rate_plans=rate_plans, meal_plans=meal_plans,
+            min_capacity=min_capacity, max_capacity=max_capacity,
+            allow_multi_room=allow_multi_room,
+            lat=lat, lon=lon, radius_km=radius_km,
+        )
+
+    by_schema = {org["schema_name"]: org for org in organizations}
+    rows_by_schema: dict[str, list[dict[str, Any]]] = {}
+    for row in raw_rows:
+        schema_name = row.pop("_tenant_schema")
+        organization = by_schema.get(schema_name)
+        if organization is None:
+            continue
+        rows_by_schema.setdefault(schema_name, []).append(
+            _finish_hotel_row(row, schema_name, organization)
+        )
 
     all_rows: list[dict[str, Any]] = []
-    for organization in list_hotel_organizations():
-        schema_name = organization["schema_name"]
-        try:
+    for schema_name, rows in rows_by_schema.items():
+        if allow_multi_room:
+            # Reads tenant-local tables per hotel, so it needs the schema on
+            # the search_path — the one part that still runs per schema.
             rows = _run_in_schema(
                 schema_name,
-                lambda sn=schema_name, org=organization: _search_hotels_in_schema(
-                    sn, org,
-                    city=city, check_in=check_in, check_out=check_out, guests=guests,
-                    star_rating=star_rating, weel_classification=weel_classification,
-                    is_recommended=is_recommended, themes=themes,
-                    price_min=price_min, price_max=price_max, budget_max=budget_max,
-                    room_types=room_types, room_type_presets=room_type_presets,
-                    rate_plans=rate_plans, meal_plans=meal_plans,
-                    min_capacity=min_capacity, max_capacity=max_capacity,
-                    allow_multi_room=allow_multi_room,
+                lambda r=rows: _filter_multi_room(
+                    r,
+                    check_in=check_in, check_out=check_out, guests=guests,
+                    budget_max=budget_max, room_types=room_types,
+                    room_type_presets=room_type_presets, rate_plans=rate_plans,
+                    meal_plans=meal_plans, max_capacity=max_capacity,
+                    price_min=price_min, price_max=price_max,
                 ),
             )
-        except Exception:
-            continue
         all_rows.extend(rows)
 
     if lat is not None and lon is not None:
-        def _within_radius(row: dict[str, Any]) -> bool:
-            try:
-                row_lat = float(row.get("latitude") or 0)
-                row_lon = float(row.get("longitude") or 0)
-            except (TypeError, ValueError):
-                return False
-            if row_lat == 0.0 and row_lon == 0.0:
-                return False
-            return _haversine_km(lat, lon, row_lat, row_lon) <= radius_km
-
-        all_rows = [r for r in all_rows if _within_radius(r)]
+        all_rows = [
+            row for row in all_rows if _row_within_radius(row, lat, lon, radius_km, _haversine_km)
+        ]
 
     return all_rows
 
@@ -1270,6 +1694,30 @@ def search_hotels(
     return rows[offset : offset + limit]
 
 
+def search_hotels_page(
+    *,
+    sort_by: str = "popular",
+    limit: int = 20,
+    offset: int = 0,
+    **filters: Any,
+) -> tuple[list[dict[str, Any]], int]:
+    """One page of results, and how many there are in total.
+
+    A paginated screen needs both, and asking for them separately meant
+    ``search_hotels`` and ``count_hotels`` each ran the entire cross-schema
+    search — the same work, twice, for every page view. The total is simply
+    the size of the set the page was cut from.
+
+    Sorting and slicing stay in Python rather than moving into SQL because
+    prices are converted to UZS after the query (rooms are sold in mixed
+    currencies) and the radius filter is computed here too; ordering in SQL
+    would sort on figures the caller never sees.
+    """
+    rows = _collect_hotel_rows(**filters)
+    rows.sort(key=_SORT_KEYS.get(sort_by, _SORT_KEYS["popular"]))
+    return rows[offset : offset + limit], len(rows)
+
+
 def count_hotels(
     *,
     city: str | None = None,
@@ -1307,6 +1755,25 @@ def count_hotels(
     ))
 
 
+def _list_hotel_cities_per_schema(
+    schema_names: list[str], city_sql: str
+) -> list[dict[str, Any]]:
+    """City counts one schema at a time — survives a schema the union cannot
+    read, at the cost of a round trip each."""
+    from apps.property.hotel_repository import _run_in_schema
+
+    rows: list[dict[str, Any]] = []
+    for schema_name in schema_names:
+        try:
+            rows.extend(_run_in_schema(schema_name, lambda: fetch_all(city_sql)))
+        except Exception:
+            logger.warning(
+                "Failed to list hotel cities in tenant schema",
+                extra={"tenant_schema": schema_name},
+            )
+    return rows
+
+
 def list_hotel_cities() -> list[dict[str, Any]]:
     """Every city that currently has bookable hotels, with how many.
 
@@ -1314,39 +1781,45 @@ def list_hotel_cities() -> list[dict[str, Any]]:
     visibility rules of :func:`search_hotels` — a city offered as a suggestion
     must never come back empty when it is searched for.
     """
-    from apps.property.hotel_repository import _run_in_schema, list_hotel_organizations
+    from apps.property.hotel_repository import _safe_schema_name, list_hotel_organizations
+
+    schema_names = [
+        name
+        for org in list_hotel_organizations()
+        if (name := _safe_schema_name(org.get("schema_name")))
+    ]
+    if not schema_names:
+        return []
+
+    city_sql = """
+        SELECT p.city AS city, COUNT(*) AS hotel_count
+        FROM pms_property p
+        WHERE p.is_active = TRUE
+          AND COALESCE(p.is_verified, FALSE) = TRUE
+          AND p.city IS NOT NULL
+          AND btrim(p.city) <> ''
+        GROUP BY p.city
+    """
+
+    # One statement across every schema, for the same reason the search itself
+    # is one statement: this feeds the search box's suggestions and was costing
+    # three round trips per organization to answer.
+    union = "\n UNION ALL \n".join(
+        _qualify_tenant_tables(city_sql, schema_name) for schema_name in schema_names
+    )
+    try:
+        rows = fetch_all(union)
+    except Exception:
+        logger.warning("Cross-schema city list failed; falling back per schema.", exc_info=True)
+        rows = _list_hotel_cities_per_schema(schema_names, city_sql)
 
     # Keyed by lowercased name: the same city can be spelled inconsistently
     # across tenant schemas, and suggesting it twice would look broken.
     totals: dict[str, dict[str, Any]] = {}
-    for organization in list_hotel_organizations():
-        schema_name = organization["schema_name"]
-        try:
-            rows = _run_in_schema(
-                schema_name,
-                lambda: fetch_all(
-                    """
-                    SELECT p.city AS city, COUNT(*) AS hotel_count
-                    FROM pms_property p
-                    WHERE p.is_active = TRUE
-                      AND COALESCE(p.is_verified, FALSE) = TRUE
-                      AND p.city IS NOT NULL
-                      AND btrim(p.city) <> ''
-                    GROUP BY p.city
-                    """,
-                ),
-            )
-        except Exception:
-            logger.warning(
-                "Failed to list hotel cities in tenant schema",
-                extra={"tenant_schema": schema_name},
-            )
-            continue
-
-        for row in rows:
-            city = str(row["city"]).strip()
-            entry = totals.setdefault(city.lower(), {"city": city, "hotel_count": 0})
-            entry["hotel_count"] += int(row["hotel_count"] or 0)
+    for row in rows:
+        city = str(row["city"]).strip()
+        entry = totals.setdefault(city.lower(), {"city": city, "hotel_count": 0})
+        entry["hotel_count"] += int(row["hotel_count"] or 0)
 
     return sorted(
         totals.values(),
@@ -1398,22 +1871,28 @@ def get_hotel_card_by_guid(hotel_guid: str) -> dict[str, Any] | None:
     if not organization:
         return None
 
-    try:
-        rows = _run_in_schema(
-            schema_name,
-            lambda: _search_hotels_in_schema(
-                schema_name, organization,
-                city=None, check_in=None, check_out=None, guests=1,
-                star_rating=None, weel_classification=None, is_recommended=None,
-                themes=None, price_min=None, price_max=None, budget_max=None,
-                room_types=None, room_type_presets=None, rate_plans=None, meal_plans=None,
-                min_capacity=None, max_capacity=None,
-            ),
+    def _load_one() -> list[dict[str, Any]]:
+        sql, params = _build_schema_search_sql(
+            city=None, check_in=None, check_out=None, guests=1,
+            star_rating=None, weel_classification=None, is_recommended=None,
+            themes=None, price_min=None, price_max=None, budget_max=None,
+            room_types=None, room_type_presets=None, rate_plans=None, meal_plans=None,
+            min_capacity=None, max_capacity=None,
         )
+        # One hotel is wanted, so narrow in SQL rather than searching the whole
+        # schema and picking the row out in Python.
+        sql = f"SELECT * FROM ({sql}) AS card WHERE card.id = %s"
+        return [
+            _finish_hotel_row(row, schema_name, organization)
+            for row in fetch_all(sql, [*params, hotel_id])
+        ]
+
+    try:
+        rows = _run_in_schema(schema_name, _load_one)
     except Exception:
         return None
 
-    return next((row for row in rows if int(row.get("id") or 0) == hotel_id), None)
+    return rows[0] if rows else None
 
 
 def get_hotel_reviews(

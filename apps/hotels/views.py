@@ -29,6 +29,7 @@ from apps.hotels.repository import (
     get_hotel_calendar,
     get_hotel_reviews,
     search_hotels,
+    search_hotels_page,
 )
 from apps.hotels.serializers import (
     HotelCalendarSerializer,
@@ -81,8 +82,10 @@ class HotelSearchView(APIView):
         d.pop("children", None)
         d.pop("babies", None)
 
-        hotels = search_hotels(**d, limit=page_size, offset=offset)
-        count = count_hotels(**{k: v for k, v in d.items() if k != "sort_by"})
+        # One pass: the page and its total come from the same search. Asking
+        # `search_hotels` then `count_hotels` ran the whole cross-schema query
+        # twice for every page view.
+        hotels, count = search_hotels_page(**d, limit=page_size, offset=offset)
         ctx = {
             "request": request,
             "favorite_guids": _favorite_guids_from_request(request),
