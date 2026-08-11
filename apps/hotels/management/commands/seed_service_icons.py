@@ -6,7 +6,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand
 
-from shared.raw.db import execute, fetch_all
+from shared.raw.db import execute, fetch_all, fetch_one
 
 ICON_DIR = Path(__file__).resolve().parents[2] / "assets" / "service_icons"
 ICON_STORAGE_PREFIX = "property/icons"
@@ -140,6 +140,21 @@ def _has_icon(icon_url: str) -> bool:
     return bool(icon_url) and "default.svg" not in icon_url
 
 
+def _update_icon_sql() -> str:
+    """`public.services` carries an `updated_at` column on some deployments and
+    not others — it is a raw-SQL table, not a migrated model, so the schema
+    drifted. Writing to a column that isn't there aborts the whole command, so
+    ask the catalogue first rather than assuming."""
+    has_updated_at = fetch_one(
+        "SELECT 1 AS present FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'services' "
+        "AND column_name = 'updated_at'"
+    )
+    if has_updated_at:
+        return "UPDATE public.services SET icon_url = %s, updated_at = NOW() WHERE title = %s"
+    return "UPDATE public.services SET icon_url = %s WHERE title = %s"
+
+
 class Command(BaseCommand):
     """Gives every amenity an icon.
 
@@ -179,6 +194,7 @@ class Command(BaseCommand):
             for row in fetch_all("SELECT title, icon_url FROM public.services")
         }
 
+        update_sql = _update_icon_sql()
         uploaded = 0
         linked = 0
         missing_service: list[str] = []
@@ -215,11 +231,7 @@ class Command(BaseCommand):
             default_storage.save(storage_path, ContentFile(source.read_bytes()))
             uploaded += 1
 
-            execute(
-                "UPDATE public.services SET icon_url = %s, updated_at = NOW() "
-                "WHERE title = %s",
-                [storage_path, title],
-            )
+            execute(update_sql, [storage_path, title])
             linked += 1
 
         borrowed = 0
@@ -238,11 +250,7 @@ class Command(BaseCommand):
             self.stdout.write(f"  {title} -> {source_icon} (borrowed from {source_title})")
             borrowed += 1
             if apply_changes:
-                execute(
-                    "UPDATE public.services SET icon_url = %s, updated_at = NOW() "
-                    "WHERE title = %s",
-                    [source_icon, title],
-                )
+                execute(update_sql, [source_icon, title])
 
         verb = "Uploaded" if apply_changes else "Would upload"
         self.stdout.write(
