@@ -181,6 +181,27 @@ def _get_user_id(request) -> int | None:
     return getattr(user, "id", None)
 
 
+def _get_b2b_user_id(request) -> int | None:
+    """The caller's ``b2b_user.id``, or None when they signed in through the
+    workspace.
+
+    Two different accounts reach these endpoints. A ``B2BAuthUser`` is a row in
+    ``b2b_user``; a ``WorkspaceUser`` is an employee, and its ``id`` is a
+    ``b2b_employee`` row — the two id spaces are unrelated, and no column links
+    them. ``created_by``/``requested_by``/``reviewed_by`` are foreign keys into
+    ``b2b_user``, so handing them an employee id is a constraint violation
+    rather than attribution: the mobile workspace app died with a 500 on every
+    hotel booking, at the trip it creates first. All three columns are
+    nullable, so an unattributed row is the honest answer here.
+    """
+    user = getattr(request, "user", None)
+    # WorkspaceUser is the only account carrying employee_id; B2BAuthUser and
+    # the dict form (both b2b_user-backed) do not.
+    if getattr(user, "employee_id", None) is not None:
+        return None
+    return _get_user_id(request)
+
+
 class B2BHotelSearchView(APIView):
     """GET /b2b/hotels/search/
 
@@ -437,7 +458,7 @@ class B2BHotelBookingListCreateView(APIView):
         try:
             booking_request = create_booking_request(
                 company_id=company_id,
-                requested_by=_get_user_id(request),
+                requested_by=_get_b2b_user_id(request),
                 data=serializer.validated_data,
             )
         except HotelBookingError as exc:
@@ -1161,7 +1182,7 @@ class BusinessTripListCreateView(APIView):
         trip = create_trip(
             company_id=company_id,
             name=validated.pop("name"),
-            created_by=_get_user_id(request),
+            created_by=_get_b2b_user_id(request),
             **{k: v for k, v in validated.items() if k not in ("company_id", "created_by")},
         )
         if not trip:
@@ -1414,7 +1435,7 @@ class BudgetRequestListCreateView(APIView):
             trip_id=trip_id,
             employee_id=employee_id,
             department_id=department_id,
-            requested_by=_get_user_id(request),
+            requested_by=_get_b2b_user_id(request),
             amount=validated["amount"],
             description=validated.get("description"),
         )
@@ -1501,7 +1522,7 @@ class BudgetRequestReviewView(APIView):
         result = review_budget_request(
             request_id=request_id,
             status=serializer.validated_data["status"],
-            reviewed_by=_get_user_id(request),
+            reviewed_by=_get_b2b_user_id(request),
             review_description=serializer.validated_data.get("description"),
         )
         if not result:
