@@ -7481,6 +7481,17 @@
      "title": "Property detail",
      "type": "object"
     },
+    "property_services": {
+     "items": {
+      "additionalProperties": {
+       "type": "string",
+       "x-nullable": true
+      },
+      "type": "object"
+     },
+     "readOnly": true,
+     "type": "array"
+    },
     "rating": {
      "format": "decimal",
      "readOnly": true,
@@ -7493,6 +7504,17 @@
      "readOnly": true,
      "title": "Review count",
      "type": "integer"
+    },
+    "services": {
+     "items": {
+      "additionalProperties": {
+       "type": "string",
+       "x-nullable": true
+      },
+      "type": "object"
+     },
+     "readOnly": true,
+     "type": "array"
     },
     "star_rating": {
      "readOnly": true,
@@ -7583,6 +7605,8 @@
     "available_rooms",
     "amenities",
     "amenity_ids",
+    "services",
+    "property_services",
     "legal_info",
     "check_in_time",
     "check_out_time",
@@ -7884,6 +7908,17 @@
      "title": "Property detail",
      "type": "object"
     },
+    "property_services": {
+     "items": {
+      "additionalProperties": {
+       "type": "string",
+       "x-nullable": true
+      },
+      "type": "object"
+     },
+     "readOnly": true,
+     "type": "array"
+    },
     "rating": {
      "format": "decimal",
      "readOnly": true,
@@ -7917,6 +7952,17 @@
       },
       "type": "object"
      },
+     "type": "array"
+    },
+    "services": {
+     "items": {
+      "additionalProperties": {
+       "type": "string",
+       "x-nullable": true
+      },
+      "type": "object"
+     },
+     "readOnly": true,
      "type": "array"
     },
     "star_rating": {
@@ -8007,6 +8053,8 @@
     "available_rooms",
     "amenities",
     "amenity_ids",
+    "services",
+    "property_services",
     "legal_info",
     "check_in_time",
     "check_out_time",
@@ -10012,6 +10060,18 @@
      "title": "Property detail",
      "type": "object"
     },
+    "property_services": {
+     "default": [],
+     "items": {
+      "additionalProperties": {
+       "type": "string",
+       "x-nullable": true
+      },
+      "type": "object"
+     },
+     "readOnly": true,
+     "type": "array"
+    },
     "rating": {
      "format": "decimal",
      "readOnly": true,
@@ -10024,6 +10084,18 @@
      "readOnly": true,
      "title": "Review count",
      "type": "integer"
+    },
+    "services": {
+     "default": [],
+     "items": {
+      "additionalProperties": {
+       "type": "string",
+       "x-nullable": true
+      },
+      "type": "object"
+     },
+     "readOnly": true,
+     "type": "array"
     },
     "star_rating": {
      "readOnly": true,
@@ -10315,6 +10387,18 @@
      "title": "Property detail",
      "type": "object"
     },
+    "property_services": {
+     "default": [],
+     "items": {
+      "additionalProperties": {
+       "type": "string",
+       "x-nullable": true
+      },
+      "type": "object"
+     },
+     "readOnly": true,
+     "type": "array"
+    },
     "rating": {
      "format": "decimal",
      "readOnly": true,
@@ -10327,6 +10411,18 @@
      "readOnly": true,
      "title": "Review count",
      "type": "integer"
+    },
+    "services": {
+     "default": [],
+     "items": {
+      "additionalProperties": {
+       "type": "string",
+       "x-nullable": true
+      },
+      "type": "object"
+     },
+     "readOnly": true,
+     "type": "array"
     },
     "star_rating": {
      "readOnly": true,
