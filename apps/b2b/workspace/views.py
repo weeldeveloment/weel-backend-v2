@@ -915,6 +915,22 @@ class WorkspaceMessageView(WorkspaceAPIView):
         serializer = MessageWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         message = repo.send_message(thread_id, request.user.id, serializer.validated_data["text"])
+
+        # Off the request: a slow FCM call must not hold up the sender's own
+        # screen, and a push that fails is not a reason to report the message
+        # as unsent — it is already in the thread.
+        try:
+            from apps.b2b.mail.tasks import notify_chat_message
+
+            notify_chat_message.delay(
+                thread_id,
+                request.user.id,
+                getattr(request.user, "full_name", "") or "",
+                serializer.validated_data["text"],
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not queue chat notification for thread %s", thread_id)
+
         return Response(ChatMessageSerializer(message).data, status=status.HTTP_201_CREATED)
 
 

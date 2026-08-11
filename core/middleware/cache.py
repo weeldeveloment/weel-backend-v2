@@ -52,6 +52,11 @@ EXEMPT_PATH_PREFIXES = (
     # mildly — a colleague uploads a waybill and nobody else can see it yet.
     "/api/b2b/workspace/leads/",
     "/api/b2b/workspace/files/",
+    # Mail must never be cached. Opening a thread is what marks it read, and a
+    # cache hit would skip that write, so the message would keep reappearing as
+    # unread. The inbox list has the same freshness argument as chat.
+    "/api/b2b/workspace/mail/",
+    "/api/b2b/workspace/notifications/",
 )
 
 AUTH_HEADER_PREFIX = "Bearer "

@@ -46,6 +46,17 @@ def capabilities_for(role: str | None) -> dict[str, bool]:
         "can_pick_employee_of_month": owner,
         "can_view_hotels": True,
         "can_book_hotel": manager,
+        # Corporate mail. Having a mailbox at all is a separate question the
+        # server answers per-employee (`/mail/me/`) — these flags only say what
+        # someone with one is allowed to do with it.
+        "can_use_mail": True,
+        # Everyone with a mailbox may write to the outside world — that is the
+        # point of giving an employee a company address. Abuse is held back by
+        # the per-mailbox send limit rather than by role, so that a compromised
+        # account cannot burn the sending IP's reputation.
+        "can_send_external_mail": True,
+        "can_manage_mail_domain": owner,
+        "can_manage_mailboxes": owner,
         # Whether this person sees the whole company or only their own work.
         "sees_all_company_data": manager,
     }

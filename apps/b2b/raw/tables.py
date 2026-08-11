@@ -27,3 +27,21 @@ B2B_CHAT_MESSAGE_TABLE = "b2b_chat_message"
 B2B_WORKSPACE_LEAD_TABLE = "b2b_workspace_lead"
 B2B_WORKSPACE_FILE_TABLE = "b2b_workspace_file"
 B2B_EMPLOYEE_OF_MONTH_TABLE = "b2b_employee_of_month"
+
+# Corporate mail (`/api/b2b/workspace/mail/`).
+#
+# A company brings its own domain (`kompaniya.com`); every employee who is given
+# a mailbox gets `local_part@that domain`. The mail itself lives on the Mailcow
+# server — these tables are the copy the apps read, because the phone and the
+# dashboard talk to this API, never to IMAP.
+B2B_MAIL_DOMAIN_TABLE = "b2b_mail_domain"
+B2B_MAILBOX_TABLE = "b2b_mailbox"
+B2B_MAIL_THREAD_TABLE = "b2b_mail_thread"
+B2B_MAIL_MESSAGE_TABLE = "b2b_mail_message"
+B2B_MAIL_RECIPIENT_TABLE = "b2b_mail_recipient"
+B2B_MAIL_ATTACHMENT_TABLE = "b2b_mail_attachment"
+B2B_MAIL_OUTBOX_TABLE = "b2b_mail_outbox"
+
+# In-app notification feed for workspace employees. The existing `notification`
+# table only knows the `client` and `partner` roles, so B2B gets its own.
+B2B_NOTIFICATION_TABLE = "b2b_notification"

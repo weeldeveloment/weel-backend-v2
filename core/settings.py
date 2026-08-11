@@ -652,6 +652,53 @@ ESKIZ_PASSWORD = os.getenv("ESKIZ_PASSWORD")
 ESKIZ_SENDER = os.getenv("ESKIZ_SENDER", "")
 ESKIZ_CALLBACK_URL = os.getenv("ESKIZ_CALLBACK_URL", "")
 
+# ─── B2B corporate mail (apps/b2b/mail) ──────────────────────────────────────
+#
+# Mail runs on its own host, not in this deployment: Mailcow owns the domains,
+# the mailboxes and the message store, and this backend is a client of it over
+# three channels — the admin API to provision, SMTP submission to send, IMAP to
+# read. Outbound then leaves Mailcow through a relay (SES) so that a fresh VPS
+# address is never the one Gmail judges.
+B2B_MAIL_ENABLED = env_bool("B2B_MAIL_ENABLED", False)
+
+# Mailcow admin API — provisioning domains, DKIM keys and mailboxes.
+B2B_MAILCOW_API_URL = (os.getenv("B2B_MAILCOW_API_URL") or "").strip().rstrip("/")
+B2B_MAILCOW_API_KEY = (os.getenv("B2B_MAILCOW_API_KEY") or "").strip()
+B2B_MAILCOW_TIMEOUT = int(os.getenv("B2B_MAILCOW_TIMEOUT", "20"))
+
+# Where mailboxes actually connect. These are the same host under normal
+# deployments, split out because staging often points them elsewhere.
+B2B_MAIL_SMTP_HOST = (os.getenv("B2B_MAIL_SMTP_HOST") or "").strip()
+B2B_MAIL_SMTP_PORT = int(os.getenv("B2B_MAIL_SMTP_PORT", "587"))
+B2B_MAIL_IMAP_HOST = (os.getenv("B2B_MAIL_IMAP_HOST") or "").strip()
+B2B_MAIL_IMAP_PORT = int(os.getenv("B2B_MAIL_IMAP_PORT", "993"))
+
+# The MX / DKIM values a customer is told to publish for their own domain.
+B2B_MAIL_MX_HOST = (os.getenv("B2B_MAIL_MX_HOST") or "").strip()
+B2B_MAIL_SPF_INCLUDE = (os.getenv("B2B_MAIL_SPF_INCLUDE") or "").strip()
+B2B_MAIL_DKIM_SELECTOR = (os.getenv("B2B_MAIL_DKIM_SELECTOR") or "weel").strip()
+# Companies without a domain of their own get `<slug>.<this>` instead, which we
+# control, so they can be sending mail minutes after signing up.
+B2B_MAIL_FALLBACK_DOMAIN = (os.getenv("B2B_MAIL_FALLBACK_DOMAIN") or "").strip()
+
+# Encrypts `b2b_mailbox.smtp_password_enc`. A Fernet key
+# (`Fernet.generate_key()`); rotating it invalidates every stored password, so
+# it is listed in docs/SECRET_ROTATION.md.
+B2B_MAIL_SECRET_KEY = (os.getenv("B2B_MAIL_SECRET_KEY") or "").strip()
+
+# Signs the inbound webhook Mailcow's sieve script calls, so that "new mail
+# arrived" cannot be forged by anyone who can reach the endpoint.
+B2B_MAIL_WEBHOOK_SECRET = (os.getenv("B2B_MAIL_WEBHOOK_SECRET") or "").strip()
+
+# Per-mailbox ceilings. The daily one is the backstop against a stolen
+# password turning the sending IP into a spam source overnight.
+B2B_MAIL_DAILY_SEND_LIMIT = int(os.getenv("B2B_MAIL_DAILY_SEND_LIMIT", "200"))
+B2B_MAIL_MAX_ATTACHMENT_MB = int(os.getenv("B2B_MAIL_MAX_ATTACHMENT_MB", "20"))
+B2B_MAIL_MAX_RECIPIENTS = int(os.getenv("B2B_MAIL_MAX_RECIPIENTS", "25"))
+# How many messages one sync pass pulls per mailbox, so a mailbox that has been
+# offline for a week cannot monopolise a worker.
+B2B_MAIL_SYNC_BATCH = int(os.getenv("B2B_MAIL_SYNC_BATCH", "50"))
+
 # DEBUG=True da Celery tasklari sinxron ishlaydi — worker ishlamasa ham OTP SMS yuboriladi
 CELERY_TASK_ALWAYS_EAGER = DEBUG
 
