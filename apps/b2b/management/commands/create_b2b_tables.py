@@ -310,6 +310,7 @@ class Command(BaseCommand):
             self.stdout.write("  Created b2b_lead_request")
 
             self._create_workspace_tables(cursor)
+            self._create_mail_tables(cursor)
 
         self.stdout.write(self.style.SUCCESS("B2B tables created successfully."))
 
@@ -538,3 +539,212 @@ class Command(BaseCommand):
             );
         """)
         self.stdout.write("  Created b2b_employee_of_month")
+
+    def _create_mail_tables(self, cursor):
+        """Mail inside the workspace (`/api/b2b/workspace/mail/`).
+
+        We do not host mail. An employee connects an inbox they already have —
+        their Gmail, their company address — and it appears in the chat section
+        beside their colleagues. The provider stays the system of record; these
+        tables are the copy the web dashboard and the phone read, so neither
+        has to speak IMAP or hold a credential.
+
+        Everything hangs off `b2b_mail_account`, which belongs to exactly one
+        employee. That is what keeps one person out of another's mail, and one
+        company out of another's.
+        """
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_mail_account (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                address VARCHAR(320) NOT NULL,
+                display_name VARCHAR(200),
+                provider VARCHAR(20) NOT NULL DEFAULT 'imap',
+                auth_type VARCHAR(20) NOT NULL DEFAULT 'app_password',
+                secret_enc TEXT NOT NULL,
+                oauth_access_enc TEXT,
+                oauth_expires_at TIMESTAMPTZ,
+                imap_host VARCHAR(253) NOT NULL,
+                imap_port INTEGER NOT NULL DEFAULT 993,
+                smtp_host VARCHAR(253) NOT NULL,
+                smtp_port INTEGER NOT NULL DEFAULT 587,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                last_seen_uid BIGINT NOT NULL DEFAULT 0,
+                uid_validity BIGINT,
+                last_sync_at TIMESTAMPTZ,
+                sync_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                -- One person may connect several inboxes (a personal Gmail and
+                -- a work address), but not the same one twice.
+                UNIQUE (employee_id, address)
+            );
+        """)
+        # The sync beat walks every active account, least-recently-synced
+        # first; the chat screen looks them up by employee.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_account_employee_idx "
+            "ON b2b_mail_account (employee_id);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_account_sync_idx "
+            "ON b2b_mail_account (is_active, last_sync_at);"
+        )
+        self.stdout.write("  Created b2b_mail_account")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_mail_thread (
+                id BIGSERIAL PRIMARY KEY,
+                account_id BIGINT NOT NULL REFERENCES b2b_mail_account(id) ON DELETE CASCADE,
+                subject VARCHAR(500) NOT NULL DEFAULT '',
+                subject_key VARCHAR(500) NOT NULL DEFAULT '',
+                snippet VARCHAR(500) NOT NULL DEFAULT '',
+                folder VARCHAR(20) NOT NULL DEFAULT 'inbox',
+                participants TEXT NOT NULL DEFAULT '',
+                message_count INTEGER NOT NULL DEFAULT 0,
+                unread_count INTEGER NOT NULL DEFAULT 0,
+                is_starred BOOLEAN NOT NULL DEFAULT FALSE,
+                last_message_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # The inbox list is "this account, this folder, newest first".
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_thread_account_idx "
+            "ON b2b_mail_thread (account_id, folder, last_message_at DESC);"
+        )
+        # Mail with no References header is threaded on the normalised subject.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_thread_subject_key_idx "
+            "ON b2b_mail_thread (account_id, subject_key);"
+        )
+        self.stdout.write("  Created b2b_mail_thread")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_mail_message (
+                id BIGSERIAL PRIMARY KEY,
+                thread_id BIGINT NOT NULL REFERENCES b2b_mail_thread(id) ON DELETE CASCADE,
+                account_id BIGINT NOT NULL REFERENCES b2b_mail_account(id) ON DELETE CASCADE,
+                direction VARCHAR(10) NOT NULL DEFAULT 'inbound',
+                status VARCHAR(20) NOT NULL DEFAULT 'delivered',
+                imap_uid BIGINT,
+                message_id_header VARCHAR(998),
+                in_reply_to VARCHAR(998),
+                references_header TEXT,
+                from_address VARCHAR(320) NOT NULL DEFAULT '',
+                from_name VARCHAR(300) NOT NULL DEFAULT '',
+                subject VARCHAR(500) NOT NULL DEFAULT '',
+                body_text TEXT NOT NULL DEFAULT '',
+                body_html_sanitized TEXT NOT NULL DEFAULT '',
+                has_attachments BOOLEAN NOT NULL DEFAULT FALSE,
+                is_read BOOLEAN NOT NULL DEFAULT FALSE,
+                is_starred BOOLEAN NOT NULL DEFAULT FALSE,
+                error TEXT,
+                sent_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # A thread pages backwards from its newest message, like chat rooms do.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_message_thread_idx "
+            "ON b2b_mail_message (thread_id, id DESC);"
+        )
+        # Re-fetching the same UID must not duplicate a message. The header is
+        # globally unique per RFC 5322, but only within one account's copy —
+        # two colleagues on the same thread each keep their own row.
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_mail_message_dedup_idx "
+            "ON b2b_mail_message (account_id, message_id_header) "
+            "WHERE message_id_header IS NOT NULL;"
+        )
+        self.stdout.write("  Created b2b_mail_message")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_mail_recipient (
+                id BIGSERIAL PRIMARY KEY,
+                message_id BIGINT NOT NULL REFERENCES b2b_mail_message(id) ON DELETE CASCADE,
+                kind VARCHAR(3) NOT NULL DEFAULT 'to',
+                address VARCHAR(320) NOT NULL,
+                name VARCHAR(300) NOT NULL DEFAULT ''
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_recipient_message_idx "
+            "ON b2b_mail_recipient (message_id);"
+        )
+        self.stdout.write("  Created b2b_mail_recipient")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_mail_attachment (
+                id BIGSERIAL PRIMARY KEY,
+                message_id BIGINT REFERENCES b2b_mail_message(id) ON DELETE CASCADE,
+                account_id BIGINT NOT NULL REFERENCES b2b_mail_account(id) ON DELETE CASCADE,
+                filename VARCHAR(300) NOT NULL,
+                content_type VARCHAR(200) NOT NULL DEFAULT 'application/octet-stream',
+                size_bytes BIGINT NOT NULL DEFAULT 0,
+                storage_key VARCHAR(500) NOT NULL,
+                content_id VARCHAR(300),
+                is_inline BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # `message_id` is null while a draft's upload is still unattached, so
+        # the compose screen can upload before the message exists.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_attachment_message_idx "
+            "ON b2b_mail_attachment (message_id);"
+        )
+        self.stdout.write("  Created b2b_mail_attachment")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_mail_outbox (
+                id BIGSERIAL PRIMARY KEY,
+                account_id BIGINT NOT NULL REFERENCES b2b_mail_account(id) ON DELETE CASCADE,
+                message_id BIGINT REFERENCES b2b_mail_message(id) ON DELETE CASCADE,
+                payload JSONB NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                scheduled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                sent_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # The per-account daily send limit counts rows in this window.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_outbox_account_idx "
+            "ON b2b_mail_outbox (account_id, created_at DESC);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_mail_outbox_pending_idx "
+            "ON b2b_mail_outbox (status, scheduled_at);"
+        )
+        self.stdout.write("  Created b2b_mail_outbox")
+
+        # The `notification` table in apps/notification only recognises the
+        # `client` and `partner` roles, and its rows are keyed to `users`. B2B
+        # employees live in their own table, so they get their own feed rather
+        # than a nullable-column fork of that one.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_notification (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                kind VARCHAR(30) NOT NULL,
+                title VARCHAR(300) NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                is_read BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_notification_employee_idx "
+            "ON b2b_notification (employee_id, created_at DESC);"
+        )
+        self.stdout.write("  Created b2b_notification")

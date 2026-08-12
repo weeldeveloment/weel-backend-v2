@@ -58,6 +58,14 @@ opentelemetry-instrumentation-celery = "^0.64b0"
 opentelemetry-instrumentation-redis = "^0.64b0"
 opentelemetry-instrumentation-psycopg2 = "^0.64b0"
 opentelemetry-exporter-otlp-proto-http = "^1.43.0"
+# Corporate mail (apps/b2b/mail): sanitising inbound HTML bodies before any
+# client renders them, checking a customer's MX/SPF/DKIM/DMARC records, and
+# encrypting the per-mailbox SMTP passwords at rest.
+# The `css` extra pulls in tinycss2, without which bleach silently empties
+# every `style` attribute instead of filtering the properties inside it.
+bleach = {extras = ["css"], version = "^6.2.0"}
+dnspython = "^2.7.0"
+cryptography = "^46.0.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.9.0"

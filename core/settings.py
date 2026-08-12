@@ -652,6 +652,39 @@ ESKIZ_PASSWORD = os.getenv("ESKIZ_PASSWORD")
 ESKIZ_SENDER = os.getenv("ESKIZ_SENDER", "")
 ESKIZ_CALLBACK_URL = os.getenv("ESKIZ_CALLBACK_URL", "")
 
+# ─── Mail in the workspace (apps/b2b/mail) ───────────────────────────────────
+#
+# We do not host mail. An employee connects an inbox they already have and it
+# shows up in the chat section, so this backend is an IMAP/SMTP *client* of
+# whatever provider they use. There is no mail server of ours to configure —
+# the per-account hosts are stored on each account row and guessed from the
+# address (see apps/b2b/mail/providers.py).
+B2B_MAIL_ENABLED = env_bool("B2B_MAIL_ENABLED", False)
+
+# Encrypts `b2b_mail_account.secret_enc` — an app password or a Google refresh
+# token. A Fernet key (`Fernet.generate_key()`); rotating it invalidates every
+# stored credential and forces everyone to reconnect, so it is listed in
+# docs/SECRET_ROTATION.md.
+B2B_MAIL_SECRET_KEY = (os.getenv("B2B_MAIL_SECRET_KEY") or "").strip()
+
+# Google sign-in for Gmail accounts. Off by default and deliberately so:
+# reading mail is a *restricted* OAuth scope, and until Google has verified the
+# app (which includes a CASA security assessment) it is capped at 100 test
+# users. The app-password path works for everyone in the meantime.
+B2B_MAIL_GOOGLE_OAUTH_ENABLED = env_bool("B2B_MAIL_GOOGLE_OAUTH_ENABLED", False)
+B2B_MAIL_GOOGLE_CLIENT_ID = (os.getenv("B2B_MAIL_GOOGLE_CLIENT_ID") or "").strip()
+B2B_MAIL_GOOGLE_CLIENT_SECRET = (os.getenv("B2B_MAIL_GOOGLE_CLIENT_SECRET") or "").strip()
+B2B_MAIL_GOOGLE_REDIRECT_URI = (os.getenv("B2B_MAIL_GOOGLE_REDIRECT_URI") or "").strip()
+
+# Per-account ceilings. The daily one is the backstop against a stolen
+# credential quietly sending spam from somebody's real address.
+B2B_MAIL_DAILY_SEND_LIMIT = int(os.getenv("B2B_MAIL_DAILY_SEND_LIMIT", "200"))
+B2B_MAIL_MAX_ATTACHMENT_MB = int(os.getenv("B2B_MAIL_MAX_ATTACHMENT_MB", "20"))
+B2B_MAIL_MAX_RECIPIENTS = int(os.getenv("B2B_MAIL_MAX_RECIPIENTS", "25"))
+# How many messages one sync pass pulls per mailbox, so a mailbox that has been
+# offline for a week cannot monopolise a worker.
+B2B_MAIL_SYNC_BATCH = int(os.getenv("B2B_MAIL_SYNC_BATCH", "50"))
+
 # DEBUG=True da Celery tasklari sinxron ishlaydi — worker ishlamasa ham OTP SMS yuboriladi
 CELERY_TASK_ALWAYS_EAGER = DEBUG
 

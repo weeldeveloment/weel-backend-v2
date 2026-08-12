@@ -46,6 +46,11 @@ def capabilities_for(role: str | None) -> dict[str, bool]:
         "can_pick_employee_of_month": owner,
         "can_view_hotels": True,
         "can_book_hotel": manager,
+        # Mail in the chat section. Everyone, every role: the account belongs
+        # to the person, not to the company — they connect an inbox they
+        # already own, and nobody else can see it, including the owner. There
+        # is deliberately no manager-level flag here to gate it with.
+        "can_use_mail": True,
         # Whether this person sees the whole company or only their own work.
         "sees_all_company_data": manager,
     }

@@ -27,3 +27,21 @@ B2B_CHAT_MESSAGE_TABLE = "b2b_chat_message"
 B2B_WORKSPACE_LEAD_TABLE = "b2b_workspace_lead"
 B2B_WORKSPACE_FILE_TABLE = "b2b_workspace_file"
 B2B_EMPLOYEE_OF_MONTH_TABLE = "b2b_employee_of_month"
+
+# Mail inside the workspace (`/api/b2b/workspace/mail/`).
+#
+# We do not host mail. An employee connects an inbox they already have — their
+# Gmail, their company address, whatever — and it shows up in the chat section
+# beside their colleagues. `b2b_mail_account` is that connection; the rest are
+# the copy the apps read, because the phone and the dashboard talk to this API
+# and never to IMAP.
+B2B_MAIL_ACCOUNT_TABLE = "b2b_mail_account"
+B2B_MAIL_THREAD_TABLE = "b2b_mail_thread"
+B2B_MAIL_MESSAGE_TABLE = "b2b_mail_message"
+B2B_MAIL_RECIPIENT_TABLE = "b2b_mail_recipient"
+B2B_MAIL_ATTACHMENT_TABLE = "b2b_mail_attachment"
+B2B_MAIL_OUTBOX_TABLE = "b2b_mail_outbox"
+
+# In-app notification feed for workspace employees. The existing `notification`
+# table only knows the `client` and `partner` roles, so B2B gets its own.
+B2B_NOTIFICATION_TABLE = "b2b_notification"

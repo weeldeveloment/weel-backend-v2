@@ -1,5 +1,6 @@
-from django.urls import path
+from django.urls import include, path
 
+from apps.b2b.mail.urls import notification_urlpatterns
 from apps.b2b.workspace.views import (
     WorkspaceDeviceTokenView,
     WorkspaceEmployeeMonthlyStatsView,
@@ -72,4 +73,7 @@ urlpatterns = [
 
     path("files/", WorkspaceFileListCreateView.as_view(), name="ws-files"),
     path("files/<int:file_id>/", WorkspaceFileDetailView.as_view(), name="ws-file-detail"),
+
+    path("mail/", include("apps.b2b.mail.urls")),
+    *notification_urlpatterns,
 ]
