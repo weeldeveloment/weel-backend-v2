@@ -2781,6 +2781,51 @@
    ],
    "type": "object"
   },
+  "B2BNotification": {
+   "properties": {
+    "body": {
+     "title": "Body",
+     "type": "string"
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_read": {
+     "title": "Is read",
+     "type": "boolean"
+    },
+    "kind": {
+     "minLength": 1,
+     "title": "Kind",
+     "type": "string"
+    },
+    "payload": {
+     "title": "Payload",
+     "type": "object"
+    },
+    "title": {
+     "minLength": 1,
+     "title": "Title",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "kind",
+    "title",
+    "body",
+    "payload",
+    "is_read",
+    "created_at"
+   ],
+   "type": "object"
+  },
   "B2BRefresh": {
    "properties": {
     "refresh": {
@@ -8551,6 +8596,482 @@
    ],
    "type": "object"
   },
+  "MailAccount": {
+   "properties": {
+    "address": {
+     "minLength": 1,
+     "title": "Address",
+     "type": "string"
+    },
+    "auth_type": {
+     "minLength": 1,
+     "title": "Auth type",
+     "type": "string"
+    },
+    "display_name": {
+     "minLength": 1,
+     "title": "Display name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "imap_host": {
+     "minLength": 1,
+     "title": "Imap host",
+     "type": "string"
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "last_sync_at": {
+     "format": "date-time",
+     "title": "Last sync at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "provider": {
+     "minLength": 1,
+     "title": "Provider",
+     "type": "string"
+    },
+    "smtp_host": {
+     "minLength": 1,
+     "title": "Smtp host",
+     "type": "string"
+    },
+    "sync_error": {
+     "minLength": 1,
+     "title": "Sync error",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unread": {
+     "title": "Unread",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "address",
+    "provider",
+    "auth_type",
+    "imap_host",
+    "smtp_host",
+    "is_active"
+   ],
+   "type": "object"
+  },
+  "MailAccountConnect": {
+   "properties": {
+    "address": {
+     "format": "email",
+     "minLength": 1,
+     "title": "Address",
+     "type": "string"
+    },
+    "display_name": {
+     "maxLength": 200,
+     "title": "Display name",
+     "type": "string"
+    },
+    "imap_host": {
+     "maxLength": 253,
+     "title": "Imap host",
+     "type": "string"
+    },
+    "imap_port": {
+     "maximum": 65535,
+     "minimum": 1,
+     "title": "Imap port",
+     "type": "integer"
+    },
+    "password": {
+     "minLength": 1,
+     "title": "Password",
+     "type": "string"
+    },
+    "smtp_host": {
+     "maxLength": 253,
+     "title": "Smtp host",
+     "type": "string"
+    },
+    "smtp_port": {
+     "maximum": 65535,
+     "minimum": 1,
+     "title": "Smtp port",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "address",
+    "password"
+   ],
+   "type": "object"
+  },
+  "MailAccountPatch": {
+   "properties": {
+    "display_name": {
+     "maxLength": 200,
+     "title": "Display name",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "MailAttachment": {
+   "properties": {
+    "content_type": {
+     "minLength": 1,
+     "title": "Content type",
+     "type": "string"
+    },
+    "download_url": {
+     "minLength": 1,
+     "title": "Download url",
+     "type": "string"
+    },
+    "filename": {
+     "minLength": 1,
+     "title": "Filename",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "size_bytes": {
+     "title": "Size bytes",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "filename",
+    "content_type",
+    "size_bytes"
+   ],
+   "type": "object"
+  },
+  "MailMessage": {
+   "properties": {
+    "attachments": {
+     "items": {
+      "$ref": "#/definitions/MailAttachment"
+     },
+     "type": "array"
+    },
+    "body_html": {
+     "title": "Body html",
+     "type": "string"
+    },
+    "body_text": {
+     "title": "Body text",
+     "type": "string"
+    },
+    "direction": {
+     "minLength": 1,
+     "title": "Direction",
+     "type": "string"
+    },
+    "error": {
+     "minLength": 1,
+     "title": "Error",
+     "type": "string",
+     "x-nullable": true
+    },
+    "from_address": {
+     "minLength": 1,
+     "title": "From address",
+     "type": "string"
+    },
+    "from_name": {
+     "title": "From name",
+     "type": "string"
+    },
+    "has_attachments": {
+     "title": "Has attachments",
+     "type": "boolean"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_read": {
+     "title": "Is read",
+     "type": "boolean"
+    },
+    "recipients": {
+     "items": {
+      "$ref": "#/definitions/MailRecipient"
+     },
+     "type": "array"
+    },
+    "sent_at": {
+     "format": "date-time",
+     "title": "Sent at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "status": {
+     "minLength": 1,
+     "title": "Status",
+     "type": "string"
+    },
+    "subject": {
+     "title": "Subject",
+     "type": "string"
+    },
+    "thread_id": {
+     "title": "Thread id",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "thread_id",
+    "direction",
+    "status",
+    "from_address",
+    "from_name",
+    "subject",
+    "body_text",
+    "body_html",
+    "has_attachments",
+    "is_read",
+    "sent_at"
+   ],
+   "type": "object"
+  },
+  "MailProviderHint": {
+   "properties": {
+    "help_url": {
+     "minLength": 1,
+     "title": "Help url",
+     "type": "string",
+     "x-nullable": true
+    },
+    "imap_host": {
+     "minLength": 1,
+     "title": "Imap host",
+     "type": "string"
+    },
+    "imap_port": {
+     "title": "Imap port",
+     "type": "integer"
+    },
+    "label": {
+     "minLength": 1,
+     "title": "Label",
+     "type": "string"
+    },
+    "provider": {
+     "minLength": 1,
+     "title": "Provider",
+     "type": "string"
+    },
+    "requires_app_password": {
+     "title": "Requires app password",
+     "type": "boolean"
+    },
+    "smtp_host": {
+     "minLength": 1,
+     "title": "Smtp host",
+     "type": "string"
+    },
+    "smtp_port": {
+     "title": "Smtp port",
+     "type": "integer"
+    },
+    "supports_oauth": {
+     "title": "Supports oauth",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "provider",
+    "label",
+    "imap_host",
+    "imap_port",
+    "smtp_host",
+    "smtp_port",
+    "requires_app_password",
+    "supports_oauth"
+   ],
+   "type": "object"
+  },
+  "MailRecipient": {
+   "properties": {
+    "address": {
+     "minLength": 1,
+     "title": "Address",
+     "type": "string"
+    },
+    "kind": {
+     "minLength": 1,
+     "title": "Kind",
+     "type": "string"
+    },
+    "name": {
+     "title": "Name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "kind",
+    "address",
+    "name"
+   ],
+   "type": "object"
+  },
+  "MailSend": {
+   "properties": {
+    "account_id": {
+     "title": "Account id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "attachment_ids": {
+     "default": [],
+     "items": {
+      "type": "integer"
+     },
+     "type": "array"
+    },
+    "bcc": {
+     "default": [],
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "body_html": {
+     "default": "",
+     "title": "Body html",
+     "type": "string"
+    },
+    "body_text": {
+     "default": "",
+     "title": "Body text",
+     "type": "string"
+    },
+    "cc": {
+     "default": [],
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "reply_to_message_id": {
+     "title": "Reply to message id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "subject": {
+     "default": "",
+     "maxLength": 500,
+     "title": "Subject",
+     "type": "string"
+    },
+    "to": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "to"
+   ],
+   "type": "object"
+  },
+  "MailThread": {
+   "properties": {
+    "account_id": {
+     "title": "Account id",
+     "type": "integer"
+    },
+    "folder": {
+     "minLength": 1,
+     "title": "Folder",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_starred": {
+     "title": "Is starred",
+     "type": "boolean"
+    },
+    "last_message_at": {
+     "format": "date-time",
+     "title": "Last message at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "message_count": {
+     "title": "Message count",
+     "type": "integer"
+    },
+    "participants": {
+     "minLength": 1,
+     "title": "Participants",
+     "type": "string"
+    },
+    "snippet": {
+     "minLength": 1,
+     "title": "Snippet",
+     "type": "string"
+    },
+    "subject": {
+     "minLength": 1,
+     "title": "Subject",
+     "type": "string"
+    },
+    "unread_count": {
+     "title": "Unread count",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "account_id",
+    "subject",
+    "snippet",
+    "folder",
+    "participants",
+    "message_count",
+    "unread_count",
+    "is_starred",
+    "last_message_at"
+   ],
+   "type": "object"
+  },
+  "MailThreadFlags": {
+   "properties": {
+    "folder": {
+     "enum": [
+      "inbox",
+      "archive",
+      "trash"
+     ],
+     "title": "Folder",
+     "type": "string"
+    },
+    "is_starred": {
+     "title": "Is starred",
+     "type": "boolean"
+    }
+   },
+   "type": "object"
+  },
   "MarkAsRead": {
    "properties": {
     "notification_ids": {
@@ -8752,6 +9273,18 @@
    "required": [
     "new_room_id"
    ],
+   "type": "object"
+  },
+  "NotificationRead": {
+   "properties": {
+    "ids": {
+     "default": [],
+     "items": {
+      "type": "integer"
+     },
+     "type": "array"
+    }
+   },
    "type": "object"
   },
   "NullableOrganization": {
@@ -18583,6 +19116,463 @@
     ]
    }
   },
+  "/b2b/workspace/mail/accounts/": {
+   "get": {
+    "description": "GET / POST /api/b2b/workspace/mail/accounts/ — the caller's own inboxes.",
+    "operationId": "b2b_workspace_mail_accounts_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/MailAccount"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "List the inboxes this person has connected",
+    "tags": [
+     "B2B / Mail"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET / POST /api/b2b/workspace/mail/accounts/ — the caller's own inboxes.",
+    "operationId": "b2b_workspace_mail_accounts_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MailAccountConnect"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MailAccount"
+      }
+     }
+    },
+    "summary": "Connect an inbox with an app password",
+    "tags": [
+     "B2B / Mail"
+    ]
+   }
+  },
+  "/b2b/workspace/mail/accounts/{account_id}/": {
+   "delete": {
+    "description": "PATCH / DELETE /api/b2b/workspace/mail/accounts/<id>/",
+    "operationId": "b2b_workspace_mail_accounts_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": "Disconnected"
+     }
+    },
+    "summary": "Disconnect an inbox",
+    "tags": [
+     "B2B / Mail"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "account_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "PATCH / DELETE /api/b2b/workspace/mail/accounts/<id>/",
+    "operationId": "b2b_workspace_mail_accounts_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MailAccountPatch"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MailAccount"
+      }
+     }
+    },
+    "summary": "Rename a connected inbox",
+    "tags": [
+     "B2B / Mail"
+    ]
+   }
+  },
+  "/b2b/workspace/mail/accounts/{account_id}/reconnect/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "account_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/mail/accounts/<id>/reconnect/ — new password.",
+    "operationId": "b2b_workspace_mail_accounts_reconnect_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MailAccountConnect"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MailAccount"
+      }
+     }
+    },
+    "summary": "Replace a stored app password",
+    "tags": [
+     "B2B / Mail"
+    ]
+   }
+  },
+  "/b2b/workspace/mail/attachments/": {
+   "parameters": [],
+   "post": {
+    "consumes": [
+     "multipart/form-data",
+     "application/x-www-form-urlencoded"
+    ],
+    "description": "POST /api/b2b/workspace/mail/attachments/ — upload before composing.",
+    "operationId": "b2b_workspace_mail_attachments_create",
+    "parameters": [
+     {
+      "in": "formData",
+      "name": "file",
+      "required": true,
+      "type": "file"
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "Uploaded"
+     }
+    },
+    "summary": "Upload a file to attach to a message",
+    "tags": [
+     "B2B / Mail"
+    ]
+   }
+  },
+  "/b2b/workspace/mail/attachments/{attachment_id}/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/mail/attachments/<id>/ — redirect to the file.",
+    "operationId": "b2b_workspace_mail_attachments_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     },
+     "302": {
+      "description": "Redirect to the file"
+     }
+    },
+    "summary": "Download an attachment",
+    "tags": [
+     "B2B / Mail"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "attachment_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/mail/messages/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/mail/messages/ — compose and send.",
+    "operationId": "b2b_workspace_mail_messages_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MailSend"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MailMessage"
+      }
+     }
+    },
+    "summary": "Send an email",
+    "tags": [
+     "B2B / Mail"
+    ]
+   }
+  },
+  "/b2b/workspace/mail/oauth/google/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/mail/oauth/google/ — where to send the browser.",
+    "operationId": "b2b_workspace_mail_oauth_google_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "Authorize URL"
+     }
+    },
+    "summary": "Begin Google sign-in",
+    "tags": [
+     "B2B / Mail"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/mail/oauth/google/callback/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/mail/oauth/google/callback/ — finish sign-in.",
+    "operationId": "b2b_workspace_mail_oauth_google_callback_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MailAccount"
+      }
+     }
+    },
+    "summary": "Complete Google sign-in",
+    "tags": [
+     "B2B / Mail"
+    ]
+   }
+  },
+  "/b2b/workspace/mail/providers/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/mail/providers/?address=… — what to show next.\n\nLets the connect screen say \"Gmail needs an app password, here is the link\"\nthe moment an address is typed, instead of after a failed attempt.",
+    "operationId": "b2b_workspace_mail_providers_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "address",
+      "required": true,
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MailProviderHint"
+      }
+     }
+    },
+    "summary": "Guess a provider's settings from an address",
+    "tags": [
+     "B2B / Mail"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/mail/sync/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/mail/sync/ — pull-to-refresh.",
+    "operationId": "b2b_workspace_mail_sync_create",
+    "parameters": [],
+    "responses": {
+     "202": {
+      "description": "Sync queued"
+     }
+    },
+    "summary": "Check for new mail now",
+    "tags": [
+     "B2B / Mail"
+    ]
+   }
+  },
+  "/b2b/workspace/mail/threads/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/mail/threads/ — the conversation list.\n\nWith no ``account_id`` the caller's accounts are merged into one list, so\nsomebody with a personal and a work inbox sees a single stream.",
+    "operationId": "b2b_workspace_mail_threads_list",
+    "parameters": [
+     {
+      "description": "Omit to merge every connected inbox",
+      "in": "query",
+      "name": "account_id",
+      "type": "integer"
+     },
+     {
+      "description": "inbox | sent | archive | trash",
+      "in": "query",
+      "name": "folder",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "unread",
+      "type": "boolean"
+     },
+     {
+      "in": "query",
+      "name": "starred",
+      "type": "boolean"
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/MailThread"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "List mail threads",
+    "tags": [
+     "B2B / Mail"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/mail/threads/{thread_id}/flags/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/mail/threads/<id>/flags/ — star, archive, trash.",
+    "operationId": "b2b_workspace_mail_threads_flags_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MailThreadFlags"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MailThread"
+      }
+     }
+    },
+    "summary": "Star or move a thread",
+    "tags": [
+     "B2B / Mail"
+    ]
+   }
+  },
+  "/b2b/workspace/mail/threads/{thread_id}/messages/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/mail/threads/<id>/messages/",
+    "operationId": "b2b_workspace_mail_threads_messages_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "before_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/MailMessage"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "Messages in a thread (oldest first)",
+    "tags": [
+     "B2B / Mail"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/mail/threads/{thread_id}/read/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/mail/threads/<id>/read/",
+    "operationId": "b2b_workspace_mail_threads_read_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "Marked read"
+     }
+    },
+    "summary": "Mark a thread as read",
+    "tags": [
+     "B2B / Mail"
+    ]
+   }
+  },
   "/b2b/workspace/me/": {
    "get": {
     "description": "GET /api/b2b/workspace/me/ — profile plus the permission map the app\nbuilds its UI from.",
@@ -18617,6 +19607,66 @@
     "summary": "Register the FCM token for push notifications",
     "tags": [
      "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/notifications/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/notifications/ — the real, server-stored feed.\n\nReplaces the feed both clients used to synthesise from whatever data they\nhappened to have loaded, which could not show anything that arrived while\nthe app was closed.",
+    "operationId": "b2b_workspace_notifications_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "before_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/B2BNotification"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "List notifications",
+    "tags": [
+     "B2B / Mail"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/notifications/read/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/notifications/read/ — mark some or all read.",
+    "operationId": "b2b_workspace_notifications_read_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/NotificationRead"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Marked read"
+     }
+    },
+    "summary": "Mark notifications read",
+    "tags": [
+     "B2B / Mail"
     ]
    }
   },
