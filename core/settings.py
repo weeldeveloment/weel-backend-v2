@@ -114,6 +114,8 @@ _DEFAULT_PROD_ORIGINS = (
     "https://partners.weel.uz",
     "https://weelrooms.uz",
     "https://www.weelrooms.uz",
+    "https://weel-booking.uz",
+    "https://www.weel-booking.uz",
 )
 _DEFAULT_DEV_ORIGINS = (
     "http://localhost:3000",
@@ -796,6 +798,8 @@ else:
         "https://partners.weel.uz",
         "https://weelrooms.uz",
         "https://www.weelrooms.uz",
+        "https://weel-booking.uz",
+        "https://www.weel-booking.uz",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",
