@@ -18,6 +18,7 @@ from apps.b2b.workspace.views import (
     WorkspaceLogoutView,
     WorkspaceMeView,
     WorkspaceMessageView,
+    WorkspaceStorageView,
     WorkspaceSubtaskToggleView,
     WorkspaceTaskCommentView,
     WorkspaceTaskDetailView,
@@ -72,6 +73,7 @@ urlpatterns = [
     path("leads/<int:lead_id>/complete/", WorkspaceLeadCompleteView.as_view(), name="ws-lead-complete"),
 
     path("files/", WorkspaceFileListCreateView.as_view(), name="ws-files"),
+    path("storage/", WorkspaceStorageView.as_view(), name="ws-storage"),
     path("files/<int:file_id>/", WorkspaceFileDetailView.as_view(), name="ws-file-detail"),
 
     path("mail/", include("apps.b2b.mail.urls")),

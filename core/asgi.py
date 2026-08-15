@@ -26,6 +26,9 @@ django_asgi_app = get_asgi_application()
 
 # Import after Django setup
 from chat.routing import websocket_urlpatterns
+from apps.b2b.workspace.routing import (
+    websocket_urlpatterns as workspace_websocket_urlpatterns,
+)
 
 
 def _header_value(scope, name: bytes) -> str:
@@ -118,8 +121,12 @@ class OptionalOriginAllowedHostsValidator:
 
 application = ProtocolTypeRouter({
     "http": TracingASGIMiddleware(django_asgi_app),
+    # The b2b workspace's own routes come first: both lists are ordered and
+    # `chat.routing` matches a bare `ws/chat/`, so anything the workspace adds
+    # under its own prefix must be reachable regardless of what the older
+    # consumer claims.
     "websocket": OptionalOriginAllowedHostsValidator(
-        URLRouter(websocket_urlpatterns)
+        URLRouter(workspace_websocket_urlpatterns + websocket_urlpatterns)
     ),
 })
       

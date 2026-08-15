@@ -748,6 +748,15 @@ def send_message(thread_id: int, sender_id: int, text: str) -> dict[str, Any] | 
     return message
 
 
+def delete_message(message_id: int, thread_id: int) -> bool:
+    """Removes a message. Its attachment row cascades with it, which is what
+    hands the bytes back to the quota."""
+    return execute(
+        f"DELETE FROM {B2B_CHAT_MESSAGE_TABLE} WHERE id = %s AND thread_id = %s",
+        [message_id, thread_id],
+    ) > 0
+
+
 def mark_thread_read(thread_id: int, employee_id: int) -> None:
     execute(
         f"UPDATE {B2B_CHAT_MEMBER_TABLE} SET last_read_at = %s, updated_at = %s "
@@ -877,11 +886,24 @@ def complete_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, 
 
 # ─── Files ────────────────────────────────────────────────────────────────────
 
-def list_files(company_id: int) -> list[dict[str, Any]]:
+def list_files(company_id: int, kind: str | None = "file") -> list[dict[str, Any]]:
+    """The shared drive.
+
+    Defaults to ``kind='file'``: chat attachments and vouchers live in the same
+    table because that is what makes the quota one SUM, but they are not drive
+    documents and listing them here would fill the Fayllar tab with every photo
+    anyone ever sent. Pass ``kind=None`` to get everything.
+    """
+    if kind is None:
+        return fetch_all(
+            f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE company_id = %s "
+            "ORDER BY created_at DESC, id DESC",
+            [company_id],
+        )
     return fetch_all(
-        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE company_id = %s "
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE company_id = %s AND kind = %s "
         "ORDER BY created_at DESC, id DESC",
-        [company_id],
+        [company_id, kind],
     )
 
 
@@ -893,17 +915,62 @@ def get_file(file_id: int, company_id: int) -> dict[str, Any] | None:
 
 
 def create_file(
-    *, company_id: int, author_id: int, name: str, path: str, size: int
+    *,
+    company_id: int,
+    author_id: int,
+    name: str,
+    path: str,
+    size: int,
+    kind: str = "file",
+    content_type: str | None = None,
+    message_id: int | None = None,
+    trip_id: int | None = None,
 ) -> dict[str, Any] | None:
+    """Records stored bytes.
+
+    Every upload path goes through here — the drive, a chat attachment, a
+    generated voucher — because this row *is* the company's storage accounting.
+    Writing an object to storage without one makes those bytes invisible to the
+    quota and impossible to reclaim.
+    """
     return fetch_one(
         f"""
         INSERT INTO {B2B_WORKSPACE_FILE_TABLE}
-            (company_id, author_id, name, path, size, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+            (company_id, author_id, name, path, size, kind, content_type,
+             message_id, trip_id, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [company_id, author_id, name, path, size, timezone.now()],
+        [
+            company_id, author_id, name, path, size, kind, content_type,
+            message_id, trip_id, timezone.now(),
+        ],
     )
+
+
+def attachments_for_messages(message_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
+    """Attachment per message id, fetched in one query.
+
+    A room page is up to 200 messages; asking per message would be 200 round
+    trips to render one screen.
+    """
+    if not message_ids:
+        return {}
+    rows = fetch_all(
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE message_id = ANY(%s)",
+        [list(message_ids)],
+    )
+    return {row["message_id"]: row for row in rows}
+
+
+def files_for_company_paths(company_id: int, kind: str) -> list[str]:
+    """Storage paths for one kind — used when reclaiming space."""
+    rows = fetch_all(
+        f"SELECT path FROM {B2B_WORKSPACE_FILE_TABLE} "
+        "WHERE company_id = %s AND kind = %s",
+        [company_id, kind],
+    )
+    return [row["path"] for row in rows]
 
 
 def delete_file(file_id: int, company_id: int) -> bool:

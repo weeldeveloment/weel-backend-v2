@@ -501,6 +501,11 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_workspace_lead")
 
+        # Every byte the company stores is a row here, whatever put it there —
+        # the shared drive, a photo sent in a chat, a generated voucher. That
+        # is what makes the 5 GB quota a single SUM over one table rather than
+        # a counter that has to be kept in step with three upload paths and
+        # drifts the first time one of them forgets.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_workspace_file (
                 id BIGSERIAL PRIMARY KEY,
@@ -515,6 +520,40 @@ class Command(BaseCommand):
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS b2b_workspace_file_company_idx "
             "ON b2b_workspace_file (company_id, created_at DESC);"
+        )
+
+        # Where the bytes came from: 'file' (shared drive), 'chat' (an image or
+        # video sent in a thread), 'voucher' (a generated trip document).
+        # Defaulted rather than backfilled — every row that existed before this
+        # column was a drive upload.
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_file "
+            "ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'file';"
+        )
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_file "
+            "ADD COLUMN IF NOT EXISTS content_type VARCHAR(120);"
+        )
+        # A chat attachment dies with its message. ON DELETE CASCADE is what
+        # keeps the quota honest: deleting a thread has to give the bytes back,
+        # and a nightly reconciliation job would be the alternative.
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_file ADD COLUMN IF NOT EXISTS "
+            "message_id BIGINT REFERENCES b2b_chat_message(id) ON DELETE CASCADE;"
+        )
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_file ADD COLUMN IF NOT EXISTS "
+            "trip_id BIGINT REFERENCES b2b_business_trip(id) ON DELETE CASCADE;"
+        )
+        # The quota reads SUM(size) per company on every upload, and the
+        # drive list filters to kind='file'. Both go through this.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_file_company_kind_idx "
+            "ON b2b_workspace_file (company_id, kind);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_file_message_idx "
+            "ON b2b_workspace_file (message_id) WHERE message_id IS NOT NULL;"
         )
         self.stdout.write("  Created b2b_workspace_file")
 

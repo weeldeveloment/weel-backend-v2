@@ -255,13 +255,36 @@ class ThreadCreateSerializer(serializers.Serializer):
 
 
 class MessageWriteSerializer(serializers.Serializer):
-    text = serializers.CharField(max_length=4000)
+    """A chat message.
+
+    ``text`` is optional only when the request carries an attachment — the view
+    sets ``allow_empty_text`` in the context for that. A photo with no caption
+    is a message; an empty envelope is not.
+    """
+
+    text = serializers.CharField(max_length=4000, required=False, allow_blank=True, default="")
 
     def validate_text(self, value: str) -> str:
         value = value.strip()
-        if not value:
+        if not value and not self.context.get("allow_empty_text"):
             raise serializers.ValidationError("Message cannot be empty.")
         return value
+
+
+class StorageKindUsageSerializer(serializers.Serializer):
+    bytes = serializers.IntegerField()
+    files = serializers.IntegerField()
+
+
+class StorageUsageSerializer(serializers.Serializer):
+    """``GET /storage/`` — the company's 5 GB allowance and what is in it."""
+
+    used_bytes = serializers.IntegerField()
+    quota_bytes = serializers.IntegerField()
+    available_bytes = serializers.IntegerField()
+    used_percent = serializers.FloatField()
+    max_upload_bytes = serializers.IntegerField()
+    by_kind = serializers.DictField(child=StorageKindUsageSerializer())
 
 
 class ThreadFlagsSerializer(serializers.Serializer):

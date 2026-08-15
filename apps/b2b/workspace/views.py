@@ -26,6 +26,8 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from apps.b2b.models import LeadStatus
 from apps.b2b.repository import get_company
 from apps.b2b.workspace import repository as repo
+from apps.b2b.workspace import storage
+from apps.b2b.workspace.consumers import broadcast_message
 from apps.b2b.workspace.authentication import (
     DashboardWorkspaceAuthentication,
     WorkspaceJWTAuthentication,
@@ -60,6 +62,7 @@ from apps.b2b.workspace.serializers import (
     WorkspaceLoginSerializer,
     WorkspaceLoginVerifySerializer,
     WorkspaceRefreshSerializer,
+    StorageUsageSerializer,
 )
 from apps.b2b.workspace.tokens import create_workspace_tokens, rotate_workspace_tokens
 from apps.hotels.repository import search_hotels
@@ -862,6 +865,28 @@ class WorkspaceThreadListCreateView(WorkspaceAPIView):
         return Response(_thread_payload(thread), status=status.HTTP_201_CREATED)
 
 
+def _message_payload(message: dict, attachment: dict | None = None) -> dict:
+    """One message as the app reads it.
+
+    The attachment is nested rather than flattened: a message has at most one
+    today, but a client that reads `attachment.url` keeps working when that
+    becomes a list, whereas one reading `attachment_url` does not.
+    """
+    data = ChatMessageSerializer(message).data
+    data["attachment"] = (
+        {
+            "id": attachment["id"],
+            "name": attachment["name"],
+            "size": attachment["size"],
+            "content_type": attachment.get("content_type"),
+            "url": default_storage.url(attachment["path"]),
+        }
+        if attachment
+        else None
+    )
+    return data
+
+
 class WorkspaceMessageView(WorkspaceAPIView):
     """GET / POST messages in a thread the caller belongs to."""
 
@@ -893,6 +918,7 @@ class WorkspaceMessageView(WorkspaceAPIView):
             before_id = None
 
         messages = repo.list_messages(thread_id, before_id=before_id, limit=limit)
+        attachments = repo.attachments_for_messages([m["id"] for m in messages])
         # Opening a room is what marks it read, so it happens here rather than
         # costing the phone a second round trip. Only the newest page counts —
         # scrolling back through history must not clear newer messages. The
@@ -902,19 +928,59 @@ class WorkspaceMessageView(WorkspaceAPIView):
             repo.mark_thread_read(thread_id, request.user.id)
 
         return Response({
-            "results": ChatMessageSerializer(messages, many=True).data,
+            "results": [
+                _message_payload(m, attachments.get(m["id"])) for m in messages
+            ],
             "has_more": len(messages) == limit,
         })
 
-    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Send a message",
-                         request_body=MessageWriteSerializer, responses={201: ChatMessageSerializer()})
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Send a message, optionally with a photo or video",
+        consumes=["application/json", "multipart/form-data"],
+        request_body=MessageWriteSerializer,
+        manual_parameters=[
+            openapi.Parameter("file", openapi.IN_FORM, type=openapi.TYPE_FILE, required=False),
+        ],
+        responses={201: ChatMessageSerializer(), 413: "Storage limit reached"},
+    )
     def post(self, request, thread_id: int):
         if not self._thread(request, thread_id):
             return Response({"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = MessageWriteSerializer(data=request.data)
+        upload = request.FILES.get("file")
+        serializer = MessageWriteSerializer(
+            data=request.data,
+            # An attachment carries its own meaning, so a photo with no caption
+            # is a real message. Text stays required when there is nothing else
+            # in the envelope.
+            context={"allow_empty_text": upload is not None},
+        )
         serializer.is_valid(raise_exception=True)
+
+        # The quota is checked before the message row exists, so a refused
+        # upload leaves no half-sent message in the thread.
+        if upload is not None:
+            try:
+                storage.assert_can_store(request.user.company_id, upload.size)
+            except storage.UploadTooLarge as exc:
+                return _too_large_response(exc)
+            except storage.StorageQuotaExceeded as exc:
+                return _quota_response(exc)
+
         message = repo.send_message(thread_id, request.user.id, serializer.validated_data["text"])
+
+        attachment = None
+        if upload is not None:
+            attachment, refusal = store_upload(
+                request=request, upload=upload, kind="chat", message_id=message["id"]
+            )
+            if refusal:
+                # Racing another upload between the check and here. The message
+                # goes with it rather than being left in the thread as an empty
+                # bubble the sender cannot explain.
+                repo.delete_message(message["id"], thread_id)
+                return refusal
 
         # Off the request: a slow FCM call must not hold up the sender's own
         # screen, and a push that fails is not a reason to report the message
@@ -931,7 +997,9 @@ class WorkspaceMessageView(WorkspaceAPIView):
         except Exception:  # noqa: BLE001
             logger.exception("Could not queue chat notification for thread %s", thread_id)
 
-        return Response(ChatMessageSerializer(message).data, status=status.HTTP_201_CREATED)
+        payload = _message_payload(message, attachment)
+        broadcast_message(thread_id, payload)
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 class WorkspaceThreadFlagsView(WorkspaceAPIView):
@@ -1123,6 +1191,99 @@ def _file_payload(file: dict) -> dict:
     return {**file, "url": default_storage.url(file["path"])}
 
 
+def _quota_response(exc: storage.StorageQuotaExceeded) -> Response:
+    """413 rather than 400.
+
+    A validation error means "fix your request"; this one means "the request
+    was fine, there is no room". The client shows a different screen for each,
+    and the numbers go in the body so it can say how much is left.
+    """
+    return Response(
+        {
+            "detail": _("Storage limit reached."),
+            "code": "storage_quota_exceeded",
+            "used_bytes": exc.used,
+            "quota_bytes": exc.quota,
+            "available_bytes": exc.available,
+            "incoming_bytes": exc.incoming,
+        },
+        status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    )
+
+
+def _too_large_response(exc: storage.UploadTooLarge) -> Response:
+    return Response(
+        {
+            "detail": _("File is too large."),
+            "code": "upload_too_large",
+            "size_bytes": exc.size,
+            "max_upload_bytes": exc.limit,
+        },
+        status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    )
+
+
+def store_upload(*, request, upload, kind: str, message_id: int | None = None,
+                 trip_id: int | None = None):
+    """Quota-check, write the object, and record the row that owns its bytes.
+
+    The single door for everything the workspace stores. The check happens
+    *before* the write: reject afterwards and the bytes are already on disk,
+    and any failure between the two leaves an orphan the quota can never see.
+
+    Returns the file row, or a [Response] to return as-is when it was refused.
+    """
+    try:
+        storage.assert_can_store(request.user.company_id, upload.size)
+    except storage.UploadTooLarge as exc:
+        return None, _too_large_response(exc)
+    except storage.StorageQuotaExceeded as exc:
+        return None, _quota_response(exc)
+
+    path = default_storage.save(
+        f"b2b/workspace/{request.user.company_id}/{kind}/{upload.name}", upload
+    )
+    file = repo.create_file(
+        company_id=request.user.company_id,
+        author_id=request.user.id,
+        name=upload.name,
+        path=path,
+        size=upload.size,
+        kind=kind,
+        content_type=getattr(upload, "content_type", None),
+        message_id=message_id,
+        trip_id=trip_id,
+    )
+    if not file:
+        # The row is what makes the bytes accountable. Without it the object
+        # would sit in storage forever, invisible to both the drive and the
+        # quota, so it is removed rather than left behind.
+        default_storage.delete(path)
+        return None, Response(
+            {"detail": _("Could not store the file.")},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return file, None
+
+
+class WorkspaceStorageView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/storage/ — how much of the 5 GB is gone.
+
+    Read by everyone, not just the owner: an employee about to upload a video
+    needs to know it will be refused before they spend the data sending it.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Company storage usage and quota",
+        responses={200: StorageUsageSerializer()},
+    )
+    def get(self, request):
+        return Response(storage.usage(request.user.company_id))
+
+
 class WorkspaceFileListCreateView(WorkspaceAPIView):
     """GET/POST /api/b2b/workspace/files/ — the company's shared folder.
 
@@ -1151,14 +1312,9 @@ class WorkspaceFileListCreateView(WorkspaceAPIView):
         if not upload:
             return Response({"detail": _("No file provided.")}, status=status.HTTP_400_BAD_REQUEST)
 
-        path = default_storage.save(f"b2b/workspace/{request.user.company_id}/{upload.name}", upload)
-        file = repo.create_file(
-            company_id=request.user.company_id,
-            author_id=request.user.id,
-            name=upload.name,
-            path=path,
-            size=upload.size,
-        )
+        file, refusal = store_upload(request=request, upload=upload, kind="file")
+        if refusal:
+            return refusal
         return Response(_file_payload(file), status=status.HTTP_201_CREATED)
 
 
@@ -1173,8 +1329,15 @@ class WorkspaceFileDetailView(WorkspaceAPIView):
         if not file:
             return Response({"detail": _("File not found.")}, status=status.HTTP_404_NOT_FOUND)
 
+        # Row first: it is what the quota counts, so dropping it is what frees
+        # the space. A storage delete that fails afterwards leaves an orphan
+        # object, which wastes disk but never blocks the company from
+        # uploading — the other order would.
         repo.delete_file(file_id, request.user.company_id)
-        default_storage.delete(file["path"])
+        try:
+            default_storage.delete(file["path"])
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not delete stored object %s", file["path"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
