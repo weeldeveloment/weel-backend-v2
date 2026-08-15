@@ -323,3 +323,44 @@ class EmployeeOfMonthSerializer(serializers.Serializer):
 
 class EmployeeOfMonthSelectSerializer(serializers.Serializer):
     employee_id = serializers.IntegerField()
+
+
+# ─── Attendance ─────────────────────────────────────────────────────────────
+
+ATTENDANCE_STATUSES = ("present", "absent", "late", "remote")
+
+
+class AttendanceEntrySerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    position = serializers.CharField(allow_null=True, required=False)
+    department_name = serializers.CharField(allow_null=True, required=False)
+    # Null for somebody nobody has accounted for yet today — which is a third
+    # state, not the same as being marked absent.
+    status = serializers.CharField(allow_null=True)
+    checked_in_at = serializers.DateTimeField(allow_null=True, required=False)
+    reason = serializers.CharField(allow_null=True, required=False)
+    marked_by_id = serializers.IntegerField(allow_null=True, required=False)
+
+
+class AttendanceDaySerializer(serializers.Serializer):
+    date = serializers.DateField()
+    present = serializers.IntegerField()
+    absent = serializers.IntegerField()
+    unmarked = serializers.IntegerField()
+    my_status = serializers.CharField(allow_null=True)
+    entries = AttendanceEntrySerializer(many=True)
+
+
+class AttendanceMarkSerializer(serializers.Serializer):
+    """A manager recording someone's day."""
+
+    status = serializers.ChoiceField(choices=ATTENDANCE_STATUSES)
+    reason = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True)
+    date = serializers.DateField(required=False)
+
+
+class AttendanceCheckInSerializer(serializers.Serializer):
+    """An employee marking themselves in. Nothing to send — the time is the
+    server's, not the phone's, or a wrong device clock becomes an arrival
+    time nobody can argue with."""

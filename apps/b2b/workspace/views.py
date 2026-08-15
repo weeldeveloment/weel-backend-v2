@@ -14,6 +14,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -63,6 +64,9 @@ from apps.b2b.workspace.serializers import (
     WorkspaceLoginVerifySerializer,
     WorkspaceRefreshSerializer,
     StorageUsageSerializer,
+    AttendanceCheckInSerializer,
+    AttendanceDaySerializer,
+    AttendanceMarkSerializer,
 )
 from apps.b2b.workspace.tokens import create_workspace_tokens, rotate_workspace_tokens
 from apps.hotels.repository import search_hotels
@@ -1438,6 +1442,162 @@ class WorkspaceFileDetailView(WorkspaceAPIView):
         except Exception:  # noqa: BLE001
             logger.exception("Could not delete stored object %s", file["path"])
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─── Attendance ───────────────────────────────────────────────────────────────
+
+def _work_date(request):
+    """The day being asked about.
+
+    Defaults to today in the *server's* timezone, which is the company's — an
+    employee travelling with a phone set to another zone must not check in
+    against yesterday.
+    """
+    raw = request.query_params.get("date") if hasattr(request, "query_params") else None
+    if raw:
+        parsed = parse_date(raw)
+        if parsed:
+            return parsed
+    return timezone.localdate()
+
+
+def _attendance_payload(company_id: int, work_date, viewer_id: int) -> dict:
+    rows = repo.attendance_for_date(company_id, work_date)
+
+    present = sum(1 for r in rows if r["status"] in ("present", "late", "remote"))
+    absent = sum(1 for r in rows if r["status"] == "absent")
+    mine = next((r for r in rows if r["employee_id"] == viewer_id), None)
+
+    return {
+        "date": work_date,
+        "present": present,
+        "absent": absent,
+        # Counted, not inferred by the client from the two above — the roster
+        # can change under a day, so present + absent + unmarked is the only
+        # sum that adds up.
+        "unmarked": sum(1 for r in rows if r["status"] is None),
+        "my_status": (mine or {}).get("status"),
+        "entries": rows,
+    }
+
+
+class WorkspaceAttendanceView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/attendance/ — today's roll call.
+
+    Readable by everyone: it is on the chat home screen, and the point of it is
+    knowing who is around. `?date=YYYY-MM-DD` reads another day.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Attendance for a day",
+        manual_parameters=[
+            openapi.Parameter("date", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                              description="YYYY-MM-DD, defaults to today"),
+        ],
+        responses={200: AttendanceDaySerializer()},
+    )
+    def get(self, request):
+        payload = _attendance_payload(
+            request.user.company_id, _work_date(request), request.user.id
+        )
+        return Response(AttendanceDaySerializer(payload).data)
+
+
+class WorkspaceAttendanceCheckInView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/attendance/check-in/ — "I'm here".
+
+    Needs no capability: it only ever writes the caller's own row. The arrival
+    time is taken from the server rather than the request, so a wrong device
+    clock cannot become an arrival time nobody can argue with.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Check yourself in for today",
+        request_body=AttendanceCheckInSerializer,
+        responses={200: AttendanceDaySerializer()},
+    )
+    def post(self, request):
+        today = timezone.localdate()
+        existing = repo.attendance_row(request.user.id, today)
+
+        repo.upsert_attendance(
+            company_id=request.user.company_id,
+            employee_id=request.user.id,
+            work_date=today,
+            status="present",
+            # Only on the first check-in of the day. Tapping again must not
+            # rewrite the time you actually arrived to the time you tapped.
+            checked_in_at=(existing or {}).get("checked_in_at") or timezone.now(),
+            reason=None,
+            marked_by_id=None,
+        )
+        return Response(
+            AttendanceDaySerializer(
+                _attendance_payload(request.user.company_id, today, request.user.id)
+            ).data
+        )
+
+
+class WorkspaceAttendanceMarkView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/attendance/<employee_id>/ — record someone's day.
+
+    A manager's screen. Marking yourself goes through check-in instead, which
+    is why this does not special-case it.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser, HasCapability]
+    required_capability = "can_manage_attendance"
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Mark an employee present or absent",
+        request_body=AttendanceMarkSerializer,
+        responses={200: AttendanceDaySerializer(), 403: "Not a manager"},
+    )
+    def post(self, request, employee_id: int):
+        serializer = AttendanceMarkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        # Scoped to the company, so one company cannot write attendance for
+        # another's staff by guessing an id.
+        if not repo.employee_ids_in_company(request.user.company_id, [employee_id]):
+            return Response(
+                {"detail": _("Employee not found.")},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        work_date = data.get("date") or timezone.localdate()
+        marked_present = data["status"] in ("present", "late", "remote")
+        existing = repo.attendance_row(employee_id, work_date)
+
+        repo.upsert_attendance(
+            company_id=request.user.company_id,
+            employee_id=employee_id,
+            work_date=work_date,
+            status=data["status"],
+            # A manager marking someone present records an arrival time only if
+            # there is not one already — the employee's own check-in is the
+            # better record of when they actually got in.
+            checked_in_at=(
+                (existing or {}).get("checked_in_at") or timezone.now()
+                if marked_present
+                else None
+            ),
+            reason=(data.get("reason") or "").strip() or None,
+            marked_by_id=request.user.id,
+        )
+        return Response(
+            AttendanceDaySerializer(
+                _attendance_payload(request.user.company_id, work_date, request.user.id)
+            ).data
+        )
 
 
 # ─── Hotels ───────────────────────────────────────────────────────────────────

@@ -21,6 +21,7 @@ from apps.b2b.raw.tables import (
     B2B_CHAT_MESSAGE_TABLE,
     B2B_CHAT_THREAD_TABLE,
     B2B_DEPARTMENT_TABLE,
+    B2B_ATTENDANCE_TABLE,
     B2B_EMPLOYEE_OF_MONTH_TABLE,
     B2B_EMPLOYEE_TABLE,
     B2B_TASK_ASSIGNEE_TABLE,
@@ -770,7 +771,7 @@ def messages_by_ids(message_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
     if not message_ids:
         return {}
     rows = fetch_all(
-        f"SELECT * FROM {B2B_CHAT_MESSAGE_TABLE} WHERE id = ANY(%s)",
+        f"SELECT * FROM {B2B_CHAT_MESSAGE_TABLE} WHERE id = __ANY_MARKER__(%s)",
         [list(message_ids)],
     )
     return {row["id"]: row for row in rows}
@@ -985,7 +986,7 @@ def attachments_for_messages(message_ids: Sequence[int]) -> dict[int, dict[str, 
     if not message_ids:
         return {}
     rows = fetch_all(
-        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE message_id = ANY(%s)",
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE message_id = __ANY_MARKER__(%s)",
         [list(message_ids)],
     )
     return {row["message_id"]: row for row in rows}
@@ -1078,3 +1079,86 @@ def set_employee_of_month(
         [company_id, year, month, employee_id, selected_by_id, timezone.now()],
     )
     return get_employee_of_month(company_id, year, month)
+
+
+# ─── Attendance ─────────────────────────────────────────────────────────────
+
+def attendance_for_date(company_id: int, work_date) -> list[dict[str, Any]]:
+    """The roll call for one day.
+
+    Left-joined off the roster rather than read straight from the attendance
+    table: someone with no row for the day has not been accounted for, and a
+    query over the attendance table alone would silently leave them out of a
+    list whose whole purpose is to show who is missing. They come back with a
+    null status, which the view reads as "unmarked".
+    """
+    return fetch_all(
+        f"""
+        SELECT
+            e.id            AS employee_id,
+            e.full_name,
+            e.position,
+            d.name          AS department_name,
+            a.status,
+            a.checked_in_at,
+            a.reason,
+            a.marked_by_id
+        FROM {B2B_EMPLOYEE_TABLE} e
+        LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
+        LEFT JOIN {B2B_ATTENDANCE_TABLE} a
+               ON a.employee_id = e.id AND a.work_date = %s
+        WHERE e.company_id = %s AND e.is_active = TRUE
+        ORDER BY e.full_name
+        """,
+        [work_date, company_id],
+    )
+
+
+def upsert_attendance(
+    *,
+    company_id: int,
+    employee_id: int,
+    work_date,
+    status: str,
+    checked_in_at=None,
+    reason: str | None = None,
+    marked_by_id: int | None = None,
+) -> dict[str, Any] | None:
+    """Records one employee's day.
+
+    ON CONFLICT rather than a read-then-write: two managers marking the same
+    person at once, or an employee double-tapping check-in, would otherwise
+    race into two rows the UNIQUE key then rejects outright.
+
+    `checked_in_at` is only overwritten when a new one is given — correcting a
+    status from a manager's screen must not erase the time the employee
+    actually arrived.
+    """
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_ATTENDANCE_TABLE}
+            (company_id, employee_id, work_date, status, checked_in_at,
+             reason, marked_by_id, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (employee_id, work_date) DO UPDATE SET
+            status        = EXCLUDED.status,
+            checked_in_at = COALESCE(EXCLUDED.checked_in_at, {B2B_ATTENDANCE_TABLE}.checked_in_at),
+            reason        = EXCLUDED.reason,
+            marked_by_id  = EXCLUDED.marked_by_id,
+            updated_at    = EXCLUDED.updated_at
+        RETURNING *
+        """,
+        [
+            company_id, employee_id, work_date, status, checked_in_at,
+            reason, marked_by_id, now, now,
+        ],
+    )
+
+
+def attendance_row(employee_id: int, work_date) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {B2B_ATTENDANCE_TABLE} "
+        "WHERE employee_id = %s AND work_date = %s",
+        [employee_id, work_date],
+    )

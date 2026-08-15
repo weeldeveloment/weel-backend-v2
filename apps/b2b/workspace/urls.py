@@ -2,6 +2,9 @@ from django.urls import include, path
 
 from apps.b2b.mail.urls import notification_urlpatterns
 from apps.b2b.workspace.views import (
+    WorkspaceAttendanceCheckInView,
+    WorkspaceAttendanceMarkView,
+    WorkspaceAttendanceView,
     WorkspaceDeviceTokenView,
     WorkspaceEmployeeMonthlyStatsView,
     WorkspaceEmployeeOfMonthView,
@@ -41,6 +44,18 @@ urlpatterns = [
     path("me/", WorkspaceMeView.as_view(), name="ws-me"),
     path("me/device-token/", WorkspaceDeviceTokenView.as_view(), name="ws-device-token"),
     path("team/", WorkspaceTeamView.as_view(), name="ws-team"),
+
+    path("attendance/", WorkspaceAttendanceView.as_view(), name="ws-attendance"),
+    path(
+        "attendance/check-in/",
+        WorkspaceAttendanceCheckInView.as_view(),
+        name="ws-attendance-check-in",
+    ),
+    path(
+        "attendance/<int:employee_id>/",
+        WorkspaceAttendanceMarkView.as_view(),
+        name="ws-attendance-mark",
+    ),
 
     path("employee-of-month/", WorkspaceEmployeeOfMonthView.as_view(), name="ws-employee-of-month"),
     path(

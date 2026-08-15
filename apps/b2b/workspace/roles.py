@@ -39,6 +39,13 @@ def capabilities_for(role: str | None) -> dict[str, bool]:
         # Chat
         "can_create_group_chat": manager,
         "can_chat": True,
+        # Attendance. Everyone sees the roll call — it is on the chat home
+        # screen and the point of it is knowing who is around today. Recording
+        # it for *someone else* is a manager's job; an employee can only check
+        # themselves in, which needs no flag because it is never about anyone
+        # else.
+        "can_view_attendance": True,
+        "can_manage_attendance": manager,
         # Team & hotels
         "can_view_team": True,
         "can_manage_team": owner,

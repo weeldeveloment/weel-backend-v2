@@ -574,6 +574,39 @@ class Command(BaseCommand):
             ALTER TABLE b2b_task ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
         """)
 
+        # One row per employee per day. Attendance is a fact about a date, and
+        # the UNIQUE key is what makes writing it idempotent: an employee
+        # tapping check-in twice, or a manager correcting a status, updates the
+        # day rather than adding a second contradictory row.
+        #
+        # `work_date` is a DATE, not a timestamp: "was Aziz in on the 14th" has
+        # one answer, and storing an instant would make it depend on the
+        # reader's timezone.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_attendance (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                work_date DATE NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'present',
+                checked_in_at TIMESTAMPTZ,
+                reason VARCHAR(200),
+                -- Null when the employee checked themselves in; set when a
+                -- manager recorded it for them. Worth keeping: "who said I was
+                -- absent" is the first question anyone asks.
+                marked_by_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (employee_id, work_date)
+            );
+        """)
+        # The roll call reads one company on one day, every time.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_attendance_company_date_idx "
+            "ON b2b_attendance (company_id, work_date);"
+        )
+        self.stdout.write("  Created b2b_attendance")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_employee_of_month (
                 id BIGSERIAL PRIMARY KEY,
