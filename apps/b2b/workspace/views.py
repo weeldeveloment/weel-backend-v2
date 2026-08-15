@@ -875,6 +875,16 @@ class WorkspaceThreadListCreateView(WorkspaceAPIView):
 _QUOTE_LENGTH = 120
 
 
+def _int_or_none(value) -> int | None:
+    """Form fields arrive as strings, and a client that sends nonsense should
+    lose the label rather than the message."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 def _quote_payload(original: dict | None) -> dict | None:
     if not original:
         return None
@@ -906,6 +916,9 @@ def _message_payload(
             "name": attachment["name"],
             "size": attachment["size"],
             "content_type": attachment.get("content_type"),
+            # Null for anything that is not audio. Present for a voice message,
+            # so the bubble can be labelled before the clip is fetched.
+            "duration_ms": attachment.get("duration_ms"),
             "url": default_storage.url(attachment["path"]),
         }
         if attachment
@@ -1029,7 +1042,14 @@ class WorkspaceMessageView(WorkspaceAPIView):
         attachment = None
         if upload is not None:
             attachment, refusal = store_upload(
-                request=request, upload=upload, kind="chat", message_id=message["id"]
+                request=request,
+                upload=upload,
+                kind="chat",
+                message_id=message["id"],
+                # Sent by the recorder, which is the only thing that knows how
+                # long the clip is — the server would have to decode the audio
+                # to find out, and a wrong number here is cosmetic.
+                duration_ms=_int_or_none(request.data.get("duration_ms")),
             )
             if refusal:
                 # Racing another upload between the check and here. The message
@@ -1327,7 +1347,7 @@ def _too_large_response(exc: storage.UploadTooLarge) -> Response:
 
 
 def store_upload(*, request, upload, kind: str, message_id: int | None = None,
-                 trip_id: int | None = None):
+                 trip_id: int | None = None, duration_ms: int | None = None):
     """Quota-check, write the object, and record the row that owns its bytes.
 
     The single door for everything the workspace stores. The check happens
@@ -1356,6 +1376,7 @@ def store_upload(*, request, upload, kind: str, message_id: int | None = None,
         content_type=getattr(upload, "content_type", None),
         message_id=message_id,
         trip_id=trip_id,
+        duration_ms=duration_ms,
     )
     if not file:
         # The row is what makes the bytes accountable. Without it the object

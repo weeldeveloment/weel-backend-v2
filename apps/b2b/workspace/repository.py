@@ -954,6 +954,7 @@ def create_file(
     content_type: str | None = None,
     message_id: int | None = None,
     trip_id: int | None = None,
+    duration_ms: int | None = None,
 ) -> dict[str, Any] | None:
     """Records stored bytes.
 
@@ -966,13 +967,13 @@ def create_file(
         f"""
         INSERT INTO {B2B_WORKSPACE_FILE_TABLE}
             (company_id, author_id, name, path, size, kind, content_type,
-             message_id, trip_id, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             message_id, trip_id, duration_ms, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
             company_id, author_id, name, path, size, kind, content_type,
-            message_id, trip_id, timezone.now(),
+            message_id, trip_id, duration_ms, timezone.now(),
         ],
     )
 

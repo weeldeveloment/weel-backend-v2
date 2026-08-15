@@ -543,6 +543,14 @@ class Command(BaseCommand):
             "ALTER TABLE b2b_workspace_file "
             "ADD COLUMN IF NOT EXISTS content_type VARCHAR(120);"
         )
+        # How long a voice message runs, in milliseconds. Stored rather than
+        # read off the file: the thread renders a duration under every voice
+        # bubble, and working it out client-side would mean downloading every
+        # clip in the history just to label them.
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_file "
+            "ADD COLUMN IF NOT EXISTS duration_ms INTEGER;"
+        )
         # A chat attachment dies with its message. ON DELETE CASCADE is what
         # keeps the quota honest: deleting a thread has to give the bytes back,
         # and a nightly reconciliation job would be the alternative.
