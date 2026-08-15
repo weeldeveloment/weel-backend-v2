@@ -114,7 +114,8 @@ class ChatMessageSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     thread_id = serializers.IntegerField(required=False)
     sender_id = serializers.IntegerField()
-    text = serializers.CharField()
+    text = serializers.CharField(allow_blank=True)
+    reply_to_id = serializers.IntegerField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
 
     class Meta:
@@ -263,6 +264,7 @@ class MessageWriteSerializer(serializers.Serializer):
     """
 
     text = serializers.CharField(max_length=4000, required=False, allow_blank=True, default="")
+    reply_to_id = serializers.IntegerField(required=False, allow_null=True)
 
     def validate_text(self, value: str) -> str:
         value = value.strip()

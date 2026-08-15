@@ -27,13 +27,13 @@ from apps.b2b.models import LeadStatus
 from apps.b2b.repository import get_company
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import storage
-from apps.b2b.workspace.consumers import broadcast_message
+from apps.b2b.workspace.consumers import broadcast_deletion, broadcast_message
 from apps.b2b.workspace.authentication import (
     DashboardWorkspaceAuthentication,
     WorkspaceJWTAuthentication,
 )
 from apps.b2b.workspace.permissions import HasCapability, IsWorkspaceManager, IsWorkspaceUser
-from apps.b2b.workspace.roles import capabilities_for
+from apps.b2b.workspace.roles import capabilities_for, is_manager
 from apps.b2b.workspace.serializers import (
     CalendarEventSerializer,
     ChatMessageSerializer,
@@ -865,12 +865,35 @@ class WorkspaceThreadListCreateView(WorkspaceAPIView):
         return Response(_thread_payload(thread), status=status.HTTP_201_CREATED)
 
 
-def _message_payload(message: dict, attachment: dict | None = None) -> dict:
+# What a quoted message shows in the bubble above a reply. Deliberately short:
+# the quote is a pointer, and shipping the whole original doubles the size of
+# every reply in a page of history.
+_QUOTE_LENGTH = 120
+
+
+def _quote_payload(original: dict | None) -> dict | None:
+    if not original:
+        return None
+    text = original.get("text") or ""
+    return {
+        "id": original["id"],
+        "sender_id": original["sender_id"],
+        "text": text[:_QUOTE_LENGTH],
+        "is_truncated": len(text) > _QUOTE_LENGTH,
+    }
+
+
+def _message_payload(
+    message: dict,
+    attachment: dict | None = None,
+    replied_to: dict | None = None,
+) -> dict:
     """One message as the app reads it.
 
-    The attachment is nested rather than flattened: a message has at most one
-    today, but a client that reads `attachment.url` keeps working when that
-    becomes a list, whereas one reading `attachment_url` does not.
+    The attachment and the quote are nested rather than flattened: a message
+    has at most one attachment today, but a client that reads `attachment.url`
+    keeps working when that becomes a list, whereas one reading
+    `attachment_url` does not.
     """
     data = ChatMessageSerializer(message).data
     data["attachment"] = (
@@ -884,6 +907,9 @@ def _message_payload(message: dict, attachment: dict | None = None) -> dict:
         if attachment
         else None
     )
+    # Null once the original is deleted — the reply survives and simply stops
+    # quoting, which is what the ON DELETE SET NULL on the column produces.
+    data["reply_to"] = _quote_payload(replied_to)
     return data
 
 
@@ -919,6 +945,9 @@ class WorkspaceMessageView(WorkspaceAPIView):
 
         messages = repo.list_messages(thread_id, before_id=before_id, limit=limit)
         attachments = repo.attachments_for_messages([m["id"] for m in messages])
+        quoted = repo.messages_by_ids(
+            [m["reply_to_id"] for m in messages if m.get("reply_to_id")]
+        )
         # Opening a room is what marks it read, so it happens here rather than
         # costing the phone a second round trip. Only the newest page counts —
         # scrolling back through history must not clear newer messages. The
@@ -929,7 +958,12 @@ class WorkspaceMessageView(WorkspaceAPIView):
 
         return Response({
             "results": [
-                _message_payload(m, attachments.get(m["id"])) for m in messages
+                _message_payload(
+                    m,
+                    attachments.get(m["id"]),
+                    quoted.get(m.get("reply_to_id")),
+                )
+                for m in messages
             ],
             "has_more": len(messages) == limit,
         })
@@ -968,7 +1002,25 @@ class WorkspaceMessageView(WorkspaceAPIView):
             except storage.StorageQuotaExceeded as exc:
                 return _quota_response(exc)
 
-        message = repo.send_message(thread_id, request.user.id, serializer.validated_data["text"])
+        # A reply has to point at a message in *this* thread. Without the
+        # check, a valid id from another company's room would be quoted into
+        # one the caller can read, leaking its text.
+        reply_to_id = serializer.validated_data.get("reply_to_id")
+        replied_to = None
+        if reply_to_id:
+            replied_to = repo.get_message(reply_to_id, thread_id)
+            if not replied_to:
+                return Response(
+                    {"reply_to_id": [_("That message is not in this chat.")]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        message = repo.send_message(
+            thread_id,
+            request.user.id,
+            serializer.validated_data["text"],
+            reply_to_id=reply_to_id,
+        )
 
         attachment = None
         if upload is not None:
@@ -997,9 +1049,56 @@ class WorkspaceMessageView(WorkspaceAPIView):
         except Exception:  # noqa: BLE001
             logger.exception("Could not queue chat notification for thread %s", thread_id)
 
-        payload = _message_payload(message, attachment)
+        payload = _message_payload(message, attachment, replied_to)
         broadcast_message(thread_id, payload)
         return Response(payload, status=status.HTTP_201_CREATED)
+
+
+class WorkspaceMessageDetailView(WorkspaceAPIView):
+    """DELETE /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/
+
+    Your own message, always. Anyone else's only if you run the company —
+    a manager has to be able to take down something posted in a shared room,
+    and an employee must not be able to edit the record of what was said.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Delete a message",
+        responses={204: "Deleted", 403: "Not yours", 404: "Not found"},
+    )
+    def delete(self, request, thread_id: int, message_id: int):
+        if not repo.get_thread_for_member(thread_id, request.user.company_id, request.user.id):
+            return Response({"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        message = repo.get_message(message_id, thread_id)
+        if not message:
+            return Response({"detail": _("Message not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        own = message["sender_id"] == request.user.id
+        if not own and not is_manager(getattr(request.user, "role", None)):
+            return Response(
+                {"detail": _("You can only delete your own messages.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # The attachment row cascades with the message, which is what hands its
+        # bytes back to the quota. The stored object is removed separately —
+        # failing there wastes disk but must not fail the delete, or the
+        # message stays in the room with no way to remove it.
+        attachment = repo.attachments_for_messages([message_id]).get(message_id)
+        repo.delete_message(message_id, thread_id)
+        if attachment:
+            try:
+                default_storage.delete(attachment["path"])
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not delete stored object %s", attachment["path"])
+
+        # Everyone in the room drops the bubble without refetching.
+        broadcast_deletion(thread_id, message_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class WorkspaceThreadFlagsView(WorkspaceAPIView):

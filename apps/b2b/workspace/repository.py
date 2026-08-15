@@ -731,12 +731,18 @@ def list_messages(
     return list(reversed(fetch_all(sql, params)))
 
 
-def send_message(thread_id: int, sender_id: int, text: str) -> dict[str, Any] | None:
+def send_message(
+    thread_id: int,
+    sender_id: int,
+    text: str,
+    reply_to_id: int | None = None,
+) -> dict[str, Any] | None:
     now = timezone.now()
     message = fetch_one(
-        f"INSERT INTO {B2B_CHAT_MESSAGE_TABLE} (thread_id, sender_id, text, created_at) "
-        f"VALUES (%s, %s, %s, %s) RETURNING *",
-        [thread_id, sender_id, text, now],
+        f"INSERT INTO {B2B_CHAT_MESSAGE_TABLE} "
+        "(thread_id, sender_id, text, reply_to_id, created_at) "
+        f"VALUES (%s, %s, %s, %s, %s) RETURNING *",
+        [thread_id, sender_id, text, reply_to_id, now],
     )
     if message:
         execute(
@@ -746,6 +752,28 @@ def send_message(thread_id: int, sender_id: int, text: str) -> dict[str, Any] | 
         # Sending is also reading: otherwise your own message counts as unread.
         mark_thread_read(thread_id, sender_id)
     return message
+
+
+def get_message(message_id: int, thread_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {B2B_CHAT_MESSAGE_TABLE} WHERE id = %s AND thread_id = %s",
+        [message_id, thread_id],
+    )
+
+
+def messages_by_ids(message_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
+    """The messages a page of history quotes, fetched in one query.
+
+    A room page is up to 200 bubbles and any of them may be a reply; asking
+    per reply would be a query per bubble to render one screen.
+    """
+    if not message_ids:
+        return {}
+    rows = fetch_all(
+        f"SELECT * FROM {B2B_CHAT_MESSAGE_TABLE} WHERE id = ANY(%s)",
+        [list(message_ids)],
+    )
+    return {row["id"]: row for row in rows}
 
 
 def delete_message(message_id: int, thread_id: int) -> bool:

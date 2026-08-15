@@ -41,6 +41,7 @@ _CLOSE_TOKEN_INVALID = 4402
 EVENT_MESSAGE = "message"
 EVENT_TYPING = "typing"
 EVENT_READ = "read"
+EVENT_DELETED = "deleted"
 
 
 def thread_group(thread_id: int) -> str:
@@ -65,6 +66,26 @@ def broadcast_message(thread_id: int, payload: dict[str, Any]) -> None:
         )
     except Exception:  # noqa: BLE001
         logger.exception("Could not broadcast message for thread %s", thread_id)
+
+
+def broadcast_deletion(thread_id: int, message_id: int) -> None:
+    """Tells the room a message is gone, so every open thread drops the bubble
+    rather than showing it until the next refetch."""
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        async_to_sync(channel_layer.group_send)(
+            thread_group(thread_id),
+            {
+                "type": "thread.event",
+                "event": EVENT_DELETED,
+                "thread_id": thread_id,
+                "message_id": message_id,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not broadcast deletion for thread %s", thread_id)
 
 
 class WorkspaceChatConsumer(AsyncWebsocketConsumer):

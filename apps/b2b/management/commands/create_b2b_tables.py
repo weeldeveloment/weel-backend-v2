@@ -475,6 +475,15 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_chat_message_thread_idx "
             "ON b2b_chat_message (thread_id, id DESC);"
         )
+
+        # Threaded replies. SET NULL rather than CASCADE: deleting a message
+        # someone answered must not take their answer with it — the reply
+        # survives and simply stops quoting anything, which is what every
+        # other messenger does.
+        cursor.execute(
+            "ALTER TABLE b2b_chat_message ADD COLUMN IF NOT EXISTS "
+            "reply_to_id BIGINT REFERENCES b2b_chat_message(id) ON DELETE SET NULL;"
+        )
         self.stdout.write("  Created b2b_chat_message")
 
         cursor.execute("""
