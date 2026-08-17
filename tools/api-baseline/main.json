@@ -2184,6 +2184,135 @@
    },
    "type": "object"
   },
+  "AttendanceCheckIn": {
+   "properties": {},
+   "type": "object"
+  },
+  "AttendanceDay": {
+   "properties": {
+    "absent": {
+     "title": "Absent",
+     "type": "integer"
+    },
+    "date": {
+     "format": "date",
+     "title": "Date",
+     "type": "string"
+    },
+    "entries": {
+     "items": {
+      "$ref": "#/definitions/AttendanceEntry"
+     },
+     "type": "array"
+    },
+    "my_status": {
+     "minLength": 1,
+     "title": "My status",
+     "type": "string",
+     "x-nullable": true
+    },
+    "present": {
+     "title": "Present",
+     "type": "integer"
+    },
+    "unmarked": {
+     "title": "Unmarked",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "date",
+    "present",
+    "absent",
+    "unmarked",
+    "my_status",
+    "entries"
+   ],
+   "type": "object"
+  },
+  "AttendanceEntry": {
+   "properties": {
+    "checked_in_at": {
+     "format": "date-time",
+     "title": "Checked in at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "department_name": {
+     "minLength": 1,
+     "title": "Department name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "marked_by_id": {
+     "title": "Marked by id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "position": {
+     "minLength": 1,
+     "title": "Position",
+     "type": "string",
+     "x-nullable": true
+    },
+    "reason": {
+     "minLength": 1,
+     "title": "Reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "status": {
+     "minLength": 1,
+     "title": "Status",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "employee_id",
+    "full_name",
+    "status"
+   ],
+   "type": "object"
+  },
+  "AttendanceMark": {
+   "properties": {
+    "date": {
+     "format": "date",
+     "title": "Date",
+     "type": "string"
+    },
+    "reason": {
+     "maxLength": 200,
+     "title": "Reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "status": {
+     "enum": [
+      "present",
+      "absent",
+      "late",
+      "remote"
+     ],
+     "title": "Status",
+     "type": "string"
+    }
+   },
+   "required": [
+    "status"
+   ],
+   "type": "object"
+  },
   "AuthenticatedOrgCreate": {
    "properties": {
     "name": {
@@ -9177,20 +9306,6 @@
    ],
    "type": "object"
   },
-  "MessageWrite": {
-   "properties": {
-    "text": {
-     "maxLength": 4000,
-     "minLength": 1,
-     "title": "Text",
-     "type": "string"
-    }
-   },
-   "required": [
-    "text"
-   ],
-   "type": "object"
-  },
   "MonthlySpendingChartPoint": {
    "properties": {
     "change_percent": {
@@ -13093,6 +13208,63 @@
    ],
    "type": "object"
   },
+  "StorageKindUsage": {
+   "properties": {
+    "bytes": {
+     "title": "Bytes",
+     "type": "integer"
+    },
+    "files": {
+     "title": "Files",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "bytes",
+    "files"
+   ],
+   "type": "object"
+  },
+  "StorageUsage": {
+   "properties": {
+    "available_bytes": {
+     "title": "Available bytes",
+     "type": "integer"
+    },
+    "by_kind": {
+     "additionalProperties": {
+      "$ref": "#/definitions/StorageKindUsage"
+     },
+     "title": "By kind",
+     "type": "object"
+    },
+    "max_upload_bytes": {
+     "title": "Max upload bytes",
+     "type": "integer"
+    },
+    "quota_bytes": {
+     "title": "Quota bytes",
+     "type": "integer"
+    },
+    "used_bytes": {
+     "title": "Used bytes",
+     "type": "integer"
+    },
+    "used_percent": {
+     "title": "Used percent",
+     "type": "number"
+    }
+   },
+   "required": [
+    "used_bytes",
+    "quota_bytes",
+    "available_bytes",
+    "used_percent",
+    "max_upload_bytes",
+    "by_kind"
+   ],
+   "type": "object"
+  },
   "Story": {
    "properties": {
     "body": {
@@ -14347,12 +14519,16 @@
      "title": "Id",
      "type": "integer"
     },
+    "reply_to_id": {
+     "title": "Reply to id",
+     "type": "integer",
+     "x-nullable": true
+    },
     "sender_id": {
      "title": "Sender id",
      "type": "integer"
     },
     "text": {
-     "minLength": 1,
      "title": "Text",
      "type": "string"
     },
@@ -18397,6 +18573,101 @@
     ]
    }
   },
+  "/b2b/workspace/attendance/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/attendance/ — today's roll call.\n\nReadable by everyone: it is on the chat home screen, and the point of it is\nknowing who is around. `?date=YYYY-MM-DD` reads another day.",
+    "operationId": "b2b_workspace_attendance_list",
+    "parameters": [
+     {
+      "description": "YYYY-MM-DD, defaults to today",
+      "in": "query",
+      "name": "date",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AttendanceDay"
+      }
+     }
+    },
+    "summary": "Attendance for a day",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/attendance/check-in/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/attendance/check-in/ — \"I'm here\".\n\nNeeds no capability: it only ever writes the caller's own row. The arrival\ntime is taken from the server rather than the request, so a wrong device\nclock cannot become an arrival time nobody can argue with.",
+    "operationId": "b2b_workspace_attendance_check-in_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AttendanceCheckIn"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AttendanceDay"
+      }
+     }
+    },
+    "summary": "Check yourself in for today",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/attendance/{employee_id}/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/attendance/<employee_id>/ — record someone's day.\n\nA manager's screen. Marking yourself goes through check-in instead, which\nis why this does not special-case it.",
+    "operationId": "b2b_workspace_attendance_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AttendanceMark"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AttendanceDay"
+      }
+     },
+     "403": {
+      "description": "Not a manager"
+     }
+    },
+    "summary": "Mark an employee present or absent",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/auth/login/": {
    "parameters": [],
    "post": {
@@ -18639,16 +18910,33 @@
     }
    ],
    "post": {
+    "consumes": [
+     "application/json",
+     "multipart/form-data"
+    ],
     "description": "GET / POST messages in a thread the caller belongs to.",
     "operationId": "b2b_workspace_chats_messages_create",
     "parameters": [
      {
-      "in": "body",
-      "name": "data",
-      "required": true,
-      "schema": {
-       "$ref": "#/definitions/MessageWrite"
-      }
+      "default": "",
+      "in": "formData",
+      "maxLength": 4000,
+      "name": "text",
+      "required": false,
+      "type": "string"
+     },
+     {
+      "in": "formData",
+      "name": "reply_to_id",
+      "required": false,
+      "type": "integer",
+      "x-nullable": true
+     },
+     {
+      "in": "formData",
+      "name": "file",
+      "required": false,
+      "type": "file"
      }
     ],
     "responses": {
@@ -18657,13 +18945,52 @@
       "schema": {
        "$ref": "#/definitions/WorkspaceChatMessage"
       }
+     },
+     "413": {
+      "description": "Storage limit reached"
      }
     },
-    "summary": "Send a message",
+    "summary": "Send a message, optionally with a photo or video",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
    }
+  },
+  "/b2b/workspace/chats/{thread_id}/messages/{message_id}/": {
+   "delete": {
+    "description": "DELETE /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/\n\nYour own message, always. Anyone else's only if you run the company —\na manager has to be able to take down something posted in a shared room,\nand an employee must not be able to edit the record of what was said.",
+    "operationId": "b2b_workspace_chats_messages_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": "Deleted"
+     },
+     "403": {
+      "description": "Not yours"
+     },
+     "404": {
+      "description": "Not found"
+     }
+    },
+    "summary": "Delete a message",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "message_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
   },
   "/b2b/workspace/chats/{thread_id}/read/": {
    "parameters": [
@@ -18897,7 +19224,14 @@
    "get": {
     "description": "GET/POST /api/b2b/workspace/files/ — the company's shared folder.\n\nEveryone may read and add; nothing here is scoped to a role, so a driver\ncan send a photographed waybill without asking anyone to do it for them.",
     "operationId": "b2b_workspace_files_list",
-    "parameters": [],
+    "parameters": [
+     {
+      "description": "file (default), chat, or voucher",
+      "in": "query",
+      "name": "kind",
+      "type": "string"
+     }
+    ],
     "responses": {
      "200": {
       "description": "",
@@ -19669,6 +20003,26 @@
      "B2B / Mail"
     ]
    }
+  },
+  "/b2b/workspace/storage/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/storage/ — how much of the 5 GB is gone.\n\nRead by everyone, not just the owner: an employee about to upload a video\nneeds to know it will be refused before they spend the data sending it.",
+    "operationId": "b2b_workspace_storage_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/StorageUsage"
+      }
+     }
+    },
+    "summary": "Company storage usage and quota",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
   },
   "/b2b/workspace/tasks/": {
    "get": {
