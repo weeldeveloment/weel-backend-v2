@@ -1417,9 +1417,22 @@ class WorkspaceFileListCreateView(WorkspaceAPIView):
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
-    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="List files", responses={200: WorkspaceFileListSerializer()})
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="List files",
+        manual_parameters=[
+            openapi.Parameter(
+                "kind", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                description="file (default), chat, or voucher",
+            ),
+        ],
+        responses={200: WorkspaceFileListSerializer()},
+    )
     def get(self, request):
-        files = repo.list_files(request.user.company_id)
+        kind = request.query_params.get("kind", "file")
+        if kind not in ("file", "chat", "voucher"):
+            return Response({"detail": _("Invalid kind.")}, status=status.HTTP_400_BAD_REQUEST)
+        files = repo.list_files(request.user.company_id, kind=kind)
         return Response({"results": [_file_payload(f) for f in files]})
 
     @swagger_auto_schema(
