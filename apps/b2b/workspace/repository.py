@@ -22,6 +22,7 @@ from apps.b2b.raw.tables import (
     B2B_CHAT_THREAD_TABLE,
     B2B_DEPARTMENT_TABLE,
     B2B_ATTENDANCE_TABLE,
+    B2B_ATTENDANCE_LOCATION_TABLE,
     B2B_EMPLOYEE_OF_MONTH_TABLE,
     B2B_EMPLOYEE_TABLE,
     B2B_TASK_ASSIGNEE_TABLE,
@@ -1124,6 +1125,8 @@ def upsert_attendance(
     checked_in_at=None,
     reason: str | None = None,
     marked_by_id: int | None = None,
+    check_in_latitude: float | None = None,
+    check_in_longitude: float | None = None,
 ) -> dict[str, Any] | None:
     """Records one employee's day.
 
@@ -1133,26 +1136,31 @@ def upsert_attendance(
 
     `checked_in_at` is only overwritten when a new one is given — correcting a
     status from a manager's screen must not erase the time the employee
-    actually arrived.
+    actually arrived. The check-in coordinates follow the same rule: a
+    manager's own mark carries none, and must not blank out where the
+    employee's own check-in happened.
     """
     now = timezone.now()
     return fetch_one(
         f"""
         INSERT INTO {B2B_ATTENDANCE_TABLE}
             (company_id, employee_id, work_date, status, checked_in_at,
-             reason, marked_by_id, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             reason, marked_by_id, check_in_latitude, check_in_longitude,
+             created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (employee_id, work_date) DO UPDATE SET
-            status        = EXCLUDED.status,
-            checked_in_at = COALESCE(EXCLUDED.checked_in_at, {B2B_ATTENDANCE_TABLE}.checked_in_at),
-            reason        = EXCLUDED.reason,
-            marked_by_id  = EXCLUDED.marked_by_id,
-            updated_at    = EXCLUDED.updated_at
+            status             = EXCLUDED.status,
+            checked_in_at      = COALESCE(EXCLUDED.checked_in_at, {B2B_ATTENDANCE_TABLE}.checked_in_at),
+            reason             = EXCLUDED.reason,
+            marked_by_id       = EXCLUDED.marked_by_id,
+            check_in_latitude  = COALESCE(EXCLUDED.check_in_latitude, {B2B_ATTENDANCE_TABLE}.check_in_latitude),
+            check_in_longitude = COALESCE(EXCLUDED.check_in_longitude, {B2B_ATTENDANCE_TABLE}.check_in_longitude),
+            updated_at         = EXCLUDED.updated_at
         RETURNING *
         """,
         [
             company_id, employee_id, work_date, status, checked_in_at,
-            reason, marked_by_id, now, now,
+            reason, marked_by_id, check_in_latitude, check_in_longitude, now, now,
         ],
     )
 
@@ -1162,4 +1170,48 @@ def attendance_row(employee_id: int, work_date) -> dict[str, Any] | None:
         f"SELECT * FROM {B2B_ATTENDANCE_TABLE} "
         "WHERE employee_id = %s AND work_date = %s",
         [employee_id, work_date],
+    )
+
+
+# ─── Attendance location (geofence) ────────────────────────────────────────
+
+def get_attendance_location(company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {B2B_ATTENDANCE_LOCATION_TABLE} WHERE company_id = %s",
+        [company_id],
+    )
+
+
+def upsert_attendance_location(
+    *,
+    company_id: int,
+    is_enabled: bool,
+    latitude: float | None,
+    longitude: float | None,
+    radius_meters: int,
+    updated_by_id: int,
+) -> dict[str, Any] | None:
+    """One row per company — the point and radius check-ins are measured
+    against. ON CONFLICT so switching it on and off never fights the UNIQUE
+    constraint the way two managers marking the same employee would."""
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_ATTENDANCE_LOCATION_TABLE}
+            (company_id, is_enabled, latitude, longitude, radius_meters,
+             updated_by_id, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (company_id) DO UPDATE SET
+            is_enabled     = EXCLUDED.is_enabled,
+            latitude       = EXCLUDED.latitude,
+            longitude      = EXCLUDED.longitude,
+            radius_meters  = EXCLUDED.radius_meters,
+            updated_by_id  = EXCLUDED.updated_by_id,
+            updated_at     = EXCLUDED.updated_at
+        RETURNING *
+        """,
+        [
+            company_id, is_enabled, latitude, longitude, radius_meters,
+            updated_by_id, now, now,
+        ],
     )

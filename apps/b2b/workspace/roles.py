@@ -46,6 +46,11 @@ def capabilities_for(role: str | None) -> dict[str, bool]:
         # else.
         "can_view_attendance": True,
         "can_manage_attendance": manager,
+        # The geofence itself — where "at work" means and how wide. An
+        # owner-only knob: a manager marking someone present is a judgment
+        # call about one person's day, but moving the office point changes
+        # what every future check-in company-wide is measured against.
+        "can_manage_attendance_location": owner,
         # Team & hotels
         "can_view_team": True,
         "can_manage_team": owner,

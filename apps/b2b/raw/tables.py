@@ -28,6 +28,7 @@ B2B_WORKSPACE_LEAD_TABLE = "b2b_workspace_lead"
 B2B_WORKSPACE_FILE_TABLE = "b2b_workspace_file"
 B2B_EMPLOYEE_OF_MONTH_TABLE = "b2b_employee_of_month"
 B2B_ATTENDANCE_TABLE = "b2b_attendance"
+B2B_ATTENDANCE_LOCATION_TABLE = "b2b_attendance_location"
 
 # Mail inside the workspace (`/api/b2b/workspace/mail/`).
 #

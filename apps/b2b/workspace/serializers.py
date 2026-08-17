@@ -361,6 +361,38 @@ class AttendanceMarkSerializer(serializers.Serializer):
 
 
 class AttendanceCheckInSerializer(serializers.Serializer):
-    """An employee marking themselves in. Nothing to send — the time is the
-    server's, not the phone's, or a wrong device clock becomes an arrival
-    time nobody can argue with."""
+    """An employee marking themselves in. The time is the server's, not the
+    phone's, or a wrong device clock becomes an arrival time nobody can argue
+    with. Coordinates are only required when the company has geofencing on —
+    the view is what knows that, not this serializer, since the same "I'm
+    here" tap has to work for both."""
+
+    latitude = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
+
+
+class AttendanceLocationSerializer(serializers.Serializer):
+    """``GET /attendance/location/`` — the office point a check-in is
+    measured against, and whether that measuring is turned on."""
+
+    is_enabled = serializers.BooleanField()
+    latitude = serializers.FloatField(allow_null=True)
+    longitude = serializers.FloatField(allow_null=True)
+    radius_meters = serializers.IntegerField()
+    updated_at = serializers.DateTimeField(allow_null=True, required=False)
+
+
+class AttendanceLocationUpdateSerializer(serializers.Serializer):
+    """The owner's write to the geofence.
+
+    Coordinates are optional here on purpose: switching it back on without
+    resending the point should reuse the one already on file. Whether that
+    leaves the geofence with no point at all — enabling it for the first
+    time without ever having sent one — is for the view to reject, since only
+    it knows what is already stored.
+    """
+
+    is_enabled = serializers.BooleanField()
+    latitude = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
+    radius_meters = serializers.IntegerField(required=False, min_value=10, max_value=5000)

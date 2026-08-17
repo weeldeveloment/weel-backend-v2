@@ -67,7 +67,10 @@ from apps.b2b.workspace.serializers import (
     AttendanceCheckInSerializer,
     AttendanceDaySerializer,
     AttendanceMarkSerializer,
+    AttendanceLocationSerializer,
+    AttendanceLocationUpdateSerializer,
 )
+from apps.b2b.workspace.geo import distance_meters
 from apps.b2b.workspace.tokens import create_workspace_tokens, rotate_workspace_tokens
 from apps.hotels.repository import search_hotels
 from apps.hotels.serializers import HotelCardSerializer
@@ -1546,6 +1549,10 @@ class WorkspaceAttendanceCheckInView(WorkspaceAPIView):
     Needs no capability: it only ever writes the caller's own row. The arrival
     time is taken from the server rather than the request, so a wrong device
     clock cannot become an arrival time nobody can argue with.
+
+    When the company has a geofence on, the phone's coordinates are checked
+    against it *here*, server-side — a client-side "close enough" is a check
+    a modified app could always pass.
     """
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -1554,9 +1561,36 @@ class WorkspaceAttendanceCheckInView(WorkspaceAPIView):
         tags=WORKSPACE_TAG,
         operation_summary="Check yourself in for today",
         request_body=AttendanceCheckInSerializer,
-        responses={200: AttendanceDaySerializer()},
+        responses={200: AttendanceDaySerializer(), 400: "Location required or too far"},
     )
     def post(self, request):
+        serializer = AttendanceCheckInSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        latitude = serializer.validated_data.get("latitude")
+        longitude = serializer.validated_data.get("longitude")
+
+        location = repo.get_attendance_location(request.user.company_id)
+        if location and location["is_enabled"]:
+            if latitude is None or longitude is None:
+                return Response(
+                    {"detail": _("Location is required to check in.")},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            distance = distance_meters(
+                float(latitude), float(longitude),
+                float(location["latitude"]), float(location["longitude"]),
+            )
+            if distance > location["radius_meters"]:
+                return Response(
+                    {
+                        "detail": _("You are too far from the workplace to check in."),
+                        "code": "too_far_from_workplace",
+                        "distance_meters": round(distance),
+                        "radius_meters": location["radius_meters"],
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         today = timezone.localdate()
         existing = repo.attendance_row(request.user.id, today)
 
@@ -1570,12 +1604,85 @@ class WorkspaceAttendanceCheckInView(WorkspaceAPIView):
             checked_in_at=(existing or {}).get("checked_in_at") or timezone.now(),
             reason=None,
             marked_by_id=None,
+            check_in_latitude=latitude,
+            check_in_longitude=longitude,
         )
         return Response(
             AttendanceDaySerializer(
                 _attendance_payload(request.user.company_id, today, request.user.id)
             ).data
         )
+
+
+class WorkspaceAttendanceLocationView(WorkspaceAPIView):
+    """GET / PUT ``attendance/location/`` — the office geofence.
+
+    Read by everyone: the app needs `is_enabled` before it knows whether a
+    check-in has to carry coordinates at all. Only the owner may change it —
+    gated by `can_manage_attendance_location` rather than the manager-level
+    `can_manage_attendance`, since this is company policy, not one person's
+    day.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated(), IsWorkspaceUser()]
+        return [IsAuthenticated(), IsWorkspaceUser(), HasCapability()]
+
+    required_capability = "can_manage_attendance_location"
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="The office geofence attendance is checked against",
+        responses={200: AttendanceLocationSerializer()},
+    )
+    def get(self, request):
+        location = repo.get_attendance_location(request.user.company_id) or {
+            "is_enabled": False,
+            "latitude": None,
+            "longitude": None,
+            "radius_meters": 200,
+            "updated_at": None,
+        }
+        return Response(AttendanceLocationSerializer(location).data)
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Set or toggle the office geofence",
+        request_body=AttendanceLocationUpdateSerializer,
+        responses={200: AttendanceLocationSerializer(), 403: "Not the owner"},
+    )
+    def put(self, request):
+        serializer = AttendanceLocationUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        existing = repo.get_attendance_location(request.user.company_id)
+        latitude = data.get("latitude")
+        longitude = data.get("longitude")
+        if latitude is None and longitude is None and existing:
+            # Re-enabling (or just changing the radius) without resending the
+            # point — reuse what is already on file.
+            latitude = existing["latitude"]
+            longitude = existing["longitude"]
+
+        if data["is_enabled"] and (latitude is None or longitude is None):
+            return Response(
+                {"detail": _("latitude and longitude are required to enable location-based attendance.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        location = repo.upsert_attendance_location(
+            company_id=request.user.company_id,
+            is_enabled=data["is_enabled"],
+            latitude=latitude,
+            longitude=longitude,
+            radius_meters=data.get("radius_meters") or (existing or {}).get("radius_meters", 200),
+            updated_by_id=request.user.id,
+        )
+        return Response(AttendanceLocationSerializer(location).data)
 
 
 class WorkspaceAttendanceMarkView(WorkspaceAPIView):

@@ -613,7 +613,36 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_attendance_company_date_idx "
             "ON b2b_attendance (company_id, work_date);"
         )
+        # Where a geofenced check-in actually happened, for the same reason
+        # `marked_by_id` is kept: a rejected or accepted check-in should have
+        # something to point at besides the employee's word.
+        cursor.execute("""
+            ALTER TABLE b2b_attendance ADD COLUMN IF NOT EXISTS check_in_latitude NUMERIC(9,6);
+        """)
+        cursor.execute("""
+            ALTER TABLE b2b_attendance ADD COLUMN IF NOT EXISTS check_in_longitude NUMERIC(9,6);
+        """)
         self.stdout.write("  Created b2b_attendance")
+
+        # One row per company: the office point and radius a check-in is
+        # measured against. `is_enabled` is kept separate from having
+        # coordinates at all — an owner picking a point on the map before
+        # switching geofencing on must not have it enforced early, and
+        # switching it off later must not lose the point for next time.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_attendance_location (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL UNIQUE REFERENCES b2b_company(id) ON DELETE CASCADE,
+                is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                latitude NUMERIC(9,6),
+                longitude NUMERIC(9,6),
+                radius_meters INTEGER NOT NULL DEFAULT 200,
+                updated_by_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        self.stdout.write("  Created b2b_attendance_location")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_employee_of_month (

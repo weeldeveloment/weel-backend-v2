@@ -18,6 +18,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from apps.b2b.workspace.authentication import WorkspaceUser
 from apps.b2b.workspace.views import (
     WorkspaceAttendanceCheckInView,
+    WorkspaceAttendanceLocationView,
     WorkspaceAttendanceMarkView,
     WorkspaceAttendanceView,
 )
@@ -112,12 +113,15 @@ class TestRollCall:
 
 
 class TestCheckIn:
-    def _post(self, existing=None):
-        request = factory.post("/attendance/check-in/", {}, format="json")
+    def _post(self, existing=None, location=None, body=None):
+        request = factory.post("/attendance/check-in/", body or {}, format="json")
         force_authenticate(request, user=EMPLOYEE)
         with patch("apps.b2b.workspace.views.repo") as repo:
             repo.attendance_row.return_value = existing
             repo.attendance_for_date.return_value = ROSTER
+            # No geofence configured unless a test says otherwise — the
+            # default company has never turned this on.
+            repo.get_attendance_location.return_value = location
             response = WorkspaceAttendanceCheckInView.as_view()(request)
             return response, repo
 
@@ -138,6 +142,45 @@ class TestCheckIn:
     def test_the_first_check_in_stamps_a_time(self):
         _, repo = self._post(existing=None)
         assert repo.upsert_attendance.call_args.kwargs["checked_in_at"] is not None
+
+    def test_no_geofence_configured_needs_no_coordinates(self):
+        response, repo = self._post(location=None)
+        assert response.status_code == 200
+        repo.upsert_attendance.assert_called_once()
+
+    def test_a_disabled_geofence_needs_no_coordinates(self):
+        response, repo = self._post(
+            location={"is_enabled": False, "latitude": 41.3, "longitude": 69.2, "radius_meters": 200}
+        )
+        assert response.status_code == 200
+
+    def test_an_enabled_geofence_refuses_a_check_in_with_no_location(self):
+        response, repo = self._post(
+            location={"is_enabled": True, "latitude": 41.3, "longitude": 69.2, "radius_meters": 200},
+        )
+        assert response.status_code == 400
+        repo.upsert_attendance.assert_not_called()
+
+    def test_inside_the_radius_checks_in(self):
+        # ~11m north of the office point — well inside a 200m radius.
+        response, repo = self._post(
+            location={"is_enabled": True, "latitude": 41.3000, "longitude": 69.2000, "radius_meters": 200},
+            body={"latitude": 41.3001, "longitude": 69.2000},
+        )
+        assert response.status_code == 200
+        kwargs = repo.upsert_attendance.call_args.kwargs
+        assert kwargs["check_in_latitude"] == 41.3001
+        assert kwargs["check_in_longitude"] == 69.2000
+
+    def test_outside_the_radius_is_refused(self):
+        # ~1.1km away — outside a 200m radius.
+        response, repo = self._post(
+            location={"is_enabled": True, "latitude": 41.3000, "longitude": 69.2000, "radius_meters": 200},
+            body={"latitude": 41.3100, "longitude": 69.2000},
+        )
+        assert response.status_code == 400
+        assert response.data["code"] == "too_far_from_workplace"
+        repo.upsert_attendance.assert_not_called()
 
 
 class TestMarking:
@@ -192,3 +235,88 @@ class TestMarking:
         # column, or a filter on `reason IS NULL` misses half of them.
         _, repo = self._post(OWNER, {"status": "absent", "reason": "   "})
         assert repo.upsert_attendance.call_args.kwargs["reason"] is None
+
+
+PERFORMER = WorkspaceUser({
+    "id": 11, "company_id": 55, "role": "performer",
+    "full_name": "Menejer", "phone": "+998900000003",
+})
+
+
+class TestLocation:
+    def _get(self, user=EMPLOYEE, location=None):
+        request = factory.get("/attendance/location/")
+        force_authenticate(request, user=user)
+        with patch("apps.b2b.workspace.views.repo") as repo:
+            repo.get_attendance_location.return_value = location
+            return WorkspaceAttendanceLocationView.as_view()(request), repo
+
+    def _put(self, user=OWNER, body=None, existing=None):
+        request = factory.put("/attendance/location/", body or {}, format="json")
+        force_authenticate(request, user=user)
+        with patch("apps.b2b.workspace.views.repo") as repo:
+            repo.get_attendance_location.return_value = existing
+            repo.upsert_attendance_location.side_effect = (
+                lambda **kw: {**kw, "updated_at": None}
+            )
+            response = WorkspaceAttendanceLocationView.as_view()(request)
+            return response, repo
+
+    def test_anyone_may_read_whether_it_is_on(self):
+        # The app needs this before it knows whether check-in has to carry
+        # coordinates — an employee, not just the owner, has to read it.
+        response, _ = self._get(user=EMPLOYEE, location={
+            "is_enabled": True, "latitude": 41.3, "longitude": 69.2,
+            "radius_meters": 200, "updated_at": None,
+        })
+        assert response.status_code == 200
+        assert response.data["is_enabled"] is True
+
+    def test_nothing_configured_yet_reads_as_disabled(self):
+        response, _ = self._get(location=None)
+        assert response.status_code == 200
+        assert response.data["is_enabled"] is False
+
+    def test_an_employee_cannot_change_it(self):
+        response, repo = self._put(user=EMPLOYEE, body={"is_enabled": True, "latitude": 41.3, "longitude": 69.2})
+        assert response.status_code == 403
+        repo.upsert_attendance_location.assert_not_called()
+
+    def test_a_performer_manager_cannot_change_it_either(self):
+        # Company policy, not a manager's day-to-day call — only the owner.
+        response, repo = self._put(user=PERFORMER, body={"is_enabled": True, "latitude": 41.3, "longitude": 69.2})
+        assert response.status_code == 403
+        repo.upsert_attendance_location.assert_not_called()
+
+    def test_the_owner_can_set_the_point_and_turn_it_on(self):
+        response, repo = self._put(
+            user=OWNER, body={"is_enabled": True, "latitude": 41.3, "longitude": 69.2, "radius_meters": 150}
+        )
+        assert response.status_code == 200
+        kwargs = repo.upsert_attendance_location.call_args.kwargs
+        assert kwargs["is_enabled"] is True
+        assert kwargs["latitude"] == 41.3
+        assert kwargs["longitude"] == 69.2
+        assert kwargs["radius_meters"] == 150
+        assert kwargs["updated_by_id"] == 9
+
+    def test_turning_it_on_with_no_point_ever_set_is_refused(self):
+        response, repo = self._put(user=OWNER, body={"is_enabled": True}, existing=None)
+        assert response.status_code == 400
+        repo.upsert_attendance_location.assert_not_called()
+
+    def test_turning_it_back_on_reuses_the_point_already_on_file(self):
+        response, repo = self._put(
+            user=OWNER,
+            body={"is_enabled": True},
+            existing={"is_enabled": False, "latitude": 41.3, "longitude": 69.2, "radius_meters": 200},
+        )
+        assert response.status_code == 200
+        kwargs = repo.upsert_attendance_location.call_args.kwargs
+        assert kwargs["latitude"] == 41.3
+        assert kwargs["longitude"] == 69.2
+
+    def test_turning_it_off_needs_no_point(self):
+        response, repo = self._put(user=OWNER, body={"is_enabled": False}, existing=None)
+        assert response.status_code == 200
+        repo.upsert_attendance_location.assert_called_once()
