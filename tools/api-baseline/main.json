@@ -2185,7 +2185,18 @@
    "type": "object"
   },
   "AttendanceCheckIn": {
-   "properties": {},
+   "properties": {
+    "latitude": {
+     "title": "Latitude",
+     "type": "number",
+     "x-nullable": true
+    },
+    "longitude": {
+     "title": "Longitude",
+     "type": "number",
+     "x-nullable": true
+    }
+   },
    "type": "object"
   },
   "AttendanceDay": {
@@ -2281,6 +2292,69 @@
     "employee_id",
     "full_name",
     "status"
+   ],
+   "type": "object"
+  },
+  "AttendanceLocation": {
+   "properties": {
+    "is_enabled": {
+     "title": "Is enabled",
+     "type": "boolean"
+    },
+    "latitude": {
+     "title": "Latitude",
+     "type": "number",
+     "x-nullable": true
+    },
+    "longitude": {
+     "title": "Longitude",
+     "type": "number",
+     "x-nullable": true
+    },
+    "radius_meters": {
+     "title": "Radius meters",
+     "type": "integer"
+    },
+    "updated_at": {
+     "format": "date-time",
+     "title": "Updated at",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "is_enabled",
+    "latitude",
+    "longitude",
+    "radius_meters"
+   ],
+   "type": "object"
+  },
+  "AttendanceLocationUpdate": {
+   "properties": {
+    "is_enabled": {
+     "title": "Is enabled",
+     "type": "boolean"
+    },
+    "latitude": {
+     "title": "Latitude",
+     "type": "number",
+     "x-nullable": true
+    },
+    "longitude": {
+     "title": "Longitude",
+     "type": "number",
+     "x-nullable": true
+    },
+    "radius_meters": {
+     "maximum": 5000,
+     "minimum": 10,
+     "title": "Radius meters",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "is_enabled"
    ],
    "type": "object"
   },
@@ -8506,6 +8580,11 @@
   },
   "Lead": {
    "properties": {
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
     "author_id": {
      "title": "Author id",
      "type": "integer"
@@ -8538,6 +8617,24 @@
      "title": "Company name",
      "type": "string"
     },
+    "completed_at": {
+     "format": "date-time",
+     "title": "Completed at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "contact_address": {
+     "minLength": 1,
+     "title": "Contact address",
+     "type": "string",
+     "x-nullable": true
+    },
+    "contact_email": {
+     "minLength": 1,
+     "title": "Contact email",
+     "type": "string",
+     "x-nullable": true
+    },
     "contact_full_name": {
      "minLength": 1,
      "title": "Contact full name",
@@ -8550,6 +8647,12 @@
      "type": "string",
      "x-nullable": true
     },
+    "contact_position": {
+     "minLength": 1,
+     "title": "Contact position",
+     "type": "string",
+     "x-nullable": true
+    },
     "created_at": {
      "format": "date-time",
      "title": "Created at",
@@ -8557,6 +8660,10 @@
     },
     "id": {
      "title": "Id",
+     "type": "integer"
+    },
+    "item_count": {
+     "title": "Item count",
      "type": "integer"
     },
     "product_name": {
@@ -8569,10 +8676,37 @@
      "title": "Quantity",
      "type": "string"
     },
+    "source": {
+     "enum": [
+      "website",
+      "call",
+      "referral",
+      "exhibition",
+      "manual"
+     ],
+     "title": "Source",
+     "type": "string"
+    },
+    "stage": {
+     "enum": [
+      "new",
+      "interested",
+      "proposal",
+      "negotiation",
+      "won",
+      "lost"
+     ],
+     "title": "Stage",
+     "type": "string"
+    },
     "status": {
      "minLength": 1,
      "title": "Status",
      "type": "string"
+    },
+    "task_count": {
+     "title": "Task count",
+     "type": "integer"
     }
    },
    "required": [
@@ -8582,12 +8716,324 @@
     "contact_phone",
     "product_name",
     "quantity",
+    "amount",
     "status",
+    "stage",
+    "source",
     "author_id",
     "created_at",
     "can_claim",
     "can_complete",
     "can_view_details"
+   ],
+   "type": "object"
+  },
+  "LeadActivity": {
+   "properties": {
+    "author_id": {
+     "title": "Author id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "author_name": {
+     "minLength": 1,
+     "title": "Author name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "author_photo": {
+     "minLength": 1,
+     "title": "Author photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "kind": {
+     "enum": [
+      "created",
+      "claimed",
+      "assigned",
+      "stage",
+      "comment",
+      "completed"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "text": {
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "kind",
+    "text",
+    "author_id",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "LeadAssignWrite": {
+   "properties": {
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "employee_id"
+   ],
+   "type": "object"
+  },
+  "LeadCommentWrite": {
+   "properties": {
+    "text": {
+     "maxLength": 2000,
+     "minLength": 1,
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "type": "object"
+  },
+  "LeadDetail": {
+   "properties": {
+    "activity": {
+     "items": {
+      "$ref": "#/definitions/LeadActivity"
+     },
+     "type": "array"
+    },
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
+    "author_id": {
+     "title": "Author id",
+     "type": "integer"
+    },
+    "can_claim": {
+     "title": "Can claim",
+     "type": "boolean"
+    },
+    "can_complete": {
+     "title": "Can complete",
+     "type": "boolean"
+    },
+    "can_view_details": {
+     "title": "Can view details",
+     "type": "boolean"
+    },
+    "claimed_at": {
+     "format": "date-time",
+     "title": "Claimed at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "claimed_by_id": {
+     "title": "Claimed by id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "company_name": {
+     "minLength": 1,
+     "title": "Company name",
+     "type": "string"
+    },
+    "completed_at": {
+     "format": "date-time",
+     "title": "Completed at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "contact_address": {
+     "minLength": 1,
+     "title": "Contact address",
+     "type": "string",
+     "x-nullable": true
+    },
+    "contact_email": {
+     "minLength": 1,
+     "title": "Contact email",
+     "type": "string",
+     "x-nullable": true
+    },
+    "contact_full_name": {
+     "minLength": 1,
+     "title": "Contact full name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "contact_phone": {
+     "minLength": 1,
+     "title": "Contact phone",
+     "type": "string",
+     "x-nullable": true
+    },
+    "contact_position": {
+     "minLength": 1,
+     "title": "Contact position",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "item_count": {
+     "title": "Item count",
+     "type": "integer"
+    },
+    "items": {
+     "items": {
+      "$ref": "#/definitions/LeadItem"
+     },
+     "type": "array"
+    },
+    "product_name": {
+     "minLength": 1,
+     "title": "Product name",
+     "type": "string"
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    },
+    "source": {
+     "enum": [
+      "website",
+      "call",
+      "referral",
+      "exhibition",
+      "manual"
+     ],
+     "title": "Source",
+     "type": "string"
+    },
+    "stage": {
+     "enum": [
+      "new",
+      "interested",
+      "proposal",
+      "negotiation",
+      "won",
+      "lost"
+     ],
+     "title": "Stage",
+     "type": "string"
+    },
+    "status": {
+     "minLength": 1,
+     "title": "Status",
+     "type": "string"
+    },
+    "task_count": {
+     "title": "Task count",
+     "type": "integer"
+    },
+    "tasks": {
+     "items": {
+      "$ref": "#/definitions/Task"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "id",
+    "company_name",
+    "contact_full_name",
+    "contact_phone",
+    "product_name",
+    "quantity",
+    "amount",
+    "status",
+    "stage",
+    "source",
+    "author_id",
+    "created_at",
+    "can_claim",
+    "can_complete",
+    "can_view_details",
+    "items",
+    "activity",
+    "tasks"
+   ],
+   "type": "object"
+  },
+  "LeadItem": {
+   "properties": {
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "position": {
+     "title": "Position",
+     "type": "integer"
+    },
+    "unit": {
+     "title": "Unit",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "unit",
+    "amount",
+    "position"
+   ],
+   "type": "object"
+  },
+  "LeadItemWrite": {
+   "properties": {
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
+    "name": {
+     "maxLength": 300,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "unit": {
+     "maxLength": 100,
+     "title": "Unit",
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
    ],
    "type": "object"
   },
@@ -8605,6 +9051,26 @@
    ],
    "type": "object"
   },
+  "LeadStageWrite": {
+   "properties": {
+    "stage": {
+     "enum": [
+      "new",
+      "interested",
+      "proposal",
+      "negotiation",
+      "won",
+      "lost"
+     ],
+     "title": "Stage",
+     "type": "string"
+    }
+   },
+   "required": [
+    "stage"
+   ],
+   "type": "object"
+  },
   "LeadWrite": {
    "properties": {
     "company_name": {
@@ -8612,6 +9078,18 @@
      "minLength": 1,
      "title": "Company name",
      "type": "string"
+    },
+    "contact_address": {
+     "title": "Contact address",
+     "type": "string",
+     "x-nullable": true
+    },
+    "contact_email": {
+     "format": "email",
+     "maxLength": 254,
+     "title": "Contact email",
+     "type": "string",
+     "x-nullable": true
     },
     "contact_full_name": {
      "maxLength": 300,
@@ -8625,6 +9103,18 @@
      "title": "Contact phone",
      "type": "string"
     },
+    "contact_position": {
+     "maxLength": 200,
+     "title": "Contact position",
+     "type": "string",
+     "x-nullable": true
+    },
+    "items": {
+     "items": {
+      "$ref": "#/definitions/LeadItemWrite"
+     },
+     "type": "array"
+    },
     "product_name": {
      "maxLength": 300,
      "minLength": 1,
@@ -8634,6 +9124,17 @@
     "quantity": {
      "format": "decimal",
      "title": "Quantity",
+     "type": "string"
+    },
+    "source": {
+     "enum": [
+      "website",
+      "call",
+      "referral",
+      "exhibition",
+      "manual"
+     ],
+     "title": "Source",
      "type": "string"
     }
    },
@@ -18603,7 +19104,7 @@
   "/b2b/workspace/attendance/check-in/": {
    "parameters": [],
    "post": {
-    "description": "POST /api/b2b/workspace/attendance/check-in/ — \"I'm here\".\n\nNeeds no capability: it only ever writes the caller's own row. The arrival\ntime is taken from the server rather than the request, so a wrong device\nclock cannot become an arrival time nobody can argue with.",
+    "description": "POST /api/b2b/workspace/attendance/check-in/ — \"I'm here\".\n\nNeeds no capability: it only ever writes the caller's own row. The arrival\ntime is taken from the server rather than the request, so a wrong device\nclock cannot become an arrival time nobody can argue with.\n\nWhen the company has a geofence on, the phone's coordinates are checked\nagainst it *here*, server-side — a client-side \"close enough\" is a check\na modified app could always pass.",
     "operationId": "b2b_workspace_attendance_check-in_create",
     "parameters": [
      {
@@ -18621,9 +19122,61 @@
       "schema": {
        "$ref": "#/definitions/AttendanceDay"
       }
+     },
+     "400": {
+      "description": "Location required or too far"
      }
     },
     "summary": "Check yourself in for today",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/attendance/location/": {
+   "get": {
+    "description": "GET / PUT ``attendance/location/`` — the office geofence.\n\nRead by everyone: the app needs `is_enabled` before it knows whether a\ncheck-in has to carry coordinates at all. Only the owner may change it —\ngated by `can_manage_attendance_location` rather than the manager-level\n`can_manage_attendance`, since this is company policy, not one person's\nday.",
+    "operationId": "b2b_workspace_attendance_location_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AttendanceLocation"
+      }
+     }
+    },
+    "summary": "The office geofence attendance is checked against",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "put": {
+    "description": "GET / PUT ``attendance/location/`` — the office geofence.\n\nRead by everyone: the app needs `is_enabled` before it knows whether a\ncheck-in has to carry coordinates at all. Only the owner may change it —\ngated by `can_manage_attendance_location` rather than the manager-level\n`can_manage_attendance`, since this is company policy, not one person's\nday.",
+    "operationId": "b2b_workspace_attendance_location_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AttendanceLocationUpdate"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AttendanceLocation"
+      }
+     },
+     "403": {
+      "description": "Not the owner"
+     }
+    },
+    "summary": "Set or toggle the office geofence",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -19396,6 +19949,75 @@
     ]
    }
   },
+  "/b2b/workspace/leads/{lead_id}/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/leads/<id>/ — the whole lead in one response.\n\nThe detail screen shows the lead, its priced lines, its history and the\ntasks raised off it all at once, so it fetches them together: four small\nqueries on the server beats four round trips from a phone.",
+    "operationId": "b2b_workspace_leads_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/LeadDetail"
+      }
+     },
+     "404": {
+      "description": "Not found"
+     }
+    },
+    "summary": "Lead detail with items, activity and linked tasks",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/leads/{lead_id}/assign/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/leads/<id>/assign/ — hand the lead to somebody.\n\nManagers only, and distinct from claiming: claiming is first-come and\nself-service, this takes a lead off one employee and gives it to another.",
+    "operationId": "b2b_workspace_leads_assign_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadAssignWrite"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Lead"
+      }
+     },
+     "403": {
+      "description": "Managers only"
+     }
+    },
+    "summary": "Reassign a lead (managers only)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/leads/{lead_id}/claim/": {
    "parameters": [
     {
@@ -19423,6 +20045,42 @@
     ]
    }
   },
+  "/b2b/workspace/leads/{lead_id}/comments/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/leads/<id>/comments/ — add a note to the history.\n\nOnly open to whoever may see the contact: the history names the people and\nthe calls, and it is withheld from the rest of the board for the same reason\nthe phone number is.",
+    "operationId": "b2b_workspace_leads_comments_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadCommentWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/LeadActivity"
+      }
+     }
+    },
+    "summary": "Comment on a lead",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/leads/{lead_id}/complete/": {
    "parameters": [
     {
@@ -19445,6 +20103,179 @@
      }
     },
     "summary": "Complete a lead",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/leads/{lead_id}/items/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST   /api/b2b/workspace/leads/<id>/items/ — add a priced line.\nPUT    /api/b2b/workspace/leads/<id>/items/ — replace the whole list.\n\nEither way the lead's ``amount`` is re-totalled, so the board's money never\ndisagrees with the lines it came from.",
+    "operationId": "b2b_workspace_leads_items_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadItemWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/LeadItem"
+      }
+     }
+    },
+    "summary": "Add a line item to a lead",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "put": {
+    "description": "POST   /api/b2b/workspace/leads/<id>/items/ — add a priced line.\nPUT    /api/b2b/workspace/leads/<id>/items/ — replace the whole list.\n\nEither way the lead's ``amount`` is re-totalled, so the board's money never\ndisagrees with the lines it came from.",
+    "operationId": "b2b_workspace_leads_items_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/LeadItemWrite"
+       },
+       "type": "array"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/LeadItem"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "Replace a lead's line items",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/leads/{lead_id}/items/{item_id}/": {
+   "delete": {
+    "description": "DELETE /api/b2b/workspace/leads/<id>/items/<item_id>/.",
+    "operationId": "b2b_workspace_leads_items_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Delete a lead's line item",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "item_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/leads/{lead_id}/stage/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/leads/<id>/stage/ — move the lead along the funnel.\n\nThe owner or a manager, and never on a closed lead. Reaching ``won`` or\n``lost`` completes it; that rule lives in the repository so this view does\nnot have to know which stages are terminal.",
+    "operationId": "b2b_workspace_leads_stage_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadStageWrite"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Lead"
+      }
+     },
+     "403": {
+      "description": "Not yours"
+     }
+    },
+    "summary": "Change a lead's funnel stage",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/leads/{lead_id}/tasks/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/leads/<id>/tasks/ — raise a task off this lead.\n\nDeliberately not gated on `can_create_task`: the point of the button on the\nlead screen is that the person working the deal can write down the next\nthing they have to do, and that is an employee more often than a manager.\nThe task is created assigned to them.",
+    "operationId": "b2b_workspace_leads_tasks_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/TaskWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Task"
+      }
+     }
+    },
+    "summary": "Create a task linked to a lead",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
