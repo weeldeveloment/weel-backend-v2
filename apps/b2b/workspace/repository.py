@@ -13,7 +13,13 @@ from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one
 
-from apps.b2b.models import EmployeeRole, LeadStatus
+from apps.b2b.models import (
+    EmployeeRole,
+    LeadActivityKind,
+    LeadSource,
+    LeadStage,
+    LeadStatus,
+)
 from apps.b2b.raw.tables import (
     B2B_CALENDAR_EVENT_TABLE,
     B2B_CALENDAR_PARTICIPANT_TABLE,
@@ -32,6 +38,8 @@ from apps.b2b.raw.tables import (
     B2B_USER_TABLE,
     B2B_WORKSPACE_FILE_TABLE,
     B2B_WORKSPACE_LEAD_TABLE,
+    B2B_WORKSPACE_LEAD_ACTIVITY_TABLE,
+    B2B_WORKSPACE_LEAD_ITEM_TABLE,
 )
 
 # ─── Identity ─────────────────────────────────────────────────────────────────
@@ -321,17 +329,21 @@ def create_task(
     due_date: datetime | None = None,
     assignee_ids: Sequence[int] = (),
     subtasks: Sequence[str] = (),
+    lead_id: int | None = None,
 ) -> dict[str, Any] | None:
     now = timezone.now()
     task = fetch_one(
         f"""
         INSERT INTO {B2B_TASK_TABLE}
             (company_id, title, description, status, priority, project, due_date,
-             author_id, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             author_id, lead_id, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [company_id, title, description, status, priority, project, due_date, author_id, now, now],
+        [
+            company_id, title, description, status, priority, project, due_date,
+            author_id, lead_id, now, now,
+        ],
     )
     if not task:
         return None
@@ -837,14 +849,24 @@ def total_unread(company_id: int, employee_id: int) -> int:
 # ─── Leads ────────────────────────────────────────────────────────────────────
 
 LEAD_STATUSES = tuple(LeadStatus.CHOICES)
+LEAD_STAGES = tuple(LeadStage.CHOICES)
+LEAD_SOURCES = tuple(LeadSource.CHOICES)
 
 
-def list_leads(company_id: int, *, status: str | None = None) -> list[dict[str, Any]]:
+def list_leads(
+    company_id: int,
+    *,
+    status: str | None = None,
+    stage: str | None = None,
+) -> list[dict[str, Any]]:
     sql = f"SELECT * FROM {B2B_WORKSPACE_LEAD_TABLE} WHERE company_id = %s"
     params: list[Any] = [company_id]
     if status:
         sql += " AND status = %s"
         params.append(status)
+    if stage:
+        sql += " AND stage = %s"
+        params.append(stage)
     sql += " ORDER BY created_at DESC, id DESC"
     return fetch_all(sql, params)
 
@@ -865,21 +887,34 @@ def create_lead(
     contact_phone: str,
     product_name: str,
     quantity,
+    contact_position: str | None = None,
+    contact_email: str | None = None,
+    contact_address: str | None = None,
+    source: str = LeadSource.MANUAL,
+    items: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any] | None:
     now = timezone.now()
-    return fetch_one(
+    lead = fetch_one(
         f"""
         INSERT INTO {B2B_WORKSPACE_LEAD_TABLE}
             (company_id, author_id, company_name, contact_full_name, contact_phone,
-             product_name, quantity, status, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             contact_position, contact_email, contact_address,
+             product_name, quantity, status, stage, source, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
             company_id, author_id, company_name, contact_full_name, contact_phone,
-            product_name, quantity, LeadStatus.NEW, now, now,
+            contact_position, contact_email, contact_address,
+            product_name, quantity, LeadStatus.NEW, LeadStage.NEW, source, now, now,
         ],
     )
+    if not lead:
+        return None
+
+    replace_lead_items(lead["id"], items)
+    add_lead_activity(lead["id"], kind=LeadActivityKind.CREATED, author_id=author_id)
+    return get_lead(lead["id"], company_id)
 
 
 def claim_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, Any] | None:
@@ -891,7 +926,7 @@ def claim_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, Any
     the winner.
     """
     now = timezone.now()
-    return fetch_one(
+    lead = fetch_one(
         f"""
         UPDATE {B2B_WORKSPACE_LEAD_TABLE}
         SET status = %s, claimed_by_id = %s, claimed_at = %s, updated_at = %s
@@ -900,18 +935,294 @@ def claim_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, Any
         """,
         [LeadStatus.IN_PROGRESS, employee_id, now, now, lead_id, company_id, LeadStatus.NEW],
     )
+    # Only the winner logs — the loser updated nothing and has nothing to say.
+    if lead:
+        add_lead_activity(lead_id, kind=LeadActivityKind.CLAIMED, author_id=employee_id)
+    return lead
+
+
+def assign_lead(
+    lead_id: int, company_id: int, *, employee_id: int, actor_id: int
+) -> dict[str, Any] | None:
+    """Hands a lead to a named employee. A manager's move, not a claim.
+
+    Unlike [claim_lead] this does not care what the current status is: the point
+    of it is to take a lead off somebody and give it to somebody else. A lead
+    that was still ``new`` becomes ``in_progress``, because it now has an owner;
+    a completed one keeps its status.
+    """
+    now = timezone.now()
+    lead = fetch_one(
+        f"""
+        UPDATE {B2B_WORKSPACE_LEAD_TABLE}
+        SET claimed_by_id = %s,
+            claimed_at = COALESCE(claimed_at, %s),
+            status = CASE WHEN status = %s THEN %s ELSE status END,
+            updated_at = %s
+        WHERE id = %s AND company_id = %s
+        RETURNING *
+        """,
+        [
+            employee_id, now, LeadStatus.NEW, LeadStatus.IN_PROGRESS, now,
+            lead_id, company_id,
+        ],
+    )
+    if lead:
+        add_lead_activity(
+            lead_id, kind=LeadActivityKind.ASSIGNED, author_id=actor_id,
+            text=str(employee_id),
+        )
+    return lead
+
+
+def set_lead_stage(
+    lead_id: int, company_id: int, *, stage: str, employee_id: int
+) -> dict[str, Any] | None:
+    """Moves a lead along the funnel, and closes it if the stage closes it.
+
+    The status follows the stage here and nowhere else, so "which stages mean
+    done" is a single rule rather than one the callers each re-derive.
+    """
+    current = get_lead(lead_id, company_id)
+    if not current or current.get("stage") == stage:
+        return current
+
+    now = timezone.now()
+    closing = stage in LeadStage.CLOSED
+    lead = fetch_one(
+        f"""
+        UPDATE {B2B_WORKSPACE_LEAD_TABLE}
+        SET stage = %s,
+            status = %s,
+            completed_at = %s,
+            updated_at = %s
+        WHERE id = %s AND company_id = %s
+        RETURNING *
+        """,
+        [
+            stage,
+            LeadStatus.COMPLETED if closing else current.get("status"),
+            now if closing else None,
+            now,
+            lead_id,
+            company_id,
+        ],
+    )
+    if lead:
+        add_lead_activity(
+            lead_id,
+            kind=LeadActivityKind.COMPLETED if closing else LeadActivityKind.STAGE,
+            author_id=employee_id,
+            # The two stage names, so the feed can read "Yangi → Taklif
+            # yuborildi" without having to guess what it moved from.
+            text=f"{current.get('stage') or LeadStage.NEW}>{stage}",
+        )
+    return lead
 
 
 def complete_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, Any] | None:
-    return fetch_one(
+    """The claiming employee marks the lead won.
+
+    Kept as its own call rather than folded into [set_lead_stage] because it
+    carries a guard that one does not: only the employee holding the lead may
+    finish it, and only from ``in_progress``.
+    """
+    now = timezone.now()
+    lead = fetch_one(
         f"""
         UPDATE {B2B_WORKSPACE_LEAD_TABLE}
-        SET status = %s, updated_at = %s
+        SET status = %s, stage = %s, completed_at = %s, updated_at = %s
         WHERE id = %s AND company_id = %s AND status = %s AND claimed_by_id = %s
         RETURNING *
         """,
-        [LeadStatus.COMPLETED, timezone.now(), lead_id, company_id, LeadStatus.IN_PROGRESS, employee_id],
+        [
+            LeadStatus.COMPLETED, LeadStage.WON, now, now,
+            lead_id, company_id, LeadStatus.IN_PROGRESS, employee_id,
+        ],
     )
+    if lead:
+        add_lead_activity(
+            lead_id, kind=LeadActivityKind.COMPLETED, author_id=employee_id,
+            text=f"{LeadStage.NEGOTIATION}>{LeadStage.WON}",
+        )
+    return lead
+
+
+# ─── Lead line items ──────────────────────────────────────────────────────────
+
+def list_lead_items(lead_id: int) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"SELECT * FROM {B2B_WORKSPACE_LEAD_ITEM_TABLE} WHERE lead_id = %s "
+        "ORDER BY position, id",
+        [lead_id],
+    )
+
+
+def replace_lead_items(lead_id: int, items: Sequence[dict[str, Any]]) -> None:
+    """Swaps a lead's whole item list, then re-totals it.
+
+    Delete-and-insert rather than a diff: the list is short, the client sends it
+    whole, and matching rows up by name would break the moment somebody renamed
+    one.
+    """
+    execute(f"DELETE FROM {B2B_WORKSPACE_LEAD_ITEM_TABLE} WHERE lead_id = %s", [lead_id])
+    for position, item in enumerate(items):
+        name = (item.get("name") or "").strip()
+        if not name:
+            continue
+        execute(
+            f"""
+            INSERT INTO {B2B_WORKSPACE_LEAD_ITEM_TABLE}
+                (lead_id, name, unit, amount, position, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            [
+                lead_id, name, (item.get("unit") or "").strip(),
+                item.get("amount") or 0, position, timezone.now(),
+            ],
+        )
+    recalc_lead_amount(lead_id)
+
+
+def add_lead_item(
+    lead_id: int, *, name: str, unit: str = "", amount=0
+) -> dict[str, Any] | None:
+    row = fetch_one(
+        f"SELECT COALESCE(MAX(position), -1) + 1 AS next FROM "
+        f"{B2B_WORKSPACE_LEAD_ITEM_TABLE} WHERE lead_id = %s",
+        [lead_id],
+    )
+    item = fetch_one(
+        f"""
+        INSERT INTO {B2B_WORKSPACE_LEAD_ITEM_TABLE}
+            (lead_id, name, unit, amount, position, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [lead_id, name, unit, amount, int((row or {}).get("next") or 0), timezone.now()],
+    )
+    recalc_lead_amount(lead_id)
+    return item
+
+
+def delete_lead_item(lead_id: int, item_id: int) -> bool:
+    deleted = execute(
+        f"DELETE FROM {B2B_WORKSPACE_LEAD_ITEM_TABLE} WHERE id = %s AND lead_id = %s",
+        [item_id, lead_id],
+    )
+    recalc_lead_amount(lead_id)
+    return bool(deleted)
+
+
+def recalc_lead_amount(lead_id: int) -> None:
+    """Mirrors SUM(items.amount) onto the lead.
+
+    Denormalised on purpose: the board lists every lead in the company and the
+    card shows the money, so the alternative is a join and a GROUP BY on every
+    list call to recompute a number that only changes when somebody edits an
+    item.
+    """
+    execute(
+        f"""
+        UPDATE {B2B_WORKSPACE_LEAD_TABLE}
+        SET amount = COALESCE((
+                SELECT SUM(amount) FROM {B2B_WORKSPACE_LEAD_ITEM_TABLE}
+                WHERE lead_id = %s
+            ), 0),
+            updated_at = %s
+        WHERE id = %s
+        """,
+        [lead_id, timezone.now(), lead_id],
+    )
+
+
+# ─── Lead activity ────────────────────────────────────────────────────────────
+
+def list_lead_activity(lead_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
+    """Newest first, with the author's name joined on so the feed does not need
+    the roster to render."""
+    return fetch_all(
+        f"""
+        SELECT a.*,
+               e.full_name AS author_name,
+               e.photo AS author_photo
+        FROM {B2B_WORKSPACE_LEAD_ACTIVITY_TABLE} a
+        LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = a.author_id
+        WHERE a.lead_id = %s
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT %s
+        """,
+        [lead_id, limit],
+    )
+
+
+def add_lead_activity(
+    lead_id: int,
+    *,
+    kind: str,
+    author_id: int | None = None,
+    text: str = "",
+) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_WORKSPACE_LEAD_ACTIVITY_TABLE}
+            (lead_id, author_id, kind, text, created_at)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [lead_id, author_id, kind, text, timezone.now()],
+    )
+
+
+def add_lead_comment(lead_id: int, *, author_id: int, text: str) -> dict[str, Any] | None:
+    """A typed note. The only activity kind the client may create directly."""
+    activity = add_lead_activity(
+        lead_id, kind=LeadActivityKind.COMMENT, author_id=author_id, text=text
+    )
+    if not activity:
+        return None
+    # Re-read through the list query so a comment comes back with the same
+    # author fields every other row has.
+    rows = list_lead_activity(lead_id, limit=1)
+    return rows[0] if rows else activity
+
+
+# ─── Tasks raised off a lead ──────────────────────────────────────────────────
+
+def list_lead_tasks(lead_id: int, company_id: int) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"SELECT * FROM {B2B_TASK_TABLE} WHERE lead_id = %s AND company_id = %s "
+        "ORDER BY created_at DESC, id DESC",
+        [lead_id, company_id],
+    )
+
+
+# ─── Board counters ───────────────────────────────────────────────────────────
+#
+# Both take the whole page of lead ids and answer in one query. The funnel lists
+# every lead in the company, so asking per lead is the difference between one
+# round trip and one per card.
+
+def count_lead_items(lead_ids: Sequence[int]) -> dict[int, int]:
+    if not lead_ids:
+        return {}
+    rows = fetch_all(
+        f"SELECT lead_id, COUNT(*) AS total FROM {B2B_WORKSPACE_LEAD_ITEM_TABLE} "
+        "WHERE lead_id = __ANY_MARKER__(%s) GROUP BY lead_id",
+        [list(lead_ids)],
+    )
+    return {int(row["lead_id"]): int(row["total"]) for row in rows}
+
+
+def count_lead_tasks(company_id: int, lead_ids: Sequence[int]) -> dict[int, int]:
+    if not lead_ids:
+        return {}
+    rows = fetch_all(
+        f"SELECT lead_id, COUNT(*) AS total FROM {B2B_TASK_TABLE} "
+        "WHERE company_id = %s AND lead_id = __ANY_MARKER__(%s) GROUP BY lead_id",
+        [company_id, list(lead_ids)],
+    )
+    return {int(row["lead_id"]): int(row["total"]) for row in rows}
 
 
 # ─── Files ────────────────────────────────────────────────────────────────────

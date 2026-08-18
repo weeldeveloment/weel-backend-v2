@@ -24,7 +24,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
-from apps.b2b.models import LeadStatus
+from apps.b2b.models import LeadSource, LeadStage, LeadStatus
 from apps.b2b.repository import get_company
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import storage
@@ -45,7 +45,14 @@ from apps.b2b.workspace.serializers import (
     EventPatchSerializer,
     EventWriteSerializer,
     LeadListSerializer,
+    LeadActivitySerializer,
+    LeadAssignWriteSerializer,
+    LeadCommentWriteSerializer,
+    LeadDetailSerializer,
+    LeadItemSerializer,
+    LeadItemWriteSerializer,
     LeadSerializer,
+    LeadStageWriteSerializer,
     LeadWriteSerializer,
     MeSerializer,
     MessageWriteSerializer,
@@ -1179,10 +1186,23 @@ def _lead_payload(lead: dict, user) -> dict:
         "can_claim": lead.get("status") == LeadStatus.NEW,
         "can_complete": lead.get("status") == LeadStatus.IN_PROGRESS and is_owner,
         "can_view_details": can_view_details,
+        # Moving a lead along the funnel is the owner's job; a manager may do it
+        # over their head. Nobody moves a lead that is already closed.
+        "can_change_stage": (
+            (is_owner or user.is_manager)
+            and lead.get("status") != LeadStatus.COMPLETED
+        ),
+        # Reassigning is a manager's call only — see `WorkspaceLeadAssignView`.
+        "can_assign": bool(user.is_manager),
     }
     if not can_view_details:
+        # The whole contact card, not just the two original fields: an address
+        # and an email are as much a way to reach the contact as the phone is.
         payload["contact_full_name"] = None
         payload["contact_phone"] = None
+        payload["contact_position"] = None
+        payload["contact_email"] = None
+        payload["contact_address"] = None
     return payload
 
 
@@ -1218,8 +1238,25 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
         leads = repo.list_leads(
             request.user.company_id,
             status=request.query_params.get("status") or None,
+            stage=request.query_params.get("stage") or None,
         )
-        return Response({"results": [_lead_payload(lead, request.user) for lead in leads]})
+        # Counted in two queries for the whole board rather than two per lead:
+        # the funnel shows every lead in the company, and N+1 here is the
+        # difference between one screen and forty round trips.
+        items = repo.count_lead_items([lead["id"] for lead in leads])
+        tasks = repo.count_lead_tasks(
+            request.user.company_id, [lead["id"] for lead in leads]
+        )
+        return Response({
+            "results": [
+                {
+                    **_lead_payload(lead, request.user),
+                    "item_count": items.get(lead["id"], 0),
+                    "task_count": tasks.get(lead["id"], 0),
+                }
+                for lead in leads
+            ]
+        })
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,
@@ -1246,6 +1283,11 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
             contact_phone=data["contact_phone"],
             product_name=data["product_name"],
             quantity=data["quantity"],
+            contact_position=data.get("contact_position") or None,
+            contact_email=data.get("contact_email") or None,
+            contact_address=data.get("contact_address") or None,
+            source=data.get("source") or LeadSource.MANUAL,
+            items=data.get("items") or (),
         )
 
         tokens = repo.list_employee_fcm_tokens(
@@ -1309,6 +1351,301 @@ class WorkspaceLeadCompleteView(WorkspaceAPIView):
                 {"detail": _("Lead is not in progress.")}, status=status.HTTP_409_CONFLICT
             )
         return Response(_lead_payload(updated, request.user))
+
+
+class WorkspaceLeadDetailView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/leads/<id>/ — the whole lead in one response.
+
+    The detail screen shows the lead, its priced lines, its history and the
+    tasks raised off it all at once, so it fetches them together: four small
+    queries on the server beats four round trips from a phone.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Lead detail with items, activity and linked tasks",
+        responses={200: LeadDetailSerializer(), 404: openapi.Response(description="Not found")},
+    )
+    def get(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        payload = _lead_payload(lead, request.user)
+        tasks = repo.list_lead_tasks(lead_id, request.user.company_id)
+        return Response({
+            **payload,
+            "item_count": len(repo.list_lead_items(lead_id)),
+            "task_count": len(tasks),
+            "items": repo.list_lead_items(lead_id),
+            "activity": repo.list_lead_activity(lead_id),
+            # Hydrated the same way the tasks tab does it, so a checkbox on this
+            # screen and the same task on Vazifa agree about who may tick it.
+            "tasks": [
+                _task_payload(repo.get_task(task["id"], request.user.company_id), request.user)
+                for task in tasks
+            ],
+        })
+
+
+class WorkspaceLeadStageView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/leads/<id>/stage/ — move the lead along the funnel.
+
+    The owner or a manager, and never on a closed lead. Reaching ``won`` or
+    ``lost`` completes it; that rule lives in the repository so this view does
+    not have to know which stages are terminal.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Change a lead's funnel stage",
+        request_body=LeadStageWriteSerializer,
+        responses={200: LeadSerializer(), 403: openapi.Response(description="Not yours")},
+    )
+    def post(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        is_owner = lead.get("claimed_by_id") == request.user.id
+        if not (is_owner or request.user.is_manager):
+            return Response(
+                {"detail": _("Only the employee who claimed this lead can move it.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if lead.get("status") == LeadStatus.COMPLETED:
+            return Response(
+                {"detail": _("This lead is already closed.")},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = LeadStageWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = repo.set_lead_stage(
+            lead_id,
+            request.user.company_id,
+            stage=serializer.validated_data["stage"],
+            employee_id=request.user.id,
+        )
+        return Response(_lead_payload(updated or lead, request.user))
+
+
+class WorkspaceLeadAssignView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/leads/<id>/assign/ — hand the lead to somebody.
+
+    Managers only, and distinct from claiming: claiming is first-come and
+    self-service, this takes a lead off one employee and gives it to another.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Reassign a lead (managers only)",
+        request_body=LeadAssignWriteSerializer,
+        responses={200: LeadSerializer(), 403: openapi.Response(description="Managers only")},
+    )
+    def post(self, request, lead_id: int):
+        if not request.user.is_manager:
+            return Response(
+                {"detail": _("Your role does not allow reassigning leads.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not repo.get_lead(lead_id, request.user.company_id):
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = LeadAssignWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        employee_id = serializer.validated_data["employee_id"]
+
+        # Checked against this company's roster rather than trusted: an id from
+        # the client could otherwise attach a lead to somebody else's employee.
+        if employee_id not in repo.employee_ids_in_company(
+            request.user.company_id, [employee_id]
+        ):
+            return Response(
+                {"detail": _("Employee not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        updated = repo.assign_lead(
+            lead_id,
+            request.user.company_id,
+            employee_id=employee_id,
+            actor_id=request.user.id,
+        )
+        return Response(_lead_payload(updated, request.user))
+
+
+class WorkspaceLeadCommentView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/leads/<id>/comments/ — add a note to the history.
+
+    Only open to whoever may see the contact: the history names the people and
+    the calls, and it is withheld from the rest of the board for the same reason
+    the phone number is.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Comment on a lead",
+        request_body=LeadCommentWriteSerializer,
+        responses={201: LeadActivitySerializer()},
+    )
+    def post(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        is_owner = lead.get("claimed_by_id") == request.user.id
+        if not (is_owner or request.user.is_manager):
+            return Response(
+                {"detail": _("Only the employee who claimed this lead can comment.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = LeadCommentWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        activity = repo.add_lead_comment(
+            lead_id, author_id=request.user.id, text=serializer.validated_data["text"]
+        )
+        return Response(activity, status=status.HTTP_201_CREATED)
+
+
+class WorkspaceLeadItemsView(WorkspaceAPIView):
+    """POST   /api/b2b/workspace/leads/<id>/items/ — add a priced line.
+    PUT    /api/b2b/workspace/leads/<id>/items/ — replace the whole list.
+
+    Either way the lead's ``amount`` is re-totalled, so the board's money never
+    disagrees with the lines it came from.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    def _guard(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return None, Response(
+                {"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+        is_owner = lead.get("claimed_by_id") == request.user.id
+        if not (is_owner or request.user.is_manager):
+            return None, Response(
+                {"detail": _("Only the employee who claimed this lead can edit it.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return lead, None
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Add a line item to a lead",
+        request_body=LeadItemWriteSerializer,
+        responses={201: LeadItemSerializer()},
+    )
+    def post(self, request, lead_id: int):
+        _, error = self._guard(request, lead_id)
+        if error:
+            return error
+
+        serializer = LeadItemWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        item = repo.add_lead_item(
+            lead_id,
+            name=data["name"],
+            unit=data.get("unit") or "",
+            amount=data.get("amount") or 0,
+        )
+        return Response(item, status=status.HTTP_201_CREATED)
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Replace a lead's line items",
+        request_body=LeadItemWriteSerializer(many=True),
+        responses={200: LeadItemSerializer(many=True)},
+    )
+    def put(self, request, lead_id: int):
+        _, error = self._guard(request, lead_id)
+        if error:
+            return error
+
+        serializer = LeadItemWriteSerializer(data=request.data, many=True)
+        serializer.is_valid(raise_exception=True)
+        repo.replace_lead_items(lead_id, serializer.validated_data)
+        return Response(repo.list_lead_items(lead_id))
+
+
+class WorkspaceLeadItemDetailView(WorkspaceAPIView):
+    """DELETE /api/b2b/workspace/leads/<id>/items/<item_id>/."""
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Delete a lead's line item")
+    def delete(self, request, lead_id: int, item_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+        is_owner = lead.get("claimed_by_id") == request.user.id
+        if not (is_owner or request.user.is_manager):
+            return Response(
+                {"detail": _("Only the employee who claimed this lead can edit it.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not repo.delete_lead_item(lead_id, item_id):
+            return Response({"detail": _("Item not found.")}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkspaceLeadTasksView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/leads/<id>/tasks/ — raise a task off this lead.
+
+    Deliberately not gated on `can_create_task`: the point of the button on the
+    lead screen is that the person working the deal can write down the next
+    thing they have to do, and that is an employee more often than a manager.
+    The task is created assigned to them.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Create a task linked to a lead",
+        request_body=TaskWriteSerializer,
+        responses={201: TaskSerializer()},
+    )
+    def post(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        is_owner = lead.get("claimed_by_id") == request.user.id
+        if not (is_owner or request.user.is_manager):
+            return Response(
+                {"detail": _("Only the employee who claimed this lead can add tasks.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = TaskWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        task = repo.create_task(
+            company_id=request.user.company_id,
+            author_id=request.user.id,
+            title=data["title"],
+            description=data.get("description") or "",
+            status=data.get("status") or "todo",
+            priority=data.get("priority") or "medium",
+            project=data.get("project") or lead.get("company_name"),
+            due_date=data.get("due_date"),
+            assignee_ids=data.get("assignee_ids") or [request.user.id],
+            subtasks=data.get("subtasks") or (),
+            lead_id=lead_id,
+        )
+        return Response(_task_payload(task, request.user), status=status.HTTP_201_CREATED)
 
 
 # ─── Files ────────────────────────────────────────────────────────────────────

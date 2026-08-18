@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-from apps.b2b.workspace.repository import EVENT_TYPES, TASK_PRIORITIES, TASK_STATUSES
+from apps.b2b.models import LeadActivityKind
+from apps.b2b.workspace.repository import (
+    EVENT_TYPES,
+    LEAD_SOURCES,
+    LEAD_STAGES,
+    TASK_PRIORITIES,
+    TASK_STATUSES,
+)
+
+LEAD_ACTIVITY_KINDS = tuple(LeadActivityKind.CHOICES)
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -132,16 +141,59 @@ class LeadSerializer(serializers.Serializer):
     # posted it — see `_lead_payload`.
     contact_full_name = serializers.CharField(allow_null=True)
     contact_phone = serializers.CharField(allow_null=True)
+    # Withheld with the two above, for the same reason.
+    contact_position = serializers.CharField(allow_null=True, required=False)
+    contact_email = serializers.CharField(allow_null=True, required=False)
+    contact_address = serializers.CharField(allow_null=True, required=False)
     product_name = serializers.CharField()
     quantity = serializers.DecimalField(max_digits=12, decimal_places=2)
+    #: SUM of the lead's line items, mirrored onto the row — see
+    #: `repository.recalc_lead_amount`.
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2)
     status = serializers.CharField()
+    #: Where the lead sits inside `status`; the funnel's own step.
+    stage = serializers.ChoiceField(choices=LEAD_STAGES)
+    source = serializers.ChoiceField(choices=LEAD_SOURCES)
     author_id = serializers.IntegerField()
     claimed_by_id = serializers.IntegerField(allow_null=True, required=False)
     claimed_at = serializers.DateTimeField(allow_null=True, required=False)
+    completed_at = serializers.DateTimeField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
     can_claim = serializers.BooleanField()
     can_complete = serializers.BooleanField()
     can_view_details = serializers.BooleanField()
+    #: Set on every row of the board, so the card can show a total and a task
+    #: count without a second request per lead.
+    item_count = serializers.IntegerField(required=False)
+    task_count = serializers.IntegerField(required=False)
+
+
+class LeadItemSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    #: The free-text qualifier the design prints under the name — "3 oy",
+    #: "1 marta". Not a unit of measure, so it is not validated as one.
+    unit = serializers.CharField(allow_blank=True)
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    position = serializers.IntegerField()
+
+
+class LeadActivitySerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    kind = serializers.ChoiceField(choices=LEAD_ACTIVITY_KINDS)
+    #: The employee's note for a `comment`; for a `stage` move the two stage
+    #: names as `from>to`; empty otherwise.
+    text = serializers.CharField(allow_blank=True)
+    author_id = serializers.IntegerField(allow_null=True)
+    author_name = serializers.CharField(allow_null=True, required=False)
+    author_photo = serializers.CharField(allow_null=True, required=False)
+    created_at = serializers.DateTimeField()
+
+
+class LeadDetailSerializer(LeadSerializer):
+    items = LeadItemSerializer(many=True)
+    activity = LeadActivitySerializer(many=True)
+    tasks = TaskSerializer(many=True)
 
 
 class LeadListSerializer(serializers.Serializer):
@@ -186,15 +238,47 @@ class TaskWriteSerializer(serializers.Serializer):
     )
 
 
+class LeadItemWriteSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=300)
+    unit = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=0, required=False
+    )
+
+
 class LeadWriteSerializer(serializers.Serializer):
     company_name = serializers.CharField(max_length=300)
     contact_full_name = serializers.CharField(max_length=300)
     contact_phone = serializers.CharField(max_length=20)
     product_name = serializers.CharField(max_length=300)
     quantity = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
+    contact_position = serializers.CharField(
+        max_length=200, required=False, allow_blank=True, allow_null=True
+    )
+    contact_email = serializers.EmailField(
+        max_length=254, required=False, allow_blank=True, allow_null=True
+    )
+    contact_address = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    source = serializers.ChoiceField(choices=LEAD_SOURCES, required=False)
+    #: The priced lines. Sent whole; the server totals them onto the lead.
+    items = LeadItemWriteSerializer(many=True, required=False)
 
     def validate_contact_phone(self, value: str) -> str:
         return _clean_phone(value)
+
+
+class LeadStageWriteSerializer(serializers.Serializer):
+    stage = serializers.ChoiceField(choices=LEAD_STAGES)
+
+
+class LeadAssignWriteSerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()
+
+
+class LeadCommentWriteSerializer(serializers.Serializer):
+    text = serializers.CharField(max_length=2000)
 
 
 class TaskPatchSerializer(TaskWriteSerializer):

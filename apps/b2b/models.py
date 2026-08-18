@@ -69,6 +69,58 @@ class LeadStatus:
     CHOICES = [NEW, IN_PROGRESS, COMPLETED]
 
 
+class LeadStage:
+    """Where a lead sits *inside* its status.
+
+    ``LeadStatus`` is the board's three columns — unclaimed, somebody is on it,
+    done. The stage is the step the salesperson actually moves through, and it
+    is what the funnel screen shows on every card. The two are kept in step at
+    one place only (``repository.set_lead_stage``): reaching ``WON`` or ``LOST``
+    completes the lead, and nothing else changes the status.
+    """
+    NEW = "new"
+    INTERESTED = "interested"
+    PROPOSAL = "proposal"
+    NEGOTIATION = "negotiation"
+    WON = "won"
+    LOST = "lost"
+
+    CHOICES = [NEW, INTERESTED, PROPOSAL, NEGOTIATION, WON, LOST]
+
+    #: The stages that close a lead — reaching either sets the status to
+    #: ``LeadStatus.COMPLETED``.
+    CLOSED = [WON, LOST]
+
+
+class LeadSource:
+    """Where a lead came from. Reported on every card, so a company can see
+    which channel is actually filling the funnel."""
+    WEBSITE = "website"
+    CALL = "call"
+    REFERRAL = "referral"
+    EXHIBITION = "exhibition"
+    MANUAL = "manual"
+
+    CHOICES = [WEBSITE, CALL, REFERRAL, EXHIBITION, MANUAL]
+
+
+class LeadActivityKind:
+    """One row of a lead's history.
+
+    Everything but ``COMMENT`` is written by the server as a side effect of the
+    action it names, which is why the text is composed there and not accepted
+    from the client.
+    """
+    CREATED = "created"
+    CLAIMED = "claimed"
+    ASSIGNED = "assigned"
+    STAGE = "stage"
+    COMMENT = "comment"
+    COMPLETED = "completed"
+
+    CHOICES = [CREATED, CLAIMED, ASSIGNED, STAGE, COMMENT, COMPLETED]
+
+
 class DepartmentBudgetStatus:
     """Where a department stands against its owner-set budget limit,
     based on how much of ``budget_limit`` remains unspent.

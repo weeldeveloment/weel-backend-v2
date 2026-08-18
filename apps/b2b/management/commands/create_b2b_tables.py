@@ -508,7 +508,91 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_workspace_lead_company_status_idx "
             "ON b2b_workspace_lead (company_id, status);"
         )
+
+        # A lead started as company + contact + one product. The mobile funnel
+        # needs more of the deal than that, so:
+        #
+        #  * `stage` is where the lead sits inside `status`. The three statuses
+        #    are the board's columns; the stage is the step the salesperson
+        #    actually moves through, and "won"/"lost" are what close a lead.
+        #  * `source` is where it came from — the funnel labels every card with
+        #    it and there was nowhere to record it.
+        #  * `amount` is the deal's value, kept as the sum of the lead's line
+        #    items so the card and the list can show money without joining.
+        #  * the extra `contact_*` columns are the rest of the card a
+        #    salesperson actually calls from.
+        for statement in (
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "stage VARCHAR(30) NOT NULL DEFAULT 'new';",
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "source VARCHAR(30) NOT NULL DEFAULT 'manual';",
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "amount NUMERIC(14, 2) NOT NULL DEFAULT 0;",
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "contact_position VARCHAR(200);",
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "contact_email VARCHAR(254);",
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "contact_address TEXT;",
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "completed_at TIMESTAMPTZ;",
+        ):
+            cursor.execute(statement)
         self.stdout.write("  Created b2b_workspace_lead")
+
+        # What the deal is actually made of — "CRM tizimi — Bazaviy paket,
+        # 3 oy, 9 000 000". The lead's own `product_name`/`quantity` stay as
+        # the headline ask; these are the priced lines under it, and their sum
+        # is mirrored onto `b2b_workspace_lead.amount`.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_lead_item (
+                id BIGSERIAL PRIMARY KEY,
+                lead_id BIGINT NOT NULL REFERENCES b2b_workspace_lead(id) ON DELETE CASCADE,
+                name VARCHAR(300) NOT NULL,
+                unit VARCHAR(100) NOT NULL DEFAULT '',
+                amount NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_lead_item_lead_idx "
+            "ON b2b_workspace_lead_item (lead_id, position, id);"
+        )
+        self.stdout.write("  Created b2b_workspace_lead_item")
+
+        # Everything that has happened to the lead, in one place: the events
+        # the server writes itself (created, claimed, stage moved, completed)
+        # and the notes employees type. One table rather than two, because the
+        # screen shows them as one list and paging two sources in step is work
+        # nobody needs.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_lead_activity (
+                id BIGSERIAL PRIMARY KEY,
+                lead_id BIGINT NOT NULL REFERENCES b2b_workspace_lead(id) ON DELETE CASCADE,
+                author_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                kind VARCHAR(20) NOT NULL DEFAULT 'comment',
+                text TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_lead_activity_lead_idx "
+            "ON b2b_workspace_lead_activity (lead_id, created_at DESC, id DESC);"
+        )
+        self.stdout.write("  Created b2b_workspace_lead_activity")
+
+        # A task raised off a lead. Nullable and ON DELETE SET NULL: the great
+        # majority of tasks have nothing to do with a lead, and deleting a lead
+        # must not take somebody's task with it.
+        cursor.execute(
+            "ALTER TABLE b2b_task ADD COLUMN IF NOT EXISTS lead_id BIGINT "
+            "REFERENCES b2b_workspace_lead(id) ON DELETE SET NULL;"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_task_lead_idx "
+            "ON b2b_task (lead_id) WHERE lead_id IS NOT NULL;"
+        )
 
         # Every byte the company stores is a row here, whatever put it there —
         # the shared drive, a photo sent in a chat, a generated voucher. That
