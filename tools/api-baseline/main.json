@@ -5695,6 +5695,245 @@
    "type": "object",
    "x-nullable": true
   },
+  "CrmCustomer": {
+   "properties": {
+    "company_name": {
+     "minLength": 1,
+     "title": "Company name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "deal_count": {
+     "title": "Deal count",
+     "type": "integer"
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "last_activity_at": {
+     "format": "date-time",
+     "title": "Last activity at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "phone": {
+     "minLength": 1,
+     "title": "Phone",
+     "type": "string"
+    },
+    "position": {
+     "minLength": 1,
+     "title": "Position",
+     "type": "string",
+     "x-nullable": true
+    },
+    "total_amount": {
+     "format": "decimal",
+     "title": "Total amount",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "full_name",
+    "phone",
+    "deal_count",
+    "total_amount",
+    "last_activity_at",
+    "is_active"
+   ],
+   "type": "object"
+  },
+  "CrmCustomerDetail": {
+   "properties": {
+    "address": {
+     "minLength": 1,
+     "title": "Address",
+     "type": "string",
+     "x-nullable": true
+    },
+    "company_name": {
+     "minLength": 1,
+     "title": "Company name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "deal_count": {
+     "title": "Deal count",
+     "type": "integer"
+    },
+    "deals": {
+     "items": {
+      "$ref": "#/definitions/CrmDeal"
+     },
+     "type": "array"
+    },
+    "email": {
+     "minLength": 1,
+     "title": "Email",
+     "type": "string",
+     "x-nullable": true
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "last_activity_at": {
+     "format": "date-time",
+     "title": "Last activity at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "monthly_amounts": {
+     "items": {
+      "$ref": "#/definitions/CrmMonthlyAmount"
+     },
+     "type": "array"
+    },
+    "phone": {
+     "minLength": 1,
+     "title": "Phone",
+     "type": "string"
+    },
+    "position": {
+     "minLength": 1,
+     "title": "Position",
+     "type": "string",
+     "x-nullable": true
+    },
+    "top_manager_name": {
+     "minLength": 1,
+     "title": "Top manager name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "total_amount": {
+     "format": "decimal",
+     "title": "Total amount",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "full_name",
+    "phone",
+    "deal_count",
+    "total_amount",
+    "last_activity_at",
+    "is_active",
+    "top_manager_name",
+    "monthly_amounts",
+    "deals"
+   ],
+   "type": "object"
+  },
+  "CrmCustomerList": {
+   "properties": {
+    "results": {
+     "items": {
+      "$ref": "#/definitions/CrmCustomer"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results"
+   ],
+   "type": "object"
+  },
+  "CrmDeal": {
+   "properties": {
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
+    "completed_at": {
+     "format": "date-time",
+     "title": "Completed at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "stage": {
+     "enum": [
+      "new",
+      "interested",
+      "proposal",
+      "negotiation",
+      "contract",
+      "won",
+      "lost"
+     ],
+     "title": "Stage",
+     "type": "string"
+    },
+    "status": {
+     "enum": [
+      "new",
+      "in_progress",
+      "completed"
+     ],
+     "title": "Status",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "amount",
+    "stage",
+    "status",
+    "created_at",
+    "completed_at"
+   ],
+   "type": "object"
+  },
+  "CrmMonthlyAmount": {
+   "properties": {
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
+    "month": {
+     "minLength": 1,
+     "title": "Month",
+     "type": "string"
+    }
+   },
+   "required": [
+    "month",
+    "amount"
+   ],
+   "type": "object"
+  },
   "Customer": {
    "properties": {
     "company_name": {
@@ -19938,6 +20177,73 @@
      "B2B / Workspace (mobile)"
     ]
    }
+  },
+  "/b2b/workspace/crm/customers/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/crm/customers/ — the CRM directory.\n\nEvery customer the company has ever raised a lead against, with their\ndeal count, lifetime value and last-touched date, so the CRM list screen\ncan render straight off one response.",
+    "operationId": "b2b_workspace_crm_customers_list",
+    "parameters": [
+     {
+      "description": "Name, company or phone.",
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     },
+     {
+      "description": "Faol mijozlar / Nofaol mijozlar. Omit for Barchasi.",
+      "enum": [
+       "active",
+       "inactive"
+      ],
+      "in": "query",
+      "name": "active",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/CrmCustomerList"
+      }
+     }
+    },
+    "summary": "List CRM customers",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/crm/customers/{customer_id}/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/crm/customers/<id>/ — one customer's CRM card.\n\nThe contact card, the lifetime totals, the trailing six months of deal\nvalue for the chart, and the deal history — everything the detail screen\ndraws, in one response.",
+    "operationId": "b2b_workspace_crm_customers_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/CrmCustomerDetail"
+      }
+     },
+     "404": {
+      "description": "Not found"
+     }
+    },
+    "summary": "CRM customer detail",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "customer_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
   },
   "/b2b/workspace/customers/": {
    "get": {
