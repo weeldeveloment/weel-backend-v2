@@ -511,6 +511,17 @@ class Command(BaseCommand):
             "CREATE UNIQUE INDEX IF NOT EXISTS b2b_workspace_customer_phone_idx "
             "ON b2b_workspace_customer (company_id, phone);"
         )
+        # The CRM detail card's "Kontakt ma'lumotlari" needs an email and an
+        # address on the customer themselves, not just on whichever lead
+        # happened to collect one — backfilled from a lead's contact fields
+        # the same way the name and company are.
+        for statement in (
+            "ALTER TABLE b2b_workspace_customer ADD COLUMN IF NOT EXISTS "
+            "email VARCHAR(254);",
+            "ALTER TABLE b2b_workspace_customer ADD COLUMN IF NOT EXISTS "
+            "address TEXT;",
+        ):
+            cursor.execute(statement)
         self.stdout.write("  Created b2b_workspace_customer")
 
         cursor.execute("""
