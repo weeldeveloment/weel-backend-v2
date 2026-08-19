@@ -61,6 +61,7 @@ def _build_b2b_patterns():
         AdminHotelRoomInventoryView, AdminHotelCalendarView, AdminHotelBookingsView,
         AdminHotelReviewsView, AdminReviewRespondView, AdminReviewHideView,
         AdminB2BCompaniesView, AdminB2BCompanyDetailView, AdminB2BUsersView,
+        AdminB2BSupportThreadsView, AdminB2BSupportThreadView,
     )
     return [
         path("api/b2b/", include("apps.b2b.urls")),
@@ -79,6 +80,8 @@ def _build_b2b_patterns():
         path("api/admin-auth/b2b/companies/", AdminB2BCompaniesView.as_view()),
         path("api/admin-auth/b2b/companies/<int:company_id>/", AdminB2BCompanyDetailView.as_view()),
         path("api/admin-auth/b2b/companies/<int:company_id>/users/", AdminB2BUsersView.as_view()),
+        path("api/admin-auth/b2b/support/", AdminB2BSupportThreadsView.as_view()),
+        path("api/admin-auth/b2b/support/<int:employee_id>/", AdminB2BSupportThreadView.as_view()),
     ]
 
 _b2b_patterns = _build_b2b_patterns()

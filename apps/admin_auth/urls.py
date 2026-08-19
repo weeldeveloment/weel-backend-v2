@@ -25,6 +25,8 @@ from .hotel_views import (
     AdminB2BCompaniesView,
     AdminB2BCompanyDetailView,
     AdminB2BUsersView,
+    AdminB2BSupportThreadsView,
+    AdminB2BSupportThreadView,
 )
 from apps.activities.views import (
     AdminActivityCalendarView,
@@ -67,6 +69,11 @@ urlpatterns = [
     path('b2b/companies/', AdminB2BCompaniesView.as_view(), name='admin-b2b-companies'),
     path('b2b/companies/<int:company_id>/', AdminB2BCompanyDetailView.as_view(), name='admin-b2b-company-detail'),
     path('b2b/companies/<int:company_id>/users/', AdminB2BUsersView.as_view(), name='admin-b2b-users'),
+
+    # The other end of the mobile app's "Yordam markazi".
+    path('b2b/support/', AdminB2BSupportThreadsView.as_view(), name='admin-b2b-support'),
+    path('b2b/support/<int:employee_id>/', AdminB2BSupportThreadView.as_view(),
+         name='admin-b2b-support-thread'),
     # Adventure Activities
     path('activities/', AdminActivityListView.as_view(), name='admin-activities-list'),
     path('activities/<uuid:guid>/', AdminActivityDetailView.as_view(), name='admin-activity-detail'),

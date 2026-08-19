@@ -785,6 +785,39 @@ class Command(BaseCommand):
         """)
         self.stdout.write("  Created b2b_employee_of_month")
 
+        # The help desk. One flat log per employee rather than a thread table
+        # plus a message table: an employee has exactly one conversation with
+        # WEEL support and it is never forked, so a thread row would carry no
+        # information the employee id does not already give.
+        #
+        # `is_staff` is which side wrote the line — the app puts the employee's
+        # own words on the right and support's on the left, and that is the
+        # only thing it has to know. `author_user_id` is the dashboard account
+        # that answered, null for a line the employee wrote.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_support_message (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                text TEXT NOT NULL,
+                is_staff BOOLEAN NOT NULL DEFAULT FALSE,
+                author_user_id BIGINT REFERENCES b2b_user(id) ON DELETE SET NULL,
+                read_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # The app reads one employee's log oldest-first; the admin inbox reads
+        # a company's newest-first. Both are this index.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_support_message_employee_idx "
+            "ON b2b_support_message (employee_id, created_at);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_support_message_company_idx "
+            "ON b2b_support_message (company_id, created_at DESC);"
+        )
+        self.stdout.write("  Created b2b_support_message")
+
     def _create_mail_tables(self, cursor):
         """Mail inside the workspace (`/api/b2b/workspace/mail/`).
 

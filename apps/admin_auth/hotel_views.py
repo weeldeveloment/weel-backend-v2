@@ -22,6 +22,13 @@ from rest_framework.pagination import PageNumberPagination
 from .authentication import AdminJWTAuthentication
 from .permissions import IsAdminUser
 
+from apps.b2b.workspace import repository as workspace_repo
+from apps.b2b.workspace.serializers import (
+    SupportMessageCreateSerializer,
+    SupportMessageSerializer,
+    SupportThreadSerializer,
+)
+
 from apps.pms.repository import (
     accept_booking,
     cancel_booking,
@@ -643,3 +650,78 @@ class AdminHotelRoomImageUploadView(AdminHotelBaseView):
         )
         image_url = default_storage.url(path)
         return Response({"image_url": image_url}, status=status.HTTP_201_CREATED)
+
+
+# ─── B2B yordam markazi ──────────────────────────────────────────────────────
+#
+# The other end of the mobile app's "Yordam markazi". WEEL staff read the queue
+# here and answer into it; the employee sees the reply on their own screen.
+
+class AdminB2BSupportThreadsView(AdminBaseView):
+    """GET ``/api/admin-auth/b2b/support/`` — the inbox.
+
+    One row per employee who has written in, newest first, with the count of
+    their own lines nobody has answered yet. Across every company: this is
+    WEEL's own desk, not a company's.
+    """
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                "search", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                description="Employee name, company name or phone.",
+            ),
+        ],
+        responses={200: SupportThreadSerializer(many=True)},
+    )
+    def get(self, request):
+        threads = workspace_repo.list_support_threads(
+            search=(request.query_params.get("search") or "").strip() or None,
+        )
+        return Response(SupportThreadSerializer(threads, many=True).data)
+
+
+class AdminB2BSupportThreadView(AdminBaseView):
+    """GET/POST ``/api/admin-auth/b2b/support/<employee_id>/`` — one
+    conversation, and the reply into it.
+
+    Reading marks the employee's lines answered, which is what clears them off
+    the inbox counter. A reply is stored with ``is_staff`` set here rather than
+    taken from the body, the same way the app cannot claim to be support.
+    """
+
+    @swagger_auto_schema(responses={200: SupportMessageSerializer(many=True), 404: "Unknown employee"})
+    def get(self, request, employee_id):
+        if not workspace_repo.support_employee(employee_id):
+            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        messages = workspace_repo.list_support_messages(employee_id)
+        workspace_repo.mark_support_answered(employee_id)
+        return Response(SupportMessageSerializer(messages, many=True).data)
+
+    @swagger_auto_schema(
+        request_body=SupportMessageCreateSerializer,
+        responses={201: SupportMessageSerializer(), 404: "Unknown employee"},
+    )
+    def post(self, request, employee_id):
+        employee = workspace_repo.support_employee(employee_id)
+        if not employee:
+            return Response({"detail": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = SupportMessageCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        message = workspace_repo.create_support_message(
+            # The company comes off the employee, never off the request: a
+            # reply must land in the same thread the question came from.
+            company_id=employee["company_id"],
+            employee_id=employee_id,
+            text=serializer.validated_data["text"],
+            is_staff=True,
+            author_user_id=getattr(request.user, "id", None),
+        )
+        workspace_repo.mark_support_answered(employee_id)
+        return Response(
+            SupportMessageSerializer(message).data, status=status.HTTP_201_CREATED,
+        )

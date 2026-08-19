@@ -27,9 +27,11 @@ from apps.b2b.raw.tables import (
     B2B_CHAT_MEMBER_TABLE,
     B2B_CHAT_MESSAGE_TABLE,
     B2B_CHAT_THREAD_TABLE,
+    B2B_COMPANY_TABLE,
     B2B_DEPARTMENT_TABLE,
     B2B_ATTENDANCE_TABLE,
     B2B_ATTENDANCE_LOCATION_TABLE,
+    B2B_SUPPORT_MESSAGE_TABLE,
     B2B_EMPLOYEE_OF_MONTH_TABLE,
     B2B_EMPLOYEE_TABLE,
     B2B_TASK_ASSIGNEE_TABLE,
@@ -1506,11 +1508,21 @@ def _month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
 
 
 def monthly_employee_stats(company_id: int, year: int, month: int) -> list[dict[str, Any]]:
-    """Every active employee's completed-task activity for one calendar month.
+    """Every active employee's month, as the owner judges it from.
 
     ``on_time_count`` is out of ``due_count`` — tasks that had a due date —
     not out of every completed task: one with no deadline was never late by
     definition, and counting it either way would just dilute the rate.
+
+    ``deals_count`` is deals they closed as won in the same window. Counted in
+    its own subquery rather than a third LEFT JOIN: joining both the task
+    assignees and the leads off one employee row multiplies them together, and
+    every task count would come back scaled by however many deals that person
+    closed.
+
+    The job title and the department ride along because the screen that reads
+    this lists people by name and has nowhere else to get them from — without
+    it the app would fetch the whole roster again just to label six rows.
     """
     start, end = _month_bounds(year, month)
     return fetch_all(
@@ -1519,22 +1531,53 @@ def monthly_employee_stats(company_id: int, year: int, month: int) -> list[dict[
             e.id                                                 AS employee_id,
             e.full_name,
             e.photo,
+            e.position,
+            d.name                                                AS department_name,
             COUNT(t.id)                                           AS completed_count,
             COUNT(t.id) FILTER (WHERE t.due_date IS NOT NULL)     AS due_count,
             COUNT(t.id) FILTER (WHERE t.due_date IS NOT NULL
-                                 AND t.completed_at <= t.due_date) AS on_time_count
+                                 AND t.completed_at <= t.due_date) AS on_time_count,
+            COALESCE(deals.deals_count, 0)                        AS deals_count
         FROM {B2B_EMPLOYEE_TABLE} e
+        LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
         LEFT JOIN {B2B_TASK_ASSIGNEE_TABLE} ta ON ta.employee_id = e.id
         LEFT JOIN {B2B_TASK_TABLE} t
             ON t.id = ta.task_id
             AND t.status = 'done'
             AND t.completed_at >= %s AND t.completed_at < %s
+        LEFT JOIN (
+            SELECT claimed_by_id AS employee_id, COUNT(*) AS deals_count
+            FROM {B2B_WORKSPACE_LEAD_TABLE}
+            WHERE company_id = %s
+              AND stage = 'won'
+              AND claimed_by_id IS NOT NULL
+              AND completed_at >= %s AND completed_at < %s
+            GROUP BY claimed_by_id
+        ) deals ON deals.employee_id = e.id
         WHERE e.company_id = %s AND e.is_active = TRUE
-        GROUP BY e.id, e.full_name, e.photo
-        ORDER BY completed_count DESC, e.full_name ASC
+        GROUP BY e.id, e.full_name, e.photo, e.position, d.name, deals.deals_count
+        ORDER BY completed_count DESC, deals_count DESC, e.full_name ASC
         """,
-        [start, end, company_id],
+        [start, end, company_id, start, end, company_id],
     )
+
+
+def completed_tasks_this_month(employee_id: int, year: int, month: int) -> int:
+    """The one number the profile screen prints — "Bu oy: 24 ta vazifa
+    bajarildi". Same window and same definition of "done" as
+    :func:`monthly_employee_stats`, so the two can never disagree."""
+    start, end = _month_bounds(year, month)
+    return fetch_one(
+        f"""
+        SELECT COUNT(*) AS n
+        FROM {B2B_TASK_ASSIGNEE_TABLE} ta
+        JOIN {B2B_TASK_TABLE} t ON t.id = ta.task_id
+        WHERE ta.employee_id = %s
+          AND t.status = 'done'
+          AND t.completed_at >= %s AND t.completed_at < %s
+        """,
+        [employee_id, start, end],
+    )["n"]
 
 
 def get_employee_of_month(company_id: int, year: int, month: int) -> dict[str, Any] | None:
@@ -1699,4 +1742,136 @@ def upsert_attendance_location(
             company_id, is_enabled, latitude, longitude, radius_meters,
             updated_by_id, now, now,
         ],
+    )
+
+
+# ─── Yordam markazi ─────────────────────────────────────────────────────────
+#
+# One flat log per employee. See the table's own comment in
+# ``create_b2b_tables`` for why there is no thread row.
+
+def list_support_messages(employee_id: int, limit: int = 200) -> list[dict[str, Any]]:
+    """One employee's conversation, oldest first — reading order.
+
+    The limit takes the *newest* rows and then flips them, so a long-running
+    conversation shows its recent end rather than its opening lines.
+    """
+    rows = fetch_all(
+        f"""
+        SELECT id, text, is_staff, created_at
+        FROM {B2B_SUPPORT_MESSAGE_TABLE}
+        WHERE employee_id = %s
+        ORDER BY created_at DESC, id DESC
+        LIMIT %s
+        """,
+        [employee_id, limit],
+    )
+    return list(reversed(rows))
+
+
+def create_support_message(
+    *,
+    company_id: int,
+    employee_id: int,
+    text: str,
+    is_staff: bool = False,
+    author_user_id: int | None = None,
+) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_SUPPORT_MESSAGE_TABLE}
+            (company_id, employee_id, text, is_staff, author_user_id, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id, text, is_staff, created_at
+        """,
+        [company_id, employee_id, text, is_staff, author_user_id, timezone.now()],
+    )
+
+
+def mark_support_read(employee_id: int) -> None:
+    """The employee has seen support's replies. Only the staff side is marked:
+    what the employee wrote was never unread to them."""
+    execute(
+        f"""
+        UPDATE {B2B_SUPPORT_MESSAGE_TABLE}
+        SET read_at = %s
+        WHERE employee_id = %s AND is_staff = TRUE AND read_at IS NULL
+        """,
+        [timezone.now(), employee_id],
+    )
+
+
+def list_support_threads(search: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """The admin inbox: one row per employee who has ever written in, newest
+    conversation first.
+
+    A "thread" is derived rather than stored — see ``create_b2b_tables`` for
+    why there is no thread table. ``unread_count`` counts the employee's own
+    unanswered lines, not support's: the inbox is a queue of people waiting,
+    and a reply that has been sent is off it.
+    """
+    where = ""
+    params: list[Any] = []
+    if search:
+        where = "WHERE e.full_name ILIKE %s OR c.name ILIKE %s OR e.phone ILIKE %s"
+        needle = f"%{search}%"
+        params = [needle, needle, needle]
+
+    params.append(limit)
+    return fetch_all(
+        f"""
+        SELECT
+            e.id                                          AS employee_id,
+            e.full_name,
+            e.phone,
+            e.photo,
+            c.id                                          AS company_id,
+            c.name                                        AS company_name,
+            COUNT(m.id)                                   AS message_count,
+            COUNT(m.id) FILTER (
+                WHERE m.is_staff = FALSE AND m.read_at IS NULL
+            )                                             AS unread_count,
+            MAX(m.created_at)                             AS last_message_at,
+            (
+                SELECT text FROM {B2B_SUPPORT_MESSAGE_TABLE} latest
+                WHERE latest.employee_id = e.id
+                ORDER BY latest.created_at DESC, latest.id DESC
+                LIMIT 1
+            )                                             AS last_message
+        FROM {B2B_SUPPORT_MESSAGE_TABLE} m
+        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = m.employee_id
+        JOIN {B2B_COMPANY_TABLE} c ON c.id = m.company_id
+        {where}
+        GROUP BY e.id, e.full_name, e.phone, e.photo, c.id, c.name
+        ORDER BY last_message_at DESC
+        LIMIT %s
+        """,
+        params,
+    )
+
+
+def mark_support_answered(employee_id: int) -> None:
+    """Support has read what this employee wrote. The mirror of
+    :func:`mark_support_read`, which is the employee reading support."""
+    execute(
+        f"""
+        UPDATE {B2B_SUPPORT_MESSAGE_TABLE}
+        SET read_at = %s
+        WHERE employee_id = %s AND is_staff = FALSE AND read_at IS NULL
+        """,
+        [timezone.now(), employee_id],
+    )
+
+
+def support_employee(employee_id: int) -> dict[str, Any] | None:
+    """Who a support thread belongs to — needed before replying into it, so a
+    reply cannot be addressed to an id that is not an employee."""
+    return fetch_one(
+        f"""
+        SELECT e.id, e.full_name, e.phone, e.photo, e.company_id, c.name AS company_name
+        FROM {B2B_EMPLOYEE_TABLE} e
+        JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
+        WHERE e.id = %s
+        """,
+        [employee_id],
     )

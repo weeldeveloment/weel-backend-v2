@@ -36,6 +36,11 @@ from apps.b2b.workspace.authentication import (
 from apps.b2b.workspace.permissions import HasCapability, IsWorkspaceManager, IsWorkspaceUser
 from apps.b2b.workspace.roles import capabilities_for, is_manager
 from apps.b2b.workspace.serializers import (
+    AttendanceCheckInSerializer,
+    AttendanceDaySerializer,
+    AttendanceLocationSerializer,
+    AttendanceLocationUpdateSerializer,
+    AttendanceMarkSerializer,
     CalendarEventSerializer,
     ChatMessageSerializer,
     ChatThreadSerializer,
@@ -45,18 +50,21 @@ from apps.b2b.workspace.serializers import (
     EmployeeOfMonthSerializer,
     EventPatchSerializer,
     EventWriteSerializer,
-    LeadListSerializer,
     LeadActivitySerializer,
     LeadAssignWriteSerializer,
     LeadCommentWriteSerializer,
     LeadDetailSerializer,
     LeadItemSerializer,
     LeadItemWriteSerializer,
+    LeadListSerializer,
     LeadSerializer,
     LeadStageWriteSerializer,
     LeadWriteSerializer,
     MeSerializer,
     MessageWriteSerializer,
+    StorageUsageSerializer,
+    SupportMessageCreateSerializer,
+    SupportMessageSerializer,
     TaskCommentWriteSerializer,
     TaskListSerializer,
     TaskPatchSerializer,
@@ -71,12 +79,6 @@ from apps.b2b.workspace.serializers import (
     WorkspaceLoginSerializer,
     WorkspaceLoginVerifySerializer,
     WorkspaceRefreshSerializer,
-    StorageUsageSerializer,
-    AttendanceCheckInSerializer,
-    AttendanceDaySerializer,
-    AttendanceMarkSerializer,
-    AttendanceLocationSerializer,
-    AttendanceLocationUpdateSerializer,
 )
 from apps.b2b.workspace.geo import distance_meters
 from apps.b2b.workspace.tokens import create_workspace_tokens, rotate_workspace_tokens
@@ -302,6 +304,9 @@ def _me_payload(employee: dict) -> dict:
         "email": employee.get("email"),
         "photo": employee.get("photo"),
         "department_name": employee.get("department_name"),
+        "completed_this_month": repo.completed_tasks_this_month(
+            employee["id"], *_current_year_month()
+        ),
         "permissions": capabilities_for(employee.get("role")),
     }
 
@@ -2301,3 +2306,52 @@ class WorkspaceEmployeeOfMonthView(WorkspaceAPIView):
             selected_by_id=request.user.id,
         )
         return Response(EmployeeOfMonthSerializer(winner).data)
+
+
+# ─── Yordam markazi ───────────────────────────────────────────────────────────
+
+class WorkspaceSupportView(WorkspaceAPIView):
+    """GET/POST ``support/`` — the employee's own thread with WEEL support.
+
+    No capability and no thread id. Every employee has exactly one
+    conversation, it is scoped to whoever is calling, and it is created by the
+    first message rather than by an explicit "open a ticket" step — a help desk
+    that asks you to file a ticket before you can describe the problem is one
+    people give up on.
+
+    Reading it also marks support's replies seen, because opening the screen is
+    what seeing them means; there is no separate "read" call for the app to
+    forget to make.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="The caller's support conversation",
+        responses={200: SupportMessageSerializer(many=True)},
+    )
+    def get(self, request):
+        messages = repo.list_support_messages(request.user.id)
+        repo.mark_support_read(request.user.id)
+        return Response(SupportMessageSerializer(messages, many=True).data)
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Write to support",
+        request_body=SupportMessageCreateSerializer,
+        responses={201: SupportMessageSerializer()},
+    )
+    def post(self, request):
+        serializer = SupportMessageCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        message = repo.create_support_message(
+            company_id=request.user.company_id,
+            employee_id=request.user.id,
+            text=serializer.validated_data["text"],
+        )
+        return Response(
+            SupportMessageSerializer(message).data,
+            status=status.HTTP_201_CREATED,
+        )

@@ -57,6 +57,45 @@ class TeamMemberSerializer(serializers.Serializer):
     status = serializers.CharField(required=False)
 
 
+class SupportMessageSerializer(serializers.Serializer):
+    """One line of an employee's conversation with WEEL support.
+
+    ``is_staff`` is the whole of what the app needs to place a bubble — the
+    employee only ever talks to one counterparty here, so which named person
+    answered is the admin inbox's business, not the phone's.
+    """
+
+    id = serializers.IntegerField()
+    text = serializers.CharField()
+    is_staff = serializers.BooleanField()
+    created_at = serializers.DateTimeField()
+
+
+class SupportMessageCreateSerializer(serializers.Serializer):
+    text = serializers.CharField(max_length=4000, trim_whitespace=True)
+
+    def validate_text(self, value: str) -> str:
+        if not value.strip():
+            raise serializers.ValidationError(_("Message cannot be empty."))
+        return value.strip()
+
+
+class SupportThreadSerializer(serializers.Serializer):
+    """One row of the admin inbox — a person waiting, and how long they have
+    been waiting. Derived per employee; there is no thread table."""
+
+    employee_id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    phone = serializers.CharField(allow_null=True, required=False)
+    photo = serializers.CharField(allow_null=True, required=False)
+    company_id = serializers.IntegerField()
+    company_name = serializers.CharField(allow_null=True, required=False)
+    message_count = serializers.IntegerField()
+    unread_count = serializers.IntegerField()
+    last_message = serializers.CharField(allow_null=True, required=False)
+    last_message_at = serializers.DateTimeField(allow_null=True, required=False)
+
+
 class MeSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     company_id = serializers.IntegerField()
@@ -68,6 +107,10 @@ class MeSerializer(serializers.Serializer):
     email = serializers.CharField(allow_null=True, required=False)
     photo = serializers.CharField(allow_null=True, required=False)
     department_name = serializers.CharField(allow_null=True, required=False)
+    # Tasks finished in the current calendar month. Sent from here because the
+    # profile screen prints it under the name and the app holds only the tasks
+    # it happens to have fetched, which is not the same set.
+    completed_this_month = serializers.IntegerField()
     permissions = serializers.DictField(child=serializers.BooleanField())
 
 
@@ -475,6 +518,11 @@ class EmployeeMonthlyStatSerializer(serializers.Serializer):
     employee_id = serializers.IntegerField()
     full_name = serializers.CharField()
     photo = serializers.CharField(allow_null=True, required=False)
+    position = serializers.CharField(allow_null=True, required=False)
+    department_name = serializers.CharField(allow_null=True, required=False)
+    # Deals this person closed as won in the same month — what the owner reads
+    # beside the task count when picking the month's best.
+    deals_count = serializers.IntegerField()
     completed_count = serializers.IntegerField()
     due_count = serializers.IntegerField()
     on_time_count = serializers.IntegerField()

@@ -32,6 +32,7 @@ from apps.b2b.workspace.views import (
     WorkspaceMessageDetailView,
     WorkspaceMessageView,
     WorkspaceStorageView,
+    WorkspaceSupportView,
     WorkspaceSubtaskToggleView,
     WorkspaceTaskCommentView,
     WorkspaceTaskDetailView,
@@ -100,6 +101,8 @@ urlpatterns = [
     ),
     path("chats/<int:thread_id>/read/", WorkspaceThreadReadView.as_view(), name="ws-chat-read"),
     path("chats/<int:thread_id>/flags/", WorkspaceThreadFlagsView.as_view(), name="ws-chat-flags"),
+
+    path("support/", WorkspaceSupportView.as_view(), name="ws-support"),
 
     path("hotels/", WorkspaceHotelListView.as_view(), name="ws-hotels"),
 
