@@ -6173,6 +6173,16 @@
      "title": "Completed count",
      "type": "integer"
     },
+    "deals_count": {
+     "title": "Deals count",
+     "type": "integer"
+    },
+    "department_name": {
+     "minLength": 1,
+     "title": "Department name",
+     "type": "string",
+     "x-nullable": true
+    },
     "due_count": {
      "title": "Due count",
      "type": "integer"
@@ -6201,11 +6211,18 @@
      "title": "Photo",
      "type": "string",
      "x-nullable": true
+    },
+    "position": {
+     "minLength": 1,
+     "title": "Position",
+     "type": "string",
+     "x-nullable": true
     }
    },
    "required": [
     "employee_id",
     "full_name",
+    "deals_count",
     "completed_count",
     "due_count",
     "on_time_count"
@@ -9876,6 +9893,10 @@
      "type": "string",
      "x-nullable": true
     },
+    "completed_this_month": {
+     "title": "Completed this month",
+     "type": "integer"
+    },
     "department_name": {
      "minLength": 1,
      "title": "Department name",
@@ -9933,6 +9954,7 @@
     "company_id",
     "full_name",
     "role",
+    "completed_this_month",
     "permissions"
    ],
    "type": "object"
@@ -14031,6 +14053,112 @@
    ],
    "type": "object"
   },
+  "SupportMessage": {
+   "properties": {
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_staff": {
+     "title": "Is staff",
+     "type": "boolean"
+    },
+    "text": {
+     "minLength": 1,
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "text",
+    "is_staff",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "SupportMessageCreate": {
+   "properties": {
+    "text": {
+     "maxLength": 4000,
+     "minLength": 1,
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "type": "object"
+  },
+  "SupportThread": {
+   "properties": {
+    "company_id": {
+     "title": "Company id",
+     "type": "integer"
+    },
+    "company_name": {
+     "minLength": 1,
+     "title": "Company name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "last_message": {
+     "minLength": 1,
+     "title": "Last message",
+     "type": "string",
+     "x-nullable": true
+    },
+    "last_message_at": {
+     "format": "date-time",
+     "title": "Last message at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "message_count": {
+     "title": "Message count",
+     "type": "integer"
+    },
+    "phone": {
+     "minLength": 1,
+     "title": "Phone",
+     "type": "string",
+     "x-nullable": true
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unread_count": {
+     "title": "Unread count",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "employee_id",
+    "full_name",
+    "company_id",
+    "message_count",
+    "unread_count"
+   ],
+   "type": "object"
+  },
   "Task": {
    "properties": {
     "assignee_ids": {
@@ -16003,6 +16131,98 @@
       }
      }
     },
+    "tags": [
+     "api"
+    ]
+   }
+  },
+  "/admin-auth/b2b/support/": {
+   "get": {
+    "description": "One row per employee who has written in, newest first, with the count of\ntheir own lines nobody has answered yet. Across every company: this is\nWEEL's own desk, not a company's.",
+    "operationId": "admin-auth_b2b_support_list",
+    "parameters": [
+     {
+      "description": "Employee name, company name or phone.",
+      "in": "query",
+      "name": "search",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/SupportThread"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "GET ``/api/admin-auth/b2b/support/`` — the inbox.",
+    "tags": [
+     "api"
+    ]
+   },
+   "parameters": []
+  },
+  "/admin-auth/b2b/support/{employee_id}/": {
+   "get": {
+    "description": "Reading marks the employee's lines answered, which is what clears them off\nthe inbox counter. A reply is stored with ``is_staff`` set here rather than\ntaken from the body, the same way the app cannot claim to be support.",
+    "operationId": "admin-auth_b2b_support_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/SupportMessage"
+       },
+       "type": "array"
+      }
+     },
+     "404": {
+      "description": "Unknown employee"
+     }
+    },
+    "summary": "GET/POST ``/api/admin-auth/b2b/support/<employee_id>/`` — one\nconversation, and the reply into it.",
+    "tags": [
+     "api"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "Reading marks the employee's lines answered, which is what clears them off\nthe inbox counter. A reply is stored with ``is_staff`` set here rather than\ntaken from the body, the same way the app cannot claim to be support.",
+    "operationId": "admin-auth_b2b_support_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/SupportMessageCreate"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/SupportMessage"
+      }
+     },
+     "404": {
+      "description": "Unknown employee"
+     }
+    },
+    "summary": "GET/POST ``/api/admin-auth/b2b/support/<employee_id>/`` — one\nconversation, and the reply into it.",
     "tags": [
      "api"
     ]
@@ -21031,6 +21251,55 @@
     ]
    },
    "parameters": []
+  },
+  "/b2b/workspace/support/": {
+   "get": {
+    "description": "GET/POST ``support/`` — the employee's own thread with WEEL support.\n\nNo capability and no thread id. Every employee has exactly one\nconversation, it is scoped to whoever is calling, and it is created by the\nfirst message rather than by an explicit \"open a ticket\" step — a help desk\nthat asks you to file a ticket before you can describe the problem is one\npeople give up on.\n\nReading it also marks support's replies seen, because opening the screen is\nwhat seeing them means; there is no separate \"read\" call for the app to\nforget to make.",
+    "operationId": "b2b_workspace_support_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/SupportMessage"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "The caller's support conversation",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET/POST ``support/`` — the employee's own thread with WEEL support.\n\nNo capability and no thread id. Every employee has exactly one\nconversation, it is scoped to whoever is calling, and it is created by the\nfirst message rather than by an explicit \"open a ticket\" step — a help desk\nthat asks you to file a ticket before you can describe the problem is one\npeople give up on.\n\nReading it also marks support's replies seen, because opening the screen is\nwhat seeing them means; there is no separate \"read\" call for the app to\nforget to make.",
+    "operationId": "b2b_workspace_support_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/SupportMessageCreate"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/SupportMessage"
+      }
+     }
+    },
+    "summary": "Write to support",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/tasks/": {
    "get": {
