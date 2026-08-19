@@ -5695,6 +5695,67 @@
    "type": "object",
    "x-nullable": true
   },
+  "Customer": {
+   "properties": {
+    "company_name": {
+     "minLength": 1,
+     "title": "Company name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "deal_count": {
+     "title": "Deal count",
+     "type": "integer"
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "phone": {
+     "minLength": 1,
+     "title": "Phone",
+     "type": "string"
+    },
+    "position": {
+     "minLength": 1,
+     "title": "Position",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "full_name",
+    "phone",
+    "deal_count",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "CustomerList": {
+   "properties": {
+    "results": {
+     "items": {
+      "$ref": "#/definitions/Customer"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results"
+   ],
+   "type": "object"
+  },
   "DashboardSummary": {
    "properties": {
     "active_employees": {
@@ -8658,6 +8719,11 @@
      "title": "Created at",
      "type": "string"
     },
+    "customer_id": {
+     "title": "Customer id",
+     "type": "integer",
+     "x-nullable": true
+    },
     "id": {
      "title": "Id",
      "type": "integer"
@@ -8665,6 +8731,26 @@
     "item_count": {
      "title": "Item count",
      "type": "integer"
+    },
+    "lost_note": {
+     "minLength": 1,
+     "title": "Lost note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "lost_reason": {
+     "enum": [
+      "price",
+      "competitor",
+      "no_budget",
+      "no_response",
+      "not_needed",
+      "postponed",
+      "other"
+     ],
+     "title": "Lost reason",
+     "type": "string",
+     "x-nullable": true
     },
     "product_name": {
      "minLength": 1,
@@ -8693,6 +8779,7 @@
       "interested",
       "proposal",
       "negotiation",
+      "contract",
       "won",
       "lost"
      ],
@@ -8894,6 +8981,11 @@
      "title": "Created at",
      "type": "string"
     },
+    "customer_id": {
+     "title": "Customer id",
+     "type": "integer",
+     "x-nullable": true
+    },
     "id": {
      "title": "Id",
      "type": "integer"
@@ -8907,6 +8999,26 @@
       "$ref": "#/definitions/LeadItem"
      },
      "type": "array"
+    },
+    "lost_note": {
+     "minLength": 1,
+     "title": "Lost note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "lost_reason": {
+     "enum": [
+      "price",
+      "competitor",
+      "no_budget",
+      "no_response",
+      "not_needed",
+      "postponed",
+      "other"
+     ],
+     "title": "Lost reason",
+     "type": "string",
+     "x-nullable": true
     },
     "product_name": {
      "minLength": 1,
@@ -8935,6 +9047,7 @@
       "interested",
       "proposal",
       "negotiation",
+      "contract",
       "won",
       "lost"
      ],
@@ -9053,12 +9166,33 @@
   },
   "LeadStageWrite": {
    "properties": {
+    "lost_reason": {
+     "enum": [
+      "price",
+      "competitor",
+      "no_budget",
+      "no_response",
+      "not_needed",
+      "postponed",
+      "other"
+     ],
+     "title": "Lost reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "note": {
+     "maxLength": 2000,
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
     "stage": {
      "enum": [
       "new",
       "interested",
       "proposal",
       "negotiation",
+      "contract",
       "won",
       "lost"
      ],
@@ -9073,9 +9207,18 @@
   },
   "LeadWrite": {
    "properties": {
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
+    "assign_to_me": {
+     "default": true,
+     "title": "Assign to me",
+     "type": "boolean"
+    },
     "company_name": {
      "maxLength": 300,
-     "minLength": 1,
      "title": "Company name",
      "type": "string"
     },
@@ -9109,15 +9252,25 @@
      "type": "string",
      "x-nullable": true
     },
+    "customer_id": {
+     "title": "Customer id",
+     "type": "integer",
+     "x-nullable": true
+    },
     "items": {
      "items": {
       "$ref": "#/definitions/LeadItemWrite"
      },
      "type": "array"
     },
+    "note": {
+     "maxLength": 2000,
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
     "product_name": {
      "maxLength": 300,
-     "minLength": 1,
      "title": "Product name",
      "type": "string"
     },
@@ -9139,11 +9292,8 @@
     }
    },
    "required": [
-    "company_name",
     "contact_full_name",
-    "contact_phone",
-    "product_name",
-    "quantity"
+    "contact_phone"
    ],
    "type": "object"
   },
@@ -19568,6 +19718,33 @@
      "B2B / Workspace (mobile)"
     ]
    }
+  },
+  "/b2b/workspace/customers/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/customers/?q= — the company's customer directory.\n\nWhat step 1 of the \"Yangi lead\" sheet searches. Any employee may look a\ncustomer up: the point of the search is to stop the same buyer being typed\nin twice, and a directory only half the company can see would not.\n\nDeliberately not paged. It answers a search box the moment somebody stops\ntyping, and twenty matches is already more than anyone reads before\nnarrowing the query.",
+    "operationId": "b2b_workspace_customers_list",
+    "parameters": [
+     {
+      "description": "Name, company or phone. Blank returns the most recent.",
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/CustomerList"
+      }
+     }
+    },
+    "summary": "Search the customer directory",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
   },
   "/b2b/workspace/employee-of-month/": {
    "get": {
