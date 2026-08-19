@@ -27,6 +27,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from apps.b2b.models import LeadStage, LeadStatus
 from apps.b2b.workspace.authentication import WorkspaceUser
 from apps.b2b.workspace.views import (
+    WorkspaceCustomerSearchView,
     WorkspaceLeadAssignView,
     WorkspaceLeadCommentView,
     WorkspaceLeadDetailView,
@@ -288,3 +289,215 @@ def test_a_task_raised_off_a_lead_carries_the_link_and_defaults_to_the_asker():
     # Grouped under the customer's name, so it reads sensibly on the Vazifa tab
     # where the lead is not in sight.
     assert kwargs["project"] == "GlobalTrade Co"
+
+
+# ─── Closing a deal as lost has to say why ────────────────────────────────────
+
+def test_losing_a_deal_without_a_reason_is_refused():
+    """"Yutqazdik" with nothing beside it is a number nobody can act on, so the
+    sheet's required dropdown is enforced here and not only in the app."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.repo.set_lead_stage") as set_stage,
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post("/leads/7/stage/", {"stage": LeadStage.LOST}, format="json"),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 400
+    # The project's exception handler flattens field errors into `errors`.
+    assert "lost_reason" in {e["field"] for e in response.data["errors"]}
+    set_stage.assert_not_called()
+
+
+def test_losing_a_deal_carries_the_reason_and_the_note_through():
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_stage",
+            return_value=_lead(stage=LeadStage.LOST, status=LeadStatus.COMPLETED),
+        ) as set_stage,
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post(
+                "/leads/7/stage/",
+                {
+                    "stage": LeadStage.LOST,
+                    "lost_reason": "price",
+                    "note": "Raqobatchi 15% arzon taklif qildi",
+                },
+                format="json",
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    kwargs = set_stage.call_args.kwargs
+    assert kwargs["lost_reason"] == "price"
+    assert kwargs["note"] == "Raqobatchi 15% arzon taklif qildi"
+
+
+def test_a_won_deal_needs_no_reason():
+    """Only the losing end is asked to explain itself."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_stage",
+            return_value=_lead(stage=LeadStage.WON, status=LeadStatus.COMPLETED),
+        ) as set_stage,
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post("/leads/7/stage/", {"stage": LeadStage.WON}, format="json"),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    assert set_stage.call_args.kwargs["lost_reason"] is None
+
+
+def test_the_contract_stage_is_an_ordinary_move_and_does_not_close_the_lead():
+    """"Shartnoma tuzish" sits between negotiation and won. It was added after
+    the funnel shipped, so the check is that nothing treats it as an ending."""
+    assert LeadStage.CONTRACT in LeadStage.CHOICES
+    assert LeadStage.CONTRACT not in LeadStage.CLOSED
+    assert LeadStage.ORDER.index(LeadStage.CONTRACT) == (
+        LeadStage.ORDER.index(LeadStage.NEGOTIATION) + 1
+    )
+
+
+# ─── Creating a lead from the two-step sheet ──────────────────────────────────
+
+def test_an_employee_may_record_their_own_deal_and_holds_it_from_the_start():
+    """"Mas'ul menejer: Siz" — the salesperson entering a deal they are already
+    working is not posting it to the board, so the manager gate does not apply
+    and the lead is theirs on creation rather than sitting there to be claimed.
+    """
+    with (
+        patch("apps.b2b.workspace.views.repo.create_lead", return_value=_lead()) as create,
+        patch("apps.b2b.workspace.views.repo.list_employee_fcm_tokens") as tokens,
+    ):
+        response = _call(
+            WorkspaceLeadListCreateView,
+            factory.post(
+                "/leads/",
+                {
+                    "contact_full_name": "Aziz Karimov",
+                    "contact_phone": "+998 90 123 45 67",
+                    "amount": "22000000",
+                    "source": "call",
+                },
+                format="json",
+            ),
+            BYSTANDER,
+        )
+
+    assert response.status_code == 201
+    assert create.call_args.kwargs["claim_for_author"] is True
+    # A lead its author already holds is not up for grabs, so the board is not
+    # told about it.
+    tokens.assert_not_called()
+
+
+def test_an_employee_cannot_post_a_lead_to_the_shared_board():
+    """The manager gate is still there — it is about handing work to other
+    people, which is the one thing an employee may not do."""
+    with patch("apps.b2b.workspace.views.repo.create_lead") as create:
+        response = _call(
+            WorkspaceLeadListCreateView,
+            factory.post(
+                "/leads/",
+                {
+                    "contact_full_name": "Aziz Karimov",
+                    "contact_phone": "+998901234567",
+                    "assign_to_me": False,
+                },
+                format="json",
+            ),
+            BYSTANDER,
+        )
+
+    assert response.status_code == 403
+    create.assert_not_called()
+
+
+def test_a_lead_falls_back_to_the_contact_and_the_first_line_it_was_given():
+    """The sheet asks for a customer and a price, not for a company name and a
+    product — so the board's two columns are derived rather than demanded."""
+    with (
+        patch("apps.b2b.workspace.views.repo.create_lead", return_value=_lead()) as create,
+        patch("apps.b2b.workspace.views.repo.list_employee_fcm_tokens", return_value=[]),
+    ):
+        response = _call(
+            WorkspaceLeadListCreateView,
+            factory.post(
+                "/leads/",
+                {
+                    "contact_full_name": "Aziz Karimov",
+                    "contact_phone": "+998901234567",
+                    "items": [{"name": "CRM tizimi", "amount": "9000000"}],
+                },
+                format="json",
+            ),
+            MANAGER,
+        )
+
+    assert response.status_code == 201
+    kwargs = create.call_args.kwargs
+    assert kwargs["company_name"] == "Aziz Karimov"
+    assert kwargs["product_name"] == "CRM tizimi"
+    assert kwargs["quantity"] == 1
+
+
+def test_a_lead_against_a_customer_from_another_company_is_not_found():
+    """`customer_id` comes off the wire, so it is checked against the caller's
+    own directory before anything is written against it."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_customer", return_value=None),
+        patch("apps.b2b.workspace.views.repo.create_lead") as create,
+    ):
+        response = _call(
+            WorkspaceLeadListCreateView,
+            factory.post(
+                "/leads/",
+                {
+                    "customer_id": 999,
+                    "contact_full_name": "Aziz Karimov",
+                    "contact_phone": "+998901234567",
+                },
+                format="json",
+            ),
+            MANAGER,
+        )
+
+    assert response.status_code == 404
+    create.assert_not_called()
+
+
+# ─── The customer directory ───────────────────────────────────────────────────
+
+def test_anyone_may_search_the_directory_and_the_query_reaches_the_repository():
+    """Step 1 of the sheet exists to stop the same buyer being typed in twice,
+    which only works if the whole company can search."""
+    with patch(
+        "apps.b2b.workspace.views.repo.search_customers",
+        return_value=[{
+            "id": 3, "full_name": "Aziz Karimov", "phone": "+998901234567",
+            "company_name": "GlobalTrade Co", "position": None, "deal_count": 2,
+        }],
+    ) as search:
+        response = _call(
+            WorkspaceCustomerSearchView,
+            factory.get("/customers/", {"q": "90 123"}),
+            BYSTANDER,
+        )
+
+    assert response.status_code == 200
+    assert search.call_args.kwargs["query"] == "90 123"
+    assert response.data["results"][0]["deal_count"] == 2

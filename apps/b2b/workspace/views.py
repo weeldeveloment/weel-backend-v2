@@ -39,6 +39,7 @@ from apps.b2b.workspace.serializers import (
     CalendarEventSerializer,
     ChatMessageSerializer,
     ChatThreadSerializer,
+    CustomerListSerializer,
     EmployeeMonthlyStatSerializer,
     EmployeeOfMonthSelectSerializer,
     EmployeeOfMonthSerializer,
@@ -1218,6 +1219,39 @@ class WorkspaceDeviceTokenView(WorkspaceAPIView):
         return Response({"detail": _("Saved")})
 
 
+class WorkspaceCustomerSearchView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/customers/?q= — the company's customer directory.
+
+    What step 1 of the "Yangi lead" sheet searches. Any employee may look a
+    customer up: the point of the search is to stop the same buyer being typed
+    in twice, and a directory only half the company can see would not.
+
+    Deliberately not paged. It answers a search box the moment somebody stops
+    typing, and twenty matches is already more than anyone reads before
+    narrowing the query.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Search the customer directory",
+        manual_parameters=[
+            openapi.Parameter(
+                "q", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                description="Name, company or phone. Blank returns the most recent.",
+            ),
+        ],
+        responses={200: CustomerListSerializer()},
+    )
+    def get(self, request):
+        customers = repo.search_customers(
+            request.user.company_id,
+            query=request.query_params.get("q") or "",
+        )
+        return Response({"results": customers})
+
+
 class WorkspaceLeadListCreateView(WorkspaceAPIView):
     """GET  /api/b2b/workspace/leads/ — every lead in the company, any employee
     may see the board and claim an open one.
@@ -1265,15 +1299,27 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
         responses={201: LeadSerializer(), 403: openapi.Response(description="Employees cannot create leads")},
     )
     def post(self, request):
-        if not request.user.is_manager:
-            return Response(
-                {"detail": _("Your role does not allow creating leads.")},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         serializer = LeadWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+
+        # Two different acts share this endpoint. A manager posting a lead to
+        # the board leaves it unclaimed for anyone to take; a salesperson
+        # entering a deal they are already working takes it themselves ("Mas'ul
+        # menejer: Siz"). Only the first needs a manager — an employee may
+        # always record their own deal, and never anybody else's.
+        claim_for_author = bool(data.get("assign_to_me", True))
+        if not claim_for_author and not request.user.is_manager:
+            return Response(
+                {"detail": _("Your role does not allow posting leads to the board.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        customer_id = data.get("customer_id")
+        if customer_id and not repo.get_customer(customer_id, request.user.company_id):
+            return Response(
+                {"detail": _("Customer not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
 
         lead = repo.create_lead(
             company_id=request.user.company_id,
@@ -1288,10 +1334,21 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
             contact_address=data.get("contact_address") or None,
             source=data.get("source") or LeadSource.MANUAL,
             items=data.get("items") or (),
+            customer_id=customer_id,
+            amount=data.get("amount"),
+            note=data.get("note"),
+            claim_for_author=claim_for_author,
         )
 
-        tokens = repo.list_employee_fcm_tokens(
-            request.user.company_id, exclude_employee_id=request.user.id
+        # Only a lead left on the board is news to the rest of the company —
+        # one its author already holds is not up for grabs, and telling
+        # everyone about it is a notification nobody can act on.
+        tokens = (
+            []
+            if claim_for_author
+            else repo.list_employee_fcm_tokens(
+                request.user.company_id, exclude_employee_id=request.user.id
+            )
         )
         if tokens:
             try:
@@ -1430,6 +1487,8 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
             request.user.company_id,
             stage=serializer.validated_data["stage"],
             employee_id=request.user.id,
+            lost_reason=serializer.validated_data.get("lost_reason"),
+            note=serializer.validated_data.get("note"),
         )
         return Response(_lead_payload(updated or lead, request.user))
 

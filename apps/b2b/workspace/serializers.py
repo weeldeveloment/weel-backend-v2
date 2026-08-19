@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from apps.b2b.models import LeadActivityKind
+from apps.b2b.models import LeadActivityKind, LeadStage
 from apps.b2b.workspace.repository import (
     EVENT_TYPES,
+    LEAD_LOST_REASONS,
     LEAD_SOURCES,
     LEAD_STAGES,
     TASK_PRIORITIES,
@@ -158,6 +160,14 @@ class LeadSerializer(serializers.Serializer):
     claimed_by_id = serializers.IntegerField(allow_null=True, required=False)
     claimed_at = serializers.DateTimeField(allow_null=True, required=False)
     completed_at = serializers.DateTimeField(allow_null=True, required=False)
+    #: Set only on a lead closed as `lost`, and cleared by any move off it.
+    lost_reason = serializers.ChoiceField(
+        choices=LEAD_LOST_REASONS, allow_null=True, required=False
+    )
+    lost_note = serializers.CharField(allow_null=True, required=False)
+    #: The directory card this deal is against. Null on every lead raised
+    #: before the directory existed.
+    customer_id = serializers.IntegerField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
     can_claim = serializers.BooleanField()
     can_complete = serializers.BooleanField()
@@ -223,6 +233,22 @@ class ChatThreadSerializer(serializers.Serializer):
     last_message = ChatMessageSerializer(allow_null=True, required=False)
 
 
+class CustomerSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    phone = serializers.CharField()
+    company_name = serializers.CharField(allow_null=True, required=False)
+    position = serializers.CharField(allow_null=True, required=False)
+    #: How many leads have been raised against this card. The "N ta bitim"
+    #: badge the search results show is the whole reason to search first.
+    deal_count = serializers.IntegerField()
+    created_at = serializers.DateTimeField()
+
+
+class CustomerListSerializer(serializers.Serializer):
+    results = CustomerSerializer(many=True)
+
+
 # ─── Input ────────────────────────────────────────────────────────────────────
 
 class TaskWriteSerializer(serializers.Serializer):
@@ -247,11 +273,42 @@ class LeadItemWriteSerializer(serializers.Serializer):
 
 
 class LeadWriteSerializer(serializers.Serializer):
-    company_name = serializers.CharField(max_length=300)
+    """What the "Yangi lead" sheet sends.
+
+    Only the contact is genuinely required. The sheet asks for a customer, a
+    sum and — optionally — the lines the sum is made of, and everything else the
+    board needs is derived in `validate`: a lead nobody can phone is useless,
+    and a lead whose product name has not been decided yet is perfectly normal.
+    """
+
+    #: Set when the customer was picked out of the directory rather than typed.
+    #: The server then trusts the card over the fields, which is why the sheet
+    #: shows them locked.
+    customer_id = serializers.IntegerField(required=False, allow_null=True)
+    company_name = serializers.CharField(
+        max_length=300, required=False, allow_blank=True
+    )
     contact_full_name = serializers.CharField(max_length=300)
     contact_phone = serializers.CharField(max_length=20)
-    product_name = serializers.CharField(max_length=300)
-    quantity = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
+    product_name = serializers.CharField(
+        max_length=300, required=False, allow_blank=True
+    )
+    quantity = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=0, required=False
+    )
+    #: The deal's value as typed. Ignored when `items` are sent — their sum is
+    #: the total then, and two numbers that can disagree is one too many.
+    amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=0, required=False
+    )
+    #: The first thing said about the deal. Stored as a comment in the lead's
+    #: history, not as a column.
+    note = serializers.CharField(
+        max_length=2000, required=False, allow_blank=True, allow_null=True
+    )
+    #: "Mas'ul menejer: Siz" — the creator takes the lead rather than posting it
+    #: to the board for anyone to claim.
+    assign_to_me = serializers.BooleanField(required=False, default=True)
     contact_position = serializers.CharField(
         max_length=200, required=False, allow_blank=True, allow_null=True
     )
@@ -268,9 +325,43 @@ class LeadWriteSerializer(serializers.Serializer):
     def validate_contact_phone(self, value: str) -> str:
         return _clean_phone(value)
 
+    def validate(self, attrs: dict) -> dict:
+        # The board prints a company on every card and the funnel prints a
+        # product; neither is worth blocking a lead over, so they fall back to
+        # what the sheet does know rather than being demanded from it.
+        items = attrs.get("items") or []
+        if not (attrs.get("company_name") or "").strip():
+            attrs["company_name"] = attrs["contact_full_name"]
+        if not (attrs.get("product_name") or "").strip():
+            attrs["product_name"] = (
+                items[0]["name"] if items else _("Deal")
+            )
+        if attrs.get("quantity") is None:
+            attrs["quantity"] = 1
+        return attrs
+
 
 class LeadStageWriteSerializer(serializers.Serializer):
+    """A move along the funnel, and what closing it as lost has to say for
+    itself."""
+
     stage = serializers.ChoiceField(choices=LEAD_STAGES)
+    lost_reason = serializers.ChoiceField(
+        choices=LEAD_LOST_REASONS, required=False, allow_null=True
+    )
+    #: Free text beside the reason, and the note on any other move.
+    note = serializers.CharField(
+        max_length=2000, required=False, allow_blank=True, allow_null=True
+    )
+
+    def validate(self, attrs: dict) -> dict:
+        # A lost deal with no reason is a number nobody can act on, so this is
+        # the one stage the client cannot post bare.
+        if attrs.get("stage") == LeadStage.LOST and not attrs.get("lost_reason"):
+            raise serializers.ValidationError(
+                {"lost_reason": _("Choose why the deal was lost.")}
+            )
+        return attrs
 
 
 class LeadAssignWriteSerializer(serializers.Serializer):
