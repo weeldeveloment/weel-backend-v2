@@ -21,6 +21,8 @@ from apps.b2b.workspace.views import (
     WorkspaceLeadDetailView,
     WorkspaceLeadItemDetailView,
     WorkspaceLeadItemsView,
+    WorkspaceCrmCustomerDetailView,
+    WorkspaceCrmCustomerListView,
     WorkspaceCustomerSearchView,
     WorkspaceLeadListCreateView,
     WorkspaceLeadStageView,
@@ -107,6 +109,12 @@ urlpatterns = [
     path("hotels/", WorkspaceHotelListView.as_view(), name="ws-hotels"),
 
     path("customers/", WorkspaceCustomerSearchView.as_view(), name="ws-customers"),
+    path("crm/customers/", WorkspaceCrmCustomerListView.as_view(), name="ws-crm-customers"),
+    path(
+        "crm/customers/<int:customer_id>/",
+        WorkspaceCrmCustomerDetailView.as_view(),
+        name="ws-crm-customer-detail",
+    ),
     path("leads/", WorkspaceLeadListCreateView.as_view(), name="ws-leads"),
     path("leads/<int:lead_id>/", WorkspaceLeadDetailView.as_view(), name="ws-lead-detail"),
     path("leads/<int:lead_id>/claim/", WorkspaceLeadClaimView.as_view(), name="ws-lead-claim"),

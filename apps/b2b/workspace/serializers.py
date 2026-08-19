@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from apps.b2b.models import LeadActivityKind, LeadStage
+from apps.b2b.models import LeadActivityKind, LeadStage, LeadStatus
 from apps.b2b.workspace.repository import (
     EVENT_TYPES,
     LEAD_LOST_REASONS,
@@ -290,6 +290,50 @@ class CustomerSerializer(serializers.Serializer):
 
 class CustomerListSerializer(serializers.Serializer):
     results = CustomerSerializer(many=True)
+
+
+class CrmCustomerSerializer(serializers.Serializer):
+    """One row of the CRM directory — a card with its deal footprint."""
+
+    id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    phone = serializers.CharField()
+    company_name = serializers.CharField(allow_null=True, required=False)
+    position = serializers.CharField(allow_null=True, required=False)
+    deal_count = serializers.IntegerField()
+    total_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    #: The newest of created/claimed/completed across the customer's leads —
+    #: the list screen's "Oxirgi aloqa".
+    last_activity_at = serializers.DateTimeField(allow_null=True)
+    #: True while at least one of the customer's leads is still open.
+    is_active = serializers.BooleanField()
+
+
+class CrmCustomerListSerializer(serializers.Serializer):
+    results = CrmCustomerSerializer(many=True)
+
+
+class CrmDealSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    stage = serializers.ChoiceField(choices=LeadStage.CHOICES)
+    status = serializers.ChoiceField(choices=LeadStatus.CHOICES)
+    created_at = serializers.DateTimeField()
+    completed_at = serializers.DateTimeField(allow_null=True)
+
+
+class CrmMonthlyAmountSerializer(serializers.Serializer):
+    month = serializers.CharField()
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+
+
+class CrmCustomerDetailSerializer(CrmCustomerSerializer):
+    email = serializers.CharField(allow_null=True, required=False)
+    address = serializers.CharField(allow_null=True, required=False)
+    #: Whoever has claimed the most of this customer's leads.
+    top_manager_name = serializers.CharField(allow_null=True)
+    monthly_amounts = CrmMonthlyAmountSerializer(many=True)
+    deals = CrmDealSerializer(many=True)
 
 
 # ─── Input ────────────────────────────────────────────────────────────────────

@@ -44,6 +44,8 @@ from apps.b2b.workspace.serializers import (
     CalendarEventSerializer,
     ChatMessageSerializer,
     ChatThreadSerializer,
+    CrmCustomerDetailSerializer,
+    CrmCustomerListSerializer,
     CustomerListSerializer,
     EmployeeMonthlyStatSerializer,
     EmployeeOfMonthSelectSerializer,
@@ -1255,6 +1257,71 @@ class WorkspaceCustomerSearchView(WorkspaceAPIView):
             query=request.query_params.get("q") or "",
         )
         return Response({"results": customers})
+
+
+def _parse_active(raw: str | None) -> bool | None:
+    if raw == "active":
+        return True
+    if raw == "inactive":
+        return False
+    return None
+
+
+class WorkspaceCrmCustomerListView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/crm/customers/ — the CRM directory.
+
+    Every customer the company has ever raised a lead against, with their
+    deal count, lifetime value and last-touched date, so the CRM list screen
+    can render straight off one response.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="List CRM customers",
+        manual_parameters=[
+            openapi.Parameter(
+                "q", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                description="Name, company or phone.",
+            ),
+            openapi.Parameter(
+                "active", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                enum=["active", "inactive"],
+                description="Faol mijozlar / Nofaol mijozlar. Omit for Barchasi.",
+            ),
+        ],
+        responses={200: CrmCustomerListSerializer()},
+    )
+    def get(self, request):
+        customers = repo.list_crm_customers(
+            request.user.company_id,
+            query=request.query_params.get("q") or "",
+            active=_parse_active(request.query_params.get("active")),
+        )
+        return Response({"results": customers})
+
+
+class WorkspaceCrmCustomerDetailView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/crm/customers/<id>/ — one customer's CRM card.
+
+    The contact card, the lifetime totals, the trailing six months of deal
+    value for the chart, and the deal history — everything the detail screen
+    draws, in one response.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="CRM customer detail",
+        responses={200: CrmCustomerDetailSerializer(), 404: openapi.Response(description="Not found")},
+    )
+    def get(self, request, customer_id: int):
+        customer = repo.get_customer_detail(customer_id, request.user.company_id)
+        if not customer:
+            return Response({"detail": _("Customer not found.")}, status=status.HTTP_404_NOT_FOUND)
+        return Response(customer)
 
 
 class WorkspaceLeadListCreateView(WorkspaceAPIView):

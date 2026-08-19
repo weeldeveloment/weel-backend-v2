@@ -908,6 +908,8 @@ def upsert_customer(
     phone: str,
     company_name: str | None = None,
     position: str | None = None,
+    email: str | None = None,
+    address: str | None = None,
 ) -> dict[str, Any] | None:
     """Files a customer under their number, or updates the card already there.
 
@@ -923,16 +925,22 @@ def upsert_customer(
     return fetch_one(
         f"""
         INSERT INTO {B2B_WORKSPACE_CUSTOMER_TABLE}
-            (company_id, full_name, phone, company_name, position, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (company_id, full_name, phone, company_name, position, email, address,
+             created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (company_id, phone) DO UPDATE
         SET full_name = EXCLUDED.full_name,
             company_name = COALESCE(EXCLUDED.company_name, {B2B_WORKSPACE_CUSTOMER_TABLE}.company_name),
             position = COALESCE(EXCLUDED.position, {B2B_WORKSPACE_CUSTOMER_TABLE}.position),
+            email = COALESCE(EXCLUDED.email, {B2B_WORKSPACE_CUSTOMER_TABLE}.email),
+            address = COALESCE(EXCLUDED.address, {B2B_WORKSPACE_CUSTOMER_TABLE}.address),
             updated_at = EXCLUDED.updated_at
         RETURNING *
         """,
-        [company_id, full_name, phone, company_name or None, position or None, now, now],
+        [
+            company_id, full_name, phone, company_name or None, position or None,
+            email or None, address or None, now, now,
+        ],
     )
 
 
@@ -942,6 +950,107 @@ def count_customer_deals(customer_id: int) -> int:
         [customer_id],
     )
     return int((row or {}).get("total") or 0)
+
+
+def list_crm_customers(
+    company_id: int, *, query: str = "", active: bool | None = None
+) -> list[dict[str, Any]]:
+    """The CRM directory screen: every customer with their deal footprint.
+
+    Unlike ``search_customers`` (a typeahead capped at 20, used while raising a
+    lead) this is the whole list, sortable by how recently the customer moved
+    and filterable to who is still an open deal versus who is not.
+    """
+    sql = f"""
+        SELECT c.*,
+               COUNT(l.id) AS deal_count,
+               COALESCE(SUM(l.amount), 0) AS total_amount,
+               MAX(COALESCE(l.completed_at, l.claimed_at, l.created_at)) AS last_activity_at,
+               COALESCE(BOOL_OR(l.status IN ('new', 'in_progress')), FALSE) AS is_active
+        FROM {B2B_WORKSPACE_CUSTOMER_TABLE} c
+        LEFT JOIN {B2B_WORKSPACE_LEAD_TABLE} l ON l.customer_id = c.id
+        WHERE c.company_id = %s
+    """
+    params: list[Any] = [company_id]
+
+    query = (query or "").strip()
+    if query:
+        digits = re.sub(r"\D", "", query)
+        if len(digits) >= 3:
+            sql += (
+                " AND (c.full_name ILIKE %s OR c.company_name ILIKE %s"
+                " OR regexp_replace(c.phone, '\\D', '', 'g') LIKE %s)"
+            )
+            params += [f"%{query}%", f"%{query}%", f"%{digits}%"]
+        else:
+            sql += " AND (c.full_name ILIKE %s OR c.company_name ILIKE %s)"
+            params += [f"%{query}%", f"%{query}%"]
+
+    sql += " GROUP BY c.id"
+    if active is True:
+        sql += " HAVING COALESCE(BOOL_OR(l.status IN ('new', 'in_progress')), FALSE)"
+    elif active is False:
+        sql += " HAVING NOT COALESCE(BOOL_OR(l.status IN ('new', 'in_progress')), FALSE)"
+    sql += " ORDER BY last_activity_at DESC NULLS LAST, c.id DESC"
+
+    return fetch_all(sql, params)
+
+
+def get_customer_detail(customer_id: int, company_id: int) -> dict[str, Any] | None:
+    """The CRM detail card: the customer plus their whole deal history.
+
+    ``top_manager_name`` is whoever has claimed the most of this customer's
+    leads — "Eng faol menejer" on the card — and ``monthly_amounts`` sums deal
+    value by month over the trailing six, which is what the bar chart draws.
+    """
+    customer = get_customer(customer_id, company_id)
+    if not customer:
+        return None
+
+    deals = fetch_all(
+        f"""
+        SELECT id, amount, stage, status, created_at, completed_at
+        FROM {B2B_WORKSPACE_LEAD_TABLE}
+        WHERE customer_id = %s AND company_id = %s
+        ORDER BY created_at DESC, id DESC
+        """,
+        [customer_id, company_id],
+    )
+
+    top_manager = fetch_one(
+        f"""
+        SELECT e.full_name AS name, COUNT(*) AS n
+        FROM {B2B_WORKSPACE_LEAD_TABLE} l
+        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = l.claimed_by_id
+        WHERE l.customer_id = %s AND l.company_id = %s AND l.claimed_by_id IS NOT NULL
+        GROUP BY e.id, e.full_name
+        ORDER BY n DESC, e.id ASC
+        LIMIT 1
+        """,
+        [customer_id, company_id],
+    )
+
+    monthly_amounts = fetch_all(
+        f"""
+        SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
+               COALESCE(SUM(amount), 0) AS amount
+        FROM {B2B_WORKSPACE_LEAD_TABLE}
+        WHERE customer_id = %s AND company_id = %s
+          AND created_at >= date_trunc('month', NOW()) - INTERVAL '5 months'
+        GROUP BY 1
+        ORDER BY 1
+        """,
+        [customer_id, company_id],
+    )
+
+    return {
+        **customer,
+        "deal_count": len(deals),
+        "total_amount": sum(float(deal["amount"] or 0) for deal in deals),
+        "top_manager_name": (top_manager or {}).get("name"),
+        "monthly_amounts": monthly_amounts,
+        "deals": deals,
+    }
 
 
 # ─── Leads ────────────────────────────────────────────────────────────────────
@@ -1018,6 +1127,8 @@ def create_lead(
             phone=contact_phone,
             company_name=company_name,
             position=contact_position,
+            email=contact_email,
+            address=contact_address,
         )
 
     # The customer card wins over what was typed: for a buyer already in the
@@ -1028,6 +1139,19 @@ def create_lead(
         contact_phone = customer.get("phone") or contact_phone
         company_name = customer.get("company_name") or company_name
         contact_position = customer.get("position") or contact_position
+        # An existing card is missing an email or address more often than not
+        # — the search step never asked for either — so a fresh deal is also a
+        # chance to fill them in, without overwriting what is already there.
+        if contact_email or contact_address:
+            customer = upsert_customer(
+                company_id=company_id,
+                full_name=contact_full_name,
+                phone=contact_phone,
+                company_name=company_name,
+                position=contact_position,
+                email=contact_email,
+                address=contact_address,
+            ) or customer
 
     claimed_by = author_id if claim_for_author else None
     lead = fetch_one(
