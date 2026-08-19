@@ -8914,6 +8914,10 @@
      "title": "Can complete",
      "type": "boolean"
     },
+    "can_delete": {
+     "title": "Can delete",
+     "type": "boolean"
+    },
     "can_view_details": {
      "title": "Can view details",
      "type": "boolean"
@@ -9174,6 +9178,10 @@
     },
     "can_complete": {
      "title": "Can complete",
+     "type": "boolean"
+    },
+    "can_delete": {
+     "title": "Can delete",
      "type": "boolean"
     },
     "can_view_details": {
@@ -20653,6 +20661,26 @@
    }
   },
   "/b2b/workspace/leads/{lead_id}/": {
+   "delete": {
+    "description": "GET /api/b2b/workspace/leads/<id>/ — the whole lead in one response.\n\nThe detail screen shows the lead, its priced lines, its history and the\ntasks raised off it all at once, so it fetches them together: four small\nqueries on the server beats four round trips from a phone.",
+    "operationId": "b2b_workspace_leads_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": "Deleted"
+     },
+     "403": {
+      "description": "Employees cannot delete leads"
+     },
+     "404": {
+      "description": "Not found"
+     }
+    },
+    "summary": "Delete a lead (manager only)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
    "get": {
     "description": "GET /api/b2b/workspace/leads/<id>/ — the whole lead in one response.\n\nThe detail screen shows the lead, its priced lines, its history and the\ntasks raised off it all at once, so it fetches them together: four small\nqueries on the server beats four round trips from a phone.",
     "operationId": "b2b_workspace_leads_read",
