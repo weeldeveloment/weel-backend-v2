@@ -36,6 +36,12 @@ def capabilities_for(role: str | None) -> dict[str, bool]:
         "can_edit_any_event": manager,
         # An employee still gets a private calendar of their own.
         "can_create_personal_event": True,
+        # Sales funnel. Anyone may record a deal they are already working —
+        # that lead arrives claimed by its author. Posting one to the board for
+        # the company to pick up is a manager's act, and it is the one
+        # `WorkspaceLeadListView.post` refuses to an employee, so the sheet has
+        # to know before it submits which of the two it is doing.
+        "can_post_lead": manager,
         # Chat
         "can_create_group_chat": manager,
         "can_chat": True,
