@@ -20670,13 +20670,13 @@
       "description": "Deleted"
      },
      "403": {
-      "description": "Employees cannot delete leads"
+      "description": "Only the owner or a manager may delete this lead"
      },
      "404": {
       "description": "Not found"
      }
     },
-    "summary": "Delete a lead (manager only)",
+    "summary": "Delete a lead (owner or manager)",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
