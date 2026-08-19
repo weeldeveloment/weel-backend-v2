@@ -137,13 +137,26 @@ def test_a_manager_deletes_a_lead():
     delete.assert_called_once_with(7, COMPANY_ID)
 
 
-def test_an_employee_cannot_delete_a_lead():
+def test_the_owner_deletes_their_own_lead():
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.repo.delete_lead", return_value=True) as delete,
+    ):
+        response = _call(
+            WorkspaceLeadDetailView, factory.delete("/leads/7/"), OWNER, lead_id=7
+        )
+
+    assert response.status_code == 204
+    delete.assert_called_once_with(7, COMPANY_ID)
+
+
+def test_a_bystander_cannot_delete_somebody_elses_lead():
     with (
         patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
         patch("apps.b2b.workspace.views.repo.delete_lead") as delete,
     ):
         response = _call(
-            WorkspaceLeadDetailView, factory.delete("/leads/7/"), OWNER, lead_id=7
+            WorkspaceLeadDetailView, factory.delete("/leads/7/"), BYSTANDER, lead_id=7
         )
 
     assert response.status_code == 403

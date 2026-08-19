@@ -1202,9 +1202,10 @@ def _lead_payload(lead: dict, user) -> dict:
         ),
         # Reassigning is a manager's call only — see `WorkspaceLeadAssignView`.
         "can_assign": bool(user.is_manager),
-        # Deleting is irreversible, so it stays a manager's call too — see
+        # Deleting is irreversible, so it is limited the same way moving the
+        # lead is — the owner, or a manager over their head — see
         # `WorkspaceLeadDetailView.delete`.
-        "can_delete": bool(user.is_manager),
+        "can_delete": is_owner or user.is_manager,
     }
     if not can_view_details:
         # The whole contact card, not just the two original fields: an address
@@ -1523,10 +1524,10 @@ class WorkspaceLeadDetailView(WorkspaceAPIView):
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,
-        operation_summary="Delete a lead (manager only)",
+        operation_summary="Delete a lead (owner or manager)",
         responses={
             204: openapi.Response(description="Deleted"),
-            403: openapi.Response(description="Employees cannot delete leads"),
+            403: openapi.Response(description="Only the owner or a manager may delete this lead"),
             404: openapi.Response(description="Not found"),
         },
     )
@@ -1534,9 +1535,10 @@ class WorkspaceLeadDetailView(WorkspaceAPIView):
         lead = repo.get_lead(lead_id, request.user.company_id)
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
-        if not request.user.is_manager:
+        is_owner = lead.get("claimed_by_id") == request.user.id
+        if not (is_owner or request.user.is_manager):
             return Response(
-                {"detail": _("Your role does not allow deleting leads.")},
+                {"detail": _("Only the owner or a manager may delete this lead.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
