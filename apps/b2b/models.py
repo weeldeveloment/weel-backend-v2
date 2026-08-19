@@ -82,14 +82,43 @@ class LeadStage:
     INTERESTED = "interested"
     PROPOSAL = "proposal"
     NEGOTIATION = "negotiation"
+    #: Terms are agreed and the paperwork is being drawn up — the last step
+    #: before a deal is actually won, and the one a salesperson sits in
+    #: longest. Added after the funnel screen shipped, which is why it is at
+    #: the end of the list and not in funnel order; ``ORDER`` is what orders it.
+    CONTRACT = "contract"
     WON = "won"
     LOST = "lost"
 
-    CHOICES = [NEW, INTERESTED, PROPOSAL, NEGOTIATION, WON, LOST]
+    CHOICES = [NEW, INTERESTED, PROPOSAL, NEGOTIATION, CONTRACT, WON, LOST]
+
+    #: The funnel's own order, which ``CHOICES`` cannot carry — a stage added
+    #: later has to go on the end of the choices for the existing rows' sake.
+    #: This is what "which stages come after this one" is read from.
+    ORDER = [NEW, INTERESTED, PROPOSAL, NEGOTIATION, CONTRACT, WON, LOST]
 
     #: The stages that close a lead — reaching either sets the status to
     #: ``LeadStatus.COMPLETED``.
     CLOSED = [WON, LOST]
+
+
+class LeadLostReason:
+    """Why a deal was lost.
+
+    A closed-lost lead without a reason is a number nobody can act on, so the
+    stage change demands one. Kept as a short fixed list rather than free text
+    for exactly that reason: five reasons that can be counted beat a thousand
+    sentences that cannot. The salesperson's own words go in the note beside it.
+    """
+    PRICE = "price"
+    COMPETITOR = "competitor"
+    NO_BUDGET = "no_budget"
+    NO_RESPONSE = "no_response"
+    NOT_NEEDED = "not_needed"
+    POSTPONED = "postponed"
+    OTHER = "other"
+
+    CHOICES = [PRICE, COMPETITOR, NO_BUDGET, NO_RESPONSE, NOT_NEEDED, POSTPONED, OTHER]
 
 
 class LeadSource:

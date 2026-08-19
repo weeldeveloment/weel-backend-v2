@@ -16,6 +16,7 @@ from shared.raw.db import execute, fetch_all, fetch_one
 from apps.b2b.models import (
     EmployeeRole,
     LeadActivityKind,
+    LeadLostReason,
     LeadSource,
     LeadStage,
     LeadStatus,
@@ -38,6 +39,7 @@ from apps.b2b.raw.tables import (
     B2B_USER_TABLE,
     B2B_WORKSPACE_FILE_TABLE,
     B2B_WORKSPACE_LEAD_TABLE,
+    B2B_WORKSPACE_CUSTOMER_TABLE,
     B2B_WORKSPACE_LEAD_ACTIVITY_TABLE,
     B2B_WORKSPACE_LEAD_ITEM_TABLE,
 )
@@ -846,11 +848,106 @@ def total_unread(company_id: int, employee_id: int) -> int:
     return int((row or {}).get("unread") or 0)
 
 
+# ─── Customers ────────────────────────────────────────────────────────────────
+
+def search_customers(
+    company_id: int, *, query: str = "", limit: int = 20
+) -> list[dict[str, Any]]:
+    """The directory as the "new lead" sheet searches it: by name or by number.
+
+    Digits in the query are matched against the phone with every separator
+    stripped from both sides, because nobody types a number the way it was
+    stored — "90 123 45 67" has to find "+998901234567".
+
+    Each row carries ``deal_count``, which is the whole point of searching
+    before creating: seeing "2 ta bitim" beside a name is how a salesperson
+    knows this is the same buyer and not a namesake.
+    """
+    sql = f"""
+        SELECT c.*,
+               (SELECT COUNT(*) FROM {B2B_WORKSPACE_LEAD_TABLE} l
+                 WHERE l.customer_id = c.id) AS deal_count
+        FROM {B2B_WORKSPACE_CUSTOMER_TABLE} c
+        WHERE c.company_id = %s
+    """
+    params: list[Any] = [company_id]
+
+    query = (query or "").strip()
+    if query:
+        digits = re.sub(r"\D", "", query)
+        # A stray digit or two in a name ("Aziz 2") is not a phone search, and
+        # matching on it would return the whole directory.
+        if len(digits) >= 3:
+            sql += (
+                " AND (c.full_name ILIKE %s OR c.company_name ILIKE %s"
+                " OR regexp_replace(c.phone, '\\D', '', 'g') LIKE %s)"
+            )
+            params += [f"%{query}%", f"%{query}%", f"%{digits}%"]
+        else:
+            sql += " AND (c.full_name ILIKE %s OR c.company_name ILIKE %s)"
+            params += [f"%{query}%", f"%{query}%"]
+
+    sql += " ORDER BY c.updated_at DESC, c.id DESC LIMIT %s"
+    params.append(limit)
+    return fetch_all(sql, params)
+
+
+def get_customer(customer_id: int, company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {B2B_WORKSPACE_CUSTOMER_TABLE} WHERE id = %s AND company_id = %s",
+        [customer_id, company_id],
+    )
+
+
+def upsert_customer(
+    *,
+    company_id: int,
+    full_name: str,
+    phone: str,
+    company_name: str | None = None,
+    position: str | None = None,
+) -> dict[str, Any] | None:
+    """Files a customer under their number, or updates the card already there.
+
+    ON CONFLICT rather than a SELECT-then-INSERT: two salespeople creating a
+    lead for the same new customer at the same moment is not a race anybody
+    should have to think about, and the unique index settles it.
+
+    The update is COALESCE'd on the optional columns so a lead created without
+    a company name cannot blank one somebody else already filled in — the sheet
+    sends the fields it has, not the fields it knows to be empty.
+    """
+    now = timezone.now()
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_WORKSPACE_CUSTOMER_TABLE}
+            (company_id, full_name, phone, company_name, position, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (company_id, phone) DO UPDATE
+        SET full_name = EXCLUDED.full_name,
+            company_name = COALESCE(EXCLUDED.company_name, {B2B_WORKSPACE_CUSTOMER_TABLE}.company_name),
+            position = COALESCE(EXCLUDED.position, {B2B_WORKSPACE_CUSTOMER_TABLE}.position),
+            updated_at = EXCLUDED.updated_at
+        RETURNING *
+        """,
+        [company_id, full_name, phone, company_name or None, position or None, now, now],
+    )
+
+
+def count_customer_deals(customer_id: int) -> int:
+    row = fetch_one(
+        f"SELECT COUNT(*) AS total FROM {B2B_WORKSPACE_LEAD_TABLE} WHERE customer_id = %s",
+        [customer_id],
+    )
+    return int((row or {}).get("total") or 0)
+
+
 # ─── Leads ────────────────────────────────────────────────────────────────────
 
 LEAD_STATUSES = tuple(LeadStatus.CHOICES)
 LEAD_STAGES = tuple(LeadStage.CHOICES)
 LEAD_SOURCES = tuple(LeadSource.CHOICES)
+LEAD_LOST_REASONS = tuple(LeadLostReason.CHOICES)
 
 
 def list_leads(
@@ -892,28 +989,79 @@ def create_lead(
     contact_address: str | None = None,
     source: str = LeadSource.MANUAL,
     items: Sequence[dict[str, Any]] = (),
+    customer_id: int | None = None,
+    amount=None,
+    note: str | None = None,
+    claim_for_author: bool = False,
 ) -> dict[str, Any] | None:
+    """Raises a lead, and files its customer in the directory on the way past.
+
+    The contact fields are the lead's own copy rather than a join through
+    ``customer_id``: a card can be corrected months later, and a deal should
+    keep the name and number it was actually worked against.
+
+    ``amount`` is only honoured when there are no items — with items the total
+    is theirs, and ``replace_lead_items`` mirrors it onto the row. A deal priced
+    as one round number and a deal broken into lines are both real, and this is
+    what lets the sheet accept either without the two disagreeing.
+    """
     now = timezone.now()
+    customer = None
+    if customer_id is not None:
+        customer = get_customer(customer_id, company_id)
+    if customer is None and contact_phone:
+        customer = upsert_customer(
+            company_id=company_id,
+            full_name=contact_full_name,
+            phone=contact_phone,
+            company_name=company_name,
+            position=contact_position,
+        )
+
+    # The customer card wins over what was typed: for a buyer already in the
+    # directory the sheet shows their details locked, so anything different
+    # arriving here is stale, not an edit.
+    if customer:
+        contact_full_name = customer.get("full_name") or contact_full_name
+        contact_phone = customer.get("phone") or contact_phone
+        company_name = customer.get("company_name") or company_name
+        contact_position = customer.get("position") or contact_position
+
+    claimed_by = author_id if claim_for_author else None
     lead = fetch_one(
         f"""
         INSERT INTO {B2B_WORKSPACE_LEAD_TABLE}
-            (company_id, author_id, company_name, contact_full_name, contact_phone,
-             contact_position, contact_email, contact_address,
-             product_name, quantity, status, stage, source, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (company_id, author_id, customer_id, company_name, contact_full_name,
+             contact_phone, contact_position, contact_email, contact_address,
+             product_name, quantity, amount, status, stage, source,
+             claimed_by_id, claimed_at, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
-            company_id, author_id, company_name, contact_full_name, contact_phone,
-            contact_position, contact_email, contact_address,
-            product_name, quantity, LeadStatus.NEW, LeadStage.NEW, source, now, now,
+            company_id, author_id, (customer or {}).get("id"), company_name,
+            contact_full_name, contact_phone, contact_position, contact_email,
+            contact_address, product_name, quantity, amount or 0,
+            LeadStatus.IN_PROGRESS if claim_for_author else LeadStatus.NEW,
+            LeadStage.NEW, source,
+            claimed_by, now if claim_for_author else None, now, now,
         ],
     )
     if not lead:
         return None
 
-    replace_lead_items(lead["id"], items)
+    if items:
+        replace_lead_items(lead["id"], items)
     add_lead_activity(lead["id"], kind=LeadActivityKind.CREATED, author_id=author_id)
+    if claim_for_author:
+        add_lead_activity(lead["id"], kind=LeadActivityKind.CLAIMED, author_id=author_id)
+    # The sheet's "Izoh" is the first thing said about the deal, so it lands in
+    # the history as a comment rather than in a column nothing ever reads.
+    if note and note.strip():
+        add_lead_activity(
+            lead["id"], kind=LeadActivityKind.COMMENT, author_id=author_id,
+            text=note.strip(),
+        )
     return get_lead(lead["id"], company_id)
 
 
@@ -976,12 +1124,24 @@ def assign_lead(
 
 
 def set_lead_stage(
-    lead_id: int, company_id: int, *, stage: str, employee_id: int
+    lead_id: int,
+    company_id: int,
+    *,
+    stage: str,
+    employee_id: int,
+    lost_reason: str | None = None,
+    note: str | None = None,
 ) -> dict[str, Any] | None:
     """Moves a lead along the funnel, and closes it if the stage closes it.
 
     The status follows the stage here and nowhere else, so "which stages mean
     done" is a single rule rather than one the callers each re-derive.
+
+    ``lost_reason`` is stored only on the move to ``lost`` and cleared on any
+    other move: a lead re-opened out of ``lost`` and closed again for a
+    different reason must not keep the old one. ``note`` is the salesperson's
+    own words and goes to the history as a comment, where the rest of what was
+    said about this deal already lives.
     """
     current = get_lead(lead_id, company_id)
     if not current or current.get("stage") == stage:
@@ -989,12 +1149,15 @@ def set_lead_stage(
 
     now = timezone.now()
     closing = stage in LeadStage.CLOSED
+    losing = stage == LeadStage.LOST
     lead = fetch_one(
         f"""
         UPDATE {B2B_WORKSPACE_LEAD_TABLE}
         SET stage = %s,
             status = %s,
             completed_at = %s,
+            lost_reason = %s,
+            lost_note = %s,
             updated_at = %s
         WHERE id = %s AND company_id = %s
         RETURNING *
@@ -1003,6 +1166,8 @@ def set_lead_stage(
             stage,
             LeadStatus.COMPLETED if closing else current.get("status"),
             now if closing else None,
+            lost_reason if losing else None,
+            (note or "").strip() or None if losing else None,
             now,
             lead_id,
             company_id,
@@ -1017,6 +1182,11 @@ def set_lead_stage(
             # yuborildi" without having to guess what it moved from.
             text=f"{current.get('stage') or LeadStage.NEW}>{stage}",
         )
+        if note and note.strip():
+            add_lead_activity(
+                lead_id, kind=LeadActivityKind.COMMENT, author_id=employee_id,
+                text=note.strip(),
+            )
     return lead
 
 
@@ -1028,6 +1198,7 @@ def complete_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, 
     finish it, and only from ``in_progress``.
     """
     now = timezone.now()
+    previous = (get_lead(lead_id, company_id) or {}).get("stage")
     lead = fetch_one(
         f"""
         UPDATE {B2B_WORKSPACE_LEAD_TABLE}
@@ -1043,7 +1214,10 @@ def complete_lead(lead_id: int, company_id: int, employee_id: int) -> dict[str, 
     if lead:
         add_lead_activity(
             lead_id, kind=LeadActivityKind.COMPLETED, author_id=employee_id,
-            text=f"{LeadStage.NEGOTIATION}>{LeadStage.WON}",
+            # Where it actually came from, read off the row before the UPDATE
+            # rewrote it — the funnel gained a stage after this was written and
+            # a hardcoded "from" would have started lying the day it did.
+            text=f"{previous or LeadStage.NEW}>{LeadStage.WON}",
         )
     return lead
 

@@ -486,6 +486,33 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_chat_message")
 
+        # The company's customer directory. A lead is raised against a card
+        # here, so the second deal with the same buyer reuses their details
+        # rather than retyping them — and the funnel can say "2 ta bitim"
+        # before anyone opens the card.
+        #
+        # The phone is the identity: names are typed differently every time
+        # ("Aziz Karimov", "Karimov A.") and a company can have two of them,
+        # but a number is a number. Hence the unique index rather than a
+        # convention nobody enforces.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_customer (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                full_name VARCHAR(300) NOT NULL,
+                phone VARCHAR(20) NOT NULL,
+                company_name VARCHAR(300),
+                position VARCHAR(200),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_workspace_customer_phone_idx "
+            "ON b2b_workspace_customer (company_id, phone);"
+        )
+        self.stdout.write("  Created b2b_workspace_customer")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_workspace_lead (
                 id BIGSERIAL PRIMARY KEY,
@@ -536,8 +563,24 @@ class Command(BaseCommand):
             "contact_address TEXT;",
             "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
             "completed_at TIMESTAMPTZ;",
+            # Why a deal was lost, and the salesperson's own words beside it.
+            # A closed-lost lead without a reason is a number nobody can act
+            # on, so `set_lead_stage` refuses to write `lost` without one.
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "lost_reason VARCHAR(30);",
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "lost_note TEXT;",
+            # Who the deal is with. Nullable, and SET NULL rather than CASCADE:
+            # every lead raised before the directory existed has none, and
+            # removing a customer card must not take their deal history with it.
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "customer_id BIGINT REFERENCES b2b_workspace_customer(id) ON DELETE SET NULL;",
         ):
             cursor.execute(statement)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_lead_customer_idx "
+            "ON b2b_workspace_lead (customer_id) WHERE customer_id IS NOT NULL;"
+        )
         self.stdout.write("  Created b2b_workspace_lead")
 
         # What the deal is actually made of — "CRM tizimi — Bazaviy paket,

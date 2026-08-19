@@ -28,6 +28,9 @@ B2B_WORKSPACE_LEAD_TABLE = "b2b_workspace_lead"
 # The priced lines a lead is made of, and everything that has happened to it.
 B2B_WORKSPACE_LEAD_ITEM_TABLE = "b2b_workspace_lead_item"
 B2B_WORKSPACE_LEAD_ACTIVITY_TABLE = "b2b_workspace_lead_activity"
+# The company's own customer directory. A lead is raised against one of these,
+# so the second deal with the same buyer reuses the card rather than retyping it.
+B2B_WORKSPACE_CUSTOMER_TABLE = "b2b_workspace_customer"
 B2B_WORKSPACE_FILE_TABLE = "b2b_workspace_file"
 B2B_EMPLOYEE_OF_MONTH_TABLE = "b2b_employee_of_month"
 B2B_ATTENDANCE_TABLE = "b2b_attendance"
