@@ -124,6 +124,41 @@ def test_contact_is_withheld_from_the_rest_of_the_board(user, expected_visible):
         assert (row[field] is not None) is expected_visible, field
 
 
+def test_a_manager_deletes_a_lead():
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.repo.delete_lead", return_value=True) as delete,
+    ):
+        response = _call(
+            WorkspaceLeadDetailView, factory.delete("/leads/7/"), MANAGER, lead_id=7
+        )
+
+    assert response.status_code == 204
+    delete.assert_called_once_with(7, COMPANY_ID)
+
+
+def test_an_employee_cannot_delete_a_lead():
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.repo.delete_lead") as delete,
+    ):
+        response = _call(
+            WorkspaceLeadDetailView, factory.delete("/leads/7/"), OWNER, lead_id=7
+        )
+
+    assert response.status_code == 403
+    delete.assert_not_called()
+
+
+def test_deleting_an_unknown_lead_is_a_404():
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=None):
+        response = _call(
+            WorkspaceLeadDetailView, factory.delete("/leads/7/"), MANAGER, lead_id=7
+        )
+
+    assert response.status_code == 404
+
+
 def test_detail_returns_items_activity_and_tasks_in_one_response():
     """The screen needs four things at once, so one request brings all four."""
     with (

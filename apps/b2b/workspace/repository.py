@@ -1086,6 +1086,18 @@ def get_lead(lead_id: int, company_id: int) -> dict[str, Any] | None:
     )
 
 
+def delete_lead(lead_id: int, company_id: int) -> bool:
+    """Removes the lead outright. Its items and activity go with it (ON DELETE
+    CASCADE); any task raised off it stays, just no longer pointing at a lead
+    (ON DELETE SET NULL) — see `create_b2b_tables`."""
+    return bool(
+        execute(
+            f"DELETE FROM {B2B_WORKSPACE_LEAD_TABLE} WHERE id = %s AND company_id = %s",
+            [lead_id, company_id],
+        )
+    )
+
+
 def create_lead(
     *,
     company_id: int,

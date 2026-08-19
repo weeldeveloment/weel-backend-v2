@@ -215,6 +215,7 @@ class LeadSerializer(serializers.Serializer):
     can_claim = serializers.BooleanField()
     can_complete = serializers.BooleanField()
     can_view_details = serializers.BooleanField()
+    can_delete = serializers.BooleanField(required=False)
     #: Set on every row of the board, so the card can show a total and a task
     #: count without a second request per lead.
     item_count = serializers.IntegerField(required=False)
