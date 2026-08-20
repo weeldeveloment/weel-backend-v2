@@ -170,8 +170,9 @@ def test_employee_cannot_advance_someone_elses_task(get_task):
     assert response.status_code == 403
 
 
+@patch("apps.b2b.workspace.views.repo.list_task_activity", return_value=[])
 @patch("apps.b2b.workspace.views.repo.get_task")
-def test_task_payload_tells_the_app_which_buttons_to_show(get_task):
+def test_task_payload_tells_the_app_which_buttons_to_show(get_task, _activity):
     get_task.return_value = _task(assignee_ids=[EMPLOYEE_ID])
     response = _call(WorkspaceTaskDetailView, factory.get("/tasks/10/"), EMPLOYEE, task_id=10)
     assert response.data["can_edit"] is False

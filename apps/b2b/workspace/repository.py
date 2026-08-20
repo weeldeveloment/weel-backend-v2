@@ -20,6 +20,7 @@ from apps.b2b.models import (
     LeadSource,
     LeadStage,
     LeadStatus,
+    TaskActivityKind,
 )
 from apps.b2b.raw.tables import (
     B2B_CALENDAR_EVENT_TABLE,
@@ -34,6 +35,7 @@ from apps.b2b.raw.tables import (
     B2B_SUPPORT_MESSAGE_TABLE,
     B2B_EMPLOYEE_OF_MONTH_TABLE,
     B2B_EMPLOYEE_TABLE,
+    B2B_TASK_ACTIVITY_TABLE,
     B2B_TASK_ASSIGNEE_TABLE,
     B2B_TASK_COMMENT_TABLE,
     B2B_TASK_SUBTASK_TABLE,
@@ -371,11 +373,24 @@ def create_task(
 
     set_task_assignees(task["id"], assignee_ids)
     replace_subtasks(task["id"], subtasks)
+    add_task_activity(
+        task["id"], company_id, task_title=title,
+        kind=TaskActivityKind.CREATED, author_id=author_id,
+    )
     return get_task(task["id"], company_id)
 
 
-def update_task(task_id: int, company_id: int, **fields: Any) -> dict[str, Any] | None:
+def update_task(
+    task_id: int, company_id: int, *, actor_id: int | None = None, **fields: Any
+) -> dict[str, Any] | None:
     if fields:
+        # Read before the UPDATE so a status change can say what it moved
+        # from, and every field-set can log against the title even when the
+        # title itself is one of the fields being changed.
+        current = fetch_one(
+            f"SELECT title, status FROM {B2B_TASK_TABLE} WHERE id = %s AND company_id = %s",
+            [task_id, company_id],
+        )
         sets = ", ".join(f"{key} = %s" for key in fields)
         params = list(fields.values()) + [timezone.now(), task_id, company_id]
         fetch_one(
@@ -383,6 +398,21 @@ def update_task(task_id: int, company_id: int, **fields: Any) -> dict[str, Any] 
             f"WHERE id = %s AND company_id = %s RETURNING *",
             params,
         )
+        if current:
+            title = fields.get("title") or current["title"]
+            if "status" in fields and fields["status"] != current["status"]:
+                add_task_activity(
+                    task_id, company_id, task_title=title,
+                    kind=TaskActivityKind.STATUS, author_id=actor_id,
+                    text=f"{current['status']}>{fields['status']}",
+                )
+            other_fields = [key for key in fields if key not in {"status", "completed_at"}]
+            if other_fields:
+                add_task_activity(
+                    task_id, company_id, task_title=title,
+                    kind=TaskActivityKind.UPDATED, author_id=actor_id,
+                    text=",".join(other_fields),
+                )
     return get_task(task_id, company_id)
 
 
@@ -411,21 +441,65 @@ def delete_task_voice(task_id: int) -> dict[str, Any] | None:
     return existing
 
 
-def delete_task(task_id: int, company_id: int) -> bool:
-    return execute(
+def delete_task(task_id: int, company_id: int, *, actor_id: int | None = None) -> bool:
+    # Read the title before the row is gone — it's the only place the
+    # company-wide feed can still get it from once this DELETE runs.
+    existing = fetch_one(
+        f"SELECT title FROM {B2B_TASK_TABLE} WHERE id = %s AND company_id = %s",
+        [task_id, company_id],
+    )
+    deleted = execute(
         f"DELETE FROM {B2B_TASK_TABLE} WHERE id = %s AND company_id = %s",
         [task_id, company_id],
     ) > 0
+    if deleted and existing:
+        add_task_activity(
+            None, company_id, task_title=existing["title"],
+            kind=TaskActivityKind.DELETED, author_id=actor_id,
+        )
+    return deleted
 
 
-def set_task_assignees(task_id: int, employee_ids: Sequence[int]) -> None:
+def set_task_assignees(
+    task_id: int,
+    employee_ids: Sequence[int],
+    *,
+    company_id: int | None = None,
+    actor_id: int | None = None,
+    task_title: str = "",
+) -> None:
+    """Full replace. When ``company_id`` is passed, the before/after sets are
+    diffed and logged as ASSIGNED/UNASSIGNED — left off during task creation,
+    where the CREATED entry already covers who the task started with."""
+    previous = {
+        row["employee_id"]
+        for row in fetch_all(
+            f"SELECT employee_id FROM {B2B_TASK_ASSIGNEE_TABLE} WHERE task_id = %s",
+            [task_id],
+        )
+    }
+    new_ids = list(dict.fromkeys(employee_ids))  # de-duplicate, keep order
+
     execute(f"DELETE FROM {B2B_TASK_ASSIGNEE_TABLE} WHERE task_id = %s", [task_id])
-    for employee_id in dict.fromkeys(employee_ids):  # de-duplicate, keep order
+    for employee_id in new_ids:
         execute(
             f"INSERT INTO {B2B_TASK_ASSIGNEE_TABLE} (task_id, employee_id, created_at) "
             f"VALUES (%s, %s, %s) ON CONFLICT (task_id, employee_id) DO NOTHING",
             [task_id, employee_id, timezone.now()],
         )
+
+    if company_id is not None:
+        new_set = set(new_ids)
+        for added in new_set - previous:
+            add_task_activity(
+                task_id, company_id, task_title=task_title,
+                kind=TaskActivityKind.ASSIGNED, author_id=actor_id, text=str(added),
+            )
+        for removed in previous - new_set:
+            add_task_activity(
+                task_id, company_id, task_title=task_title,
+                kind=TaskActivityKind.UNASSIGNED, author_id=actor_id, text=str(removed),
+            )
 
 
 def replace_subtasks(task_id: int, titles: Sequence[str]) -> None:
@@ -465,6 +539,73 @@ def add_task_comment(task_id: int, author_id: int, text: str) -> dict[str, Any] 
         f"VALUES (%s, %s, %s, %s) RETURNING *",
         [task_id, author_id, text, timezone.now()],
     )
+
+
+# ─── Task activity ────────────────────────────────────────────────────────────
+
+def add_task_activity(
+    task_id: int | None,
+    company_id: int,
+    *,
+    task_title: str,
+    kind: str,
+    author_id: int | None = None,
+    text: str = "",
+) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_TASK_ACTIVITY_TABLE}
+            (company_id, task_id, task_title, author_id, kind, text, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [company_id, task_id, task_title, author_id, kind, text, timezone.now()],
+    )
+
+
+def list_task_activity(task_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
+    """Newest first, with the author's name joined on so the feed does not
+    need the roster to render."""
+    return fetch_all(
+        f"""
+        SELECT a.*,
+               e.full_name AS author_name,
+               e.photo AS author_photo
+        FROM {B2B_TASK_ACTIVITY_TABLE} a
+        LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = a.author_id
+        WHERE a.task_id = %s
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT %s
+        """,
+        [task_id, limit],
+    )
+
+
+def list_company_task_activity(
+    company_id: int, *, actor_id: int | None = None, limit: int = 100
+) -> list[dict[str, Any]]:
+    """Company-wide feed for the tasks page: every task's history, newest
+    first — including tasks since deleted, since ``task_id`` is nullable and
+    ``task_title`` is a snapshot taken at write time.
+
+    ``actor_id`` narrows the feed to one employee's own actions — used for
+    non-manager callers, who may only see their own tasks and must not read
+    what the rest of the company did on theirs."""
+    sql = f"""
+        SELECT a.*,
+               e.full_name AS author_name,
+               e.photo AS author_photo
+        FROM {B2B_TASK_ACTIVITY_TABLE} a
+        LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = a.author_id
+        WHERE a.company_id = %s
+    """
+    params: list[Any] = [company_id]
+    if actor_id is not None:
+        sql += " AND a.author_id = %s"
+        params.append(actor_id)
+    sql += " ORDER BY a.created_at DESC, a.id DESC LIMIT %s"
+    params.append(limit)
+    return fetch_all(sql, params)
 
 
 def task_counters(company_id: int, visible_to: int | None = None) -> dict[str, int]:

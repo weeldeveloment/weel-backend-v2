@@ -462,6 +462,31 @@ class WorkspaceTaskListCreateView(WorkspaceAPIView):
         return Response(_task_payload(task, request.user), status=status.HTTP_201_CREATED)
 
 
+class WorkspaceTaskActivityFeedView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/tasks/activity/
+
+    The company-wide feed the tasks page shows: every create/edit/status/
+    assign/delete across every task, newest first — including tasks since
+    deleted, since the log outlives the row it was written about.
+
+    Managers (``visible_scope is None``) see everyone's actions; an employee
+    sees only their own, the same boundary ``list_tasks`` draws for the task
+    list itself.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Company-wide task activity feed",
+                         responses={200: openapi.Response(description="Activity feed")})
+    def get(self, request):
+        user = request.user
+        activity = repo.list_company_task_activity(
+            user.company_id,
+            actor_id=user.id if user.visible_scope is not None else None,
+        )
+        return Response({"results": activity})
+
+
 def _validated_employee_ids(company_id: int, ids) -> list[int] | None:
     """Returns the ids if they all belong to the company, otherwise ``None``.
 
@@ -499,7 +524,10 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
         task = self._load(request, task_id)
         if not task:
             return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
-        return Response(_task_payload(task, request.user))
+        return Response({
+            **_task_payload(task, request.user),
+            "activity": repo.list_task_activity(task_id),
+        })
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Edit a task (owner/manager only)",
                          request_body=TaskPatchSerializer, responses={200: TaskSerializer()})
@@ -527,7 +555,12 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
                     {"assignee_ids": [_("Some of these employees are not in your company.")]},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            repo.set_task_assignees(task_id, checked)
+            repo.set_task_assignees(
+                task_id, checked,
+                company_id=request.user.company_id,
+                actor_id=request.user.id,
+                task_title=task["title"],
+            )
 
         if subtasks is not None:
             repo.replace_subtasks(task_id, subtasks)
@@ -537,7 +570,9 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
         fields = {key: value for key, value in data.items() if key in {
             "title", "description", "status", "priority", "project", "due_date",
         }}
-        updated = repo.update_task(task_id, request.user.company_id, **fields)
+        updated = repo.update_task(
+            task_id, request.user.company_id, actor_id=request.user.id, **fields
+        )
         return Response(_task_payload(updated, request.user))
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Delete a task (owner/manager only)",
@@ -548,7 +583,7 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
                 {"detail": _("Your role does not allow deleting tasks.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        if not repo.delete_task(task_id, request.user.company_id):
+        if not repo.delete_task(task_id, request.user.company_id, actor_id=request.user.id):
             return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -592,7 +627,8 @@ class WorkspaceTaskStatusView(WorkspaceAPIView):
         # a stale one.
         completed_at = timezone.now() if new_status == "done" else None
         updated = repo.update_task(
-            task_id, request.user.company_id, status=new_status, completed_at=completed_at
+            task_id, request.user.company_id, actor_id=request.user.id,
+            status=new_status, completed_at=completed_at,
         )
         return Response(_task_payload(updated, request.user))
 
@@ -2006,6 +2042,26 @@ def store_upload(*, request, upload, kind: str, message_id: int | None = None,
     return file, None
 
 
+def _keep_extension(current: str, requested: str) -> str:
+    """[requested], wearing [current]'s extension.
+
+    Enforced on the server and not only hidden in the app: the field a phone
+    draws is not what protects the file, and this endpoint is reachable
+    without it.
+    """
+    stem_now, dot_now, extension = current.rpartition(".")
+    if not dot_now or not extension or not stem_now:
+        # Nothing to preserve: the file never had an extension, or its whole
+        # name is one.
+        return requested
+
+    stem, dot, _ = requested.rpartition(".")
+    base = (stem if dot else requested).strip()
+    # ".pdf" as a whole name leaves nothing to call the file, so it keeps the
+    # stem it already had.
+    return f"{base or stem_now}.{extension}"
+
+
 def _folder_payload(folder: dict) -> dict:
     """A folder as the drive screen draws it: its name and what it holds."""
     return {
@@ -2203,6 +2259,14 @@ class WorkspaceFileDetailView(WorkspaceAPIView):
         serializer = WorkspaceFilePatchSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         fields = dict(serializer.validated_data)
+
+        # A rename may not change what kind of file this is. The extension is
+        # how every reader on the other side — a phone, a browser, Excel —
+        # decides how to open the bytes, and the bytes are not being rewritten
+        # here: a .xlsx renamed to .pdf is a file that no longer opens
+        # anywhere. Whatever the client sent, the stored extension is kept.
+        if "name" in fields:
+            fields["name"] = _keep_extension(file["name"], fields["name"])
 
         # A folder id is a way into the drive, so it is checked against this
         # company before anything is written. Explicit null is the one value

@@ -38,6 +38,7 @@ from apps.b2b.workspace.views import (
     WorkspaceStorageView,
     WorkspaceSupportView,
     WorkspaceSubtaskToggleView,
+    WorkspaceTaskActivityFeedView,
     WorkspaceTaskCommentView,
     WorkspaceTaskDetailView,
     WorkspaceTaskListCreateView,
@@ -85,6 +86,7 @@ urlpatterns = [
     ),
 
     path("tasks/", WorkspaceTaskListCreateView.as_view(), name="ws-tasks"),
+    path("tasks/activity/", WorkspaceTaskActivityFeedView.as_view(), name="ws-task-activity-feed"),
     path("tasks/<int:task_id>/", WorkspaceTaskDetailView.as_view(), name="ws-task-detail"),
     path("tasks/<int:task_id>/status/", WorkspaceTaskStatusView.as_view(), name="ws-task-status"),
     path("tasks/<int:task_id>/comments/", WorkspaceTaskCommentView.as_view(), name="ws-task-comments"),

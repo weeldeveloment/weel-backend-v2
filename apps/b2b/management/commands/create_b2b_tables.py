@@ -391,6 +391,34 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_task_comment")
 
+        # Everything that has happened to a task, company-wide: the events the
+        # server writes itself (created, updated, status, (un)assigned,
+        # deleted) and the notes employees type. task_id is nullable and
+        # ON DELETE SET NULL, with task_title snapshotted at write time, so a
+        # deleted task still reads as "X deleted" in the tasks-page feed after
+        # the task row itself is gone. Mirrors b2b_workspace_lead_activity.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_task_activity (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                task_id BIGINT REFERENCES b2b_task(id) ON DELETE SET NULL,
+                task_title VARCHAR(300) NOT NULL DEFAULT '',
+                author_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                kind VARCHAR(20) NOT NULL DEFAULT 'comment',
+                text TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_task_activity_task_idx "
+            "ON b2b_task_activity (task_id, created_at DESC, id DESC);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_task_activity_company_idx "
+            "ON b2b_task_activity (company_id, created_at DESC, id DESC);"
+        )
+        self.stdout.write("  Created b2b_task_activity")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_calendar_event (
                 id BIGSERIAL PRIMARY KEY,

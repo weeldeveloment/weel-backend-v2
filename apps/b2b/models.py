@@ -150,6 +150,26 @@ class LeadActivityKind:
     CHOICES = [CREATED, CLAIMED, ASSIGNED, STAGE, COMMENT, COMPLETED]
 
 
+class TaskActivityKind:
+    """One row of a task's history.
+
+    Everything but ``COMMENT`` is written by the server as a side effect of the
+    action it names, which is why the text is composed there and not accepted
+    from the client. Rows outlive the task itself (``task_id`` is nullable, see
+    ``b2b_task_activity``) so a deleted task still reads as "X deleted" in the
+    company-wide feed on the tasks page.
+    """
+    CREATED = "created"
+    UPDATED = "updated"
+    STATUS = "status"
+    ASSIGNED = "assigned"
+    UNASSIGNED = "unassigned"
+    COMMENT = "comment"
+    DELETED = "deleted"
+
+    CHOICES = [CREATED, UPDATED, STATUS, ASSIGNED, UNASSIGNED, COMMENT, DELETED]
+
+
 class DepartmentBudgetStatus:
     """Where a department stands against its owner-set budget limit,
     based on how much of ``budget_limit`` remains unspent.
