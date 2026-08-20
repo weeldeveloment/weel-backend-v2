@@ -700,6 +700,14 @@ class Command(BaseCommand):
             "ALTER TABLE b2b_workspace_file ADD COLUMN IF NOT EXISTS "
             "trip_id BIGINT REFERENCES b2b_business_trip(id) ON DELETE CASCADE;"
         )
+        # A voice note recorded while a task was being written. Same table as
+        # every other upload because the quota is one SUM over it, and CASCADE
+        # for the same reason a chat attachment cascades: deleting the task has
+        # to give the bytes back.
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_file ADD COLUMN IF NOT EXISTS "
+            "task_id BIGINT REFERENCES b2b_task(id) ON DELETE CASCADE;"
+        )
         # The quota reads SUM(size) per company on every upload, and the
         # drive list filters to kind='file'. Both go through this.
         cursor.execute(
@@ -709,6 +717,10 @@ class Command(BaseCommand):
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS b2b_workspace_file_message_idx "
             "ON b2b_workspace_file (message_id) WHERE message_id IS NOT NULL;"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_file_task_idx "
+            "ON b2b_workspace_file (task_id) WHERE task_id IS NOT NULL;"
         )
         self.stdout.write("  Created b2b_workspace_file")
 

@@ -353,6 +353,25 @@ class WorkspaceTeamView(WorkspaceAPIView):
 
 # ─── Tasks ────────────────────────────────────────────────────────────────────
 
+def _task_voice_payload(voice: dict | None) -> dict | None:
+    """The task's voice note as the app reads it.
+
+    Shaped rather than passed through: the row carries the storage path, which
+    is an internal detail and not a URL anything can play. Same field names as
+    a chat attachment, so one bubble renders either.
+    """
+    if not voice:
+        return None
+    return {
+        "id": voice["id"],
+        "name": voice["name"],
+        "size": voice["size"],
+        "content_type": voice.get("content_type"),
+        "duration_ms": voice.get("duration_ms"),
+        "url": default_storage.url(voice["path"]),
+    }
+
+
 def _task_payload(task: dict, user) -> dict:
     """Adds the per-task permission flags the app uses to decide which buttons
     to render — the same rules the write endpoints enforce."""
@@ -362,6 +381,7 @@ def _task_payload(task: dict, user) -> dict:
 
     return {
         **task,
+        "voice": _task_voice_payload(task.get("voice")),
         "can_edit": bool(caps["can_edit_task"]),
         "can_delete": bool(caps["can_delete_task"]),
         # An employee moves only their own work along the board.
@@ -633,6 +653,98 @@ class WorkspaceTaskCommentView(WorkspaceAPIView):
 
         updated = repo.get_task(task_id, request.user.company_id)
         return Response(_task_payload(updated, request.user), status=status.HTTP_201_CREATED)
+
+
+class WorkspaceTaskVoiceView(WorkspaceAPIView):
+    """POST/DELETE /api/b2b/workspace/tasks/<id>/voice/ — the task's voice note.
+
+    Its own endpoint rather than a field on the create call: a task is created
+    as JSON and a clip is multipart, and folding the two together would mean
+    every task write carried a file parser it does not need. The app posts the
+    task, gets its id, and sends the recording straight after.
+
+    A task carries at most one clip. Posting a second replaces the first,
+    bytes and all — re-recording is the common case, and leaving the earlier
+    attempt on the company's quota is not what "replace" means.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Attach a voice note to a task",
+        consumes=["multipart/form-data"],
+        manual_parameters=[
+            openapi.Parameter("file", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
+            openapi.Parameter("duration_ms", openapi.IN_FORM, type=openapi.TYPE_INTEGER),
+        ],
+        responses={201: TaskSerializer()},
+    )
+    def post(self, request, task_id: int):
+        task = self._writable_task(request, task_id)
+        if task is None:
+            return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": _("No file provided.")}, status=status.HTTP_400_BAD_REQUEST)
+
+        self._discard_existing(task_id)
+
+        voice, refusal = store_upload(
+            request=request,
+            upload=upload,
+            kind="task",
+            task_id=task_id,
+            # From the recorder, which is the only thing that knows how long
+            # the clip runs — see the chat send for why the server does not
+            # work it out itself.
+            duration_ms=_int_or_none(request.data.get("duration_ms")),
+        )
+        if refusal:
+            return refusal
+
+        updated = repo.get_task(task_id, request.user.company_id)
+        return Response(_task_payload(updated, request.user), status=status.HTTP_201_CREATED)
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Remove a task's voice note",
+        responses={200: TaskSerializer()},
+    )
+    def delete(self, request, task_id: int):
+        task = self._writable_task(request, task_id)
+        if task is None:
+            return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        self._discard_existing(task_id)
+        updated = repo.get_task(task_id, request.user.company_id)
+        return Response(_task_payload(updated, request.user))
+
+    def _writable_task(self, request, task_id: int) -> dict | None:
+        """The task, if this caller may attach to it.
+
+        Author, assignee or a manager — the same reach the comment endpoint
+        allows, because a clip explaining a task is a comment that happens to
+        be audio. Anything else gets a 404 rather than a 403: a company's task
+        ids are not something to confirm to somebody who cannot see them.
+        """
+        task = repo.get_task(task_id, request.user.company_id)
+        if not task:
+            return None
+        if request.user.visible_scope is not None and not (
+            task["author_id"] == request.user.id
+            or request.user.id in (task.get("assignee_ids") or [])
+        ):
+            return None
+        return task
+
+    @staticmethod
+    def _discard_existing(task_id: int) -> None:
+        """Drops the clip a task already had, object and row together."""
+        previous = repo.delete_task_voice(task_id)
+        if previous:
+            default_storage.delete(previous["path"])
 
 
 # ─── Calendar ─────────────────────────────────────────────────────────────────

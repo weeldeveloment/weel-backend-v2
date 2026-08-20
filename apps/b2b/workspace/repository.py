@@ -232,6 +232,7 @@ def _attach_task_children(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         task["assignee_ids"] = []
         task["subtasks"] = []
         task["comments"] = []
+        task["voice"] = None
 
     for row in fetch_all(
         f"SELECT task_id, employee_id FROM {B2B_TASK_ASSIGNEE_TABLE} "
@@ -253,6 +254,16 @@ def _attach_task_children(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         [ids],
     ):
         by_id[row["task_id"]]["comments"].append(row)
+
+    # The voice note, if one was recorded while the task was written. At most
+    # one per task — a second upload replaces the first, so the newest row wins
+    # here rather than the list growing a clip nobody meant to keep.
+    for row in fetch_all(
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} "
+        f"WHERE task_id = __ANY_MARKER__(%s) ORDER BY created_at ASC, id ASC",
+        [ids],
+    ):
+        by_id[row["task_id"]]["voice"] = row
 
     return tasks
 
@@ -367,6 +378,31 @@ def update_task(task_id: int, company_id: int, **fields: Any) -> dict[str, Any] 
             params,
         )
     return get_task(task_id, company_id)
+
+
+def task_voice(task_id: int) -> dict[str, Any] | None:
+    """The clip attached to a task, or None."""
+    return fetch_one(
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE task_id = %s "
+        "ORDER BY created_at DESC, id DESC",
+        [task_id],
+    )
+
+
+def delete_task_voice(task_id: int) -> dict[str, Any] | None:
+    """Removes the clip a task carries and hands back the row that owned it.
+
+    Returned rather than dropped so the caller can delete the object too — the
+    row is the only record of where the bytes are, and a DELETE that forgets
+    them leaves the company paying quota for a file nothing can reach.
+    """
+    existing = task_voice(task_id)
+    if existing:
+        execute(
+            f"DELETE FROM {B2B_WORKSPACE_FILE_TABLE} WHERE id = %s",
+            [existing["id"]],
+        )
+    return existing
 
 
 def delete_task(task_id: int, company_id: int) -> bool:
@@ -1578,6 +1614,7 @@ def create_file(
     content_type: str | None = None,
     message_id: int | None = None,
     trip_id: int | None = None,
+    task_id: int | None = None,
     duration_ms: int | None = None,
 ) -> dict[str, Any] | None:
     """Records stored bytes.
@@ -1591,13 +1628,13 @@ def create_file(
         f"""
         INSERT INTO {B2B_WORKSPACE_FILE_TABLE}
             (company_id, author_id, name, path, size, kind, content_type,
-             message_id, trip_id, duration_ms, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             message_id, trip_id, task_id, duration_ms, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
             company_id, author_id, name, path, size, kind, content_type,
-            message_id, trip_id, duration_ms, timezone.now(),
+            message_id, trip_id, task_id, duration_ms, timezone.now(),
         ],
     )
 
