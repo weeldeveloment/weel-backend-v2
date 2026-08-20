@@ -654,6 +654,21 @@ class Command(BaseCommand):
         # a counter that has to be kept in step with three upload paths and
         # drifts the first time one of them forgets.
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_folder (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                author_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                name VARCHAR(120) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_folder_company_idx "
+            "ON b2b_workspace_folder (company_id, created_at DESC);"
+        )
+        self.stdout.write("  Created b2b_workspace_folder")
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_workspace_file (
                 id BIGSERIAL PRIMARY KEY,
                 company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
@@ -721,6 +736,18 @@ class Command(BaseCommand):
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS b2b_workspace_file_task_idx "
             "ON b2b_workspace_file (task_id) WHERE task_id IS NOT NULL;"
+        )
+        # Which drawer of the drive a file was put in, if any. NULL means the
+        # drive itself — most files — and a deleted folder sets it back to
+        # NULL rather than taking the files with it: emptying a shelf is not
+        # the same act as throwing out what was on it.
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_file ADD COLUMN IF NOT EXISTS "
+            "folder_id BIGINT REFERENCES b2b_workspace_folder(id) ON DELETE SET NULL;"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_file_folder_idx "
+            "ON b2b_workspace_file (folder_id) WHERE folder_id IS NOT NULL;"
         )
         self.stdout.write("  Created b2b_workspace_file")
 

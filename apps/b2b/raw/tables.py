@@ -32,6 +32,7 @@ B2B_WORKSPACE_LEAD_ACTIVITY_TABLE = "b2b_workspace_lead_activity"
 # so the second deal with the same buyer reuses the card rather than retyping it.
 B2B_WORKSPACE_CUSTOMER_TABLE = "b2b_workspace_customer"
 B2B_WORKSPACE_FILE_TABLE = "b2b_workspace_file"
+B2B_WORKSPACE_FOLDER_TABLE = "b2b_workspace_folder"
 B2B_EMPLOYEE_OF_MONTH_TABLE = "b2b_employee_of_month"
 B2B_ATTENDANCE_TABLE = "b2b_attendance"
 B2B_ATTENDANCE_LOCATION_TABLE = "b2b_attendance_location"

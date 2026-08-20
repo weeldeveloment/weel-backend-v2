@@ -36,6 +36,9 @@ from apps.b2b.workspace.authentication import (
 from apps.b2b.workspace.permissions import HasCapability, IsWorkspaceManager, IsWorkspaceUser
 from apps.b2b.workspace.roles import capabilities_for, is_manager
 from apps.b2b.workspace.serializers import (
+    WorkspaceFolderListSerializer,
+    WorkspaceFolderSerializer,
+    WorkspaceFolderWriteSerializer,
     AttendanceCheckInSerializer,
     AttendanceDaySerializer,
     AttendanceLocationSerializer,
@@ -1956,7 +1959,8 @@ def _too_large_response(exc: storage.UploadTooLarge) -> Response:
 
 
 def store_upload(*, request, upload, kind: str, message_id: int | None = None,
-                 trip_id: int | None = None, duration_ms: int | None = None):
+                 trip_id: int | None = None, task_id: int | None = None,
+                 folder_id: int | None = None, duration_ms: int | None = None):
     """Quota-check, write the object, and record the row that owns its bytes.
 
     The single door for everything the workspace stores. The check happens
@@ -1985,6 +1989,8 @@ def store_upload(*, request, upload, kind: str, message_id: int | None = None,
         content_type=getattr(upload, "content_type", None),
         message_id=message_id,
         trip_id=trip_id,
+        task_id=task_id,
+        folder_id=folder_id,
         duration_ms=duration_ms,
     )
     if not file:
@@ -1997,6 +2003,98 @@ def store_upload(*, request, upload, kind: str, message_id: int | None = None,
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     return file, None
+
+
+def _folder_payload(folder: dict) -> dict:
+    """A folder as the drive screen draws it: its name and what it holds."""
+    return {
+        "id": folder["id"],
+        "name": folder["name"],
+        "author_id": folder.get("author_id"),
+        "file_count": int(folder.get("file_count") or 0),
+        "size_bytes": int(folder.get("size_bytes") or 0),
+        "created_at": folder.get("created_at"),
+    }
+
+
+class WorkspaceFolderListCreateView(WorkspaceAPIView):
+    """GET/POST /api/b2b/workspace/folders/ — the drive's own folders.
+
+    Anyone in the company may make one, the same as anyone may add a file: the
+    drive is shared, and a folder is how somebody decided to arrange it.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="List folders",
+        responses={200: WorkspaceFolderListSerializer()},
+    )
+    def get(self, request):
+        folders = repo.list_folders(request.user.company_id)
+        return Response({"results": [_folder_payload(f) for f in folders]})
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Create a folder",
+        request_body=WorkspaceFolderWriteSerializer,
+        responses={201: WorkspaceFolderSerializer()},
+    )
+    def post(self, request):
+        serializer = WorkspaceFolderWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        folder = repo.create_folder(
+            company_id=request.user.company_id,
+            author_id=request.user.id,
+            name=serializer.validated_data["name"],
+        )
+        if not folder:
+            return Response(
+                {"detail": _("Could not create the folder.")},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        # Fresh, so its counts are the same shape the list returns rather than
+        # absent on the one payload a client reads right after creating.
+        return Response(
+            _folder_payload({**folder, "file_count": 0, "size_bytes": 0}),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class WorkspaceFolderDetailView(WorkspaceAPIView):
+    """DELETE /api/b2b/workspace/folders/<id>/
+
+    The folder goes; the files in it go back to the drive. Deleting somebody's
+    arrangement is not deleting the company's documents, and the two should
+    never be the same tap.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Delete a folder (its files return to the drive)",
+        responses={204: openapi.Response(description="Deleted")},
+    )
+    def delete(self, request, folder_id: int):
+        folder = repo.get_folder(folder_id, request.user.company_id)
+        if not folder:
+            return Response({"detail": _("Folder not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        # The person who made it, or somebody who runs the company.
+        if not (
+            folder["author_id"] == request.user.id
+            or is_manager(getattr(request.user, "role", None))
+        ):
+            return Response(
+                {"detail": _("You can only delete folders you created.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        repo.delete_folder(folder_id, request.user.company_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class WorkspaceStorageView(WorkspaceAPIView):
@@ -2038,6 +2136,15 @@ class WorkspaceFileListCreateView(WorkspaceAPIView):
         responses={200: WorkspaceFileListSerializer()},
     )
     def get(self, request):
+        folder_id = _int_or_none(request.query_params.get("folder_id"))
+        if folder_id is not None:
+            if not repo.get_folder(folder_id, request.user.company_id):
+                return Response(
+                    {"detail": _("Folder not found.")}, status=status.HTTP_404_NOT_FOUND
+                )
+            files = repo.list_files(request.user.company_id, folder_id=folder_id)
+            return Response({"results": [_file_payload(f) for f in files]})
+
         kind = request.query_params.get("kind", "file")
         if kind not in ("file", "chat", "voucher"):
             return Response({"detail": _("Invalid kind.")}, status=status.HTTP_400_BAD_REQUEST)
@@ -2058,7 +2165,19 @@ class WorkspaceFileListCreateView(WorkspaceAPIView):
         if not upload:
             return Response({"detail": _("No file provided.")}, status=status.HTTP_400_BAD_REQUEST)
 
-        file, refusal = store_upload(request=request, upload=upload, kind="file")
+        # Straight into a folder, when the screen that sent it was inside one.
+        folder_id = _int_or_none(request.data.get("folder_id"))
+        if folder_id is not None and not repo.get_folder(
+            folder_id, request.user.company_id
+        ):
+            return Response(
+                {"folder_id": [_("Folder not found.")]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        file, refusal = store_upload(
+            request=request, upload=upload, kind="file", folder_id=folder_id
+        )
         if refusal:
             return refusal
         return Response(_file_payload(file), status=status.HTTP_201_CREATED)

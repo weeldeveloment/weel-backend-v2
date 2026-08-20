@@ -267,6 +267,29 @@ class WorkspaceFileListSerializer(serializers.Serializer):
     results = WorkspaceFileSerializer(many=True)
 
 
+class WorkspaceFolderSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    author_id = serializers.IntegerField()
+    file_count = serializers.IntegerField()
+    size_bytes = serializers.IntegerField()
+    created_at = serializers.DateTimeField()
+
+
+class WorkspaceFolderListSerializer(serializers.Serializer):
+    results = WorkspaceFolderSerializer(many=True)
+
+
+class WorkspaceFolderWriteSerializer(serializers.Serializer):
+    """A folder is a name and nothing else.
+
+    Trimmed and required: a folder called " " is a row nobody can point at on
+    the screen, and `allow_blank` would let one through.
+    """
+
+    name = serializers.CharField(max_length=120, trim_whitespace=True)
+
+
 class ChatThreadSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     group_name = serializers.CharField(allow_null=True, required=False)

@@ -13,6 +13,8 @@ from apps.b2b.workspace.views import (
     WorkspaceEventListCreateView,
     WorkspaceFileDetailView,
     WorkspaceFileListCreateView,
+    WorkspaceFolderDetailView,
+    WorkspaceFolderListCreateView,
     WorkspaceHotelListView,
     WorkspaceLeadAssignView,
     WorkspaceLeadClaimView,
@@ -132,6 +134,12 @@ urlpatterns = [
     ),
     path("leads/<int:lead_id>/tasks/", WorkspaceLeadTasksView.as_view(), name="ws-lead-tasks"),
 
+    path("folders/", WorkspaceFolderListCreateView.as_view(), name="ws-folders"),
+    path(
+        "folders/<int:folder_id>/",
+        WorkspaceFolderDetailView.as_view(),
+        name="ws-folder-detail",
+    ),
     path("files/", WorkspaceFileListCreateView.as_view(), name="ws-files"),
     path("storage/", WorkspaceStorageView.as_view(), name="ws-storage"),
     path("files/<int:file_id>/", WorkspaceFileDetailView.as_view(), name="ws-file-detail"),

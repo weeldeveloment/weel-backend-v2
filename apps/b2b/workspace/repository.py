@@ -40,6 +40,7 @@ from apps.b2b.raw.tables import (
     B2B_TASK_TABLE,
     B2B_USER_TABLE,
     B2B_WORKSPACE_FILE_TABLE,
+    B2B_WORKSPACE_FOLDER_TABLE,
     B2B_WORKSPACE_LEAD_TABLE,
     B2B_WORKSPACE_CUSTOMER_TABLE,
     B2B_WORKSPACE_LEAD_ACTIVITY_TABLE,
@@ -1588,25 +1589,91 @@ def count_lead_tasks(company_id: int, lead_ids: Sequence[int]) -> dict[int, int]
 
 # ─── Files ────────────────────────────────────────────────────────────────────
 
-def list_files(company_id: int, kind: str | None = "file") -> list[dict[str, Any]]:
+def list_files(
+    company_id: int,
+    kind: str | None = "file",
+    folder_id: int | None = None,
+) -> list[dict[str, Any]]:
     """The shared drive.
 
     Defaults to ``kind='file'``: chat attachments and vouchers live in the same
     table because that is what makes the quota one SUM, but they are not drive
     documents and listing them here would fill the Fayllar tab with every photo
     anyone ever sent. Pass ``kind=None`` to get everything.
+
+    ``folder_id`` narrows to one folder's contents, and then the kind stops
+    mattering: a folder is something a person put files into, so what it holds
+    is whatever they put there.
     """
-    if kind is None:
-        return fetch_all(
-            f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE company_id = %s "
-            "ORDER BY created_at DESC, id DESC",
-            [company_id],
-        )
+    where = "company_id = %s"
+    params: list[Any] = [company_id]
+    if folder_id is not None:
+        where += " AND folder_id = %s"
+        params.append(folder_id)
+    elif kind is not None:
+        where += " AND kind = %s"
+        params.append(kind)
+
     return fetch_all(
-        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE company_id = %s AND kind = %s "
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE {where} "
         "ORDER BY created_at DESC, id DESC",
-        [company_id, kind],
+        params,
     )
+
+
+# ─── Folders ──────────────────────────────────────────────────────────────────
+
+def list_folders(company_id: int) -> list[dict[str, Any]]:
+    """The company's folders, each with what it holds.
+
+    The count and the size come back with the row rather than from a query per
+    folder: the drive screen draws every folder at once, and a card that had to
+    ask for its own numbers would turn one screen into N+1 round trips.
+    """
+    return fetch_all(
+        f"""
+        SELECT f.*,
+               COUNT(w.id)                  AS file_count,
+               COALESCE(SUM(w.size), 0)     AS size_bytes
+        FROM {B2B_WORKSPACE_FOLDER_TABLE} f
+        LEFT JOIN {B2B_WORKSPACE_FILE_TABLE} w ON w.folder_id = f.id
+        WHERE f.company_id = %s
+        GROUP BY f.id
+        ORDER BY f.created_at DESC, f.id DESC
+        """,
+        [company_id],
+    )
+
+
+def get_folder(folder_id: int, company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {B2B_WORKSPACE_FOLDER_TABLE} WHERE id = %s AND company_id = %s",
+        [folder_id, company_id],
+    )
+
+
+def create_folder(*, company_id: int, author_id: int, name: str) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        INSERT INTO {B2B_WORKSPACE_FOLDER_TABLE} (company_id, author_id, name, created_at)
+        VALUES (%s, %s, %s, %s)
+        RETURNING *
+        """,
+        [company_id, author_id, name, timezone.now()],
+    )
+
+
+def delete_folder(folder_id: int, company_id: int) -> bool:
+    """Removes the folder. Its files stay.
+
+    ``folder_id`` on the file rows is ON DELETE SET NULL, so they fall back to
+    the drive itself — emptying a shelf is not the same act as throwing out
+    what was on it, and the bytes are still the company's either way.
+    """
+    return execute(
+        f"DELETE FROM {B2B_WORKSPACE_FOLDER_TABLE} WHERE id = %s AND company_id = %s",
+        [folder_id, company_id],
+    ) > 0
 
 
 def get_file(file_id: int, company_id: int) -> dict[str, Any] | None:
@@ -1628,6 +1695,7 @@ def create_file(
     message_id: int | None = None,
     trip_id: int | None = None,
     task_id: int | None = None,
+    folder_id: int | None = None,
     duration_ms: int | None = None,
 ) -> dict[str, Any] | None:
     """Records stored bytes.
@@ -1641,13 +1709,13 @@ def create_file(
         f"""
         INSERT INTO {B2B_WORKSPACE_FILE_TABLE}
             (company_id, author_id, name, path, size, kind, content_type,
-             message_id, trip_id, task_id, duration_ms, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             message_id, trip_id, task_id, folder_id, duration_ms, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
             company_id, author_id, name, path, size, kind, content_type,
-            message_id, trip_id, task_id, duration_ms, timezone.now(),
+            message_id, trip_id, task_id, folder_id, duration_ms, timezone.now(),
         ],
     )
 
