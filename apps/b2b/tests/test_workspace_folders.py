@@ -18,6 +18,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.b2b.workspace.authentication import WorkspaceUser
 from apps.b2b.workspace.views import (
+    WorkspaceFileDetailView,
     WorkspaceFileListCreateView,
     WorkspaceFolderDetailView,
     WorkspaceFolderListCreateView,
@@ -199,3 +200,55 @@ class TestUploadingIntoOne:
 
         assert response.status_code == 400
         store.assert_not_called()
+
+
+class TestRenamingAndMoving:
+    def _patch(self, user, body, folder=None):
+        request = factory.patch("/files/9/", body, format="json")
+        force_authenticate(request, user=user)
+        with patch("apps.b2b.workspace.views.repo") as repo, patch(
+            "apps.b2b.workspace.views.default_storage"
+        ) as storage:
+            repo.get_file.return_value = {"id": 9, "path": "p", "name": "eski.pdf"}
+            repo.get_folder.return_value = folder
+            repo.update_file.return_value = {"id": 9, "path": "p", "name": "yangi.pdf"}
+            storage.url.return_value = "https://cdn.test/p"
+            response = WorkspaceFileDetailView.as_view()(request, file_id=9)
+        return response, repo
+
+    def test_a_rename_writes_the_name(self):
+        response, repo = self._patch(AUTHOR, {"name": "yangi.pdf"})
+
+        assert response.status_code == 200
+        assert repo.update_file.call_args.kwargs == {"name": "yangi.pdf"}
+
+    def test_a_move_writes_the_folder(self):
+        response, repo = self._patch(AUTHOR, {"folder_id": 3}, folder=_folder())
+
+        assert response.status_code == 200
+        assert repo.update_file.call_args.kwargs == {"folder_id": 3}
+
+    def test_moving_to_a_folder_in_another_company_is_refused(self):
+        # A folder id is a way into the drive; it is checked before anything
+        # is written.
+        response, repo = self._patch(AUTHOR, {"folder_id": 3}, folder=None)
+
+        assert response.status_code == 400
+        repo.update_file.assert_not_called()
+
+    def test_null_takes_the_file_back_to_the_drive(self):
+        # The one folder value that needs no lookup: it means no folder.
+        response, repo = self._patch(AUTHOR, {"folder_id": None})
+
+        assert response.status_code == 200
+        assert repo.update_file.call_args.kwargs == {"folder_id": None}
+
+    def test_a_file_from_another_company_is_not_there(self):
+        request = factory.patch("/files/9/", {"name": "yangi.pdf"}, format="json")
+        force_authenticate(request, user=AUTHOR)
+        with patch("apps.b2b.workspace.views.repo") as repo:
+            repo.get_file.return_value = None
+            response = WorkspaceFileDetailView.as_view()(request, file_id=9)
+
+        assert response.status_code == 404
+        repo.update_file.assert_not_called()

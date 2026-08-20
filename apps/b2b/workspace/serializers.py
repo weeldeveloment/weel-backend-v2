@@ -267,6 +267,18 @@ class WorkspaceFileListSerializer(serializers.Serializer):
     results = WorkspaceFileSerializer(many=True)
 
 
+class WorkspaceFilePatchSerializer(serializers.Serializer):
+    """What the drive screen may change about a file: its name, and which
+    folder it sits in.
+
+    ``folder_id`` is nullable on purpose — null is "back on the drive itself",
+    which is how a file leaves a folder without being deleted.
+    """
+
+    name = serializers.CharField(max_length=300, trim_whitespace=True, required=False)
+    folder_id = serializers.IntegerField(required=False, allow_null=True)
+
+
 class WorkspaceFolderSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField()

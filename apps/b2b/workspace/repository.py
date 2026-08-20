@@ -1683,6 +1683,26 @@ def get_file(file_id: int, company_id: int) -> dict[str, Any] | None:
     )
 
 
+def update_file(file_id: int, company_id: int, **fields: Any) -> dict[str, Any] | None:
+    """Renames a file, moves it into a folder, or both.
+
+    Only the two columns a person can change from the drive screen. The path,
+    the size and the kind are facts about the stored bytes, not something a
+    rename is allowed to touch — a "rename" that could rewrite the path would
+    be a way to point a row at somebody else's object.
+    """
+    allowed = {key: value for key, value in fields.items() if key in {"name", "folder_id"}}
+    if not allowed:
+        return get_file(file_id, company_id)
+
+    assignments = ", ".join(f"{key} = %s" for key in allowed)
+    return fetch_one(
+        f"UPDATE {B2B_WORKSPACE_FILE_TABLE} SET {assignments} "
+        "WHERE id = %s AND company_id = %s RETURNING *",
+        [*allowed.values(), file_id, company_id],
+    )
+
+
 def create_file(
     *,
     company_id: int,

@@ -36,6 +36,7 @@ from apps.b2b.workspace.authentication import (
 from apps.b2b.workspace.permissions import HasCapability, IsWorkspaceManager, IsWorkspaceUser
 from apps.b2b.workspace.roles import capabilities_for, is_manager
 from apps.b2b.workspace.serializers import (
+    WorkspaceFilePatchSerializer,
     WorkspaceFolderListSerializer,
     WorkspaceFolderSerializer,
     WorkspaceFolderWriteSerializer,
@@ -2184,9 +2185,41 @@ class WorkspaceFileListCreateView(WorkspaceAPIView):
 
 
 class WorkspaceFileDetailView(WorkspaceAPIView):
-    """DELETE /api/b2b/workspace/files/<id>/"""
+    """PATCH / DELETE /api/b2b/workspace/files/<id>/"""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Rename a file or move it to another folder",
+        request_body=WorkspaceFilePatchSerializer,
+        responses={200: WorkspaceFileSerializer()},
+    )
+    def patch(self, request, file_id: int):
+        file = repo.get_file(file_id, request.user.company_id)
+        if not file:
+            return Response({"detail": _("File not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = WorkspaceFilePatchSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        fields = dict(serializer.validated_data)
+
+        # A folder id is a way into the drive, so it is checked against this
+        # company before anything is written. Explicit null is the one value
+        # that needs no check: it means the drive itself.
+        if fields.get("folder_id") is not None and not repo.get_folder(
+            fields["folder_id"], request.user.company_id
+        ):
+            return Response(
+                {"folder_id": [_("Folder not found.")]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not fields:
+            return Response(_file_payload(file))
+
+        updated = repo.update_file(file_id, request.user.company_id, **fields)
+        return Response(_file_payload(updated))
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Delete a file", responses={204: "Deleted"})
     def delete(self, request, file_id: int):
