@@ -21876,6 +21876,23 @@
     ]
    }
   },
+  "/b2b/workspace/tasks/activity/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/tasks/activity/\n\nThe company-wide feed the tasks page shows: every create/edit/status/\nassign/delete across every task, newest first — including tasks since\ndeleted, since the log outlives the row it was written about.\n\nManagers (``visible_scope is None``) see everyone's actions; an employee\nsees only their own, the same boundary ``list_tasks`` draws for the task\nlist itself.",
+    "operationId": "b2b_workspace_tasks_activity_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "Activity feed"
+     }
+    },
+    "summary": "Company-wide task activity feed",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
   "/b2b/workspace/tasks/{task_id}/": {
    "delete": {
     "description": "GET / PATCH / DELETE a single task.",
