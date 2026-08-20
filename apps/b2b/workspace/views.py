@@ -553,7 +553,7 @@ class WorkspaceTaskStatusView(WorkspaceAPIView):
     """POST /api/b2b/workspace/tasks/<id>/status/
 
     The one write an employee always has: moving a task they were given from
-    todo → in progress → review → done.
+    todo → in progress → done.
     """
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -619,13 +619,12 @@ class WorkspaceSubtaskToggleView(WorkspaceAPIView):
         if not repo.toggle_subtask(task_id, subtask_id):
             return Response({"detail": _("Subtask not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        # Finishing the last step nudges the task into review rather than
-        # leaving it visually complete but still "in progress".
+        # Ticking the last step leaves the task where it is. It used to be
+        # nudged into "review", a status that no longer exists — and moving
+        # somebody's task for them was never the checklist's job anyway:
+        # finishing the steps is what the person does, saying it is done is a
+        # decision they make afterwards.
         updated = repo.get_task(task_id, request.user.company_id)
-        steps = updated.get("subtasks") or []
-        if steps and all(step["is_done"] for step in steps) and updated["status"] == "in_progress":
-            updated = repo.update_task(task_id, request.user.company_id, status="review")
-
         return Response(_task_payload(updated, request.user))
 
 

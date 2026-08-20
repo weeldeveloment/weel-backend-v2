@@ -216,7 +216,12 @@ def employee_ids_in_company(company_id: int, employee_ids: Iterable[int]) -> set
 
 # ─── Tasks ────────────────────────────────────────────────────────────────────
 
-TASK_STATUSES = ("todo", "in_progress", "review", "done")
+# Three, and only three: a task is new, being worked on, or finished. There
+# used to be a fourth, "review", which no screen ever offered as a place to put
+# something — the dashboard folded it into "in progress" for display and the
+# app had no tab for it at all, so work could land in a status nobody could see
+# or move. Old rows are normalised to "in_progress" by `create_b2b_tables`.
+TASK_STATUSES = ("todo", "in_progress", "done")
 TASK_PRIORITIES = ("low", "medium", "high", "urgent")
 
 
@@ -462,8 +467,14 @@ def add_task_comment(task_id: int, author_id: int, text: str) -> dict[str, Any] 
 
 
 def task_counters(company_id: int, visible_to: int | None = None) -> dict[str, int]:
-    """Counts for the stat tiles, computed in the database rather than by
-    pulling every task into the app just to count them."""
+    """Counts for the stat tiles and the app's three status tabs, computed in
+    the database rather than by pulling every task into the app just to count
+    them.
+
+    One per status, plus the two derived buckets the tiles show — the list
+    endpoint is capped at a page, so counting the rows that came back would
+    quietly under-report a company with more tasks than fit in one.
+    """
     where = "company_id = %s"
     params: list[Any] = [company_id]
     if visible_to is not None:
@@ -482,6 +493,8 @@ def task_counters(company_id: int, visible_to: int | None = None) -> dict[str, i
         f"""
         SELECT
             COUNT(*) FILTER (WHERE status <> 'done')                       AS open_count,
+            COUNT(*) FILTER (WHERE status = 'todo')                        AS todo_count,
+            COUNT(*) FILTER (WHERE status = 'in_progress')                 AS in_progress_count,
             COUNT(*) FILTER (WHERE status = 'done')                        AS done_count,
             COUNT(*) FILTER (WHERE status <> 'done' AND due_date IS NOT NULL
                              AND due_date::date < CURRENT_DATE)            AS overdue_count,

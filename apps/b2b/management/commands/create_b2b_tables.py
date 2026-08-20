@@ -724,6 +724,14 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_workspace_file")
 
+        # The workspace dropped the fourth task status. Anything parked in
+        # "review" is work in progress that was never finished, so that is
+        # where it goes — left alone it would sit in a status no screen can
+        # show or move it out of.
+        cursor.execute(
+            "UPDATE b2b_task SET status = 'in_progress' WHERE status = 'review';"
+        )
+
         # Set/cleared by WorkspaceTaskStatusView whenever a task's status
         # transitions to/from "done" — `updated_at` moves on every edit, so it
         # can't tell whether a done task was ever touched again after finishing.
