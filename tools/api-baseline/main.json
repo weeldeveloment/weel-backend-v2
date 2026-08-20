@@ -14603,7 +14603,6 @@
      "enum": [
       "todo",
       "in_progress",
-      "review",
       "done"
      ],
      "title": "Status",
@@ -14632,7 +14631,6 @@
      "enum": [
       "todo",
       "in_progress",
-      "review",
       "done"
      ],
      "title": "Status",
@@ -14686,7 +14684,6 @@
      "enum": [
       "todo",
       "in_progress",
-      "review",
       "done"
      ],
      "title": "Status",
@@ -15623,6 +15620,89 @@
    },
    "required": [
     "results"
+   ],
+   "type": "object"
+  },
+  "WorkspaceFilePatch": {
+   "properties": {
+    "folder_id": {
+     "title": "Folder id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "name": {
+     "maxLength": 300,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "WorkspaceFolder": {
+   "properties": {
+    "author_id": {
+     "title": "Author id",
+     "type": "integer"
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "file_count": {
+     "title": "File count",
+     "type": "integer"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "size_bytes": {
+     "title": "Size bytes",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "author_id",
+    "file_count",
+    "size_bytes",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "WorkspaceFolderList": {
+   "properties": {
+    "results": {
+     "items": {
+      "$ref": "#/definitions/WorkspaceFolder"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results"
+   ],
+   "type": "object"
+  },
+  "WorkspaceFolderWrite": {
+   "properties": {
+    "name": {
+     "maxLength": 120,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
    ],
    "type": "object"
   },
@@ -20540,7 +20620,7 @@
   },
   "/b2b/workspace/files/{file_id}/": {
    "delete": {
-    "description": "DELETE /api/b2b/workspace/files/<id>/",
+    "description": "PATCH / DELETE /api/b2b/workspace/files/<id>/",
     "operationId": "b2b_workspace_files_delete",
     "parameters": [],
     "responses": {
@@ -20557,6 +20637,102 @@
     {
      "in": "path",
      "name": "file_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "PATCH / DELETE /api/b2b/workspace/files/<id>/",
+    "operationId": "b2b_workspace_files_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/WorkspaceFilePatch"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceFile"
+      }
+     }
+    },
+    "summary": "Rename a file or move it to another folder",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/folders/": {
+   "get": {
+    "description": "GET/POST /api/b2b/workspace/folders/ — the drive's own folders.\n\nAnyone in the company may make one, the same as anyone may add a file: the\ndrive is shared, and a folder is how somebody decided to arrange it.",
+    "operationId": "b2b_workspace_folders_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceFolderList"
+      }
+     }
+    },
+    "summary": "List folders",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET/POST /api/b2b/workspace/folders/ — the drive's own folders.\n\nAnyone in the company may make one, the same as anyone may add a file: the\ndrive is shared, and a folder is how somebody decided to arrange it.",
+    "operationId": "b2b_workspace_folders_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/WorkspaceFolderWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceFolder"
+      }
+     }
+    },
+    "summary": "Create a folder",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/folders/{folder_id}/": {
+   "delete": {
+    "description": "DELETE /api/b2b/workspace/folders/<id>/\n\nThe folder goes; the files in it go back to the drive. Deleting somebody's\narrangement is not deleting the company's documents, and the two should\nnever be the same tap.",
+    "operationId": "b2b_workspace_folders_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": "Deleted"
+     }
+    },
+    "summary": "Delete a folder (its files return to the drive)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "folder_id",
      "required": true,
      "type": "string"
     }
@@ -21644,7 +21820,6 @@
       "enum": [
        "todo",
        "in_progress",
-       "review",
        "done"
       ],
       "in": "query",
@@ -21817,7 +21992,7 @@
     }
    ],
    "post": {
-    "description": "POST /api/b2b/workspace/tasks/<id>/status/\n\nThe one write an employee always has: moving a task they were given from\ntodo → in progress → review → done.",
+    "description": "POST /api/b2b/workspace/tasks/<id>/status/\n\nThe one write an employee always has: moving a task they were given from\ntodo → in progress → done.",
     "operationId": "b2b_workspace_tasks_status_create",
     "parameters": [
      {
@@ -21871,6 +22046,65 @@
      }
     },
     "summary": "Tick or untick a checklist step",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/tasks/{task_id}/voice/": {
+   "delete": {
+    "description": "POST/DELETE /api/b2b/workspace/tasks/<id>/voice/ — the task's voice note.\n\nIts own endpoint rather than a field on the create call: a task is created\nas JSON and a clip is multipart, and folding the two together would mean\nevery task write carried a file parser it does not need. The app posts the\ntask, gets its id, and sends the recording straight after.\n\nA task carries at most one clip. Posting a second replaces the first,\nbytes and all — re-recording is the common case, and leaving the earlier\nattempt on the company's quota is not what \"replace\" means.",
+    "operationId": "b2b_workspace_tasks_voice_delete",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Task"
+      }
+     }
+    },
+    "summary": "Remove a task's voice note",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "task_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "consumes": [
+     "multipart/form-data"
+    ],
+    "description": "POST/DELETE /api/b2b/workspace/tasks/<id>/voice/ — the task's voice note.\n\nIts own endpoint rather than a field on the create call: a task is created\nas JSON and a clip is multipart, and folding the two together would mean\nevery task write carried a file parser it does not need. The app posts the\ntask, gets its id, and sends the recording straight after.\n\nA task carries at most one clip. Posting a second replaces the first,\nbytes and all — re-recording is the common case, and leaving the earlier\nattempt on the company's quota is not what \"replace\" means.",
+    "operationId": "b2b_workspace_tasks_voice_create",
+    "parameters": [
+     {
+      "in": "formData",
+      "name": "file",
+      "required": true,
+      "type": "file"
+     },
+     {
+      "in": "formData",
+      "name": "duration_ms",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Task"
+      }
+     }
+    },
+    "summary": "Attach a voice note to a task",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
