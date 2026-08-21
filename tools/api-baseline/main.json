@@ -8906,6 +8906,14 @@
      "title": "Author id",
      "type": "integer"
     },
+    "can_assign": {
+     "title": "Can assign",
+     "type": "boolean"
+    },
+    "can_change_stage": {
+     "title": "Can change stage",
+     "type": "boolean"
+    },
     "can_claim": {
      "title": "Can claim",
      "type": "boolean"
@@ -8920,6 +8928,10 @@
     },
     "can_view_details": {
      "title": "Can view details",
+     "type": "boolean"
+    },
+    "can_work": {
+     "title": "Can work",
      "type": "boolean"
     },
     "claimed_at": {
@@ -9172,6 +9184,14 @@
      "title": "Author id",
      "type": "integer"
     },
+    "can_assign": {
+     "title": "Can assign",
+     "type": "boolean"
+    },
+    "can_change_stage": {
+     "title": "Can change stage",
+     "type": "boolean"
+    },
     "can_claim": {
      "title": "Can claim",
      "type": "boolean"
@@ -9186,6 +9206,10 @@
     },
     "can_view_details": {
      "title": "Can view details",
+     "type": "boolean"
+    },
+    "can_work": {
+     "title": "Can work",
      "type": "boolean"
     },
     "claimed_at": {
@@ -20827,7 +20851,7 @@
       }
      },
      "403": {
-      "description": "Employees cannot create leads"
+      "description": "Only owners and managers create leads"
      }
     },
     "summary": "Create a lead (owner/manager only)",
@@ -20962,7 +20986,7 @@
     }
    ],
    "post": {
-    "description": "POST /api/b2b/workspace/leads/<id>/comments/ — add a note to the history.\n\nOnly open to whoever may see the contact: the history names the people and\nthe calls, and it is withheld from the rest of the board for the same reason\nthe phone number is.",
+    "description": "POST /api/b2b/workspace/leads/<id>/comments/ — add a note to the history.\n\nThe claimant's alone. Management reads the history — that is the point of\nit — but the account of the calls is written by the person who made them.",
     "operationId": "b2b_workspace_leads_comments_create",
     "parameters": [
      {
@@ -21123,7 +21147,7 @@
     }
    ],
    "post": {
-    "description": "POST /api/b2b/workspace/leads/<id>/stage/ — move the lead along the funnel.\n\nThe owner or a manager, and never on a closed lead. Reaching ``won`` or\n``lost`` completes it; that rule lives in the repository so this view does\nnot have to know which stages are terminal.",
+    "description": "POST /api/b2b/workspace/leads/<id>/stage/ — move the lead along the funnel.\n\nThe claimant only, and never on a closed lead. Reaching ``won`` or ``lost``\ncompletes it; that rule lives in the repository so this view does not have\nto know which stages are terminal.",
     "operationId": "b2b_workspace_leads_stage_create",
     "parameters": [
      {
