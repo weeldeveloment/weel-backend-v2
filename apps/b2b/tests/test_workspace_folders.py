@@ -252,3 +252,42 @@ class TestRenamingAndMoving:
 
         assert response.status_code == 404
         repo.update_file.assert_not_called()
+
+
+class TestRenamingCannotChangeTheType:
+    """A rename may not change what kind of file something is.
+
+    The extension is how every reader on the other side decides how to open the
+    bytes, and a rename does not rewrite the bytes: a .xlsx called .pdf is a
+    file that opens nowhere. Enforced here rather than only in the app's own
+    field — this endpoint is reachable without it.
+    """
+
+    def _rename(self, requested, current="hisobot.xlsx"):
+        request = factory.patch("/files/9/", {"name": requested}, format="json")
+        force_authenticate(request, user=AUTHOR)
+        with patch("apps.b2b.workspace.views.repo") as repo, patch(
+            "apps.b2b.workspace.views.default_storage"
+        ) as storage:
+            repo.get_file.return_value = {"id": 9, "path": "p", "name": current}
+            repo.update_file.return_value = {"id": 9, "path": "p", "name": "x"}
+            storage.url.return_value = "https://cdn.test/p"
+            WorkspaceFileDetailView.as_view()(request, file_id=9)
+        return repo.update_file.call_args.kwargs["name"]
+
+    def test_a_different_extension_is_put_back(self):
+        assert self._rename("hisobot.pdf") == "hisobot.xlsx"
+
+    def test_a_name_with_no_extension_gets_the_original(self):
+        assert self._rename("yangi nom") == "yangi nom.xlsx"
+
+    def test_the_stem_is_what_actually_changes(self):
+        assert self._rename("2026 yillik hisobot.xlsx") == "2026 yillik hisobot.xlsx"
+
+    def test_a_file_that_never_had_one_is_left_alone(self):
+        assert self._rename("README", current="LICENSE") == "README"
+
+    def test_dropping_the_extension_entirely_is_refused(self):
+        # ".pdf" as a whole name would leave a file with no readable name at
+        # all; the stem falls back to the one it had.
+        assert self._rename(".pdf") == "hisobot.xlsx"

@@ -1329,6 +1329,22 @@ class WorkspaceThreadReadView(WorkspaceAPIView):
 
 # ─── Leads ────────────────────────────────────────────────────────────────────
 
+def _works_lead(lead: dict, user) -> bool:
+    """Whether this person is the one working the deal.
+
+    A lead belongs to exactly one employee — whoever claimed it or was handed
+    it. Nobody else touches it: not another employee, and not the owner or a
+    manager over their head. Management posts leads, hands them out and watches
+    the board; the work itself is one person's, so the history reads as one
+    person's account of one deal.
+
+    A manager who took the lead themselves is its claimant like anyone else,
+    and works it as one.
+    """
+    claimed_by = lead.get("claimed_by_id")
+    return claimed_by is not None and claimed_by == user.id
+
+
 def _lead_payload(lead: dict, user) -> dict:
     """Shapes a lead for one viewer.
 
@@ -1338,18 +1354,21 @@ def _lead_payload(lead: dict, user) -> dict:
     row (company, product, status) so they know it is taken, just not who to
     call, which is what stops two employees from working the same contact.
     """
-    is_owner = lead.get("claimed_by_id") == user.id
+    is_owner = _works_lead(lead, user)
     can_view_details = is_owner or user.is_manager
     payload = {
         **lead,
         "can_claim": lead.get("status") == LeadStatus.NEW,
         "can_complete": lead.get("status") == LeadStatus.IN_PROGRESS and is_owner,
         "can_view_details": can_view_details,
-        # Moving a lead along the funnel is the owner's job; a manager may do it
-        # over their head. Nobody moves a lead that is already closed.
+        # Everything the detail screen writes — the stage, the notes, the line
+        # items, the tasks raised off the deal — is the claimant's alone. One
+        # flag rather than four, because the rule behind them is one rule.
+        "can_work": is_owner,
+        # Moving a lead along the funnel is the claimant's job, and a manager
+        # does not do it over their head. Nobody moves a closed lead.
         "can_change_stage": (
-            (is_owner or user.is_manager)
-            and lead.get("status") != LeadStatus.COMPLETED
+            is_owner and lead.get("status") != LeadStatus.COMPLETED
         ),
         # Reassigning is a manager's call only — see `WorkspaceLeadAssignView`.
         "can_assign": bool(user.is_manager),
@@ -1523,24 +1542,23 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
         tags=WORKSPACE_TAG,
         operation_summary="Create a lead (owner/manager only)",
         request_body=LeadWriteSerializer,
-        responses={201: LeadSerializer(), 403: openapi.Response(description="Employees cannot create leads")},
+        responses={201: LeadSerializer(), 403: openapi.Response(description="Only owners and managers create leads")},
     )
     def post(self, request):
         serializer = LeadWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # Two different acts share this endpoint. A manager posting a lead to
-        # the board leaves it unclaimed for anyone to take; a salesperson
-        # entering a deal they are already working takes it themselves ("Mas'ul
-        # menejer: Siz"). Only the first needs a manager — an employee may
-        # always record their own deal, and never anybody else's.
-        claim_for_author = bool(data.get("assign_to_me", True))
-        if not claim_for_author and not request.user.is_manager:
+        # Raising a lead is management's act in both of its forms — posting one
+        # to the board for somebody to take, and entering one already claimed.
+        # An employee works the deals they are handed; they do not open the
+        # funnel with rows of their own.
+        if not request.user.is_manager:
             return Response(
-                {"detail": _("Your role does not allow posting leads to the board.")},
+                {"detail": _("Your role does not allow creating leads.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        claim_for_author = bool(data.get("assign_to_me", True))
 
         customer_id = data.get("customer_id")
         if customer_id and not repo.get_customer(customer_id, request.user.company_id):
@@ -1686,8 +1704,7 @@ class WorkspaceLeadDetailView(WorkspaceAPIView):
         lead = repo.get_lead(lead_id, request.user.company_id)
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
-        is_owner = lead.get("claimed_by_id") == request.user.id
-        if not (is_owner or request.user.is_manager):
+        if not (_works_lead(lead, request.user) or request.user.is_manager):
             return Response(
                 {"detail": _("Only the owner or a manager may delete this lead.")},
                 status=status.HTTP_403_FORBIDDEN,
@@ -1700,9 +1717,9 @@ class WorkspaceLeadDetailView(WorkspaceAPIView):
 class WorkspaceLeadStageView(WorkspaceAPIView):
     """POST /api/b2b/workspace/leads/<id>/stage/ — move the lead along the funnel.
 
-    The owner or a manager, and never on a closed lead. Reaching ``won`` or
-    ``lost`` completes it; that rule lives in the repository so this view does
-    not have to know which stages are terminal.
+    The claimant only, and never on a closed lead. Reaching ``won`` or ``lost``
+    completes it; that rule lives in the repository so this view does not have
+    to know which stages are terminal.
     """
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -1718,8 +1735,7 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        is_owner = lead.get("claimed_by_id") == request.user.id
-        if not (is_owner or request.user.is_manager):
+        if not _works_lead(lead, request.user):
             return Response(
                 {"detail": _("Only the employee who claimed this lead can move it.")},
                 status=status.HTTP_403_FORBIDDEN,
@@ -1792,9 +1808,8 @@ class WorkspaceLeadAssignView(WorkspaceAPIView):
 class WorkspaceLeadCommentView(WorkspaceAPIView):
     """POST /api/b2b/workspace/leads/<id>/comments/ — add a note to the history.
 
-    Only open to whoever may see the contact: the history names the people and
-    the calls, and it is withheld from the rest of the board for the same reason
-    the phone number is.
+    The claimant's alone. Management reads the history — that is the point of
+    it — but the account of the calls is written by the person who made them.
     """
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -1810,8 +1825,7 @@ class WorkspaceLeadCommentView(WorkspaceAPIView):
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        is_owner = lead.get("claimed_by_id") == request.user.id
-        if not (is_owner or request.user.is_manager):
+        if not _works_lead(lead, request.user):
             return Response(
                 {"detail": _("Only the employee who claimed this lead can comment.")},
                 status=status.HTTP_403_FORBIDDEN,
@@ -1841,8 +1855,7 @@ class WorkspaceLeadItemsView(WorkspaceAPIView):
             return None, Response(
                 {"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND
             )
-        is_owner = lead.get("claimed_by_id") == request.user.id
-        if not (is_owner or request.user.is_manager):
+        if not _works_lead(lead, request.user):
             return None, Response(
                 {"detail": _("Only the employee who claimed this lead can edit it.")},
                 status=status.HTTP_403_FORBIDDEN,
@@ -1898,8 +1911,7 @@ class WorkspaceLeadItemDetailView(WorkspaceAPIView):
         lead = repo.get_lead(lead_id, request.user.company_id)
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
-        is_owner = lead.get("claimed_by_id") == request.user.id
-        if not (is_owner or request.user.is_manager):
+        if not _works_lead(lead, request.user):
             return Response(
                 {"detail": _("Only the employee who claimed this lead can edit it.")},
                 status=status.HTTP_403_FORBIDDEN,
@@ -1931,8 +1943,7 @@ class WorkspaceLeadTasksView(WorkspaceAPIView):
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        is_owner = lead.get("claimed_by_id") == request.user.id
-        if not (is_owner or request.user.is_manager):
+        if not _works_lead(lead, request.user):
             return Response(
                 {"detail": _("Only the employee who claimed this lead can add tasks.")},
                 status=status.HTTP_403_FORBIDDEN,

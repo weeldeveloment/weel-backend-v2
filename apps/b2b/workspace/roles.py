@@ -36,12 +36,17 @@ def capabilities_for(role: str | None) -> dict[str, bool]:
         "can_edit_any_event": manager,
         # An employee still gets a private calendar of their own.
         "can_create_personal_event": True,
-        # Sales funnel. Anyone may record a deal they are already working —
-        # that lead arrives claimed by its author. Posting one to the board for
-        # the company to pick up is a manager's act, and it is the one
-        # `WorkspaceLeadListView.post` refuses to an employee, so the sheet has
-        # to know before it submits which of the two it is doing.
+        # Sales funnel. Raising a lead at all is management's act — posting one
+        # to the board for somebody to take, or entering one already assigned.
+        # An employee works the deals they are handed and never opens a row of
+        # their own, so the app hides "Yangi lid" from them rather than letting
+        # the sheet collect a lead the server will refuse.
         "can_post_lead": manager,
+        # Working a lead — its stage, its notes, its line items — belongs to
+        # whoever claimed it, and to nobody else. That is per-lead, not
+        # per-role, so it rides on the lead payload's `can_work` rather than
+        # here: an owner watching the board may not move a deal an employee is
+        # running, and the same owner moves the deals they took themselves.
         # Chat
         "can_create_group_chat": manager,
         "can_chat": True,

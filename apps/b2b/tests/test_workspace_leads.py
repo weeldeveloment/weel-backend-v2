@@ -4,8 +4,9 @@ Two things are worth pinning here and neither is visible from the SQL:
 
   * **Who may do what.** A lead's contact is withheld from the whole company
     once somebody claims it, and moving, commenting on or editing a lead is the
-    owner's right (a manager may override). Getting this wrong leaks a customer
-    to a competitor sitting in the same workspace.
+    claimant's alone — the owner and the managers raise leads, hand them out
+    and watch the board. Getting this wrong leaks a customer to a competitor
+    sitting in the same workspace.
   * **The stage/status coupling.** The board's three statuses and the funnel's
     six stages are separate columns, and exactly one rule keeps them in step:
     reaching ``won`` or ``lost`` completes the lead. It lives in the repository,
@@ -422,11 +423,10 @@ def test_the_contract_stage_is_an_ordinary_move_and_does_not_close_the_lead():
 
 # ─── Creating a lead from the two-step sheet ──────────────────────────────────
 
-def test_an_employee_may_record_their_own_deal_and_holds_it_from_the_start():
-    """"Mas'ul menejer: Siz" — the salesperson entering a deal they are already
-    working is not posting it to the board, so the manager gate does not apply
-    and the lead is theirs on creation rather than sitting there to be claimed.
-    """
+def test_a_manager_records_a_deal_they_are_already_working():
+    """"Mas'ul menejer: Siz" — a manager entering a deal of their own is not
+    posting it to the board, so the lead is theirs on creation rather than
+    sitting there to be claimed."""
     with (
         patch("apps.b2b.workspace.views.repo.create_lead", return_value=_lead()) as create,
         patch("apps.b2b.workspace.views.repo.list_employee_fcm_tokens") as tokens,
@@ -443,7 +443,7 @@ def test_an_employee_may_record_their_own_deal_and_holds_it_from_the_start():
                 },
                 format="json",
             ),
-            BYSTANDER,
+            MANAGER,
         )
 
     assert response.status_code == 201
@@ -453,9 +453,10 @@ def test_an_employee_may_record_their_own_deal_and_holds_it_from_the_start():
     tokens.assert_not_called()
 
 
-def test_an_employee_cannot_post_a_lead_to_the_shared_board():
-    """The manager gate is still there — it is about handing work to other
-    people, which is the one thing an employee may not do."""
+@pytest.mark.parametrize("assign_to_me", [True, False])
+def test_an_employee_cannot_raise_a_lead_at_all(assign_to_me):
+    """Neither form of it: not posting one to the board, and not recording one
+    as already theirs. An employee works the deals they are handed."""
     with patch("apps.b2b.workspace.views.repo.create_lead") as create:
         response = _call(
             WorkspaceLeadListCreateView,
@@ -464,7 +465,7 @@ def test_an_employee_cannot_post_a_lead_to_the_shared_board():
                 {
                     "contact_full_name": "Aziz Karimov",
                     "contact_phone": "+998901234567",
-                    "assign_to_me": False,
+                    "assign_to_me": assign_to_me,
                 },
                 format="json",
             ),
@@ -473,6 +474,80 @@ def test_an_employee_cannot_post_a_lead_to_the_shared_board():
 
     assert response.status_code == 403
     create.assert_not_called()
+
+
+# ─── Management watches the board; the claimant works the lead ────────────────
+
+def test_a_manager_does_not_move_a_lead_somebody_else_is_working():
+    """The whole point of the rule: an owner or a manager hands the deal out
+    and then watches it. Moving it over the claimant's head would put a stage
+    in the history that the person running the deal did not choose."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.repo.set_lead_stage") as move,
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post("/stage/", {"stage": LeadStage.NEGOTIATION}, format="json"),
+            MANAGER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 403
+    move.assert_not_called()
+
+
+def test_a_manager_does_not_comment_on_somebody_elses_lead():
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.repo.add_lead_comment") as comment,
+    ):
+        response = _call(
+            WorkspaceLeadCommentView,
+            factory.post("/comments/", {"text": "Qo’ng’iroq qildim"}, format="json"),
+            MANAGER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 403
+    comment.assert_not_called()
+
+
+def test_a_manager_who_took_the_lead_himself_works_it_like_anyone_else():
+    """The claimant is the claimant, whatever their role."""
+    lead = _lead(claimed_by_id=MANAGER_ID)
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=lead),
+        patch("apps.b2b.workspace.views.repo.set_lead_stage", return_value=lead) as move,
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post("/stage/", {"stage": LeadStage.NEGOTIATION}, format="json"),
+            MANAGER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    assert move.call_args.kwargs["stage"] == LeadStage.NEGOTIATION
+
+
+def test_the_board_tells_each_viewer_whether_the_lead_is_theirs_to_work():
+    """`can_work` is what the app hides its write controls on, so a manager
+    reading a colleague's lead must get it false while still seeing the row."""
+    lead = _lead()
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=lead),
+        patch("apps.b2b.workspace.views.repo.list_lead_items", return_value=[]),
+        patch("apps.b2b.workspace.views.repo.list_lead_activity", return_value=[]),
+        patch("apps.b2b.workspace.views.repo.list_lead_tasks", return_value=[]),
+    ):
+        for user, expected in ((OWNER, True), (MANAGER, False), (BYSTANDER, False)):
+            response = _call(
+                WorkspaceLeadDetailView, factory.get("/leads/7/"), user, lead_id=7
+            )
+            assert response.status_code == 200
+            assert response.data["can_work"] is expected
+            assert response.data["can_change_stage"] is expected
 
 
 def test_a_lead_falls_back_to_the_contact_and_the_first_line_it_was_given():

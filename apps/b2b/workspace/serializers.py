@@ -215,6 +215,12 @@ class LeadSerializer(serializers.Serializer):
     can_claim = serializers.BooleanField()
     can_complete = serializers.BooleanField()
     can_view_details = serializers.BooleanField()
+    #: Whether this viewer is the employee running the deal — the one flag
+    #: behind every write on the detail screen. False for the rest of the
+    #: company, the owner and the managers included: they watch the board.
+    can_work = serializers.BooleanField(required=False)
+    can_change_stage = serializers.BooleanField(required=False)
+    can_assign = serializers.BooleanField(required=False)
     can_delete = serializers.BooleanField(required=False)
     #: Set on every row of the board, so the card can show a total and a task
     #: count without a second request per lead.
