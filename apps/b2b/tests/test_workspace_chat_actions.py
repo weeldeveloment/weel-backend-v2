@@ -7,6 +7,8 @@ able to delete somebody else's message.
 """
 from unittest.mock import patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+
 import pytest
 from django.conf import settings
 
@@ -162,6 +164,69 @@ class TestReply:
         # One query for the page and its quotes together, not one each.
         repo.attachments_for_messages.assert_called_once()
         assert set(repo.attachments_for_messages.call_args.args[0]) == {100, 101}
+
+    def test_a_voice_message_sent_as_a_reply_keeps_its_quote(self):
+        """The clip is an upload, which is a different branch of this view from
+        a text message — and the branch a reply spoken into the mic takes. A
+        quote dropped here is a voice bubble in the thread with nothing above
+        it, which reads as a new subject rather than an answer."""
+        request = factory.post(
+            "/chats/3/messages/",
+            {
+                "text": "",
+                "duration_ms": "2400",
+                "reply_to_id": "100",
+                "file": SimpleUploadedFile("voice.m4a", b"xx", content_type="audio/mp4"),
+            },
+            format="multipart",
+        )
+        force_authenticate(request, user=EMPLOYEE)
+
+        with patch("apps.b2b.workspace.views.repo") as repo, patch(
+            "apps.b2b.workspace.views.broadcast_message"
+        ), patch("apps.b2b.workspace.views.storage.assert_can_store"), patch(
+            "apps.b2b.workspace.views.store_upload"
+        ) as store:
+            repo.get_thread_for_member.return_value = THREAD
+            repo.get_message.return_value = _message(text="asl xabar")
+            repo.attachments_for_messages.return_value = {}
+            repo.send_message.return_value = _message(id=101, text="", reply_to_id=100)
+            store.return_value = (_voice(message_id=101), None)
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        assert response.status_code == 201
+        assert repo.send_message.call_args.kwargs["reply_to_id"] == 100
+        assert response.data["reply_to"]["text"] == "asl xabar"
+        # And it is a voice message itself — both halves on one bubble.
+        assert response.data["attachment"]["duration_ms"] == 2400
+
+    def test_a_voice_reply_to_a_voice_message_names_both(self):
+        request = factory.post(
+            "/chats/3/messages/",
+            {
+                "text": "",
+                "duration_ms": "5000",
+                "reply_to_id": "100",
+                "file": SimpleUploadedFile("voice.m4a", b"xx", content_type="audio/mp4"),
+            },
+            format="multipart",
+        )
+        force_authenticate(request, user=EMPLOYEE)
+
+        with patch("apps.b2b.workspace.views.repo") as repo, patch(
+            "apps.b2b.workspace.views.broadcast_message"
+        ), patch("apps.b2b.workspace.views.storage.assert_can_store"), patch(
+            "apps.b2b.workspace.views.store_upload"
+        ) as store:
+            repo.get_thread_for_member.return_value = THREAD
+            repo.get_message.return_value = _message(text="")
+            repo.attachments_for_messages.return_value = {100: _voice()}
+            repo.send_message.return_value = _message(id=101, text="", reply_to_id=100)
+            store.return_value = (_voice(message_id=101, duration_ms=5000), None)
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        assert response.data["reply_to"]["attachment"]["duration_ms"] == 2400
+        assert response.data["attachment"]["duration_ms"] == 5000
 
     def test_a_reply_to_a_message_in_another_room_is_refused(self):
         # The lookup is scoped to the thread, so an id from a room this caller
