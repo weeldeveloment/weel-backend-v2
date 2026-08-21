@@ -39,6 +39,22 @@ OWNER = WorkspaceUser({
 THREAD = {"id": 3, "company_id": 55}
 
 
+def _voice(**overrides):
+    """A voice message's attachment row. Told apart from any other file by
+    carrying a duration, the same way the message payload does it."""
+    row = {
+        "id": 41,
+        "message_id": 100,
+        "name": "voice.m4a",
+        "size": 4096,
+        "content_type": "audio/mp4",
+        "duration_ms": 2400,
+        "path": "chat/voice.m4a",
+    }
+    row.update(overrides)
+    return row
+
+
 def _message(**overrides):
     row = {
         "id": 100,
@@ -70,6 +86,82 @@ class TestReply:
         assert response.status_code == 201
         assert repo.send_message.call_args.kwargs["reply_to_id"] == 100
         assert response.data["reply_to"]["id"] == 100
+
+    def test_quoting_a_voice_message_says_it_was_one(self):
+        # A voice message has no text at all. A quote carrying only `text`
+        # rendered as an empty strip — a reply on screen showing nothing about
+        # what it answered, which is what a quote is for.
+        request = factory.post(
+            "/chats/3/messages/", {"text": "javob", "reply_to_id": 100}, format="json"
+        )
+        force_authenticate(request, user=EMPLOYEE)
+
+        with patch("apps.b2b.workspace.views.repo") as repo, patch(
+            "apps.b2b.workspace.views.broadcast_message"
+        ):
+            repo.get_thread_for_member.return_value = THREAD
+            repo.get_message.return_value = _message(text="")
+            repo.attachments_for_messages.return_value = {100: _voice()}
+            repo.send_message.return_value = _message(id=101, reply_to_id=100)
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        quote = response.data["reply_to"]["attachment"]
+        assert quote["duration_ms"] == 2400
+        assert quote["name"] == "voice.m4a"
+
+    def test_a_quoted_text_message_carries_no_attachment(self):
+        request = factory.post(
+            "/chats/3/messages/", {"text": "javob", "reply_to_id": 100}, format="json"
+        )
+        force_authenticate(request, user=EMPLOYEE)
+
+        with patch("apps.b2b.workspace.views.repo") as repo, patch(
+            "apps.b2b.workspace.views.broadcast_message"
+        ):
+            repo.get_thread_for_member.return_value = THREAD
+            repo.get_message.return_value = _message()
+            repo.attachments_for_messages.return_value = {}
+            repo.send_message.return_value = _message(id=101, reply_to_id=100)
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        assert response.data["reply_to"]["attachment"] is None
+
+    def test_the_quoted_attachment_is_never_read_for_another_room(self):
+        # The attachment lookup is by message id alone — running it before the
+        # thread check would read a row belonging to a room the caller cannot
+        # open.
+        request = factory.post(
+            "/chats/3/messages/", {"text": "javob", "reply_to_id": 999}, format="json"
+        )
+        force_authenticate(request, user=EMPLOYEE)
+
+        with patch("apps.b2b.workspace.views.repo") as repo:
+            repo.get_thread_for_member.return_value = THREAD
+            repo.get_message.return_value = None
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        assert response.status_code == 400
+        repo.attachments_for_messages.assert_not_called()
+
+    def test_a_page_of_history_labels_the_voice_messages_it_quotes(self):
+        # The same fix on the read path: reopening the room must not turn the
+        # strip back into an empty box.
+        request = factory.get("/chats/3/messages/")
+        force_authenticate(request, user=EMPLOYEE)
+
+        with patch("apps.b2b.workspace.views.repo") as repo:
+            repo.get_thread_for_member.return_value = THREAD
+            repo.list_messages.return_value = [_message(id=101, reply_to_id=100)]
+            repo.messages_by_ids.return_value = {100: _message(text="")}
+            repo.attachments_for_messages.return_value = {100: _voice()}
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        assert response.status_code == 200
+        quote = response.data["results"][0]["reply_to"]
+        assert quote["attachment"]["duration_ms"] == 2400
+        # One query for the page and its quotes together, not one each.
+        repo.attachments_for_messages.assert_called_once()
+        assert set(repo.attachments_for_messages.call_args.args[0]) == {100, 101}
 
     def test_a_reply_to_a_message_in_another_room_is_refused(self):
         # The lookup is scoped to the thread, so an id from a room this caller

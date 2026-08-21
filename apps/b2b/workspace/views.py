@@ -1055,7 +1055,14 @@ def _int_or_none(value) -> int | None:
     return parsed if parsed > 0 else None
 
 
-def _quote_payload(original: dict | None) -> dict | None:
+def _quote_payload(original: dict | None, attachment: dict | None = None) -> dict | None:
+    """What the strip above a reply shows about the message being answered.
+
+    The attachment rides along because a voice message has no text at all: a
+    quote carrying only `text` renders as an empty strip, which says nothing
+    about what was replied to. No URL — the strip labels the original, it does
+    not play it — so this stays the pointer it is meant to be.
+    """
     if not original:
         return None
     text = original.get("text") or ""
@@ -1064,6 +1071,17 @@ def _quote_payload(original: dict | None) -> dict | None:
         "sender_id": original["sender_id"],
         "text": text[:_QUOTE_LENGTH],
         "is_truncated": len(text) > _QUOTE_LENGTH,
+        "attachment": (
+            {
+                "name": attachment["name"],
+                "content_type": attachment.get("content_type"),
+                # What tells a voice message from any other file, here as in
+                # the message payload itself.
+                "duration_ms": attachment.get("duration_ms"),
+            }
+            if attachment
+            else None
+        ),
     }
 
 
@@ -1071,6 +1089,7 @@ def _message_payload(
     message: dict,
     attachment: dict | None = None,
     replied_to: dict | None = None,
+    quoted_attachment: dict | None = None,
 ) -> dict:
     """One message as the app reads it.
 
@@ -1096,7 +1115,7 @@ def _message_payload(
     )
     # Null once the original is deleted — the reply survives and simply stops
     # quoting, which is what the ON DELETE SET NULL on the column produces.
-    data["reply_to"] = _quote_payload(replied_to)
+    data["reply_to"] = _quote_payload(replied_to, quoted_attachment)
     return data
 
 
@@ -1131,9 +1150,14 @@ class WorkspaceMessageView(WorkspaceAPIView):
             before_id = None
 
         messages = repo.list_messages(thread_id, before_id=before_id, limit=limit)
-        attachments = repo.attachments_for_messages([m["id"] for m in messages])
         quoted = repo.messages_by_ids(
             [m["reply_to_id"] for m in messages if m.get("reply_to_id")]
+        )
+        # One query for both: a quoted message is usually already on the page,
+        # and asking for its attachment separately would fetch the same rows
+        # twice to render one screen.
+        attachments = repo.attachments_for_messages(
+            [m["id"] for m in messages] + list(quoted)
         )
         # Opening a room is what marks it read, so it happens here rather than
         # costing the phone a second round trip. Only the newest page counts —
@@ -1149,6 +1173,7 @@ class WorkspaceMessageView(WorkspaceAPIView):
                     m,
                     attachments.get(m["id"]),
                     quoted.get(m.get("reply_to_id")),
+                    attachments.get(m.get("reply_to_id")),
                 )
                 for m in messages
             ],
@@ -1194,6 +1219,7 @@ class WorkspaceMessageView(WorkspaceAPIView):
         # one the caller can read, leaking its text.
         reply_to_id = serializer.validated_data.get("reply_to_id")
         replied_to = None
+        quoted_attachment = None
         if reply_to_id:
             replied_to = repo.get_message(reply_to_id, thread_id)
             if not replied_to:
@@ -1201,6 +1227,10 @@ class WorkspaceMessageView(WorkspaceAPIView):
                     {"reply_to_id": [_("That message is not in this chat.")]},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            # Only after the message is known to be in this thread: the lookup
+            # is by message id alone, and running it first would read a row the
+            # caller has no business seeing.
+            quoted_attachment = repo.attachments_for_messages([reply_to_id]).get(reply_to_id)
 
         message = repo.send_message(
             thread_id,
@@ -1243,7 +1273,7 @@ class WorkspaceMessageView(WorkspaceAPIView):
         except Exception:  # noqa: BLE001
             logger.exception("Could not queue chat notification for thread %s", thread_id)
 
-        payload = _message_payload(message, attachment, replied_to)
+        payload = _message_payload(message, attachment, replied_to, quoted_attachment)
         broadcast_message(thread_id, payload)
         return Response(payload, status=status.HTTP_201_CREATED)
 
