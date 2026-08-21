@@ -2,6 +2,7 @@ from django.urls import include, path
 
 from apps.b2b.mail.urls import notification_urlpatterns
 from apps.b2b.workspace.views import (
+    WorkspaceAttendanceAbsenceView,
     WorkspaceAttendanceCheckInView,
     WorkspaceAttendanceLocationView,
     WorkspaceAttendanceMarkView,
@@ -66,6 +67,11 @@ urlpatterns = [
         "attendance/check-in/",
         WorkspaceAttendanceCheckInView.as_view(),
         name="ws-attendance-check-in",
+    ),
+    path(
+        "attendance/absence/",
+        WorkspaceAttendanceAbsenceView.as_view(),
+        name="ws-attendance-absence",
     ),
     path(
         "attendance/location/",

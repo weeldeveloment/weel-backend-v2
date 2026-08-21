@@ -17,6 +17,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.b2b.workspace.authentication import WorkspaceUser
 from apps.b2b.workspace.views import (
+    WorkspaceAttendanceAbsenceView,
     WorkspaceAttendanceCheckInView,
     WorkspaceAttendanceLocationView,
     WorkspaceAttendanceMarkView,
@@ -93,6 +94,14 @@ class TestRollCall:
         # Drives whether the app offers a check-in button.
         response, _ = self._get(user=EMPLOYEE)
         assert response.data["my_status"] == "present"
+
+    def test_the_caller_learns_back_the_reason_they_filed(self):
+        # The app shows "Kelmadim: Kasal" rather than only knowing that the
+        # day is closed.
+        response, _ = self._get(
+            rows=[entry(7, "Xodim", "absent", reason="Kasal")],
+        )
+        assert response.data["my_reason"] == "Kasal"
 
     def test_someone_not_on_the_roster_has_no_status(self):
         response, _ = self._get(rows=[entry(8, "Sardor", "absent")])
@@ -181,6 +190,71 @@ class TestCheckIn:
         assert response.status_code == 400
         assert response.data["code"] == "too_far_from_workplace"
         repo.upsert_attendance.assert_not_called()
+
+
+class TestSelfAbsence:
+    """The other half of the check-in button.
+
+    Somebody the geofence turned away has no way to mark themselves present,
+    so this is the only thing they can do with their day besides leave it
+    unmarked — which reads as nobody having looked at them.
+    """
+
+    def _post(self, body=None, user=EMPLOYEE):
+        request = factory.post("/attendance/absence/", body or {}, format="json")
+        force_authenticate(request, user=user)
+        with patch("apps.b2b.workspace.views.repo") as repo:
+            repo.attendance_for_date.return_value = ROSTER
+            response = WorkspaceAttendanceAbsenceView.as_view()(request)
+            return response, repo
+
+    def test_reporting_yourself_absent_records_the_reason(self):
+        response, repo = self._post({"reason": "Kasal bo'lib qoldim"})
+        assert response.status_code == 200
+        kwargs = repo.upsert_attendance.call_args.kwargs
+        assert kwargs["employee_id"] == 7
+        assert kwargs["status"] == "absent"
+        assert kwargs["reason"] == "Kasal bo'lib qoldim"
+
+    def test_it_is_not_recorded_as_marked_by_a_manager(self):
+        # `marked_by_id` is what answers "who said I was absent". Filling it in
+        # with the caller's own id would make their own word look like a
+        # manager's ruling.
+        _, repo = self._post({"reason": "Yo'lda"})
+        assert repo.upsert_attendance.call_args.kwargs["marked_by_id"] is None
+
+    def test_an_absence_carries_no_arrival_time(self):
+        _, repo = self._post({"reason": "Ta'tilda"})
+        assert repo.upsert_attendance.call_args.kwargs["checked_in_at"] is None
+
+    def test_a_reason_is_required(self):
+        # Without one this is indistinguishable from never opening the app.
+        response, repo = self._post({})
+        assert response.status_code == 400
+        repo.upsert_attendance.assert_not_called()
+
+    def test_a_blank_reason_is_refused_rather_than_stored_empty(self):
+        response, repo = self._post({"reason": "   "})
+        assert response.status_code == 400
+        repo.upsert_attendance.assert_not_called()
+
+    def test_it_needs_no_capability(self):
+        # An employee filing their own absence is the entire point; requiring
+        # `can_manage_attendance` would leave them with no way to answer at all.
+        response, _ = self._post({"reason": "Kasal"}, user=EMPLOYEE)
+        assert response.status_code == 200
+
+    def test_a_future_day_is_refused(self):
+        response, repo = self._post(
+            {"reason": "Kasal", "date": "2099-01-01"},
+        )
+        assert response.status_code == 400
+        repo.upsert_attendance.assert_not_called()
+
+    def test_the_day_comes_back_with_the_reason_on_it(self):
+        response, _ = self._post({"reason": "Kasal"})
+        assert response.status_code == 200
+        assert "my_reason" in response.data
 
 
 class TestMarking:

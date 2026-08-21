@@ -613,12 +613,30 @@ class EmployeeMonthlyStatSerializer(serializers.Serializer):
     due_count = serializers.IntegerField()
     on_time_count = serializers.IntegerField()
     on_time_rate = serializers.SerializerMethodField()
+    # Days this month with an attendance row. Showing up is part of the month
+    # the owner is judging, so it is reported here beside the task and deal
+    # counts rather than living only on the daily roll call, which is thrown
+    # away the moment the day turns over.
+    present_days = serializers.IntegerField()
+    absent_days = serializers.IntegerField()
+    # Absences with no reason written against them — "sababsiz". Its own
+    # number because a fortnight off sick and a fortnight of silence are not
+    # the same month, and one total cannot tell them apart.
+    unexcused_days = serializers.IntegerField()
+    attendance_rate = serializers.SerializerMethodField()
 
     def get_on_time_rate(self, obj) -> float | None:
         # None rather than 0 when nobody had a deadline this month — a 0% rate
         # would read as "always late", which nothing in the data supports.
         due = obj["due_count"]
         return round(obj["on_time_count"] / due, 4) if due else None
+
+    def get_attendance_rate(self, obj) -> float | None:
+        # Out of the days somebody actually accounted for, not out of the
+        # calendar: a company that only marks attendance on three days a week
+        # would otherwise read as everybody being absent half the month.
+        marked = obj["present_days"] + obj["absent_days"]
+        return round(obj["present_days"] / marked, 4) if marked else None
 
 
 class EmployeeOfMonthSerializer(serializers.Serializer):
@@ -658,6 +676,9 @@ class AttendanceDaySerializer(serializers.Serializer):
     absent = serializers.IntegerField()
     unmarked = serializers.IntegerField()
     my_status = serializers.CharField(allow_null=True)
+    # What the caller wrote when they reported themselves absent, so the app
+    # can show it back instead of only knowing that they did.
+    my_reason = serializers.CharField(allow_null=True, required=False)
     entries = AttendanceEntrySerializer(many=True)
 
 
@@ -678,6 +699,19 @@ class AttendanceCheckInSerializer(serializers.Serializer):
 
     latitude = serializers.FloatField(required=False, allow_null=True)
     longitude = serializers.FloatField(required=False, allow_null=True)
+
+
+class AttendanceSelfAbsenceSerializer(serializers.Serializer):
+    """An employee reporting their own absence.
+
+    The reason is required, unlike on a manager's mark: this is the only way
+    into the day for somebody the geofence turned away, and an absence they
+    filed themselves with nothing written against it is indistinguishable from
+    never opening the app at all.
+    """
+
+    reason = serializers.CharField(max_length=200, allow_blank=False, trim_whitespace=True)
+    date = serializers.DateField(required=False)
 
 
 class AttendanceLocationSerializer(serializers.Serializer):

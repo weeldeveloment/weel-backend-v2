@@ -45,6 +45,7 @@ from apps.b2b.workspace.serializers import (
     AttendanceLocationSerializer,
     AttendanceLocationUpdateSerializer,
     AttendanceMarkSerializer,
+    AttendanceSelfAbsenceSerializer,
     CalendarEventSerializer,
     ChatMessageSerializer,
     ChatThreadSerializer,
@@ -2347,6 +2348,7 @@ def _attendance_payload(company_id: int, work_date, viewer_id: int) -> dict:
         # sum that adds up.
         "unmarked": sum(1 for r in rows if r["status"] is None),
         "my_status": (mine or {}).get("status"),
+        "my_reason": (mine or {}).get("reason"),
         "entries": rows,
     }
 
@@ -2416,7 +2418,10 @@ class WorkspaceAttendanceCheckInView(WorkspaceAPIView):
             if distance > location["radius_meters"]:
                 return Response(
                     {
-                        "detail": _("You are too far from the workplace to check in."),
+                        "detail": _(
+                            "You are too far from the workplace to check in. "
+                            "Report your absence with a reason instead."
+                        ),
                         "code": "too_far_from_workplace",
                         "distance_meters": round(distance),
                         "radius_meters": location["radius_meters"],
@@ -2443,6 +2448,63 @@ class WorkspaceAttendanceCheckInView(WorkspaceAPIView):
         return Response(
             AttendanceDaySerializer(
                 _attendance_payload(request.user.company_id, today, request.user.id)
+            ).data
+        )
+
+
+class WorkspaceAttendanceAbsenceView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/attendance/absence/ — "I am not coming in".
+
+    The other half of the check-in button. Somebody outside the geofence
+    cannot mark themselves present, and the alternative to letting them say
+    why is a day that stays unmarked — which reads as nobody having looked at
+    them rather than as an absence they declared.
+
+    Needs no capability for the same reason check-in does not: it only ever
+    writes the caller's own row. `marked_by_id` stays null, which is what
+    tells this apart from a manager marking them absent.
+
+    No coordinates are taken. The point of this endpoint is that the person is
+    somewhere else, and recording where they were when they said so would
+    collect a location for no purpose it serves.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Report yourself absent, with a reason",
+        request_body=AttendanceSelfAbsenceSerializer,
+        responses={200: AttendanceDaySerializer(), 400: "Reason required"},
+    )
+    def post(self, request):
+        serializer = AttendanceSelfAbsenceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        today = timezone.localdate()
+        work_date = data.get("date") or today
+        # Only today or a day already gone. Filing tomorrow's absence in
+        # advance would let somebody pre-empt a roll call that has not
+        # happened, and there is no screen that asks for it.
+        if work_date > today:
+            return Response(
+                {"date": [_("You cannot report an absence for a future day.")]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        repo.upsert_attendance(
+            company_id=request.user.company_id,
+            employee_id=request.user.id,
+            work_date=work_date,
+            status="absent",
+            checked_in_at=None,
+            reason=data["reason"].strip(),
+            marked_by_id=None,
+        )
+        return Response(
+            AttendanceDaySerializer(
+                _attendance_payload(request.user.company_id, work_date, request.user.id)
             ).data
         )
 

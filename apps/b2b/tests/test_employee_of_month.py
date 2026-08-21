@@ -74,6 +74,42 @@ class TestStatsPermission:
         assert response.status_code == 200
 
 
+class TestStatsSerializer:
+    """The two rates the screen prints, and the case where there is nothing to
+    compute one from."""
+
+    def _row(self, **overrides):
+        row = {
+            "employee_id": EMPLOYEE_ID, "full_name": "Test Person", "photo": None,
+            "position": None, "department_name": None,
+            "deals_count": 0, "completed_count": 0,
+            "due_count": 0, "on_time_count": 0,
+            "present_days": 0, "absent_days": 0, "unexcused_days": 0,
+        }
+        row.update(overrides)
+        from apps.b2b.workspace.serializers import EmployeeMonthlyStatSerializer
+
+        return EmployeeMonthlyStatSerializer(row).data
+
+    def test_attendance_rate_is_out_of_the_days_that_were_marked(self):
+        # 18 of 20 marked days, not 18 of a 31-day calendar: a company that
+        # only takes attendance some days is not a company where everybody is
+        # absent the rest of the time.
+        data = self._row(present_days=18, absent_days=2)
+        assert data["attendance_rate"] == 0.9
+
+    def test_no_marked_days_has_no_rate_rather_than_zero(self):
+        # 0% would read as "never showed up", which nothing in the data says.
+        assert self._row()["attendance_rate"] is None
+
+    def test_unexcused_absences_are_reported_apart_from_all_absences(self):
+        # A fortnight off sick and a fortnight of silence are not the same
+        # month, and one total cannot tell the owner which they are reading.
+        data = self._row(present_days=10, absent_days=4, unexcused_days=1)
+        assert data["absent_days"] == 4
+        assert data["unexcused_days"] == 1
+
+
 class TestSelectionPermission:
     def test_employee_cannot_pick_the_winner(self):
         request = factory.post("/employee-of-month/", {"employee_id": OWNER_ID}, format="json")
@@ -238,6 +274,56 @@ class TestMonthlyStats:
         # themselves, rather than the query encoding a "best" that would be
         # undefined for anyone with zero due-date tasks.
         assert stats[0]["employee_id"] == slow["id"]
+
+
+class TestMonthlyAttendance:
+    pytestmark = _needs_db
+
+    def test_present_absent_and_unexcused_days_are_counted(self, company, employees, django_db_blocker):
+        """Attendance rides along with the task counts.
+
+        Someone who missed half the month should not read the same as someone
+        who was in every day, and the owner picking the month's best has
+        nowhere else to see it — the roll call only ever describes one day.
+        """
+        from shared.raw.db import execute
+
+        from apps.b2b.workspace.repository import monthly_employee_stats
+
+        person = employees[2]
+        today = timezone.localdate()
+        with django_db_blocker.unblock():
+            for offset, status, reason in (
+                (0, "present", None),
+                (1, "late", None),
+                (2, "absent", "Kasal"),
+                (3, "absent", None),
+                (4, "absent", "   "),
+            ):
+                # Kept inside the month being asked about, whichever day of it
+                # the suite happens to run on.
+                work_date = today.replace(day=1) + timedelta(days=offset)
+                execute(
+                    """
+                    INSERT INTO b2b_attendance
+                        (company_id, employee_id, work_date, status, reason,
+                         created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                    ON CONFLICT (employee_id, work_date) DO UPDATE
+                        SET status = EXCLUDED.status, reason = EXCLUDED.reason
+                    """,
+                    [company["id"], person["id"], work_date, status, reason],
+                )
+
+            now = timezone.now()
+            stats = monthly_employee_stats(company["id"], now.year, now.month)
+
+        row = next(r for r in stats if r["employee_id"] == person["id"])
+        # "late" is still a day they were in.
+        assert row["present_days"] == 2
+        assert row["absent_days"] == 3
+        # Blank and null both mean nothing was written — two of the three.
+        assert row["unexcused_days"] == 2
 
 
 class TestSelection:

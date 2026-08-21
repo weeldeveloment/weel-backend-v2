@@ -1935,6 +1935,11 @@ def monthly_employee_stats(company_id: int, year: int, month: int) -> list[dict[
     every task count would come back scaled by however many deals that person
     closed.
 
+    ``present_days`` / ``absent_days`` are the same month's attendance, and
+    for the same reason they are a subquery too. ``unexcused_days`` counts
+    only the absences nobody wrote a reason against — the ones the owner
+    actually holds against a month, as opposed to sick leave.
+
     The job title and the department ride along because the screen that reads
     this lists people by name and has nowhere else to get them from — without
     it the app would fetch the whole roster again just to label six rows.
@@ -1952,7 +1957,10 @@ def monthly_employee_stats(company_id: int, year: int, month: int) -> list[dict[
             COUNT(t.id) FILTER (WHERE t.due_date IS NOT NULL)     AS due_count,
             COUNT(t.id) FILTER (WHERE t.due_date IS NOT NULL
                                  AND t.completed_at <= t.due_date) AS on_time_count,
-            COALESCE(deals.deals_count, 0)                        AS deals_count
+            COALESCE(deals.deals_count, 0)                        AS deals_count,
+            COALESCE(att.present_days, 0)                         AS present_days,
+            COALESCE(att.absent_days, 0)                          AS absent_days,
+            COALESCE(att.unexcused_days, 0)                       AS unexcused_days
         FROM {B2B_EMPLOYEE_TABLE} e
         LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
         LEFT JOIN {B2B_TASK_ASSIGNEE_TABLE} ta ON ta.employee_id = e.id
@@ -1969,11 +1977,33 @@ def monthly_employee_stats(company_id: int, year: int, month: int) -> list[dict[
               AND completed_at >= %s AND completed_at < %s
             GROUP BY claimed_by_id
         ) deals ON deals.employee_id = e.id
+        LEFT JOIN (
+            SELECT
+                employee_id,
+                COUNT(*) FILTER (
+                    WHERE status IN ('present', 'late', 'remote')
+                )                                                 AS present_days,
+                COUNT(*) FILTER (WHERE status = 'absent')          AS absent_days,
+                COUNT(*) FILTER (
+                    WHERE status = 'absent'
+                      AND COALESCE(BTRIM(reason), '') = ''
+                )                                                 AS unexcused_days
+            FROM {B2B_ATTENDANCE_TABLE}
+            WHERE company_id = %s
+              AND work_date >= %s AND work_date < %s
+            GROUP BY employee_id
+        ) att ON att.employee_id = e.id
         WHERE e.company_id = %s AND e.is_active = TRUE
-        GROUP BY e.id, e.full_name, e.photo, e.position, d.name, deals.deals_count
-        ORDER BY completed_count DESC, deals_count DESC, e.full_name ASC
+        GROUP BY e.id, e.full_name, e.photo, e.position, d.name, deals.deals_count,
+                 att.present_days, att.absent_days, att.unexcused_days
+        -- Absences break the tie rather than decide the order: the owner still
+        -- makes the pick, but two people with the same month of work should
+        -- not be listed as if one of them had not missed a fortnight of it.
+        ORDER BY completed_count DESC, deals_count DESC,
+                 unexcused_days ASC, present_days DESC, e.full_name ASC
         """,
-        [start, end, company_id, start, end, company_id],
+        [start, end, company_id, start, end,
+         company_id, start.date(), end.date(), company_id],
     )
 
 
