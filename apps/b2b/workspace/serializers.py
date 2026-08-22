@@ -758,6 +758,26 @@ class AttendanceLocationUpdateSerializer(serializers.Serializer):
     radius_meters = serializers.IntegerField(required=False, min_value=10, max_value=5000)
 
 
+class OwnProfileSerializer(serializers.Serializer):
+    """The parts of their own entry somebody may rewrite.
+
+    Two name fields rather than one, because that is what the account stores
+    and what every other workspace will read it back as. `email` is blank-able:
+    an address somebody no longer uses should be removable, and a form with no
+    way to clear a field is a form that keeps stale contact details forever.
+
+    Absent from this list, on purpose: the position, the department and the
+    role — the workspace's description of the job, not the person's — and the
+    phone, which is what the login is checked against.
+    """
+
+    first_name = serializers.CharField(max_length=100, trim_whitespace=True)
+    last_name = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, trim_whitespace=True
+    )
+    email = serializers.EmailField(required=False, allow_blank=True)
+
+
 # ─── Lending somebody to another workspace ────────────────────────────────────
 
 class UsernameSerializer(serializers.Serializer):

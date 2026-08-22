@@ -71,6 +71,7 @@ from apps.b2b.workspace.serializers import (
     LeadStageWriteSerializer,
     LeadWriteSerializer,
     MeSerializer,
+    OwnProfileSerializer,
     MessageWriteSerializer,
     StorageUsageSerializer,
     SupportMessageCreateSerializer,
@@ -406,6 +407,58 @@ class WorkspaceMeView(WorkspaceAPIView):
         if not employee:
             return Response({"detail": _("Employee not found.")}, status=status.HTTP_404_NOT_FOUND)
         return Response(_me_payload(employee, request.user.membership))
+
+
+class WorkspaceProfileView(WorkspaceAPIView):
+    """PUT /api/b2b/workspace/me/profile/ — correct your own entry.
+
+    Yours alone, and only the parts that are actually yours: the name people
+    see and the address they write to. The position, the department and the
+    role are the workspace's account of what you do here and are set by whoever
+    runs it, so the app draws them greyed out with that said in words rather
+    than leaving them off the screen — somebody looking for the field that
+    fixes their job title should find the answer, not an absence.
+
+    The phone is not editable here either. It is what the login is checked
+    against, and moving it is a different act with an OTP behind it.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Edit your own profile",
+        request_body=OwnProfileSerializer,
+        responses={200: MeSerializer()},
+    )
+    def put(self, request):
+        serializer = OwnProfileSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        first_name = data["first_name"]
+        last_name = data.get("last_name") or None
+        full_name = accounts.full_name_from(first_name, last_name)
+
+        updated = repo.set_own_profile(
+            request.user.id,
+            full_name=full_name,
+            email=data.get("email") or None,
+        )
+        if not updated:
+            return Response(
+                {"detail": _("Profile not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # The account holds the name in two halves, and this screen is the only
+        # place they can be told apart. Writing the split back keeps the next
+        # workspace this person joins from being seeded with the older one.
+        if updated.get("account_id"):
+            accounts.update_account(
+                updated["account_id"], first_name=first_name, last_name=last_name
+            )
+
+        return Response(_me_payload(updated, request.user.membership))
 
 
 class WorkspaceUsernameView(WorkspaceAPIView):

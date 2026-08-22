@@ -14,6 +14,7 @@ on purpose, so the checks here are mostly about where it stops:
 Run against mocked repository calls — the rules are in the views and in
 `secondment.py`, not in the database.
 """
+from contextlib import contextmanager
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -791,3 +792,124 @@ def test_losing_the_race_for_a_handle_is_refused_too():
         response = _set_username(AZIZ, "aziz")
 
     assert response.status_code == 409
+
+
+# ─── Correcting your own entry ────────────────────────────────────────────────
+
+def _edit_profile(user, body):
+    from apps.b2b.workspace.views import WorkspaceProfileView
+
+    return _call(
+        WorkspaceProfileView,
+        factory.put("/me/profile/", body, format="json"),
+        user,
+    )
+
+
+@contextmanager
+def _profile_write(saved=None):
+    """Patches the write and the payload this endpoint builds around it."""
+    row = {
+        "id": AZIZ_ID,
+        "company_id": HOME_COMPANY,
+        "role": "employee",
+        **(saved or {}),
+    }
+    with patch(
+        "apps.b2b.workspace.views.repo.set_own_profile", return_value=row
+    ) as write, patch(
+        "apps.b2b.workspace.views.accounts.update_account"
+    ) as account, patch(
+        "apps.b2b.workspace.views.get_company", return_value={}
+    ), patch(
+        "apps.b2b.workspace.views.repo.completed_tasks_this_month", return_value=0
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([], []),
+    ):
+        yield write, account
+
+
+def test_a_name_is_stored_the_way_a_roster_writes_it():
+    """Surname first — the order every list in the app is sorted by."""
+    with _profile_write() as (write, _):
+        response = _edit_profile(
+            AZIZ, {"first_name": "Aziz", "last_name": "Karimov"}
+        )
+
+    assert response.status_code == 200
+    assert write.call_args.kwargs["full_name"] == "Karimov Aziz"
+
+
+def test_a_name_survives_having_no_surname():
+    with _profile_write() as (write, _):
+        _edit_profile(AZIZ, {"first_name": "Aziz"})
+
+    assert write.call_args.kwargs["full_name"] == "Aziz"
+
+
+def test_a_blank_email_is_stored_as_nothing_rather_than_as_blank():
+    """An address somebody has stopped using should be removable."""
+    with _profile_write() as (write, _):
+        _edit_profile(
+            AZIZ, {"first_name": "Aziz", "last_name": "Karimov", "email": ""}
+        )
+
+    assert write.call_args.kwargs["email"] is None
+
+
+def test_a_name_cannot_be_emptied():
+    """Every list in the app draws this. There is no blank to fall back to."""
+    response = _edit_profile(AZIZ, {"first_name": "", "last_name": "Karimov"})
+    assert response.status_code == 400
+
+
+def test_the_account_learns_the_split_this_screen_is_the_only_one_to_know():
+    """The next workspace they join is seeded from the account, not from here."""
+    with _profile_write(saved={"account_id": 77}) as (_, account):
+        _edit_profile(AZIZ, {"first_name": "Aziz", "last_name": "Karimov"})
+
+    assert account.call_args.args[0] == 77
+    assert account.call_args.kwargs == {
+        "first_name": "Aziz",
+        "last_name": "Karimov",
+    }
+
+
+def test_a_roster_row_with_no_account_behind_it_is_still_editable():
+    """Imported from a spreadsheet and never registered. Still a person."""
+    with _profile_write(saved={"account_id": None}) as (write, account):
+        response = _edit_profile(AZIZ, {"first_name": "Aziz"})
+
+    assert response.status_code == 200
+    assert write.called
+    account.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["position", "role", "phone", "department_id"])
+def test_what_the_workspace_owns_cannot_be_set_from_here(field):
+    """The job title is the workspace's answer, not the employee's."""
+    with _profile_write() as (write, _):
+        _edit_profile(
+            AZIZ,
+            {"first_name": "Aziz", "last_name": "Karimov", field: "smuggled"},
+        )
+
+    assert field not in write.call_args.kwargs
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["Karimov Aziz", "Aziz", "Karimov Aziz Baxtiyorovich"],
+    ids=["two-parts", "one-part", "three-parts"],
+)
+def test_a_written_name_survives_the_round_trip_through_the_form(written):
+    """The form opens by splitting it and saves by joining it back.
+
+    A patronymic is not a field here and guessing at one would lose it, so the
+    surname is the first word and the rest travels together.
+    """
+    from apps.b2b.workspace.accounts import full_name_from, split_full_name
+
+    first, last = split_full_name(written)
+    assert full_name_from(first, last) == written

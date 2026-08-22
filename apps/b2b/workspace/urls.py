@@ -73,6 +73,7 @@ from apps.b2b.workspace.views import (
     WorkspaceTaskStatusView,
     WorkspaceTaskVoiceView,
     WorkspaceTeamView,
+    WorkspaceProfileView,
     WorkspaceUsernameView,
     WorkspaceThreadFlagsView,
     WorkspaceThreadListCreateView,
@@ -88,6 +89,7 @@ urlpatterns = [
 
     path("me/", WorkspaceMeView.as_view(), name="ws-me"),
     path("me/device-token/", WorkspaceDeviceTokenView.as_view(), name="ws-device-token"),
+    path("me/profile/", WorkspaceProfileView.as_view(), name="ws-profile"),
     path("me/username/", WorkspaceUsernameView.as_view(), name="ws-username"),
 
     # Who → where → what. See `access.py`.

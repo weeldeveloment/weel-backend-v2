@@ -2586,6 +2586,44 @@ def support_employee(employee_id: int) -> dict[str, Any] | None:
     )
 
 
+def set_own_profile(
+    employee_id: int, *, full_name: str, email: str | None
+) -> dict[str, Any] | None:
+    """What somebody may change about their own entry in the roster.
+
+    Narrow on purpose. The name and a way of being reached are theirs. The
+    position, the department and the role are the workspace's answer to "what
+    do you do here", and stay with whoever runs it — see [WorkspaceProfileView]
+    for why the app draws those as read-only rather than hiding them.
+
+    The name is written to every workspace this account works in, not only the
+    one being edited. The employee row keeps its own copy of the name to save a
+    join on every roster query (see `accounts.create_membership`), not because
+    each workspace authors it separately — somebody correcting their surname
+    means it everywhere, and leaving the other copies behind is how one person
+    ends up under two names inside one company.
+
+    The email deliberately does not travel: it is the address this workspace
+    reaches them at, and somebody may well use different ones in two of them.
+    """
+    now = timezone.now()
+    execute(
+        f"UPDATE {B2B_EMPLOYEE_TABLE} SET full_name = %s, email = %s, updated_at = %s "
+        f"WHERE id = %s",
+        [full_name, email, now, employee_id],
+    )
+    employee = get_workspace_employee(employee_id)
+
+    account_id = (employee or {}).get("account_id")
+    if account_id:
+        execute(
+            f"UPDATE {B2B_EMPLOYEE_TABLE} SET full_name = %s, updated_at = %s "
+            f"WHERE account_id = %s AND id <> %s",
+            [full_name, now, account_id, employee_id],
+        )
+    return employee
+
+
 def set_employee_username(employee_id: int, username: str | None) -> dict[str, Any] | None:
     """Claim a handle, or give one up.
 

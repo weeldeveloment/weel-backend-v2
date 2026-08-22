@@ -85,6 +85,31 @@ def ensure_account(phone: str, **profile) -> dict[str, Any] | None:
     return find_account_by_phone(phone)
 
 
+def full_name_from(
+    first_name: str | None, last_name: str | None, fallback: str | None = None
+) -> str | None:
+    """"Karimov Aziz" — surname first, the way a name is written on a roster."""
+    return " ".join(
+        part for part in [last_name, first_name] if part
+    ).strip() or fallback
+
+
+def split_full_name(full_name: str | None) -> tuple[str, str]:
+    """A written name back into (first, last), inverting [full_name_from].
+
+    The first word is the surname and everything after it is the rest, which
+    is what a two-field form needs to open with. Lossless for round-tripping —
+    "Karimov Aziz Baxtiyorovich" comes back out unchanged — without pretending
+    to know which of three words is the patronymic.
+    """
+    parts = (full_name or "").split()
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return " ".join(parts[1:]), parts[0]
+
+
 def update_account(account_id: int, **fields) -> dict[str, Any] | None:
     allowed = {
         key: value
@@ -196,9 +221,9 @@ def create_membership(
     from apps.b2b.workspace.access import Module, Permission, Role
 
     now = timezone.now()
-    full_name = " ".join(
-        part for part in [account.get("last_name"), account.get("first_name")] if part
-    ).strip() or account.get("phone")
+    full_name = full_name_from(
+        account.get("first_name"), account.get("last_name"), account.get("phone")
+    )
 
     execute(
         f"""
