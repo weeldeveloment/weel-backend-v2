@@ -16119,6 +16119,25 @@
    "type": "object",
    "x-nullable": true
   },
+  "WorkspaceCreate": {
+   "properties": {
+    "name": {
+     "maxLength": 200,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "org_id": {
+     "title": "Org id",
+     "type": "integer",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "type": "object"
+  },
   "WorkspaceFile": {
    "properties": {
     "author_id": {
@@ -20521,7 +20540,7 @@
   },
   "/b2b/workspace/account/workspaces/": {
    "get": {
-    "description": "GET  /api/b2b/workspace/account/workspaces/ — where this account works.\nPOST /api/b2b/workspace/account/workspaces/<employee_id>/open/ — a session\nfor one of them.",
+    "description": "GET  /api/b2b/workspace/account/workspaces/ — where this account works.\nPOST /api/b2b/workspace/account/workspaces/ — open a new one.",
     "operationId": "b2b_workspace_account_workspaces_list",
     "parameters": [],
     "responses": {
@@ -20534,7 +20553,33 @@
      "B2B / Workspace (mobile)"
     ]
    },
-   "parameters": []
+   "parameters": [],
+   "post": {
+    "description": "GET  /api/b2b/workspace/account/workspaces/ — where this account works.\nPOST /api/b2b/workspace/account/workspaces/ — open a new one.",
+    "operationId": "b2b_workspace_account_workspaces_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/WorkspaceCreate"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceCreate"
+      }
+     }
+    },
+    "summary": "Create a workspace",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/account/workspaces/{employee_id}/open/": {
    "parameters": [
