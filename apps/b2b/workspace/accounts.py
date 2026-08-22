@@ -223,3 +223,111 @@ def create_membership(
         ],
     )
     return employee_in_company(account["id"], company_id)
+
+
+# ─── Creating one ─────────────────────────────────────────────────────────────
+
+def slugify_workspace(name: str) -> str:
+    """A handle other people can type to find this workspace.
+
+    Latin letters, digits and hyphens. Uzbek is written in Latin script here,
+    so the name usually survives intact; anything that does not is dropped
+    rather than transliterated, because a handle nobody can guess how to spell
+    is no better than none.
+    """
+    base = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")[:40]
+    return base or "workspace"
+
+
+def free_workspace_slug(name: str) -> str:
+    """The slug this workspace will actually get, numbered if it has to be."""
+    from shared.raw.db import fetch_one as _fetch_one
+
+    base = slugify_workspace(name)
+
+    def taken(candidate: str) -> bool:
+        return bool(
+            _fetch_one(
+                f"SELECT 1 AS t FROM {B2B_COMPANY_TABLE} WHERE LOWER(slug) = LOWER(%s)",
+                [candidate],
+            )
+        )
+
+    if not taken(base):
+        return base
+    for suffix in range(2, 200):
+        candidate = f"{base}-{suffix}"
+        if not taken(candidate):
+            return candidate
+    # Two hundred workspaces called the same thing is not a real case; the
+    # unique index is still the authority if it ever happens.
+    return f"{base}-{timezone.now().strftime('%H%M%S')}"
+
+
+def org_ids_for_account(account_id: int) -> list[int]:
+    """The organisations this account already belongs to, through any roster
+    row it holds."""
+    rows = fetch_all(
+        f"""
+        SELECT DISTINCT c.org_id
+          FROM {B2B_EMPLOYEE_TABLE} e
+          JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
+         WHERE e.account_id = %s AND e.is_active = TRUE AND c.org_id IS NOT NULL
+        """,
+        [account_id],
+    )
+    return [row["org_id"] for row in rows]
+
+
+def create_workspace(
+    *, account: dict[str, Any], name: str, org_id: int | None = None
+) -> dict[str, Any] | None:
+    """Open a new workspace, with this account on its roster.
+
+    The TZ splits this in two and so does the standing it grants. Creating a
+    workspace makes you its **admin** (§5) — you run that one workspace and
+    nothing else. But somebody who belongs to no organisation yet is also
+    creating the **company** that holds it (§4), and the creator of a company
+    is its owner. So the first workspace somebody opens makes them an owner,
+    and every one after that makes them an admin.
+    """
+    from apps.b2b.workspace.access import Role
+
+    now = timezone.now()
+    name = (name or "").strip()
+
+    if org_id is None:
+        org = fetch_one(
+            "INSERT INTO b2b_org (name, owner_user_id, created_at, updated_at) "
+            "VALUES (%s, NULL, %s, %s) __RETURNING_MARKER__",
+            [name, now, now],
+        )
+        if not org:
+            org = fetch_one(
+                "SELECT * FROM b2b_org ORDER BY id DESC LIMIT 1"
+            )
+        org_id = org["id"] if org else None
+        role = Role.OWNER
+    else:
+        role = Role.ADMIN
+
+    company = fetch_one(
+        f"""
+        INSERT INTO {B2B_COMPANY_TABLE} (name, slug, org_id, is_active, created_at, updated_at)
+        VALUES (%s, %s, %s, TRUE, %s, %s)
+        __RETURNING_MARKER__
+        """,
+        [name, free_workspace_slug(name), org_id, now, now],
+    )
+    if not company:
+        company = fetch_one(
+            f"SELECT * FROM {B2B_COMPANY_TABLE} WHERE org_id = %s ORDER BY id DESC LIMIT 1",
+            [org_id],
+        )
+    if not company:
+        return None
+
+    employee = create_membership(
+        account=account, company_id=company["id"], role=role
+    )
+    return {"company": company, "employee": employee, "role": role}

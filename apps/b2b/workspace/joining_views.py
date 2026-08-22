@@ -141,14 +141,95 @@ class AccountUsernameSuggestionView(AccountAPIView):
         })
 
 
+class WorkspaceCreateSerializer(serializers.Serializer):
+    """Opening a new workspace.
+
+    A name and nothing else. The handle other people find it by is derived
+    from the name and numbered if it has to be — asking somebody to invent a
+    unique slug on the screen where they are naming their company is asking
+    them to abandon it.
+    """
+
+    name = serializers.CharField(max_length=200, trim_whitespace=True)
+    #: Which organisation to open it under. Omitted, it goes under the one
+    #: this account already belongs to, or a new one if it belongs to none.
+    org_id = serializers.IntegerField(required=False, allow_null=True)
+
+    def validate_name(self, value: str) -> str:
+        if len(value.strip()) < 2:
+            raise serializers.ValidationError(_("Please give it a name."))
+        return value.strip()
+
+
 class AccountWorkspacesView(AccountAPIView):
     """GET  /api/b2b/workspace/account/workspaces/ — where this account works.
-    POST /api/b2b/workspace/account/workspaces/<employee_id>/open/ — a session
-    for one of them."""
+    POST /api/b2b/workspace/account/workspaces/ — open a new one."""
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="My workspaces")
     def get(self, request):
         return Response({"results": _workspaces(request.user.id)})
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Create a workspace",
+        request_body=WorkspaceCreateSerializer,
+    )
+    def post(self, request):
+        if not request.user.has_profile:
+            # A workspace whose creator has no name is one nobody can identify
+            # the administrator of.
+            return Response(
+                {"detail": _("Finish your profile first."), "problem": "no_profile"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = WorkspaceCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        org_id = data.get("org_id")
+        if org_id is not None and org_id not in accounts.org_ids_for_account(
+            request.user.id
+        ):
+            # Opening a workspace inside somebody else's organisation would be
+            # a way in through the back door.
+            return Response(
+                {"org_id": [_("You do not belong to that company.")]},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        created = accounts.create_workspace(
+            account=request.user._data, name=data["name"], org_id=org_id
+        )
+        if not created or not created.get("employee"):
+            return Response(
+                {"detail": _("Could not create the workspace.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        employee = created["employee"]
+        company = created["company"]
+        arepo.record_audit(
+            company["id"],
+            actor_employee_id=employee["id"],
+            action="workspace.created",
+            target_type="company",
+            target_id=company["id"],
+            payload={"name": company.get("name"), "role": created["role"]},
+        )
+        tokens = create_workspace_tokens(employee)
+        return Response(
+            {
+                "access": tokens["access"],
+                "refresh": tokens["refresh"],
+                "employee_id": employee["id"],
+                "company_id": company["id"],
+                "company_name": company.get("name"),
+                "company_slug": company.get("slug"),
+                "role": created["role"],
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class AccountOpenWorkspaceView(AccountAPIView):
