@@ -123,9 +123,12 @@ def test_assignee_from_another_company_is_rejected(_ids):
 
 @patch("apps.b2b.workspace.views.repo.task_counters", return_value={})
 @patch("apps.b2b.workspace.views.repo.list_tasks", return_value=[])
-def test_employee_list_is_scoped_to_their_own_tasks(list_tasks, _counters):
+def test_employee_list_covers_the_whole_company_too(list_tasks, _counters):
+    # The board is the company's work: an employee reads all of it and narrows
+    # to their own with the app's "Menikilar" toggle. Writing stays gated by
+    # role — see the edit/create tests above.
     _call(WorkspaceTaskListCreateView, factory.get("/tasks/"), EMPLOYEE)
-    assert list_tasks.call_args.kwargs["visible_to"] == EMPLOYEE_ID
+    assert list_tasks.call_args.kwargs["visible_to"] is None
 
 
 @patch("apps.b2b.workspace.views.repo.task_counters", return_value={})
@@ -143,12 +146,15 @@ def test_employee_cannot_edit_a_task(get_task):
     assert response.status_code == 403
 
 
+@patch("apps.b2b.workspace.views.repo.list_task_activity", return_value=[])
 @patch("apps.b2b.workspace.views.repo.get_task")
-def test_a_task_someone_else_owns_is_invisible_not_forbidden(get_task):
-    # 404, not 403: an employee should not learn that the task exists at all.
+def test_an_employee_may_open_a_task_that_is_not_theirs(get_task, _activity):
+    # It is on the board they can now list, so opening the card must work —
+    # read-only: `can_edit`/`can_delete` in the payload stay False for them.
     get_task.return_value = _task(assignee_ids=[], author_id=OWNER_ID)
     response = _call(WorkspaceTaskDetailView, factory.get("/tasks/10/"), EMPLOYEE, task_id=10)
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.data["can_edit"] is False
 
 
 @patch("apps.b2b.workspace.views.repo.update_task")

@@ -17,6 +17,11 @@ from core.telemetry import init_telemetry
 init_telemetry()
 
 TASK_MODULES = [
+    # Workspace task and calendar notifications. Named explicitly because
+    # autodiscovery only reaches `<app>.tasks` — `apps.b2b.tasks` — and this
+    # is a sub-package of it. A beat entry sends by name, so a worker that
+    # never imported the module answers with "Received unregistered task".
+    "apps.b2b.workspace.tasks",
     "booking.tasks",
     "property.tasks",
     "stories.tasks",
@@ -111,6 +116,15 @@ app.conf.beat_schedule = {
         # a minute is about the longest an inbox can lag before it feels
         # broken. Providers rate-limit IMAP per account, not per client, so the
         # cost of this scales with connected accounts rather than with us.
+        "schedule": crontab(minute="*"),
+    },
+    # Calendar reminders: 30 minutes ahead, 10 minutes ahead, and as the event
+    # starts. Every minute is the resolution the feature needs — a reminder
+    # that lands three minutes late has missed the point of being a reminder.
+    # The pass itself is cheap: one indexed range query per offset, and it
+    # only touches events whose start is inside that window.
+    "b2b_workspace_event_reminders": {
+        "task": "b2b.workspace.send_event_reminders",
         "schedule": crontab(minute="*"),
     },
 }

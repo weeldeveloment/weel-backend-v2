@@ -98,6 +98,23 @@ class Command(BaseCommand):
             cursor.execute("""
                 ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS photo VARCHAR(500);
             """)
+            # The handle somebody is found by — "@aziz", typed into the search
+            # on "So'rov yuborish" instead of a name nobody spells the same way
+            # twice. Nullable: every existing employee has none, and a roster
+            # is imported from passports and phone numbers rather than from
+            # people picking a handle.
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS username VARCHAR(50);
+            """)
+            # Unique per company rather than globally: two companies are
+            # separate address books, and "@aziz" in one has nothing to do
+            # with "@aziz" in the other. Partial, so the many rows with no
+            # handle at all do not collide with each other.
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS b2b_employee_username_idx
+                ON b2b_employee (company_id, LOWER(username))
+                WHERE username IS NOT NULL;
+            """)
             cursor.execute("""
                 DO $$
                 BEGIN
@@ -456,6 +473,26 @@ class Command(BaseCommand):
             "ON b2b_calendar_participant (employee_id);"
         )
         self.stdout.write("  Created b2b_calendar_participant")
+
+        # One row per reminder actually sent, which is what stops an event
+        # being reminded about twice. The beat task looks back over a few
+        # minutes rather than only at the current one — a worker that was
+        # restarted or busy would otherwise drop that minute's reminders
+        # entirely — and this table is what makes that catch-up safe.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_calendar_reminder (
+                id BIGSERIAL PRIMARY KEY,
+                event_id BIGINT NOT NULL REFERENCES b2b_calendar_event(id) ON DELETE CASCADE,
+                minutes_before INTEGER NOT NULL,
+                sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (event_id, minutes_before)
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_calendar_reminder_event_idx "
+            "ON b2b_calendar_reminder (event_id);"
+        )
+        self.stdout.write("  Created b2b_calendar_reminder")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_chat_thread (

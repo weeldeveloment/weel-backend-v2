@@ -47,6 +47,22 @@ class WorkspaceUser:
         whole company", an id means "only this person's own work"."""
         return None if self.is_manager else self.id
 
+    @property
+    def task_scope(self) -> int | None:
+        """The same thing for tasks — and deliberately ``None`` for everyone.
+
+        The board is the company's work, not a private list: an employee opens
+        the tasks screen to see what the team is doing and narrows to their own
+        with the app's "Menikilar" toggle, which is a client-side filter over
+        this response. Writing is still gated by role (``can_edit_task`` and
+        friends), so a wider read does not let an employee touch anything they
+        could not touch before. Kept as its own property rather than dropping
+        the argument at every call site, so the policy has one place to live —
+        and so the calendar, which really is private per person, keeps using
+        ``visible_scope``.
+        """
+        return None
+
     def __getitem__(self, key):
         return self._data[key]
 

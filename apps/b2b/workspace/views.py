@@ -26,6 +26,8 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 from apps.b2b.models import LeadSource, LeadStage, LeadStatus
 from apps.b2b.repository import get_company
+from apps.b2b.mail import repository as mail_repo
+from apps.b2b.workspace import push_text
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import storage
 from apps.b2b.workspace.consumers import broadcast_deletion, broadcast_message
@@ -395,14 +397,15 @@ def _task_payload(task: dict, user) -> dict:
 
 
 class WorkspaceTaskListCreateView(WorkspaceAPIView):
-    """GET  /api/b2b/workspace/tasks/ — tasks the caller may see.
+    """GET  /api/b2b/workspace/tasks/ — the company's whole board, whatever
+    the caller's role; the app's "Menikilar" toggle narrows it client-side.
     POST /api/b2b/workspace/tasks/ — managers only."""
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,
-        operation_summary="List tasks (employees see only their own)",
+        operation_summary="List tasks (every role sees the whole company board)",
         manual_parameters=[
             openapi.Parameter("status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                               enum=list(repo.TASK_STATUSES)),
@@ -412,7 +415,7 @@ class WorkspaceTaskListCreateView(WorkspaceAPIView):
     )
     def get(self, request):
         user = request.user
-        scope = user.visible_scope
+        scope = user.task_scope
         tasks = repo.list_tasks(
             user.company_id,
             visible_to=scope,
@@ -460,6 +463,7 @@ class WorkspaceTaskListCreateView(WorkspaceAPIView):
             assignee_ids=assignees,
             subtasks=data.get("subtasks") or [],
         )
+        _queue_task_assigned(task, request.user)
         return Response(_task_payload(task, request.user), status=status.HTTP_201_CREATED)
 
 
@@ -470,9 +474,8 @@ class WorkspaceTaskActivityFeedView(WorkspaceAPIView):
     assign/delete across every task, newest first — including tasks since
     deleted, since the log outlives the row it was written about.
 
-    Managers (``visible_scope is None``) see everyone's actions; an employee
-    sees only their own, the same boundary ``list_tasks`` draws for the task
-    list itself.
+    Everyone sees everyone's actions, the same boundary ``list_tasks`` draws
+    for the task list itself (see ``WorkspaceUser.task_scope``).
     """
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -483,9 +486,51 @@ class WorkspaceTaskActivityFeedView(WorkspaceAPIView):
         user = request.user
         activity = repo.list_company_task_activity(
             user.company_id,
-            actor_id=user.id if user.visible_scope is not None else None,
+            actor_id=user.id if user.task_scope is not None else None,
         )
         return Response({"results": activity})
+
+
+def _queue_task_assigned(task: dict | None, user, employee_ids=None) -> None:
+    """Tell the assignees, off the request.
+
+    `employee_ids` limits it to the people an edit just added; left out, it is
+    everyone the task is on.
+
+    Swallows everything. A push is worth a manager's response being fast, not
+    worth it failing: the task is already stored, and a broker that is briefly
+    down must not turn a successful create into a 500.
+    """
+    if not task:
+        return
+    try:
+        from apps.b2b.workspace.tasks import notify_task_assigned
+
+        notify_task_assigned.delay(
+            task["id"],
+            user.id,
+            user.company_id,
+            sorted(employee_ids) if employee_ids is not None else None,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not queue the assignment push for task %s", task["id"])
+
+
+def _queue_event_created(event: dict | None, user, employee_ids=None) -> None:
+    """The same for a calendar entry somebody was invited to."""
+    if not event:
+        return
+    try:
+        from apps.b2b.workspace.tasks import notify_event_created
+
+        notify_event_created.delay(
+            event["id"],
+            user.id,
+            user.company_id,
+            sorted(employee_ids) if employee_ids is not None else None,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not queue the invite push for event %s", event["id"])
 
 
 def _validated_employee_ids(company_id: int, ids) -> list[int] | None:
@@ -510,7 +555,7 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
         task = repo.get_task(task_id, request.user.company_id)
         if not task:
             return None
-        if request.user.visible_scope is not None:
+        if request.user.task_scope is not None:
             visible = (
                 task["author_id"] == request.user.id
                 or request.user.id in (task.get("assignee_ids") or [])
@@ -556,12 +601,18 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
                     {"assignee_ids": [_("Some of these employees are not in your company.")]},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            added = set(checked) - set(task.get("assignee_ids") or [])
             repo.set_task_assignees(
                 task_id, checked,
                 company_id=request.user.company_id,
                 actor_id=request.user.id,
                 task_title=task["title"],
             )
+            # Only when somebody new is on it. Editing a title, or dropping an
+            # assignee, must not push the task at the people who already had
+            # it — that reads as a second task rather than an edit.
+            if added:
+                _queue_task_assigned(task, request.user, employee_ids=added)
 
         if subtasks is not None:
             repo.replace_subtasks(task_id, subtasks)
@@ -681,7 +732,7 @@ class WorkspaceTaskCommentView(WorkspaceAPIView):
         if not task:
             return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        if request.user.visible_scope is not None and not (
+        if request.user.task_scope is not None and not (
             task["author_id"] == request.user.id
             or request.user.id in (task.get("assignee_ids") or [])
         ):
@@ -764,9 +815,10 @@ class WorkspaceTaskVoiceView(WorkspaceAPIView):
     def _writable_task(self, request, task_id: int) -> dict | None:
         """The task, if this caller may attach to it.
 
-        Author, assignee or a manager — the same reach the comment endpoint
-        allows, because a clip explaining a task is a comment that happens to
-        be audio. Anything else gets a 404 rather than a 403: a company's task
+        Author, assignee or a manager — narrower than the comment endpoint on
+        purpose, even though everyone can now *read* every task: a task holds
+        one clip, so attaching replaces whatever was there. Reading the board
+        company-wide must not let a bystander overwrite somebody's recording. Anything else gets a 404 rather than a 403: a company's task
         ids are not something to confirm to somebody who cannot see them.
         """
         task = repo.get_task(task_id, request.user.company_id)
@@ -880,6 +932,7 @@ class WorkspaceEventListCreateView(WorkspaceAPIView):
             notes=data.get("notes") or None,
             participant_ids=checked,
         )
+        _queue_event_created(event, request.user)
         return Response(_event_payload(event, request.user), status=status.HTTP_201_CREATED)
 
 
@@ -940,6 +993,20 @@ class WorkspaceEventDetailView(WorkspaceAPIView):
             "title", "event_type", "starts_at", "ends_at", "all_day", "location", "notes",
         }}
         updated = repo.update_event(event_id, request.user.company_id, **fields)
+
+        # Moved to another time, so the reminders are due again. Without this
+        # the 30-minute row is still claimed from the old time and a meeting
+        # pushed from 10:00 to 16:00 warns nobody at all.
+        if "starts_at" in fields:
+            repo.clear_event_reminders(event_id)
+
+        # Somebody newly invited is told, the same as on create. The people
+        # who were already on it are not: `only` narrows it to the difference.
+        if participants is not None:
+            added = set(checked) - set(event.get("participant_ids") or [])
+            if added:
+                _queue_event_created(updated, request.user, employee_ids=added)
+
         return Response(_event_payload(updated, request.user))
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Delete an event",
@@ -1619,21 +1686,47 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
         # Only a lead left on the board is news to the rest of the company —
         # one its author already holds is not up for grabs, and telling
         # everyone about it is a notification nobody can act on.
-        tokens = (
+        recipients = (
             []
             if claim_for_author
-            else repo.list_employee_fcm_tokens(
+            else repo.list_company_recipients(
                 request.user.company_id, exclude_employee_id=request.user.id
             )
         )
+
+        # The row in each colleague's notification list. Written for the whole
+        # roster rather than only the reachable half: a lead sitting on the
+        # board unclaimed is exactly the thing somebody should still find when
+        # they open the app, whether or not their phone was pushed at.
+        body = f"{data['company_name']} — {data['product_name']} ({data['quantity']})"
+        for recipient in recipients:
+            try:
+                mail_repo.create_notification(
+                    company_id=recipient["company_id"],
+                    employee_id=recipient["employee_id"],
+                    kind="lead",
+                    title=push_text.LEAD_TITLE,
+                    body=body,
+                    payload={"lead_id": lead["id"]},
+                )
+            except Exception:  # noqa: BLE001 - the lead itself is stored
+                logger.exception(
+                    "Could not record the new-lead notification for employee %s.",
+                    recipient["employee_id"],
+                )
+
+        tokens = [r["fcm_token"] for r in recipients if r.get("fcm_token")]
         if tokens:
             try:
                 from apps.notification.service import FCMService, b2b_firebase_app
 
                 FCMService.send_to_tokens(
                     tokens=tokens,
-                    title=_("New lead"),
-                    body=f"{data['company_name']} — {data['product_name']} ({data['quantity']})",
+                    # Uzbek, not `gettext`: there is no recipient locale to
+                    # translate into here, and the active language in this
+                    # process is `en` — see `push_text`.
+                    title=push_text.LEAD_TITLE,
+                    body=body,
                     data={"type": "lead", "lead_id": str(lead["id"])},
                     app=b2b_firebase_app(),
                     deactivate_invalid=repo.clear_employee_fcm_tokens,

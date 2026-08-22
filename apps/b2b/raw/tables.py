@@ -22,6 +22,9 @@ B2B_TASK_COMMENT_TABLE = "b2b_task_comment"
 B2B_TASK_ACTIVITY_TABLE = "b2b_task_activity"
 B2B_CALENDAR_EVENT_TABLE = "b2b_calendar_event"
 B2B_CALENDAR_PARTICIPANT_TABLE = "b2b_calendar_participant"
+# Which reminders have already gone out for an event, so a catch-up pass over
+# the last few minutes cannot send the same one twice.
+B2B_CALENDAR_REMINDER_TABLE = "b2b_calendar_reminder"
 B2B_CHAT_THREAD_TABLE = "b2b_chat_thread"
 B2B_CHAT_MEMBER_TABLE = "b2b_chat_member"
 B2B_CHAT_MESSAGE_TABLE = "b2b_chat_message"

@@ -25,6 +25,7 @@ from apps.b2b.models import (
 from apps.b2b.raw.tables import (
     B2B_CALENDAR_EVENT_TABLE,
     B2B_CALENDAR_PARTICIPANT_TABLE,
+    B2B_CALENDAR_REMINDER_TABLE,
     B2B_CHAT_MEMBER_TABLE,
     B2B_CHAT_MESSAGE_TABLE,
     B2B_CHAT_THREAD_TABLE,
@@ -170,9 +171,138 @@ def clear_employee_fcm_tokens(tokens: list[str]) -> None:
         return
     execute(
         f"UPDATE {B2B_EMPLOYEE_TABLE} SET fcm_token = NULL, updated_at = %s "
-        f"WHERE fcm_token = ANY(%s)",
+        f"WHERE fcm_token = __ANY_MARKER__(%s)",
         [timezone.now(), list(tokens)],
     )
+
+
+def list_task_assignee_recipients(
+    task_id: int,
+    *,
+    exclude_employee_id: int | None = None,
+    only_employee_ids: Sequence[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Who to tell about a task, with their push token.
+
+    The author is excluded by the caller rather than here: a manager who puts
+    a task on their own plate along with two colleagues should still see it in
+    their feed, but not be pushed about something they just typed.
+
+    `only_employee_ids` narrows it to the people who were *just* added. An
+    edit that puts a fourth person on a task must not push it at the three who
+    have had it since Monday — to them that reads as a second task.
+    """
+    sql = (
+        f"SELECT a.employee_id, e.company_id, e.fcm_token "
+        f"FROM {B2B_TASK_ASSIGNEE_TABLE} a "
+        f"JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = a.employee_id "
+        f"WHERE a.task_id = %s AND e.is_active = TRUE"
+    )
+    params: list[Any] = [task_id]
+    if exclude_employee_id is not None:
+        sql += " AND a.employee_id <> %s"
+        params.append(exclude_employee_id)
+    if only_employee_ids is not None:
+        if not only_employee_ids:
+            return []
+        sql += " AND a.employee_id = __ANY_MARKER__(%s)"
+        params.append(list(only_employee_ids))
+    return fetch_all(sql, params)
+
+
+def list_event_participant_recipients(
+    event_id: int,
+    *,
+    exclude_employee_id: int | None = None,
+    only_employee_ids: Sequence[int] | None = None,
+) -> list[dict[str, Any]]:
+    """The same, for everyone invited to a calendar event."""
+    sql = (
+        f"SELECT p.employee_id, e.company_id, e.fcm_token "
+        f"FROM {B2B_CALENDAR_PARTICIPANT_TABLE} p "
+        f"JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = p.employee_id "
+        f"WHERE p.event_id = %s AND e.is_active = TRUE"
+    )
+    params: list[Any] = [event_id]
+    if exclude_employee_id is not None:
+        sql += " AND p.employee_id <> %s"
+        params.append(exclude_employee_id)
+    if only_employee_ids is not None:
+        if not only_employee_ids:
+            return []
+        sql += " AND p.employee_id = __ANY_MARKER__(%s)"
+        params.append(list(only_employee_ids))
+    return fetch_all(sql, params)
+
+
+def list_events_starting_between(start: datetime, end: datetime) -> list[dict[str, Any]]:
+    """Events whose start falls in a window, across every company.
+
+    The reminder pass is the one caller, and it runs for the whole deployment
+    rather than per company — so unlike everything else in this module it is
+    deliberately not scoped by `company_id`. All-day entries are left out:
+    their `starts_at` is midnight, and a "30 minutes to go" at 23:30 for
+    something that is really just a date on the calendar wakes people up for
+    nothing.
+    """
+    return fetch_all(
+        f"SELECT id, company_id, title, event_type, starts_at, location "
+        f"FROM {B2B_CALENDAR_EVENT_TABLE} "
+        f"WHERE all_day = FALSE AND starts_at >= %s AND starts_at <= %s "
+        f"ORDER BY starts_at",
+        [start, end],
+    )
+
+
+def claim_event_reminder(event_id: int, minutes_before: int) -> bool:
+    """Take the right to send one reminder, exactly once.
+
+    True means this call won the row and should send; False means it was
+    already sent — by the previous minute's pass catching up, or by a second
+    worker running the same beat tick. The unique constraint is what decides,
+    so two workers racing cannot both win.
+    """
+    inserted = execute(
+        f"INSERT INTO {B2B_CALENDAR_REMINDER_TABLE} (event_id, minutes_before, sent_at) "
+        f"VALUES (%s, %s, %s) ON CONFLICT (event_id, minutes_before) DO NOTHING",
+        [event_id, minutes_before, timezone.now()],
+    )
+    return inserted > 0
+
+
+def clear_event_reminders(event_id: int) -> None:
+    """Forget what was sent for an event, so its reminders are due again.
+
+    Called when an event is moved. Without it, pushing a meeting from 10:00 to
+    16:00 leaves the 30-minute row already claimed and the attendees get no
+    warning at all for the time it actually happens.
+    """
+    execute(
+        f"DELETE FROM {B2B_CALENDAR_REMINDER_TABLE} WHERE event_id = %s",
+        [event_id],
+    )
+
+
+def list_company_recipients(
+    company_id: int, *, exclude_employee_id: int | None = None
+) -> list[dict[str, Any]]:
+    """The whole active roster, with whatever push token each one has.
+
+    Unlike [list_employee_fcm_tokens] this keeps the people who have no token:
+    a lead posted to the board belongs in everybody's notification list
+    whether or not their phone can be reached. Somebody who never granted the
+    permission, or who is reading on the dashboard, still has to see that
+    there is a lead waiting to be claimed.
+    """
+    sql = (
+        f"SELECT id AS employee_id, company_id, fcm_token FROM {B2B_EMPLOYEE_TABLE} "
+        f"WHERE company_id = %s AND is_active = TRUE"
+    )
+    params: list[Any] = [company_id]
+    if exclude_employee_id is not None:
+        sql += " AND id <> %s"
+        params.append(exclude_employee_id)
+    return fetch_all(sql, params)
 
 
 def list_employee_fcm_tokens(company_id: int, *, exclude_employee_id: int | None = None) -> list[str]:
@@ -216,9 +346,19 @@ def list_team(company_id: int, *, search: str | None = None) -> list[dict[str, A
     """
     params: list[Any] = [company_id]
     if search:
-        sql += " AND (e.full_name ILIKE %s OR e.position ILIKE %s)"
-        needle = f"%{search}%"
-        params += [needle, needle]
+        # Name, position, phone and handle. The phone and the handle are what
+        # the picker on "So'rov yuborish" promises in its own placeholder, and
+        # a search that quietly ignores two of the three things it offers to
+        # match on is worse than not offering them.
+        #
+        # A leading "@" is dropped: it is how a handle is written and read
+        # everywhere in the app, and it is not part of the stored value.
+        needle = f"%{search.lstrip('@')}%"
+        sql += (
+            " AND (e.full_name ILIKE %s OR e.position ILIKE %s"
+            " OR e.phone ILIKE %s OR e.username ILIKE %s)"
+        )
+        params += [needle, needle, needle, needle]
     sql += " ORDER BY e.full_name ASC"
     return fetch_all(sql, params)
 

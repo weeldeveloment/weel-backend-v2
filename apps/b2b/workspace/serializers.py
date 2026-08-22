@@ -47,6 +47,9 @@ class WorkspaceRefreshSerializer(serializers.Serializer):
 class TeamMemberSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     full_name = serializers.CharField()
+    # The handle, without its "@" — the app adds that where it draws it, the
+    # same way it is typed into the search.
+    username = serializers.CharField(allow_null=True, required=False)
     position = serializers.CharField(allow_null=True, required=False)
     role = serializers.CharField()
     department_name = serializers.CharField(allow_null=True, required=False)
