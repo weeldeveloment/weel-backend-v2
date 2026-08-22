@@ -73,6 +73,20 @@ def _phone_suffix(phone: str | None) -> str | None:
 
 
 def find_employee_by_phone(phone: str) -> dict[str, Any] | None:
+    """The row somebody signs in as, found by their number.
+
+    Guest rows are excluded, and that exclusion is what makes secondments
+    safe. A person lent to another workspace has a second employee row there
+    carrying the same phone number, and this lookup is unscoped by design —
+    it is how a login with nothing but a phone number finds anybody at all.
+    Without the filter, which workspace somebody landed in on sign-in would be
+    decided by an `ORDER BY id`, and a guest row created after a home row was
+    deactivated would win outright.
+
+    Signing in always lands on the workspace that hired you. Getting to one
+    you were lent to is a deliberate switch afterwards — see
+    `WorkspaceSwitchView`.
+    """
     suffix = _phone_suffix(phone)
     if not suffix:
         return None
@@ -80,6 +94,7 @@ def find_employee_by_phone(phone: str) -> dict[str, Any] | None:
         f"""
         SELECT * FROM {B2B_EMPLOYEE_TABLE}
         WHERE is_active = TRUE
+          AND is_guest = FALSE
           AND phone IS NOT NULL
           AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE %s
         ORDER BY id ASC
@@ -342,7 +357,7 @@ def list_team(company_id: int, *, search: str | None = None) -> list[dict[str, A
         SELECT e.*, d.name AS department_name, d.color AS department_color
         FROM {B2B_EMPLOYEE_TABLE} e
         LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
-        WHERE e.company_id = %s AND e.is_active = TRUE
+        WHERE e.company_id = %s AND e.is_active = TRUE AND e.is_hidden = FALSE
     """
     params: list[Any] = [company_id]
     if search:
@@ -452,7 +467,13 @@ def list_tasks(
     they were assigned plus the ones they wrote. Managers pass ``None`` and
     get everything.
     """
-    sql = f"SELECT t.* FROM {B2B_TASK_TABLE} t WHERE t.company_id = %s"
+    # Deleted tasks are gone from lists, search and the counters — the row
+    # survives so it can be restored and so its history still reads, which is
+    # the whole of "delete is not destroy". See `list_deleted_tasks`.
+    sql = (
+        f"SELECT t.* FROM {B2B_TASK_TABLE} t "
+        f"WHERE t.company_id = %s AND t.deleted_at IS NULL"
+    )
     params: list[Any] = [company_id]
 
     if visible_to is not None:
@@ -482,11 +503,15 @@ def list_tasks(
     return _attach_task_children(fetch_all(sql, params))
 
 
-def get_task(task_id: int, company_id: int) -> dict[str, Any] | None:
-    task = fetch_one(
-        f"SELECT * FROM {B2B_TASK_TABLE} WHERE id = %s AND company_id = %s",
-        [task_id, company_id],
-    )
+def get_task(
+    task_id: int, company_id: int, *, include_deleted: bool = False
+) -> dict[str, Any] | None:
+    """One task. Deleted ones are invisible unless asked for by name — which
+    is what the trash screen and `restore_task` do."""
+    sql = f"SELECT * FROM {B2B_TASK_TABLE} WHERE id = %s AND company_id = %s"
+    if not include_deleted:
+        sql += " AND deleted_at IS NULL"
+    task = fetch_one(sql, [task_id, company_id])
     if not task:
         return None
     return _attach_task_children([task])[0]
@@ -604,15 +629,22 @@ def delete_task_voice(task_id: int) -> dict[str, Any] | None:
 
 
 def delete_task(task_id: int, company_id: int, *, actor_id: int | None = None) -> bool:
-    # Read the title before the row is gone — it's the only place the
-    # company-wide feed can still get it from once this DELETE runs.
+    """Remove a task from the workspace without destroying it.
+
+    The row stays, with `deleted_at` and `deleted_by` set: its id, its links,
+    its author and its whole history survive, and an authorised person can put
+    it back. That is what the TZ means by delete ≠ destroy, and it is why the
+    activity row below still has a title to read.
+    """
     existing = fetch_one(
-        f"SELECT title FROM {B2B_TASK_TABLE} WHERE id = %s AND company_id = %s",
+        f"SELECT title FROM {B2B_TASK_TABLE} "
+        f"WHERE id = %s AND company_id = %s AND deleted_at IS NULL",
         [task_id, company_id],
     )
     deleted = execute(
-        f"DELETE FROM {B2B_TASK_TABLE} WHERE id = %s AND company_id = %s",
-        [task_id, company_id],
+        f"UPDATE {B2B_TASK_TABLE} SET deleted_at = %s, deleted_by = %s, updated_at = %s "
+        f"WHERE id = %s AND company_id = %s AND deleted_at IS NULL",
+        [timezone.now(), actor_id, timezone.now(), task_id, company_id],
     ) > 0
     if deleted and existing:
         add_task_activity(
@@ -805,7 +837,7 @@ def task_counters(company_id: int, visible_to: int | None = None) -> dict[str, i
             COUNT(*) FILTER (WHERE status <> 'done' AND due_date IS NOT NULL
                              AND due_date::date = CURRENT_DATE)            AS due_today_count
         FROM {B2B_TASK_TABLE}
-        WHERE {where}
+        WHERE {where} AND deleted_at IS NULL
         """,
         params,
     )
@@ -1221,7 +1253,7 @@ def search_customers(
     sql = f"""
         SELECT c.*,
                (SELECT COUNT(*) FROM {B2B_WORKSPACE_LEAD_TABLE} l
-                 WHERE l.customer_id = c.id) AS deal_count
+                 WHERE l.customer_id = c.id AND l.deleted_at IS NULL) AS deal_count
         FROM {B2B_WORKSPACE_CUSTOMER_TABLE} c
         WHERE c.company_id = %s
     """
@@ -1299,7 +1331,8 @@ def upsert_customer(
 
 def count_customer_deals(customer_id: int) -> int:
     row = fetch_one(
-        f"SELECT COUNT(*) AS total FROM {B2B_WORKSPACE_LEAD_TABLE} WHERE customer_id = %s",
+        f"SELECT COUNT(*) AS total FROM {B2B_WORKSPACE_LEAD_TABLE} "
+        f"WHERE customer_id = %s AND deleted_at IS NULL",
         [customer_id],
     )
     return int((row or {}).get("total") or 0)
@@ -1364,7 +1397,7 @@ def get_customer_detail(customer_id: int, company_id: int) -> dict[str, Any] | N
         f"""
         SELECT id, amount, stage, status, created_at, completed_at
         FROM {B2B_WORKSPACE_LEAD_TABLE}
-        WHERE customer_id = %s AND company_id = %s
+        WHERE customer_id = %s AND company_id = %s AND deleted_at IS NULL
         ORDER BY created_at DESC, id DESC
         """,
         [customer_id, company_id],
@@ -1376,6 +1409,7 @@ def get_customer_detail(customer_id: int, company_id: int) -> dict[str, Any] | N
         FROM {B2B_WORKSPACE_LEAD_TABLE} l
         JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = l.claimed_by_id
         WHERE l.customer_id = %s AND l.company_id = %s AND l.claimed_by_id IS NOT NULL
+          AND l.deleted_at IS NULL
         GROUP BY e.id, e.full_name
         ORDER BY n DESC, e.id ASC
         LIMIT 1
@@ -1388,7 +1422,7 @@ def get_customer_detail(customer_id: int, company_id: int) -> dict[str, Any] | N
         SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
                COALESCE(SUM(amount), 0) AS amount
         FROM {B2B_WORKSPACE_LEAD_TABLE}
-        WHERE customer_id = %s AND company_id = %s
+        WHERE customer_id = %s AND company_id = %s AND deleted_at IS NULL
           AND created_at >= date_trunc('month', NOW()) - INTERVAL '5 months'
         GROUP BY 1
         ORDER BY 1
@@ -1420,7 +1454,10 @@ def list_leads(
     status: str | None = None,
     stage: str | None = None,
 ) -> list[dict[str, Any]]:
-    sql = f"SELECT * FROM {B2B_WORKSPACE_LEAD_TABLE} WHERE company_id = %s"
+    sql = (
+        f"SELECT * FROM {B2B_WORKSPACE_LEAD_TABLE} "
+        f"WHERE company_id = %s AND deleted_at IS NULL"
+    )
     params: list[Any] = [company_id]
     if status:
         sql += " AND status = %s"
@@ -1434,19 +1471,82 @@ def list_leads(
 
 def get_lead(lead_id: int, company_id: int) -> dict[str, Any] | None:
     return fetch_one(
-        f"SELECT * FROM {B2B_WORKSPACE_LEAD_TABLE} WHERE id = %s AND company_id = %s",
+        f"SELECT * FROM {B2B_WORKSPACE_LEAD_TABLE} "
+        f"WHERE id = %s AND company_id = %s AND deleted_at IS NULL",
         [lead_id, company_id],
     )
 
 
-def delete_lead(lead_id: int, company_id: int) -> bool:
-    """Removes the lead outright. Its items and activity go with it (ON DELETE
-    CASCADE); any task raised off it stays, just no longer pointing at a lead
-    (ON DELETE SET NULL) — see `create_b2b_tables`."""
+def delete_lead(lead_id: int, company_id: int, *, actor_id: int | None = None) -> bool:
+    """Take the lead off the board without destroying it.
+
+    Its items, its activity and any task raised off it are all untouched — the
+    row is still there, and restoring it brings back a deal with its whole
+    history rather than a shell. The TZ requires exactly this for leads and
+    tasks; everything else in the schema still deletes outright.
+    """
     return bool(
         execute(
-            f"DELETE FROM {B2B_WORKSPACE_LEAD_TABLE} WHERE id = %s AND company_id = %s",
-            [lead_id, company_id],
+            f"UPDATE {B2B_WORKSPACE_LEAD_TABLE} "
+            f"SET deleted_at = %s, deleted_by = %s, updated_at = %s "
+            f"WHERE id = %s AND company_id = %s AND deleted_at IS NULL",
+            [timezone.now(), actor_id, timezone.now(), lead_id, company_id],
+        )
+    )
+
+
+def list_deleted_tasks(company_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
+    """The bin. Only reachable with the permission to see it — the TZ says an
+    ordinary user does not see deleted objects at all."""
+    return fetch_all(
+        f"""
+        SELECT t.*, e.full_name AS deleted_by_name
+          FROM {B2B_TASK_TABLE} t
+          LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = t.deleted_by
+         WHERE t.company_id = %s AND t.deleted_at IS NOT NULL
+         ORDER BY t.deleted_at DESC
+         LIMIT %s
+        """,
+        [company_id, limit],
+    )
+
+
+def list_deleted_leads(company_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"""
+        SELECT l.*, e.full_name AS deleted_by_name
+          FROM {B2B_WORKSPACE_LEAD_TABLE} l
+          LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = l.deleted_by
+         WHERE l.company_id = %s AND l.deleted_at IS NOT NULL
+         ORDER BY l.deleted_at DESC
+         LIMIT %s
+        """,
+        [company_id, limit],
+    )
+
+
+def restore_task(task_id: int, company_id: int) -> bool:
+    """Put a task back in the working set.
+
+    Scoped to `deleted_at IS NOT NULL` so the row count says whether anything
+    was actually restored — restoring something that was never deleted should
+    not read as success.
+    """
+    return bool(
+        execute(
+            f"UPDATE {B2B_TASK_TABLE} SET deleted_at = NULL, deleted_by = NULL, "
+            f"updated_at = %s WHERE id = %s AND company_id = %s AND deleted_at IS NOT NULL",
+            [timezone.now(), task_id, company_id],
+        )
+    )
+
+
+def restore_lead(lead_id: int, company_id: int) -> bool:
+    return bool(
+        execute(
+            f"UPDATE {B2B_WORKSPACE_LEAD_TABLE} SET deleted_at = NULL, deleted_by = NULL, "
+            f"updated_at = %s WHERE id = %s AND company_id = %s AND deleted_at IS NOT NULL",
+            [timezone.now(), lead_id, company_id],
         )
     )
 
@@ -1857,7 +1957,7 @@ def add_lead_comment(lead_id: int, *, author_id: int, text: str) -> dict[str, An
 def list_lead_tasks(lead_id: int, company_id: int) -> list[dict[str, Any]]:
     return fetch_all(
         f"SELECT * FROM {B2B_TASK_TABLE} WHERE lead_id = %s AND company_id = %s "
-        "ORDER BY created_at DESC, id DESC",
+        "AND deleted_at IS NULL ORDER BY created_at DESC, id DESC",
         [lead_id, company_id],
     )
 
@@ -1884,7 +1984,8 @@ def count_lead_tasks(company_id: int, lead_ids: Sequence[int]) -> dict[int, int]
         return {}
     rows = fetch_all(
         f"SELECT lead_id, COUNT(*) AS total FROM {B2B_TASK_TABLE} "
-        "WHERE company_id = %s AND lead_id = __ANY_MARKER__(%s) GROUP BY lead_id",
+        "WHERE company_id = %s AND lead_id = __ANY_MARKER__(%s) "
+        "AND deleted_at IS NULL GROUP BY lead_id",
         [company_id, list(lead_ids)],
     )
     return {int(row["lead_id"]): int(row["total"]) for row in rows}
@@ -2135,6 +2236,7 @@ def monthly_employee_stats(company_id: int, year: int, month: int) -> list[dict[
             FROM {B2B_WORKSPACE_LEAD_TABLE}
             WHERE company_id = %s
               AND stage = 'won'
+              AND deleted_at IS NULL
               AND claimed_by_id IS NOT NULL
               AND completed_at >= %s AND completed_at < %s
             GROUP BY claimed_by_id
@@ -2482,3 +2584,36 @@ def support_employee(employee_id: int) -> dict[str, Any] | None:
         """,
         [employee_id],
     )
+
+
+def set_employee_username(employee_id: int, username: str | None) -> dict[str, Any] | None:
+    """Claim a handle, or give one up.
+
+    Returns None when somebody in the same workspace already has it. The
+    unique index is what decides — checking first and then writing would let
+    two people who pick "@aziz" in the same second both pass the check.
+    """
+    from django.db import IntegrityError
+
+    try:
+        execute(
+            f"UPDATE {B2B_EMPLOYEE_TABLE} SET username = %s, updated_at = %s WHERE id = %s",
+            [username or None, timezone.now(), employee_id],
+        )
+    except IntegrityError:
+        return None
+    return get_workspace_employee(employee_id)
+
+
+def username_taken(company_id: int, username: str, *, exclude_employee_id: int) -> bool:
+    """Whether this handle is already somebody else's, in this workspace.
+
+    Read before the write purely so the answer can be a sentence rather than a
+    database error. [set_employee_username] is still the authority.
+    """
+    row = fetch_one(
+        f"SELECT 1 AS taken FROM {B2B_EMPLOYEE_TABLE} "
+        f"WHERE company_id = %s AND LOWER(username) = LOWER(%s) AND id <> %s",
+        [company_id, username, exclude_employee_id],
+    )
+    return bool(row)

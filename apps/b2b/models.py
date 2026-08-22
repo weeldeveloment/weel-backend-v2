@@ -52,11 +52,32 @@ class EmployeeStatus:
 
 
 class EmployeeRole:
+    """What somebody is on a workspace's roster.
+
+    Four levels, and the two in the middle are not interchangeable:
+
+    * ``OWNER``     — the company. One per workspace.
+    * ``PERFORMER`` — the manager. Hands out work: raises leads, creates
+      tasks, books the shared calendar. The app calls this one "Manager"; the
+      column has said `performer` since the dashboard was written and renaming
+      it would touch every row and every screen for a label.
+
+      One per workspace among permanent staff, because this is also the
+      employee who holds a dashboard login — see `B2BEmployeeCreateView`.
+      Guests are not counted against that: somebody lent here for a fortnight
+      is not this workspace's web login.
+    * ``LIDER``     — a team lead. Many per workspace. Everything a manager
+      can do, plus asking another workspace for help — which commits this one
+      to letting an outsider in and is deliberately not a manager's call.
+    * ``EMPLOYEE``  — works what they are given.
+    """
+
     OWNER = "owner"
     PERFORMER = "performer"
+    LIDER = "lider"
     EMPLOYEE = "employee"
 
-    CHOICES = [OWNER, PERFORMER, EMPLOYEE]
+    CHOICES = [OWNER, PERFORMER, LIDER, EMPLOYEE]
 
 
 class LeadStatus:

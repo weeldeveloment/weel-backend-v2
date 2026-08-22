@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
@@ -12,6 +15,7 @@ from apps.b2b.workspace.repository import (
     TASK_PRIORITIES,
     TASK_STATUSES,
 )
+from apps.b2b.workspace.secondment import Module, RequestRole
 
 LEAD_ACTIVITY_KINDS = tuple(LeadActivityKind.CHOICES)
 
@@ -58,6 +62,9 @@ class TeamMemberSerializer(serializers.Serializer):
     email = serializers.CharField(allow_null=True, required=False)
     photo = serializers.CharField(allow_null=True, required=False)
     status = serializers.CharField(required=False)
+    # Somebody lent to this workspace by another one. The app marks the row so
+    # it is clear who is here for a while and who was hired here.
+    is_guest = serializers.BooleanField(required=False, default=False)
 
 
 class SupportMessageSerializer(serializers.Serializer):
@@ -101,6 +108,7 @@ class SupportThreadSerializer(serializers.Serializer):
 
 class MeSerializer(serializers.Serializer):
     id = serializers.IntegerField()
+    username = serializers.CharField(allow_null=True, required=False)
     company_id = serializers.IntegerField()
     company_name = serializers.CharField(allow_null=True, required=False)
     full_name = serializers.CharField()
@@ -115,6 +123,12 @@ class MeSerializer(serializers.Serializer):
     # it happens to have fetched, which is not the same set.
     completed_this_month = serializers.IntegerField()
     permissions = serializers.DictField(child=serializers.BooleanField())
+    # Set when this identity is somebody lent to the workspace by another one.
+    is_guest = serializers.BooleanField(required=False, default=False)
+    modules = serializers.ListField(
+        child=serializers.CharField(), allow_null=True, required=False
+    )
+    guest_until = serializers.DateTimeField(allow_null=True, required=False)
 
 
 class SubtaskSerializer(serializers.Serializer):
@@ -742,3 +756,139 @@ class AttendanceLocationUpdateSerializer(serializers.Serializer):
     latitude = serializers.FloatField(required=False, allow_null=True)
     longitude = serializers.FloatField(required=False, allow_null=True)
     radius_meters = serializers.IntegerField(required=False, min_value=10, max_value=5000)
+
+
+# ─── Lending somebody to another workspace ────────────────────────────────────
+
+class UsernameSerializer(serializers.Serializer):
+    """The handle somebody picks for themselves.
+
+    Deliberately narrow. This is a name other people type into a search box to
+    find you, so it has to be typeable: lowercase letters, digits and
+    underscore, no spaces, no punctuation to guess at. A leading "@" is
+    accepted and dropped — it is how a handle is written, not part of it.
+
+    Three characters minimum: shorter than that and the search matches half
+    the company on the way to you.
+    """
+
+    username = serializers.CharField(max_length=50, allow_blank=True)
+
+    def validate_username(self, value: str) -> str:
+        handle = value.strip().lstrip("@").lower()
+        # Blank clears it. Somebody who no longer wants a handle should not
+        # have to keep one, and the column is nullable for that reason.
+        if not handle:
+            return ""
+        if len(handle) < 3:
+            raise serializers.ValidationError(
+                _("At least 3 characters, please.")
+            )
+        if not re.fullmatch(r"[a-z0-9_]+", handle):
+            raise serializers.ValidationError(
+                _("Only lowercase letters, numbers and underscore.")
+            )
+        if handle[0].isdigit():
+            # A handle that starts with a digit reads as an id rather than a
+            # name, and "@12" next to a phone number is a coin toss.
+            raise serializers.ValidationError(
+                _("It has to start with a letter.")
+            )
+        return handle
+
+
+class SecondmentRequestCreateSerializer(serializers.Serializer):
+    """What "So'rov yuborish" posts.
+
+    `ends_at` is optional. An open-ended secondment is a real thing — "come
+    and help until we say otherwise" — and forcing a date would have people
+    invent one, which is worse than storing that there isn't one.
+    """
+
+    to_employee_id = serializers.IntegerField()
+    message = serializers.CharField(
+        max_length=2000, allow_blank=True, required=False, trim_whitespace=True
+    )
+    role = serializers.ChoiceField(choices=RequestRole.CHOICES)
+    modules = serializers.ListField(
+        child=serializers.ChoiceField(choices=Module.CHOICES),
+        required=False,
+        allow_empty=True,
+    )
+    starts_at = serializers.DateTimeField(required=False, allow_null=True)
+    ends_at = serializers.DateTimeField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        starts_at = attrs.get("starts_at")
+        ends_at = attrs.get("ends_at")
+        if starts_at and ends_at and ends_at <= starts_at:
+            raise serializers.ValidationError(
+                {"ends_at": _("The end has to come after the start.")}
+            )
+        if ends_at and ends_at <= timezone.now():
+            raise serializers.ValidationError(
+                {"ends_at": _("That is already in the past.")}
+            )
+        return attrs
+
+
+class SecondmentDeclineSerializer(serializers.Serializer):
+    """Saying no, and why.
+
+    The reason is required. The whole point of declining rather than ignoring
+    is that the workspace that asked learns something — "I am on leave", "ask
+    me next week" — and a blank refusal tells them nothing they did not
+    already know from the silence.
+    """
+
+    reason = serializers.CharField(max_length=1000, trim_whitespace=True)
+
+    def validate_reason(self, value: str) -> str:
+        if not value.strip():
+            raise serializers.ValidationError(_("Please say why."))
+        return value.strip()
+
+
+class SecondmentRequestSerializer(serializers.Serializer):
+    """One row of the "So'rovlar" inbox, from either side."""
+
+    id = serializers.IntegerField()
+    company_id = serializers.IntegerField()
+    company_name = serializers.CharField(allow_null=True, required=False)
+    from_employee_id = serializers.IntegerField()
+    from_full_name = serializers.CharField(allow_null=True, required=False)
+    from_position = serializers.CharField(allow_null=True, required=False)
+    from_photo = serializers.CharField(allow_null=True, required=False)
+    to_employee_id = serializers.IntegerField()
+    to_full_name = serializers.CharField(allow_null=True, required=False)
+    to_position = serializers.CharField(allow_null=True, required=False)
+    to_photo = serializers.CharField(allow_null=True, required=False)
+    to_company_name = serializers.CharField(allow_null=True, required=False)
+    message = serializers.CharField(allow_blank=True, required=False)
+    role = serializers.CharField()
+    modules = serializers.ListField(child=serializers.CharField(), required=False)
+    starts_at = serializers.DateTimeField(allow_null=True, required=False)
+    ends_at = serializers.DateTimeField(allow_null=True, required=False)
+    status = serializers.CharField()
+    decline_reason = serializers.CharField(allow_null=True, required=False)
+    responded_at = serializers.DateTimeField(allow_null=True, required=False)
+    created_at = serializers.DateTimeField(required=False)
+
+
+class OrgPersonSerializer(serializers.Serializer):
+    """Somebody in a sibling workspace, as the picker lists them.
+
+    Carries the workspace they belong to, which the picker inside one
+    workspace never had to: "Aziz Karimov" is not enough to pick from when the
+    org has four of them in four offices.
+    """
+
+    id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    username = serializers.CharField(allow_null=True, required=False)
+    position = serializers.CharField(allow_null=True, required=False)
+    phone = serializers.CharField(allow_null=True, required=False)
+    photo = serializers.CharField(allow_null=True, required=False)
+    role = serializers.CharField(required=False)
+    company_id = serializers.IntegerField()
+    company_name = serializers.CharField(allow_null=True, required=False)

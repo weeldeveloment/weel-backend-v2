@@ -1,4 +1,12 @@
 B2B_COMPANY_TABLE = "b2b_company"
+# The level above a company row. In the product's words a `b2b_company` row is
+# a *workspace* and a `b2b_org` row is the *company* that groups them — the
+# isolation boundary is `company_id` and always has been, so the new level was
+# added above it rather than beside it. See `create_b2b_tables`.
+B2B_ORG_TABLE = "b2b_org"
+# Somebody lent to another workspace: the ask, and the standing it creates.
+B2B_WORKSPACE_REQUEST_TABLE = "b2b_workspace_request"
+B2B_WORKSPACE_MEMBERSHIP_TABLE = "b2b_workspace_membership"
 B2B_USER_TABLE = "b2b_user"
 B2B_USER_SESSION_TABLE = "b2b_user_session"
 B2B_DEPARTMENT_TABLE = "b2b_department"

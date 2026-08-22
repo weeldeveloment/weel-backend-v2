@@ -43,3 +43,64 @@ class HasCapability(BasePermission):
         if capability is None:
             return True
         return bool(request.user.capabilities.get(capability))
+
+
+class HasModule(BasePermission):
+    """Closes a whole section of the workspace to a guest who was not lent it.
+
+    Views declare ``required_module = Module.SALES``. A permanent employee has
+    no module grant and passes every one of these; somebody seconded here to
+    help with the sales board is stopped at the calendar, the task list and the
+    chat unless those were named in the request they accepted.
+
+    Separate from [HasCapability] because the two answer different questions
+    and only one of them covers reading. A capability is "may you *do* this" —
+    create a task, post a lead — and a guest with no `vazifa` grant already
+    fails those. But `GET /tasks/` has no capability behind it at all: every
+    role may read the board, so without this the app could hide the tab while
+    the endpoint went on answering. Hiding a tab is not access control.
+    """
+
+    message = "This part of the workspace was not shared with you."
+
+    def has_permission(self, request, view) -> bool:
+        if not isinstance(request.user, WorkspaceUser):
+            return False
+
+        # A chat-only member is in one conversation and nowhere else. The TZ
+        # is explicit that they get no workspace role and see no other module,
+        # and that a file reachable in a chat does not thereby open Files —
+        # so every module gate refuses them, chat included. Their access to
+        # the conversation itself is decided by chat membership, which is a
+        # different question and a different table.
+        if request.user.get("is_chat_only"):
+            return False
+
+        module = getattr(view, "required_module", None)
+        if module is None:
+            return True
+        modules = request.user.modules
+        # None is a permanent employee: their role is the whole story, and a
+        # module list is a guest's narrowing rather than a universal gate.
+        return modules is None or module in modules
+
+
+class HasPermission(BasePermission):
+    """Checks one named permission from the TZ's catalogue.
+
+    Views declare ``required_permission = Permission.EMPLOYEE_CHANGE_ROLE``.
+    Distinct from [HasCapability], which reads the older role-derived map: this
+    one reads what the workspace's role editor actually wrote, so a permission
+    an administrator withdrew this morning is refused this afternoon without a
+    deployment.
+    """
+
+    message = "You do not have permission for this action."
+
+    def has_permission(self, request, view) -> bool:
+        if not isinstance(request.user, WorkspaceUser):
+            return False
+        permission = getattr(view, "required_permission", None)
+        if permission is None:
+            return True
+        return request.user.may(permission)

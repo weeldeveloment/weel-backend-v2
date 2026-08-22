@@ -5,6 +5,8 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from apps.b2b.models import EmployeeRole
+
 
 class B2BCompanySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
@@ -76,7 +78,12 @@ class B2BEmployeeSerializer(serializers.Serializer):
     passport_pinfl = serializers.CharField(max_length=20, required=True)
     individual_limit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     status = serializers.ChoiceField(choices=["available", "on_trip", "blocked"], required=False, default="available")
-    role = serializers.ChoiceField(choices=["owner", "performer", "employee"], required=False, default="employee")
+    # `lider` is a rank above the manager (`performer`): everything a manager
+    # can do, plus asking another workspace to lend somebody. Many per
+    # workspace, unlike `performer`.
+    role = serializers.ChoiceField(
+        choices=EmployeeRole.CHOICES, required=False, default=EmployeeRole.EMPLOYEE
+    )
     is_active = serializers.BooleanField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 

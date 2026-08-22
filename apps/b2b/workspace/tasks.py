@@ -222,3 +222,96 @@ def _event_body(event: dict) -> str:
     when = timezone.localtime(starts_at).strftime("%H:%M") if starts_at else ""
     parts = [part for part in (event.get("title"), when, event.get("location")) if part]
     return " · ".join(parts)
+
+
+@app.task(name="b2b.workspace.notify_secondment_request")
+def notify_secondment_request(request_id: int, event: str) -> int:
+    """One of the three moments in a request's life that somebody is waiting on.
+
+    `sent` goes to the person being asked; `accepted` and `declined` go back to
+    whoever asked. Nobody is told about a cancellation: the person it was
+    withdrawn from never acted on it, and "never mind" is not worth a buzz.
+    """
+    from apps.b2b.workspace import secondment_repository as srepo
+
+    ask = srepo.get_request(request_id)
+    if not ask:
+        return 0
+
+    if event == "sent":
+        recipient_id = ask["to_employee_id"]
+        title = push_text.SECONDMENT_TITLE
+        body = _secondment_body(ask)
+    elif event in {"accepted", "declined"}:
+        recipient_id = ask["from_employee_id"]
+        accepted = event == "accepted"
+        title = (
+            push_text.SECONDMENT_ACCEPTED_TITLE
+            if accepted
+            else push_text.SECONDMENT_DECLINED_TITLE
+        )
+        # A refusal carries its reason. It is the entire value of declining
+        # rather than ignoring, and burying it in the app is how it goes
+        # unread — see `SecondmentDeclineSerializer`.
+        body = (ask.get("decline_reason") or "").strip() if not accepted else ""
+        if not body:
+            body = _secondment_body(ask)
+    else:
+        return 0
+
+    employee = repo.get_workspace_employee(recipient_id)
+    if not employee:
+        return 0
+
+    recipients = [{
+        "employee_id": employee["id"],
+        "company_id": employee["company_id"],
+        "fcm_token": employee.get("fcm_token"),
+    }]
+    create_notification(
+        company_id=employee["company_id"],
+        employee_id=employee["id"],
+        kind="request",
+        title=title,
+        body=body,
+        payload={"request_id": request_id, "event": event},
+    )
+    _push(
+        recipients,
+        title=title,
+        body=body,
+        data={"type": "request", "request_id": str(request_id), "event": event},
+    )
+    return 1
+
+
+def _secondment_body(ask: dict) -> str:
+    """What the request reads as: who is asking, and what they wrote."""
+    message = (ask.get("message") or "").strip()
+    if message:
+        return message[:200]
+    company = ask.get("company_name")
+    return f"{company} ish jarayoniga taklif qilmoqda" if company else "Yangi so’rov"
+
+
+@app.task(name="b2b.workspace.expire_secondments")
+def expire_secondments() -> int:
+    """Close the secondments whose end has passed.
+
+    Not the security boundary — that is `resolve_membership`, which checks the
+    window on every single request and does not care whether this has run. What
+    this does is keep the roster honest: an ended guest should stop appearing
+    in assignee pickers and chat member lists, and only deactivating the row
+    achieves that.
+    """
+    from apps.b2b.workspace import secondment_repository as srepo
+
+    expired = srepo.list_expired_memberships()
+    for membership in expired:
+        try:
+            srepo.end_membership(membership["id"])
+        except Exception:  # noqa: BLE001 - one bad row must not stop the sweep
+            logger.exception("Could not end membership %s", membership["id"])
+    if expired:
+        logger.info("Secondments ended: count=%s", len(expired))
+    return len(expired)

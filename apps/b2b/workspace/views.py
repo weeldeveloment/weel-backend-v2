@@ -28,6 +28,7 @@ from apps.b2b.models import LeadSource, LeadStage, LeadStatus
 from apps.b2b.repository import get_company
 from apps.b2b.mail import repository as mail_repo
 from apps.b2b.workspace import push_text
+from apps.b2b.workspace.secondment import Module
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import storage
 from apps.b2b.workspace.consumers import broadcast_deletion, broadcast_message
@@ -80,6 +81,7 @@ from apps.b2b.workspace.serializers import (
     TaskSerializer,
     TaskStatusSerializer,
     TaskWriteSerializer,
+    UsernameSerializer,
     TeamMemberSerializer,
     ThreadCreateSerializer,
     ThreadFlagsSerializer,
@@ -90,7 +92,8 @@ from apps.b2b.workspace.serializers import (
     WorkspaceRefreshSerializer,
 )
 from apps.b2b.workspace.geo import distance_meters
-from apps.b2b.workspace.tokens import create_workspace_tokens, rotate_workspace_tokens
+from apps.b2b.workspace import accounts
+from apps.b2b.workspace.tokens import create_account_tokens, create_workspace_tokens, rotate_workspace_tokens
 from apps.hotels.repository import search_hotels
 from apps.hotels.serializers import HotelCardSerializer
 from users.models.logs import SmsPurpose
@@ -117,6 +120,24 @@ class WorkspaceAPIView(APIView):
         WorkspaceJWTAuthentication,
         DashboardWorkspaceAuthentication,
     ]
+
+    #: Set on a view that belongs to one section of the workspace — the sales
+    #: board, the task list, the calendar, chat. Left None the view is open to
+    #: anybody signed in, which is what almost all of them are.
+    required_module = None
+
+    def get_permissions(self):
+        """Every view's own permissions, plus the module gate.
+
+        Appended here rather than added to forty `permission_classes` lists.
+        Each of those lists is written per view and would have to remember
+        this one — and the failure mode of forgetting is not a broken screen
+        but a guest quietly reading a board that was never shared with them,
+        which is exactly the kind of hole nobody notices.
+        """
+        from apps.b2b.workspace.permissions import HasModule, HasPermission
+
+        return [*super().get_permissions(), HasModule(), HasPermission()]
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -159,14 +180,15 @@ class WorkspaceLoginView(APIView):
         serializer.is_valid(raise_exception=True)
         phone = serializer.validated_data["phone"]
 
-        employee = _resolve_employee(phone)
         is_test_phone = OTPRedisService.is_test_phone_for_purpose(phone, SmsPurpose.B2B_LOGIN)
 
-        if not employee and not is_test_phone:
-            return Response(
-                {"detail": _("No employee is registered with this phone number.")},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        # A number nobody has seen before is a registration, not an error. The
+        # TZ's flow starts here — phone, then OTP, then name and username —
+        # and the account it produces is a member of nothing: getting into a
+        # workspace still takes an invitation or an accepted request.
+        #
+        # Rejecting unknown numbers used to be the rule, and it was the right
+        # one while there was no way to register at all.
 
         if is_test_phone:
             return Response({
@@ -233,22 +255,39 @@ class WorkspaceLoginVerifyView(APIView):
         phone = serializer.validated_data["phone"]
         otp = serializer.validated_data["otp"]
 
-        employee = _resolve_employee(phone)
-        if not employee:
-            return Response(
-                {"phone": [_("No employee is registered with this phone number.")]},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
+        # The code is checked before anything is looked up or created. The
+        # other way round, an unknown number would tell a caller whether it is
+        # registered before proving they hold it — and would let anybody mint
+        # accounts by guessing numbers.
         ok, message = OTPRedisService.verify_otp(phone, otp, SmsPurpose.B2B_LOGIN)
         if not ok:
             return Response({"otp": [message]}, status=status.HTTP_400_BAD_REQUEST)
         OTPRedisService.consume_otp(phone, SmsPurpose.B2B_LOGIN)
 
+        account = accounts.ensure_account(phone)
+        account_tokens = create_account_tokens(account) if account else None
+
+        employee = _resolve_employee(phone)
+        if not employee:
+            # Registered, and a member of nothing yet. The app takes them on
+            # to name and username, and from there to an invitation or a
+            # request to join.
+            return Response({
+                "account": account_tokens,
+                "user": None,
+                "has_profile": bool(
+                    account and account.get("first_name") and account.get("username")
+                ),
+            })
+
         tokens = create_workspace_tokens(employee)
         return Response({
             "access": tokens["access"],
             "refresh": tokens["refresh"],
+            # Alongside the workspace session rather than instead of it: the
+            # app needs this one to switch workspaces or accept an invitation,
+            # and asking somebody to sign in twice for that would be absurd.
+            "account": account_tokens,
             "user": _me_payload(repo.get_workspace_employee(employee["id"]) or employee),
         })
 
@@ -300,8 +339,30 @@ class WorkspaceLogoutView(APIView):
 
 # ─── Me & team ────────────────────────────────────────────────────────────────
 
-def _me_payload(employee: dict) -> dict:
+def _access_payload(employee: dict) -> dict:
+    """What this person can open and do, as `access.resolve` answers it."""
+    from apps.b2b.workspace.access import Role
+    from apps.b2b.workspace.access_repository import access_for_employee
+
+    modules, permissions = access_for_employee(employee)
+    return {
+        "role": Role.clean(employee.get("role")),
+        "role_label": Role.label(employee.get("role")),
+        "modules": modules,
+        "permissions": permissions,
+    }
+
+
+def _me_payload(employee: dict, membership=None) -> dict:
+    """Who this is, where they are, and what they may do here.
+
+    `membership` is set when this identity is a guest — somebody lent to this
+    workspace by another. It has to reach `capabilities_for`, or the app would
+    build its tabs from a permission map wider than the one the endpoints
+    enforce, and every screen it drew past the grant would 403 on open.
+    """
     company = get_company(employee["company_id"]) or {}
+    modules = list(membership.modules) if membership else None
     return {
         "id": employee["id"],
         "company_id": employee["company_id"],
@@ -309,6 +370,7 @@ def _me_payload(employee: dict) -> dict:
         "full_name": employee.get("full_name"),
         "position": employee.get("position"),
         "role": employee.get("role") or "employee",
+        "username": employee.get("username"),
         "phone": employee.get("phone"),
         "email": employee.get("email"),
         "photo": employee.get("photo"),
@@ -316,7 +378,18 @@ def _me_payload(employee: dict) -> dict:
         "completed_this_month": repo.completed_tasks_this_month(
             employee["id"], *_current_year_month()
         ),
-        "permissions": capabilities_for(employee.get("role")),
+        "permissions": capabilities_for(employee.get("role"), modules),
+        # The TZ's model: which parts of the workspace are open, and what may
+        # be done inside them. Sent alongside `permissions` rather than
+        # instead of it while the older map still gates the existing
+        # endpoints — see the note on `authentication.WorkspaceUser.access`.
+        "access": _access_payload(employee),
+        # Being here on loan is worth saying out loud: the app puts the host
+        # workspace's name and the date it ends in the header, so nobody is
+        # left wondering why their own leads are missing.
+        "is_guest": bool(membership),
+        "modules": modules,
+        "guest_until": membership.ends_at if membership else None,
     }
 
 
@@ -332,7 +405,47 @@ class WorkspaceMeView(WorkspaceAPIView):
         employee = repo.get_workspace_employee(request.user.id)
         if not employee:
             return Response({"detail": _("Employee not found.")}, status=status.HTTP_404_NOT_FOUND)
-        return Response(_me_payload(employee))
+        return Response(_me_payload(employee, request.user.membership))
+
+
+class WorkspaceUsernameView(WorkspaceAPIView):
+    """PUT /api/b2b/workspace/me/username/ — pick the handle people find you by.
+
+    Yours alone. A roster is imported from passports and phone numbers, and a
+    handle is the one part of somebody's entry they choose for themselves —
+    which is also why nothing here lets one person set another's.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Set your own username",
+        request_body=UsernameSerializer,
+        responses={200: MeSerializer(), 409: openapi.Response(description="Taken")},
+    )
+    def put(self, request):
+        serializer = UsernameSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        username = serializer.validated_data["username"]
+
+        if username and repo.username_taken(
+            request.user.company_id, username, exclude_employee_id=request.user.id
+        ):
+            return Response(
+                {"username": [_("Somebody here already uses this name.")]},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        updated = repo.set_employee_username(request.user.id, username or None)
+        if not updated:
+            # Lost the race against somebody claiming the same handle between
+            # the check above and the write.
+            return Response(
+                {"username": [_("Somebody here already uses this name.")]},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(_me_payload(updated, request.user.membership))
 
 
 class WorkspaceTeamView(WorkspaceAPIView):
@@ -401,6 +514,7 @@ class WorkspaceTaskListCreateView(WorkspaceAPIView):
     the caller's role; the app's "Menikilar" toggle narrows it client-side.
     POST /api/b2b/workspace/tasks/ — managers only."""
 
+    required_module = Module.TASKS
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -478,6 +592,7 @@ class WorkspaceTaskActivityFeedView(WorkspaceAPIView):
     for the task list itself (see ``WorkspaceUser.task_scope``).
     """
 
+    required_module = Module.TASKS
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Company-wide task activity feed",
@@ -549,6 +664,7 @@ def _validated_employee_ids(company_id: int, ids) -> list[int] | None:
 class WorkspaceTaskDetailView(WorkspaceAPIView):
     """GET / PATCH / DELETE a single task."""
 
+    required_module = Module.TASKS
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     def _load(self, request, task_id: int):
@@ -647,6 +763,7 @@ class WorkspaceTaskStatusView(WorkspaceAPIView):
     todo → in progress → done.
     """
 
+    required_module = Module.TASKS
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Change a task's status",
@@ -688,6 +805,7 @@ class WorkspaceTaskStatusView(WorkspaceAPIView):
 class WorkspaceSubtaskToggleView(WorkspaceAPIView):
     """POST /api/b2b/workspace/tasks/<id>/subtasks/<sid>/toggle/"""
 
+    required_module = Module.TASKS
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Tick or untick a checklist step",
@@ -723,6 +841,7 @@ class WorkspaceSubtaskToggleView(WorkspaceAPIView):
 class WorkspaceTaskCommentView(WorkspaceAPIView):
     """POST /api/b2b/workspace/tasks/<id>/comments/"""
 
+    required_module = Module.TASKS
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Comment on a task",
@@ -759,6 +878,7 @@ class WorkspaceTaskVoiceView(WorkspaceAPIView):
     attempt on the company's quota is not what "replace" means.
     """
 
+    required_module = Module.TASKS
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -855,6 +975,7 @@ class WorkspaceEventListCreateView(WorkspaceAPIView):
     POST /api/b2b/workspace/events/ — managers create shared events; employees
     may create personal ones for themselves."""
 
+    required_module = Module.CALENDAR
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -937,6 +1058,7 @@ class WorkspaceEventListCreateView(WorkspaceAPIView):
 
 
 class WorkspaceEventDetailView(WorkspaceAPIView):
+    required_module = Module.CALENDAR
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     def _load(self, request, event_id: int):
@@ -1048,6 +1170,7 @@ class WorkspaceThreadListCreateView(WorkspaceAPIView):
     """GET  /api/b2b/workspace/chats/ — the caller's conversations.
     POST /api/b2b/workspace/chats/ — open a direct chat, or a group (managers)."""
 
+    required_module = Module.CHAT
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="List chat threads",
@@ -1189,6 +1312,7 @@ def _message_payload(
 class WorkspaceMessageView(WorkspaceAPIView):
     """GET / POST messages in a thread the caller belongs to."""
 
+    required_module = Module.CHAT
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     def _thread(self, request, thread_id: int):
@@ -1353,6 +1477,7 @@ class WorkspaceMessageDetailView(WorkspaceAPIView):
     and an employee must not be able to edit the record of what was said.
     """
 
+    required_module = Module.CHAT
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -1395,6 +1520,7 @@ class WorkspaceMessageDetailView(WorkspaceAPIView):
 class WorkspaceThreadFlagsView(WorkspaceAPIView):
     """POST /api/b2b/workspace/chats/<id>/flags/ — pin / mute for this member."""
 
+    required_module = Module.CHAT
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Pin or mute a chat",
@@ -1414,6 +1540,7 @@ class WorkspaceThreadFlagsView(WorkspaceAPIView):
 class WorkspaceThreadReadView(WorkspaceAPIView):
     """POST /api/b2b/workspace/chats/<id>/read/"""
 
+    required_module = Module.CHAT
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Mark a chat as read",
@@ -1510,6 +1637,7 @@ class WorkspaceCustomerSearchView(WorkspaceAPIView):
     narrowing the query.
     """
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -1547,6 +1675,7 @@ class WorkspaceCrmCustomerListView(WorkspaceAPIView):
     can render straight off one response.
     """
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -1582,6 +1711,7 @@ class WorkspaceCrmCustomerDetailView(WorkspaceAPIView):
     draws, in one response.
     """
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -1601,6 +1731,7 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
     may see the board and claim an open one.
     POST /api/b2b/workspace/leads/ — owner/performer only."""
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -1740,6 +1871,7 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
 class WorkspaceLeadClaimView(WorkspaceAPIView):
     """POST /api/b2b/workspace/leads/<id>/claim/ — any employee takes a 'new' lead."""
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Claim a lead", responses={200: LeadSerializer()})
@@ -1760,6 +1892,7 @@ class WorkspaceLeadCompleteView(WorkspaceAPIView):
     """POST /api/b2b/workspace/leads/<id>/complete/ — the claiming employee
     marks it resolved."""
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Complete a lead", responses={200: LeadSerializer()})
@@ -1789,6 +1922,7 @@ class WorkspaceLeadDetailView(WorkspaceAPIView):
     queries on the server beats four round trips from a phone.
     """
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -1836,7 +1970,7 @@ class WorkspaceLeadDetailView(WorkspaceAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        repo.delete_lead(lead_id, request.user.company_id)
+        repo.delete_lead(lead_id, request.user.company_id, actor_id=request.user.id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -1848,6 +1982,7 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
     to know which stages are terminal.
     """
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -1892,6 +2027,7 @@ class WorkspaceLeadAssignView(WorkspaceAPIView):
     self-service, this takes a lead off one employee and gives it to another.
     """
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -1938,6 +2074,7 @@ class WorkspaceLeadCommentView(WorkspaceAPIView):
     it — but the account of the calls is written by the person who made them.
     """
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -1973,6 +2110,7 @@ class WorkspaceLeadItemsView(WorkspaceAPIView):
     disagrees with the lines it came from.
     """
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     def _guard(self, request, lead_id: int):
@@ -2030,6 +2168,7 @@ class WorkspaceLeadItemsView(WorkspaceAPIView):
 class WorkspaceLeadItemDetailView(WorkspaceAPIView):
     """DELETE /api/b2b/workspace/leads/<id>/items/<item_id>/."""
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Delete a lead's line item")
@@ -2056,6 +2195,7 @@ class WorkspaceLeadTasksView(WorkspaceAPIView):
     The task is created assigned to them.
     """
 
+    required_module = Module.SALES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -2218,6 +2358,7 @@ class WorkspaceFolderListCreateView(WorkspaceAPIView):
     drive is shared, and a folder is how somebody decided to arrange it.
     """
 
+    required_module = Module.FILES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -2265,6 +2406,7 @@ class WorkspaceFolderDetailView(WorkspaceAPIView):
     never be the same tap.
     """
 
+    required_module = Module.FILES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -2298,6 +2440,7 @@ class WorkspaceStorageView(WorkspaceAPIView):
     needs to know it will be refused before they spend the data sending it.
     """
 
+    required_module = Module.FILES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -2316,6 +2459,7 @@ class WorkspaceFileListCreateView(WorkspaceAPIView):
     can send a photographed waybill without asking anyone to do it for them.
     """
 
+    required_module = Module.FILES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
@@ -2380,6 +2524,7 @@ class WorkspaceFileListCreateView(WorkspaceAPIView):
 class WorkspaceFileDetailView(WorkspaceAPIView):
     """PATCH / DELETE /api/b2b/workspace/files/<id>/"""
 
+    required_module = Module.FILES
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(

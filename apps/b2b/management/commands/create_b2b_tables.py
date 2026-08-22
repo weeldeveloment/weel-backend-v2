@@ -1149,3 +1149,394 @@ class Command(BaseCommand):
             "ON b2b_notification (employee_id, created_at DESC);"
         )
         self.stdout.write("  Created b2b_notification")
+
+        # ─── Organisations, and lending people between workspaces ────────────
+        #
+        # A word on names, because the code and the product disagree and it is
+        # better said once here than guessed at forty times:
+        #
+        #   product "workspace"  →  a `b2b_company` row
+        #   product "company"    →  a `b2b_org` row, which groups those
+        #
+        # Every operational table in this schema is keyed by `company_id`, and
+        # that key already means exactly what the product calls a workspace:
+        # its own leads, its own tasks, its own roster, its own chats. Adding a
+        # second `workspace_id` beside it would mean rewriting every one of the
+        # two hundred-odd queries that scope by company for no behavioural
+        # gain, and the migration would have to be right on all of them at
+        # once. So the isolation boundary stays where it is, and the new level
+        # is added *above* it.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_org (
+                id BIGSERIAL PRIMARY KEY,
+                name VARCHAR(200) NOT NULL,
+                owner_user_id BIGINT REFERENCES b2b_user(id) ON DELETE SET NULL,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute("""
+            ALTER TABLE b2b_company ADD COLUMN IF NOT EXISTS org_id
+                BIGINT REFERENCES b2b_org(id) ON DELETE SET NULL;
+        """)
+        # Every workspace that has no organisation yet gets one of its own,
+        # named after it. That is what keeps this change invisible: an org of
+        # one workspace can only ever see itself, which is precisely the
+        # isolation every deployment has today.
+        #
+        # One row at a time, and paired by the id the insert returns. Matching
+        # the two tables up by name afterwards would be wrong the moment a
+        # deployment has two workspaces called "Filial" — and every deployment
+        # eventually does.
+        cursor.execute("SELECT id, name FROM b2b_company WHERE org_id IS NULL ORDER BY id")
+        orphans = cursor.fetchall()
+        for company_id, company_name in orphans:
+            cursor.execute(
+                "INSERT INTO b2b_org (name, created_at, updated_at) "
+                "VALUES (%s, NOW(), NOW()) RETURNING id",
+                [company_name or f"Kompaniya #{company_id}"],
+            )
+            org_id = cursor.fetchone()[0]
+            cursor.execute(
+                "UPDATE b2b_company SET org_id = %s WHERE id = %s", [org_id, company_id]
+            )
+        if orphans:
+            self.stdout.write(f"  Gave {len(orphans)} workspace(s) an org of their own")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_company_org_idx ON b2b_company (org_id);"
+        )
+        self.stdout.write("  Created b2b_org")
+
+        # A person seconded into a workspace gets an employee row there, the
+        # same as anybody else — which is the whole point: every existing
+        # query, every assignment, every chat membership keeps working with no
+        # idea that this person's home is elsewhere.
+        #
+        # `home_employee_id` is the row they were hired into, and `is_guest`
+        # is what keeps the login lookup off these rows: `find_employee_by_phone`
+        # searches by phone across the whole table, so without this flag a
+        # second row with the same number would be a coin toss over which
+        # workspace somebody lands in when they sign in.
+        cursor.execute("""
+            ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS is_guest
+                BOOLEAN NOT NULL DEFAULT FALSE;
+        """)
+        cursor.execute("""
+            ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS home_employee_id
+                BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL;
+        """)
+        # A "ghost" is in the workspace without being on anybody's list.
+        cursor.execute("""
+            ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS is_hidden
+                BOOLEAN NOT NULL DEFAULT FALSE;
+        """)
+        self.stdout.write("  Extended b2b_employee for guests")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_request (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                from_employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                to_employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                message TEXT NOT NULL DEFAULT '',
+                role VARCHAR(20) NOT NULL DEFAULT 'employee',
+                modules JSONB NOT NULL DEFAULT '[]'::jsonb,
+                starts_at TIMESTAMPTZ,
+                ends_at TIMESTAMPTZ,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                decline_reason TEXT,
+                responded_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_request_to_idx "
+            "ON b2b_workspace_request (to_employee_id, status, created_at DESC);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_request_from_idx "
+            "ON b2b_workspace_request (company_id, created_at DESC);"
+        )
+        # One live ask at a time per person per workspace. Without it, a lider
+        # tapping send twice puts two identical rows in somebody's inbox and
+        # accepting both creates two guest rows for one person.
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS b2b_workspace_request_pending_idx
+            ON b2b_workspace_request (company_id, to_employee_id)
+            WHERE status = 'pending';
+        """)
+        self.stdout.write("  Created b2b_workspace_request")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_membership (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                home_employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                request_id BIGINT REFERENCES b2b_workspace_request(id) ON DELETE SET NULL,
+                role VARCHAR(20) NOT NULL DEFAULT 'employee',
+                modules JSONB NOT NULL DEFAULT '[]'::jsonb,
+                starts_at TIMESTAMPTZ,
+                ends_at TIMESTAMPTZ,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                ended_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_workspace_membership_employee_idx "
+            "ON b2b_workspace_membership (employee_id);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_membership_home_idx "
+            "ON b2b_workspace_membership (home_employee_id, is_active);"
+        )
+        self.stdout.write("  Created b2b_workspace_membership")
+
+        # ─── Who → where → what ──────────────────────────────────────────────
+        #
+        # The TZ's access model. Roles are fixed in code (`access.Role`); what
+        # each one *may do* is per workspace and editable, which is why it is a
+        # table and not a constant. A workspace with no rows here falls back to
+        # `access.default_access`, so this is configuration rather than a
+        # prerequisite — nothing has to be seeded for a workspace to work.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_role (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                code VARCHAR(20) NOT NULL,
+                modules JSONB NOT NULL DEFAULT '[]'::jsonb,
+                permissions JSONB NOT NULL DEFAULT '[]'::jsonb,
+                updated_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (company_id, code)
+            );
+        """)
+        self.stdout.write("  Created b2b_workspace_role")
+
+        # One person's own access, where it differs from their role's.
+        #
+        # NULL means "by role", which is the ordinary case and the first of the
+        # two answers the invite screen offers. A list means "configure" — and
+        # it replaces the role's list rather than adding to it, or inviting a
+        # manager *without* the sales board would be impossible.
+        cursor.execute("""
+            ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS module_access JSONB;
+        """)
+        cursor.execute("""
+            ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS permission_access JSONB;
+        """)
+        self.stdout.write("  Extended b2b_employee with per-person access")
+
+        # ─── The Weel Account ────────────────────────────────────────────────
+        #
+        # One human, one account, however many workspaces they work in. The TZ
+        # puts the phone and a globally unique username here rather than on a
+        # roster row, and it has to be that way round: somebody permanently
+        # employed by two workspaces has two `b2b_employee` rows and one
+        # handle, so a unique index on the roster could never express it.
+        #
+        # `b2b_employee` stays what it always was — a membership: this person,
+        # in this workspace, with this role.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_account (
+                id BIGSERIAL PRIMARY KEY,
+                phone VARCHAR(20) NOT NULL,
+                username VARCHAR(50),
+                first_name VARCHAR(100),
+                last_name VARCHAR(100),
+                photo VARCHAR(500),
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # Compared digits-only, because the same number is stored as
+        # "+998 90 123 45 67" in one place and "998901234567" in another.
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS b2b_account_phone_idx
+            ON b2b_account (regexp_replace(phone, '[^0-9]', '', 'g'));
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS b2b_account_username_idx
+            ON b2b_account (LOWER(username)) WHERE username IS NOT NULL;
+        """)
+        cursor.execute("""
+            ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS account_id
+                BIGINT REFERENCES b2b_account(id) ON DELETE SET NULL;
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_employee_account_idx "
+            "ON b2b_employee (account_id);"
+        )
+
+        # Backfill: an account per distinct number already on a roster, and
+        # every row carrying that number pointed at it. Guests included — the
+        # whole point is that the guest row and the home row are one person.
+        cursor.execute("""
+            INSERT INTO b2b_account (phone, first_name, photo, created_at, updated_at)
+            SELECT DISTINCT ON (regexp_replace(e.phone, '[^0-9]', '', 'g'))
+                   e.phone, e.full_name, e.photo, NOW(), NOW()
+              FROM b2b_employee e
+             WHERE e.phone IS NOT NULL
+               AND regexp_replace(e.phone, '[^0-9]', '', 'g') <> ''
+               AND NOT EXISTS (
+                   SELECT 1 FROM b2b_account a
+                    WHERE regexp_replace(a.phone, '[^0-9]', '', 'g')
+                        = regexp_replace(e.phone, '[^0-9]', '', 'g')
+               )
+             ORDER BY regexp_replace(e.phone, '[^0-9]', '', 'g'), e.id;
+        """)
+        cursor.execute("""
+            UPDATE b2b_employee e
+               SET account_id = a.id
+              FROM b2b_account a
+             WHERE e.account_id IS NULL
+               AND e.phone IS NOT NULL
+               AND regexp_replace(a.phone, '[^0-9]', '', 'g')
+                 = regexp_replace(e.phone, '[^0-9]', '', 'g');
+        """)
+        # Handles move up to the account they belong to. The lowest employee id
+        # wins a collision, which is the oldest row — the one somebody has had
+        # longest and is known by.
+        cursor.execute("""
+            UPDATE b2b_account a
+               SET username = LOWER(src.username)
+              FROM (
+                SELECT DISTINCT ON (account_id) account_id, username
+                  FROM b2b_employee
+                 WHERE username IS NOT NULL AND account_id IS NOT NULL
+                 ORDER BY account_id, id
+              ) src
+             WHERE a.id = src.account_id
+               AND a.username IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM b2b_account other
+                    WHERE LOWER(other.username) = LOWER(src.username)
+                      AND other.id <> a.id
+               );
+        """)
+        # The old per-workspace index is wrong under the new model: one person
+        # employed by two workspaces holds one handle and would collide with
+        # themselves.
+        cursor.execute("DROP INDEX IF EXISTS b2b_employee_username_idx;")
+        self.stdout.write("  Created b2b_account and linked the roster to it")
+
+        # ─── Invitations, and asking to join ─────────────────────────────────
+        #
+        # An invite is a link: role, module access and an expiry, handed out by
+        # somebody who may invite. The token is what the link carries, so it is
+        # generated from `secrets` and never derived from the row's id.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_invite (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                token VARCHAR(64) NOT NULL UNIQUE,
+                role VARCHAR(20) NOT NULL DEFAULT 'employee',
+                modules JSONB,
+                permissions JSONB,
+                expires_at TIMESTAMPTZ NOT NULL,
+                revoked_at TIMESTAMPTZ,
+                created_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                accepted_by BIGINT REFERENCES b2b_account(id) ON DELETE SET NULL,
+                accepted_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_invite_company_idx "
+            "ON b2b_workspace_invite (company_id, created_at DESC);"
+        )
+        self.stdout.write("  Created b2b_workspace_invite")
+
+        # Somebody asking to be let in, having found the workspace by its
+        # handle. The mirror image of an invite: the workspace decides the role
+        # and the modules, and what the asker chose is only a request for them.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_join_request (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                account_id BIGINT NOT NULL REFERENCES b2b_account(id) ON DELETE CASCADE,
+                message TEXT NOT NULL DEFAULT '',
+                wanted_modules JSONB,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                decline_reason TEXT,
+                granted_role VARCHAR(20),
+                granted_modules JSONB,
+                decided_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                decided_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS b2b_join_request_pending_idx
+            ON b2b_join_request (company_id, account_id) WHERE status = 'pending';
+        """)
+        self.stdout.write("  Created b2b_join_request")
+
+        # A workspace's own handle, so it can be found by name at all.
+        cursor.execute("""
+            ALTER TABLE b2b_company ADD COLUMN IF NOT EXISTS slug VARCHAR(50);
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS b2b_company_slug_idx
+            ON b2b_company (LOWER(slug)) WHERE slug IS NOT NULL;
+        """)
+
+        # ─── Chat-only membership ────────────────────────────────────────────
+        #
+        # Somebody invited to one conversation and nothing else. They still
+        # need a row on the roster — every message references `b2b_employee(id)`
+        # — so the flag is what keeps that row out of the roster, out of the
+        # navigation and out of every module.
+        cursor.execute("""
+            ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS is_chat_only
+                BOOLEAN NOT NULL DEFAULT FALSE;
+        """)
+        self.stdout.write("  Extended b2b_employee for chat-only members")
+
+        # ─── Soft delete ─────────────────────────────────────────────────────
+        #
+        # Delete is not destroy. A removed task or deal keeps its id, its
+        # links, its author and its history; it simply stops appearing.
+        for table in ("b2b_task", "b2b_workspace_lead"):
+            cursor.execute(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;"
+            )
+            cursor.execute(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS deleted_by BIGINT "
+                f"REFERENCES b2b_employee(id) ON DELETE SET NULL;"
+            )
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS {table}_not_deleted_idx "
+                f"ON {table} (company_id) WHERE deleted_at IS NULL;"
+            )
+        self.stdout.write("  Added soft delete to tasks and leads")
+
+        # ─── Audit ───────────────────────────────────────────────────────────
+        #
+        # Role changes, permission changes, deletions and restores. Append
+        # only: nothing in the application updates or deletes a row here.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_audit_event (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                actor_employee_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                action VARCHAR(60) NOT NULL,
+                target_type VARCHAR(40),
+                target_id BIGINT,
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_audit_event_company_idx "
+            "ON b2b_audit_event (company_id, created_at DESC);"
+        )
+        self.stdout.write("  Created b2b_audit_event")

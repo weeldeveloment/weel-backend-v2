@@ -1,6 +1,33 @@
 from django.urls import include, path
 
 from apps.b2b.mail.urls import notification_urlpatterns
+from apps.b2b.workspace.access_views import (
+    WorkspaceAccessCatalogueView,
+    WorkspaceAuditView,
+    WorkspaceEmployeeAccessView,
+    WorkspaceRoleDetailView,
+    WorkspaceRestoreView,
+    WorkspaceRoleListView,
+    WorkspaceTrashView,
+)
+from apps.b2b.workspace.joining_views import (
+    AccountJoinRequestView,
+    AccountMeView,
+    AccountOpenWorkspaceView,
+    AccountUsernameSuggestionView,
+    AccountWorkspacesView,
+    InvitePreviewView,
+    WorkspaceInviteListCreateView,
+    WorkspaceInviteRevokeView,
+    WorkspaceJoinRequestDecideView,
+    WorkspaceJoinRequestListView,
+)
+from apps.b2b.workspace.secondment_views import (
+    WorkspaceOrgPeopleView,
+    WorkspaceRequestListCreateView,
+    WorkspaceRequestRespondView,
+    WorkspaceSwitchView,
+)
 from apps.b2b.workspace.views import (
     WorkspaceAttendanceAbsenceView,
     WorkspaceAttendanceCheckInView,
@@ -46,6 +73,7 @@ from apps.b2b.workspace.views import (
     WorkspaceTaskStatusView,
     WorkspaceTaskVoiceView,
     WorkspaceTeamView,
+    WorkspaceUsernameView,
     WorkspaceThreadFlagsView,
     WorkspaceThreadListCreateView,
     WorkspaceThreadReadView,
@@ -60,7 +88,89 @@ urlpatterns = [
 
     path("me/", WorkspaceMeView.as_view(), name="ws-me"),
     path("me/device-token/", WorkspaceDeviceTokenView.as_view(), name="ws-device-token"),
+    path("me/username/", WorkspaceUsernameView.as_view(), name="ws-username"),
+
+    # Who → where → what. See `access.py`.
+    path(
+        "access/catalogue/",
+        WorkspaceAccessCatalogueView.as_view(),
+        name="ws-access-catalogue",
+    ),
+    path("access/roles/", WorkspaceRoleListView.as_view(), name="ws-access-roles"),
+    path(
+        "access/roles/<str:code>/",
+        WorkspaceRoleDetailView.as_view(),
+        name="ws-access-role",
+    ),
+    path(
+        "employees/<int:employee_id>/access/",
+        WorkspaceEmployeeAccessView.as_view(),
+        name="ws-employee-access",
+    ),
+    path("audit/", WorkspaceAuditView.as_view(), name="ws-audit"),
+    path("trash/", WorkspaceTrashView.as_view(), name="ws-trash"),
+    path(
+        "trash/<str:kind>/<int:object_id>/restore/",
+        WorkspaceRestoreView.as_view(),
+        name="ws-restore",
+    ),
+
+    # Registration and the account session — see `accounts.py`.
+    path("account/me/", AccountMeView.as_view(), name="ws-account-me"),
+    path(
+        "account/username-suggestion/",
+        AccountUsernameSuggestionView.as_view(),
+        name="ws-account-username-suggestion",
+    ),
+    path(
+        "account/workspaces/",
+        AccountWorkspacesView.as_view(),
+        name="ws-account-workspaces",
+    ),
+    path(
+        "account/workspaces/<int:employee_id>/open/",
+        AccountOpenWorkspaceView.as_view(),
+        name="ws-account-open",
+    ),
+    path(
+        "account/invites/<str:token>/",
+        InvitePreviewView.as_view(),
+        name="ws-account-invite",
+    ),
+    path(
+        "account/join-requests/",
+        AccountJoinRequestView.as_view(),
+        name="ws-account-join-request",
+    ),
+
+    # The three doors into a workspace, from the workspace's side.
+    path("invites/", WorkspaceInviteListCreateView.as_view(), name="ws-invites"),
+    path(
+        "invites/<int:invite_id>/revoke/",
+        WorkspaceInviteRevokeView.as_view(),
+        name="ws-invite-revoke",
+    ),
+    path(
+        "join-requests/",
+        WorkspaceJoinRequestListView.as_view(),
+        name="ws-join-requests",
+    ),
+    path(
+        "join-requests/<int:request_id>/<str:action>/",
+        WorkspaceJoinRequestDecideView.as_view(),
+        name="ws-join-request-decide",
+    ),
     path("team/", WorkspaceTeamView.as_view(), name="ws-team"),
+
+    # Lending somebody to another workspace — see `secondment_views`.
+    path("org/people/", WorkspaceOrgPeopleView.as_view(), name="ws-org-people"),
+    path("requests/", WorkspaceRequestListCreateView.as_view(), name="ws-requests"),
+    path(
+        "requests/<int:request_id>/<str:action>/",
+        WorkspaceRequestRespondView.as_view(),
+        name="ws-request-respond",
+    ),
+    path("switch/", WorkspaceSwitchView.as_view(), name="ws-switch"),
 
     path("attendance/", WorkspaceAttendanceView.as_view(), name="ws-attendance"),
     path(

@@ -135,7 +135,9 @@ def test_a_manager_deletes_a_lead():
         )
 
     assert response.status_code == 204
-    delete.assert_called_once_with(7, COMPANY_ID)
+    # Who removed it is recorded now: a soft delete keeps the row, and a
+    # row that cannot say who deleted it cannot be judged before restoring.
+    delete.assert_called_once_with(7, COMPANY_ID, actor_id=MANAGER_ID)
 
 
 def test_the_owner_deletes_their_own_lead():
@@ -148,7 +150,9 @@ def test_the_owner_deletes_their_own_lead():
         )
 
     assert response.status_code == 204
-    delete.assert_called_once_with(7, COMPANY_ID)
+    # Who removed it is recorded now: a soft delete keeps the row, and a
+    # row that cannot say who deleted it cannot be judged before restoring.
+    delete.assert_called_once_with(7, COMPANY_ID, actor_id=OWNER_ID)
 
 
 def test_a_bystander_cannot_delete_somebody_elses_lead():

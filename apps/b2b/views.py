@@ -910,6 +910,21 @@ def _file_digest(file_obj) -> str:
     return digest
 
 
+def _is_permanent_performer(employee: dict) -> bool:
+    """Whether this row is the workspace's own manager.
+
+    A workspace has one — the employee who also holds the dashboard login, so
+    a second cannot be created. Guests are excluded from that count on
+    purpose: somebody lent here for a fortnight with the "Manager" standing is
+    working this workspace's board, not holding its web login, and counting
+    them would leave the workspace unable to hire a manager of its own until
+    the secondment ended.
+    """
+    return employee.get("role") == EmployeeRole.PERFORMER and not employee.get(
+        "is_guest"
+    )
+
+
 class B2BEmployeeListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -944,7 +959,7 @@ class B2BEmployeeListCreateView(APIView):
             openapi.Parameter("position", openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description="Job title"),
             openapi.Parameter("individual_limit", openapi.IN_FORM, type=openapi.TYPE_NUMBER, required=False, description="Individual limit for the employee"),
             openapi.Parameter("status", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["available", "on_trip", "blocked"], required=False, description="Employee status (default: available)"),
-            openapi.Parameter("role", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["owner", "performer", "employee"], required=False, description="Employee role (default: employee)"),
+            openapi.Parameter("role", openapi.IN_FORM, type=openapi.TYPE_STRING, enum=["owner", "performer", "lider", "employee"], required=False, description="Employee role (default: employee)"),
         ],
         responses={
             201: B2BEmployeeSerializer(),
@@ -968,7 +983,7 @@ class B2BEmployeeListCreateView(APIView):
             return Response({"detail": "Owner role cannot be assigned to an employee."}, status=status.HTTP_400_BAD_REQUEST)
         if role == EmployeeRole.PERFORMER:
             has_performer = any(
-                e["role"] == EmployeeRole.PERFORMER for e in list_employees(company_id)
+                _is_permanent_performer(e) for e in list_employees(company_id)
             )
             if has_performer:
                 return Response(
@@ -1119,7 +1134,7 @@ class B2BEmployeeRetrieveUpdateView(APIView):
             return Response({"detail": "Owner role cannot be assigned to an employee."}, status=status.HTTP_400_BAD_REQUEST)
         if role == EmployeeRole.PERFORMER:
             for e in list_employees(company_id):
-                if e["role"] == EmployeeRole.PERFORMER and e["id"] != employee_id:
+                if _is_permanent_performer(e) and e["id"] != employee_id:
                     update_employee(e["id"], role=EmployeeRole.EMPLOYEE)
                     revoke_b2b_login_by_phone(company_id, e["phone"])
         elif role == EmployeeRole.EMPLOYEE and existing["role"] == EmployeeRole.PERFORMER:

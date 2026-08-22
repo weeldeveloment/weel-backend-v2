@@ -40,3 +40,11 @@ def event_reminder_title(minutes_before: int) -> str:
     if minutes_before <= 0:
         return EVENT_STARTING_TITLE
     return f"{minutes_before} daqiqadan keyin"
+
+
+# Somebody from another workspace is being asked to come and help.
+SECONDMENT_TITLE = "Yangi so’rov"
+
+# The answer, back to whoever asked.
+SECONDMENT_ACCEPTED_TITLE = "So’rov qabul qilindi"
+SECONDMENT_DECLINED_TITLE = "So’rov rad etildi"

@@ -127,6 +127,14 @@ app.conf.beat_schedule = {
         "task": "b2b.workspace.send_event_reminders",
         "schedule": crontab(minute="*"),
     },
+    # Retire the guest rows whose secondment has run out. Hourly rather than
+    # by the minute: this is housekeeping, not the boundary — access itself is
+    # checked against the window on every request, so a row that lingers an
+    # extra fifty minutes is untidy and not unsafe.
+    "b2b_workspace_expire_secondments": {
+        "task": "b2b.workspace.expire_secondments",
+        "schedule": crontab(minute=5),
+    },
 }
 
 # app.conf.task_queues = (
