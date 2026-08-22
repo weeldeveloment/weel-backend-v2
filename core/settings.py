@@ -742,23 +742,42 @@ FRONTEND_LOG_TOKEN = (os.getenv("FRONTEND_LOG_TOKEN") or "").strip()
 #   GOOGLE_APPLICATION_CREDENTIALS   — path to a JSON file mounted at runtime
 #
 # The local certificates/ path is still honoured for development only.
+#
+# A second, optional Firebase project serves the B2B workspace app, which was
+# registered separately from the consumer and partner apps:
+#   FIREBASE_B2B_CREDENTIALS_JSON    — the service-account JSON itself
+#   FIREBASE_B2B_CREDENTIALS_FILE    — path to a JSON file mounted at runtime
+#
+# Two projects rather than one because an FCM token is only addressable by the
+# project that issued it: a token from the B2B app cannot be sent to with the
+# consumer project's credentials, and swapping the credentials over would break
+# the consumer and partner apps instead. Leave these unset and every send keeps
+# using the single default app exactly as before — see `b2b_firebase_app`.
 FIREBASE_APP = None
+FIREBASE_B2B_APP = None
+FIREBASE_B2B_APP_NAME = "b2b"
 FIREBASE_CREDENTIALS_PATH = BASE_DIR / "certificates" / "certificate.json"
 _firebase_credentials_json = (os.getenv("FIREBASE_CREDENTIALS_JSON") or "").strip()
 _firebase_credentials_file = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+_firebase_b2b_credentials_json = (
+    os.getenv("FIREBASE_B2B_CREDENTIALS_JSON") or ""
+).strip()
+_firebase_b2b_credentials_file = (
+    os.getenv("FIREBASE_B2B_CREDENTIALS_FILE") or ""
+).strip()
 
 if not _firebase_credentials_file and FIREBASE_CREDENTIALS_PATH.exists():
     _firebase_credentials_file = str(FIREBASE_CREDENTIALS_PATH)
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _firebase_credentials_file
 
 
-def _firebase_credential():
-    if _firebase_credentials_json:
+def _firebase_credential(raw_json="", path=""):
+    if raw_json:
         import json as _json
 
-        return credentials.Certificate(_json.loads(_firebase_credentials_json))
-    if _firebase_credentials_file and os.path.exists(_firebase_credentials_file):
-        return credentials.Certificate(_firebase_credentials_file)
+        return credentials.Certificate(_json.loads(raw_json))
+    if path and os.path.exists(path):
+        return credentials.Certificate(path)
     return None
 
 
@@ -767,7 +786,9 @@ try:
 except ValueError:
     _credential = None
     try:
-        _credential = _firebase_credential()
+        _credential = _firebase_credential(
+            _firebase_credentials_json, _firebase_credentials_file
+        )
     except Exception:
         logging.exception("Firebase credentials are present but could not be parsed")
 
@@ -781,6 +802,31 @@ except ValueError:
             FIREBASE_APP = initialize_app(_credential)
         except Exception:
             logging.exception("Failed to initialize the Firebase app")
+
+# The B2B project, under its own name so it sits alongside the default app
+# rather than replacing it. Entirely optional: an unset credential leaves
+# FIREBASE_B2B_APP as None and the B2B send paths fall back to the default app,
+# which is what every deployment did before this existed.
+try:
+    FIREBASE_B2B_APP = get_app(FIREBASE_B2B_APP_NAME)
+except ValueError:
+    _b2b_credential = None
+    try:
+        _b2b_credential = _firebase_credential(
+            _firebase_b2b_credentials_json, _firebase_b2b_credentials_file
+        )
+    except Exception:
+        logging.exception(
+            "B2B Firebase credentials are present but could not be parsed"
+        )
+
+    if _b2b_credential is not None:
+        try:
+            FIREBASE_B2B_APP = initialize_app(
+                _b2b_credential, name=FIREBASE_B2B_APP_NAME
+            )
+        except Exception:
+            logging.exception("Failed to initialize the B2B Firebase app")
 
 # Security settings
 if DEBUG:

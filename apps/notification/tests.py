@@ -10,7 +10,12 @@ from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from notification.raw_repository import mark_message_notifications_for_conversation
-from notification.service import FCMService, NotificationService
+from notification.service import (
+    B2BFirebaseNotConfigured,
+    FCMService,
+    NotificationService,
+    b2b_firebase_app,
+)
 from notification.serializers import PartnerNotificationSerializer
 from notification.views import (
     ClientNotificationListView,
@@ -71,11 +76,122 @@ class FCMServiceTests(SimpleTestCase):
         self.assertEqual(result.success_count, 1)
         mock_deactivate.assert_called_once_with(["bad-token"])
 
+    @patch("notification.service.messaging.send_each_for_multicast")
+    @patch("notification.service.messaging.MulticastMessage")
+    @patch("notification.service.messaging.Notification")
+    def test_send_to_tokens_uses_the_default_app_unless_told_otherwise(
+        self,
+        _mock_notification,
+        _mock_multicast,
+        mock_send_each,
+    ):
+        """Every consumer and partner send goes through this path unchanged."""
+        mock_send_each.return_value = SimpleNamespace(
+            success_count=1, failure_count=0, responses=[_fake_send_response(success=True)]
+        )
+        FCMService.send_to_tokens(tokens=["t"], title="T", body="B")
+
+        self.assertIsNone(mock_send_each.call_args.kwargs["app"])
+
+    @patch("notification.service.messaging.send_each_for_multicast")
+    @patch("notification.service.messaging.MulticastMessage")
+    @patch("notification.service.messaging.Notification")
+    def test_send_to_tokens_forwards_the_app_it_is_given(
+        self,
+        _mock_notification,
+        _mock_multicast,
+        mock_send_each,
+    ):
+        """A B2B token is only addressable from the B2B project's app."""
+        mock_send_each.return_value = SimpleNamespace(
+            success_count=1, failure_count=0, responses=[_fake_send_response(success=True)]
+        )
+        app = object()
+        FCMService.send_to_tokens(tokens=["t"], title="T", body="B", app=app)
+
+        self.assertIs(mock_send_each.call_args.kwargs["app"], app)
+
+    @patch("notification.service.FCMService._deactivate_invalid_tokens")
+    @patch("notification.service.messaging.send_each_for_multicast")
+    @patch("notification.service.messaging.MulticastMessage")
+    @patch("notification.service.messaging.Notification")
+    def test_send_to_tokens_clears_invalid_tokens_where_the_caller_says(
+        self,
+        _mock_notification,
+        _mock_multicast,
+        mock_send_each,
+        mock_default_deactivate,
+    ):
+        """A workspace token lives in `b2b_employee`, not in `public.users`."""
+        mock_send_each.return_value = SimpleNamespace(
+            success_count=0,
+            failure_count=1,
+            responses=[_fake_send_response(success=False, code="unregistered")],
+        )
+        clear = MagicMock()
+        FCMService.send_to_tokens(
+            tokens=["dead-token"], title="T", body="B", deactivate_invalid=clear
+        )
+
+        clear.assert_called_once_with(["dead-token"])
+        # The consumer table is left alone — that token was never in it.
+        mock_default_deactivate.assert_not_called()
+
+    @patch("notification.service.messaging.send_each_for_multicast")
+    @patch("notification.service.messaging.MulticastMessage")
+    @patch("notification.service.messaging.Notification")
+    def test_send_to_tokens_survives_a_failing_cleanup(
+        self,
+        _mock_notification,
+        _mock_multicast,
+        mock_send_each,
+    ):
+        """The message is already delivered; tidying up must not undo that."""
+        mock_send_each.return_value = SimpleNamespace(
+            success_count=1,
+            failure_count=1,
+            responses=[
+                _fake_send_response(success=True),
+                _fake_send_response(success=False, code="unregistered"),
+            ],
+        )
+        result = FCMService.send_to_tokens(
+            tokens=["ok", "dead"],
+            title="T",
+            body="B",
+            deactivate_invalid=MagicMock(side_effect=RuntimeError("db down")),
+        )
+
+        self.assertEqual(result.success_count, 1)
+
+
     @patch("notification.service.execute")
     def test_deactivate_invalid_tokens_updates_users_table(self, mock_execute):
         FCMService._deactivate_invalid_tokens(["t1", "t2"])
 
         self.assertEqual(mock_execute.call_count, 1)
+
+
+class B2BFirebaseAppTests(SimpleTestCase):
+    """Which Firebase project a B2B push is sent from.
+
+    The workspace app is registered in a project of its own, and an FCM token
+    is only addressable by the project that issued it.
+    """
+
+    def test_refuses_to_send_when_no_b2b_project_is_configured(self):
+        # It used to fall back to the default app. That could never deliver a
+        # workspace token — the default project did not issue it — so the
+        # fallback only turned a missing credential into a per-token
+        # `SenderId mismatch`. Failing here names the actual cause instead.
+        with self.settings(FIREBASE_B2B_APP=None):
+            with self.assertRaises(B2BFirebaseNotConfigured):
+                b2b_firebase_app()
+
+    def test_returns_the_b2b_app_once_one_is_configured(self):
+        app = object()
+        with self.settings(FIREBASE_B2B_APP=app):
+            self.assertIs(b2b_firebase_app(), app)
 
 
 class NotificationServiceTests(SimpleTestCase):

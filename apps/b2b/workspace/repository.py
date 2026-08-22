@@ -153,6 +153,28 @@ def set_employee_fcm_token(employee_id: int, token: str | None) -> None:
     )
 
 
+def clear_employee_fcm_tokens(tokens: list[str]) -> None:
+    """Drop the workspace tokens Firebase has just reported as dead.
+
+    Handed to `FCMService.send_to_tokens` as `deactivate_invalid` by every B2B
+    sender. Its default clears `public.users` instead, which holds the consumer
+    and partner tokens and never a workspace one — so without this a token from
+    an uninstalled app stayed in `b2b_employee` and was re-sent to on every
+    chat message, every new lead and every mail, forever.
+
+    Scoped to this table on purpose: a consumer token is somebody else's row in
+    somebody else's Firebase project, and nothing here has any business
+    touching it.
+    """
+    if not tokens:
+        return
+    execute(
+        f"UPDATE {B2B_EMPLOYEE_TABLE} SET fcm_token = NULL, updated_at = %s "
+        f"WHERE fcm_token = ANY(%s)",
+        [timezone.now(), list(tokens)],
+    )
+
+
 def list_employee_fcm_tokens(company_id: int, *, exclude_employee_id: int | None = None) -> list[str]:
     """Push targets for 'notify the whole roster' events (e.g. a new lead)."""
     sql = (

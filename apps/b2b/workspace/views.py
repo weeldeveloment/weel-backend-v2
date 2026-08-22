@@ -1628,13 +1628,15 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
         )
         if tokens:
             try:
-                from apps.notification.service import FCMService
+                from apps.notification.service import FCMService, b2b_firebase_app
 
                 FCMService.send_to_tokens(
                     tokens=tokens,
                     title=_("New lead"),
                     body=f"{data['company_name']} — {data['product_name']} ({data['quantity']})",
                     data={"type": "lead", "lead_id": str(lead["id"])},
+                    app=b2b_firebase_app(),
+                    deactivate_invalid=repo.clear_employee_fcm_tokens,
                 )
             except Exception:
                 logger.exception("Failed to push new-lead notification for lead %s.", lead["id"])

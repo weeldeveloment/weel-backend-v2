@@ -174,7 +174,8 @@ def _notify_new_mail(account: dict, message: dict) -> None:
     if not token:
         return
     try:
-        from apps.notification.service import FCMService
+        from apps.b2b.workspace.repository import clear_employee_fcm_tokens
+        from apps.notification.service import FCMService, b2b_firebase_app
 
         FCMService.send_to_tokens(
             tokens=[token],
@@ -185,6 +186,12 @@ def _notify_new_mail(account: dict, message: dict) -> None:
                 "thread_id": str(message["thread_id"]),
                 "message_id": str(message["id"]),
             },
+            # The workspace app lives in its own Firebase project, so its
+            # tokens are only addressable from that project's app.
+            app=b2b_firebase_app(),
+            # And a dead one has to be cleared from `b2b_employee`, not from
+            # the consumer table the default cleanup knows about.
+            deactivate_invalid=clear_employee_fcm_tokens,
         )
     except Exception:  # noqa: BLE001 - the mail is already stored; push is a bonus
         logger.exception("Push notification failed for account %s", account["id"])
@@ -215,13 +222,16 @@ def notify_chat_message(thread_id: int, sender_id: int, sender_name: str, text: 
 
     if tokens:
         try:
-            from apps.notification.service import FCMService
+            from apps.b2b.workspace.repository import clear_employee_fcm_tokens
+            from apps.notification.service import FCMService, b2b_firebase_app
 
             FCMService.send_to_tokens(
                 tokens=tokens,
                 title=sender_name,
                 body=text[:200],
                 data={"type": "chat", "thread_id": str(thread_id)},
+                app=b2b_firebase_app(),
+                deactivate_invalid=clear_employee_fcm_tokens,
             )
         except Exception:  # noqa: BLE001 - the message is already delivered
             logger.exception("Chat push failed for thread %s", thread_id)
