@@ -14836,6 +14836,12 @@
      "minLength": 1,
      "title": "Status",
      "type": "string"
+    },
+    "username": {
+     "minLength": 1,
+     "title": "Username",
+     "type": "string",
+     "x-nullable": true
     }
    },
    "required": [
@@ -21915,7 +21921,7 @@
   },
   "/b2b/workspace/tasks/": {
    "get": {
-    "description": "GET  /api/b2b/workspace/tasks/ — tasks the caller may see.\nPOST /api/b2b/workspace/tasks/ — managers only.",
+    "description": "GET  /api/b2b/workspace/tasks/ — the company's whole board, whatever\nthe caller's role; the app's \"Menikilar\" toggle narrows it client-side.\nPOST /api/b2b/workspace/tasks/ — managers only.",
     "operationId": "b2b_workspace_tasks_list",
     "parameters": [
      {
@@ -21942,14 +21948,14 @@
       }
      }
     },
-    "summary": "List tasks (employees see only their own)",
+    "summary": "List tasks (every role sees the whole company board)",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
    },
    "parameters": [],
    "post": {
-    "description": "GET  /api/b2b/workspace/tasks/ — tasks the caller may see.\nPOST /api/b2b/workspace/tasks/ — managers only.",
+    "description": "GET  /api/b2b/workspace/tasks/ — the company's whole board, whatever\nthe caller's role; the app's \"Menikilar\" toggle narrows it client-side.\nPOST /api/b2b/workspace/tasks/ — managers only.",
     "operationId": "b2b_workspace_tasks_create",
     "parameters": [
      {
@@ -21980,7 +21986,7 @@
   },
   "/b2b/workspace/tasks/activity/": {
    "get": {
-    "description": "GET /api/b2b/workspace/tasks/activity/\n\nThe company-wide feed the tasks page shows: every create/edit/status/\nassign/delete across every task, newest first — including tasks since\ndeleted, since the log outlives the row it was written about.\n\nManagers (``visible_scope is None``) see everyone's actions; an employee\nsees only their own, the same boundary ``list_tasks`` draws for the task\nlist itself.",
+    "description": "GET /api/b2b/workspace/tasks/activity/\n\nThe company-wide feed the tasks page shows: every create/edit/status/\nassign/delete across every task, newest first — including tasks since\ndeleted, since the log outlives the row it was written about.\n\nEveryone sees everyone's actions, the same boundary ``list_tasks`` draws\nfor the task list itself (see ``WorkspaceUser.task_scope``).",
     "operationId": "b2b_workspace_tasks_activity_list",
     "parameters": [],
     "responses": {
