@@ -2770,6 +2770,7 @@
      "enum": [
       "owner",
       "performer",
+      "lider",
       "employee"
      ],
      "title": "Role",
@@ -6431,6 +6432,38 @@
    ],
    "type": "object"
   },
+  "EmployeeAccess": {
+   "properties": {
+    "modules": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array",
+     "x-nullable": true
+    },
+    "permissions": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array",
+     "x-nullable": true
+    },
+    "role": {
+     "enum": [
+      "owner",
+      "admin",
+      "manager",
+      "employee",
+      "guest"
+     ],
+     "title": "Role",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
   "EmployeeMonthlyStat": {
    "properties": {
     "absent_days": {
@@ -8912,6 +8945,103 @@
    ],
    "type": "object"
   },
+  "InviteCreate": {
+   "properties": {
+    "days": {
+     "maximum": 30,
+     "minimum": 1,
+     "title": "Days",
+     "type": "integer"
+    },
+    "modules": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array",
+     "x-nullable": true
+    },
+    "permissions": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array",
+     "x-nullable": true
+    },
+    "role": {
+     "enum": [
+      "owner",
+      "admin",
+      "manager",
+      "employee",
+      "guest"
+     ],
+     "title": "Role",
+     "type": "string"
+    }
+   },
+   "required": [
+    "role"
+   ],
+   "type": "object"
+  },
+  "JoinDecision": {
+   "properties": {
+    "modules": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array",
+     "x-nullable": true
+    },
+    "reason": {
+     "maxLength": 1000,
+     "title": "Reason",
+     "type": "string"
+    },
+    "role": {
+     "enum": [
+      "owner",
+      "admin",
+      "manager",
+      "employee",
+      "guest"
+     ],
+     "title": "Role",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "JoinRequest": {
+   "properties": {
+    "message": {
+     "maxLength": 1000,
+     "title": "Message",
+     "type": "string"
+    },
+    "modules": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array",
+     "x-nullable": true
+    },
+    "slug": {
+     "maxLength": 50,
+     "minLength": 1,
+     "title": "Slug",
+     "type": "string"
+    }
+   },
+   "required": [
+    "slug"
+   ],
+   "type": "object"
+  },
   "KPIResponse": {
    "properties": {
     "bookings": {
@@ -10231,9 +10361,28 @@
      "title": "Full name",
      "type": "string"
     },
+    "guest_until": {
+     "format": "date-time",
+     "title": "Guest until",
+     "type": "string",
+     "x-nullable": true
+    },
     "id": {
      "title": "Id",
      "type": "integer"
+    },
+    "is_guest": {
+     "default": false,
+     "title": "Is guest",
+     "type": "boolean"
+    },
+    "modules": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array",
+     "x-nullable": true
     },
     "permissions": {
      "additionalProperties": {
@@ -10264,6 +10413,12 @@
      "minLength": 1,
      "title": "Role",
      "type": "string"
+    },
+    "username": {
+     "minLength": 1,
+     "title": "Username",
+     "type": "string",
+     "x-nullable": true
     }
    },
    "required": [
@@ -10448,6 +10603,64 @@
    ],
    "type": "object",
    "x-nullable": true
+  },
+  "OrgPerson": {
+   "properties": {
+    "company_id": {
+     "title": "Company id",
+     "type": "integer"
+    },
+    "company_name": {
+     "minLength": 1,
+     "title": "Company name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "phone": {
+     "minLength": 1,
+     "title": "Phone",
+     "type": "string",
+     "x-nullable": true
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "position": {
+     "minLength": 1,
+     "title": "Position",
+     "type": "string",
+     "x-nullable": true
+    },
+    "role": {
+     "minLength": 1,
+     "title": "Role",
+     "type": "string"
+    },
+    "username": {
+     "minLength": 1,
+     "title": "Username",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "full_name",
+    "company_id"
+   ],
+   "type": "object"
   },
   "Organization": {
    "properties": {
@@ -11154,6 +11367,32 @@
    "required": [
     "guid",
     "title"
+   ],
+   "type": "object"
+  },
+  "Profile": {
+   "properties": {
+    "first_name": {
+     "maxLength": 100,
+     "minLength": 1,
+     "title": "First name",
+     "type": "string"
+    },
+    "last_name": {
+     "maxLength": 100,
+     "title": "Last name",
+     "type": "string"
+    },
+    "username": {
+     "maxLength": 50,
+     "minLength": 1,
+     "title": "Username",
+     "type": "string"
+    }
+   },
+   "required": [
+    "first_name",
+    "username"
    ],
    "type": "object"
   },
@@ -13522,6 +13761,29 @@
    ],
    "type": "object"
   },
+  "RoleAccess": {
+   "properties": {
+    "modules": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "permissions": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "modules",
+    "permissions"
+   ],
+   "type": "object"
+  },
   "Room": {
    "properties": {
     "amenities": {
@@ -14080,6 +14342,200 @@
     "is_active",
     "created_at",
     "updated_at"
+   ],
+   "type": "object"
+  },
+  "SecondmentDecline": {
+   "properties": {
+    "reason": {
+     "maxLength": 1000,
+     "minLength": 1,
+     "title": "Reason",
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "type": "object"
+  },
+  "SecondmentRequest": {
+   "properties": {
+    "company_id": {
+     "title": "Company id",
+     "type": "integer"
+    },
+    "company_name": {
+     "minLength": 1,
+     "title": "Company name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "decline_reason": {
+     "minLength": 1,
+     "title": "Decline reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "ends_at": {
+     "format": "date-time",
+     "title": "Ends at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "from_employee_id": {
+     "title": "From employee id",
+     "type": "integer"
+    },
+    "from_full_name": {
+     "minLength": 1,
+     "title": "From full name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "from_photo": {
+     "minLength": 1,
+     "title": "From photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "from_position": {
+     "minLength": 1,
+     "title": "From position",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "message": {
+     "title": "Message",
+     "type": "string"
+    },
+    "modules": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "responded_at": {
+     "format": "date-time",
+     "title": "Responded at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "role": {
+     "minLength": 1,
+     "title": "Role",
+     "type": "string"
+    },
+    "starts_at": {
+     "format": "date-time",
+     "title": "Starts at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "status": {
+     "minLength": 1,
+     "title": "Status",
+     "type": "string"
+    },
+    "to_company_name": {
+     "minLength": 1,
+     "title": "To company name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "to_employee_id": {
+     "title": "To employee id",
+     "type": "integer"
+    },
+    "to_full_name": {
+     "minLength": 1,
+     "title": "To full name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "to_photo": {
+     "minLength": 1,
+     "title": "To photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "to_position": {
+     "minLength": 1,
+     "title": "To position",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "company_id",
+    "from_employee_id",
+    "to_employee_id",
+    "role",
+    "status"
+   ],
+   "type": "object"
+  },
+  "SecondmentRequestCreate": {
+   "properties": {
+    "ends_at": {
+     "format": "date-time",
+     "title": "Ends at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "message": {
+     "maxLength": 2000,
+     "title": "Message",
+     "type": "string"
+    },
+    "modules": {
+     "items": {
+      "enum": [
+       "chat",
+       "savdo",
+       "vazifa",
+       "taqvim",
+       "fayllar"
+      ],
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "role": {
+     "enum": [
+      "lider",
+      "manager",
+      "employee",
+      "ghost"
+     ],
+     "title": "Role",
+     "type": "string"
+    },
+    "starts_at": {
+     "format": "date-time",
+     "title": "Starts at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "to_employee_id": {
+     "title": "To employee id",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "to_employee_id",
+    "role"
    ],
    "type": "object"
   },
@@ -14809,6 +15265,11 @@
      "title": "Id",
      "type": "integer"
     },
+    "is_guest": {
+     "default": false,
+     "title": "Is guest",
+     "type": "boolean"
+    },
     "phone": {
      "minLength": 1,
      "title": "Phone",
@@ -15522,6 +15983,19 @@
    },
    "required": [
     "phone_number"
+   ],
+   "type": "object"
+  },
+  "Username": {
+   "properties": {
+    "username": {
+     "maxLength": 50,
+     "title": "Username",
+     "type": "string"
+    }
+   },
+   "required": [
+    "username"
    ],
    "type": "object"
   },
@@ -18246,6 +18720,7 @@
       "enum": [
        "owner",
        "performer",
+       "lider",
        "employee"
       ],
       "in": "formData",
@@ -19847,6 +20322,244 @@
     ]
    }
   },
+  "/b2b/workspace/access/catalogue/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/access/catalogue/ — every role, module and\npermission this build knows about, with the labels to draw them.\n\nRead-only and the same for every workspace: it is the vocabulary, not the\npolicy. The app renders the role editor from this rather than from its own\nhard-coded list, so a permission added on the server appears in the editor\nwithout an app release.",
+    "operationId": "b2b_workspace_access_catalogue_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Roles, modules and permissions",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/access/roles/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/access/roles/ — what each role may do here.",
+    "operationId": "b2b_workspace_access_roles_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "This workspace's role configuration",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/access/roles/{code}/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "code",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "put": {
+    "description": "PUT /api/b2b/workspace/access/roles/<code>/ — change what a role may do.\n\nRoles themselves cannot be created or removed — the TZ forbids it for the\nMVP — so there is no POST and no DELETE here. What a role *is* stays; what\nit may do is this workspace's to decide.",
+    "operationId": "b2b_workspace_access_roles_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/RoleAccess"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/RoleAccess"
+      }
+     }
+    },
+    "summary": "Set a role's modules and permissions",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/account/invites/{token}/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/account/invites/<token>/ — what this link offers.\nPOST /api/b2b/workspace/account/invites/<token>/ — take it.",
+    "operationId": "b2b_workspace_account_invites_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Preview an invite",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "token",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "GET  /api/b2b/workspace/account/invites/<token>/ — what this link offers.\nPOST /api/b2b/workspace/account/invites/<token>/ — take it.",
+    "operationId": "b2b_workspace_account_invites_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Accept an invite",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/account/join-requests/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/account/join-requests/ — ask to be let in.",
+    "operationId": "b2b_workspace_account_join-requests_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/JoinRequest"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/JoinRequest"
+      }
+     }
+    },
+    "summary": "Ask to join a workspace",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/account/me/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/account/me/ — who this is, and where they work.\nPUT  /api/b2b/workspace/account/me/ — finish registration.",
+    "operationId": "b2b_workspace_account_me_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "The Weel account",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "put": {
+    "description": "GET  /api/b2b/workspace/account/me/ — who this is, and where they work.\nPUT  /api/b2b/workspace/account/me/ — finish registration.",
+    "operationId": "b2b_workspace_account_me_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Profile"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Profile"
+      }
+     }
+    },
+    "summary": "Set name and username",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/account/username-suggestion/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/account/username-suggestion/\n\nThe TZ says the system may propose a free handle. Offering one is most of\nwhat gets somebody past this screen — a blank field with a uniqueness rule\nis where registrations stop.",
+    "operationId": "b2b_workspace_account_username-suggestion_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "A free username",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/account/workspaces/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/account/workspaces/ — where this account works.\nPOST /api/b2b/workspace/account/workspaces/<employee_id>/open/ — a session\nfor one of them.",
+    "operationId": "b2b_workspace_account_workspaces_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "My workspaces",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/account/workspaces/{employee_id}/open/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/account/workspaces/<employee_id>/open/",
+    "operationId": "b2b_workspace_account_workspaces_open_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Open a workspace session",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/attendance/": {
    "get": {
     "description": "GET /api/b2b/workspace/attendance/ — today's roll call.\n\nReadable by everyone: it is on the chat home screen, and the point of it is\nknowing who is around. `?date=YYYY-MM-DD` reads another day.",
@@ -20025,6 +20738,29 @@
      "B2B / Workspace (mobile)"
     ]
    }
+  },
+  "/b2b/workspace/audit/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/audit/ — role changes, access changes, deletions.",
+    "operationId": "b2b_workspace_audit_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "The workspace's audit log",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
   },
   "/b2b/workspace/auth/login/": {
    "parameters": [],
@@ -20543,6 +21279,56 @@
    },
    "parameters": []
   },
+  "/b2b/workspace/employees/{employee_id}/access/": {
+   "get": {
+    "description": "GET/PUT /api/b2b/workspace/employees/<id>/access/ — one person's standing.",
+    "operationId": "b2b_workspace_employees_access_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "What one employee may do",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "put": {
+    "description": "GET/PUT /api/b2b/workspace/employees/<id>/access/ — one person's standing.",
+    "operationId": "b2b_workspace_employees_access_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/EmployeeAccess"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/EmployeeAccess"
+      }
+     }
+    },
+    "summary": "Set one employee's role and access",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/events/": {
    "get": {
     "description": "GET  /api/b2b/workspace/events/ — the calendar window.\nPOST /api/b2b/workspace/events/ — managers create shared events; employees\nmay create personal ones for themselves.",
@@ -20883,6 +21669,132 @@
     ]
    },
    "parameters": []
+  },
+  "/b2b/workspace/invites/": {
+   "get": {
+    "description": "GET/POST /api/b2b/workspace/invites/",
+    "operationId": "b2b_workspace_invites_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Invite links",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET/POST /api/b2b/workspace/invites/",
+    "operationId": "b2b_workspace_invites_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/InviteCreate"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InviteCreate"
+      }
+     }
+    },
+    "summary": "Create an invite link",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/invites/{invite_id}/revoke/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "invite_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/invites/<id>/revoke/",
+    "operationId": "b2b_workspace_invites_revoke_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Revoke an invite link",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/join-requests/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/join-requests/ — who is asking to be let in.",
+    "operationId": "b2b_workspace_join-requests_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Join requests",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/join-requests/{request_id}/{action}/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "request_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "action",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/join-requests/<id>/<accept|decline>/",
+    "operationId": "b2b_workspace_join-requests_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/JoinDecision"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/JoinDecision"
+      }
+     }
+    },
+    "summary": "Answer a join request",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/leads/": {
    "get": {
@@ -21790,6 +22702,38 @@
     ]
    }
   },
+  "/b2b/workspace/me/username/": {
+   "parameters": [],
+   "put": {
+    "description": "PUT /api/b2b/workspace/me/username/ — pick the handle people find you by.\n\nYours alone. A roster is imported from passports and phone numbers, and a\nhandle is the one part of somebody's entry they choose for themselves —\nwhich is also why nothing here lets one person set another's.",
+    "operationId": "b2b_workspace_me_username_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Username"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Me"
+      }
+     },
+     "409": {
+      "description": "Taken"
+     }
+    },
+    "summary": "Set your own username",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/notifications/": {
    "get": {
     "description": "GET /api/b2b/workspace/notifications/ — the real, server-stored feed.\n\nReplaces the feed both clients used to synthesise from whatever data they\nhappened to have loaded, which could not show anything that arrived while\nthe app was closed.",
@@ -21847,6 +22791,126 @@
     "summary": "Mark notifications read",
     "tags": [
      "B2B / Mail"
+    ]
+   }
+  },
+  "/b2b/workspace/org/people/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/org/people/?search= — who else is in the org.\n\nThe picker on \"So'rov yuborish\" searches this rather than `/team/`: the\nwhole point is to reach somebody who is *not* in this workspace. Restricted\nto the org, so a workspace can only ever ask people who share an owner\nwith it — never the whole of WEEL.",
+    "operationId": "b2b_workspace_org_people_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "search",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/OrgPerson"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "Search people in the org's other workspaces",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/requests/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/requests/ — the inbox and the sent list.\nPOST /api/b2b/workspace/requests/ — ask somebody to come and help.",
+    "operationId": "b2b_workspace_requests_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/SecondmentRequest"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "Requests received and sent",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET  /api/b2b/workspace/requests/ — the inbox and the sent list.\nPOST /api/b2b/workspace/requests/ — ask somebody to come and help.",
+    "operationId": "b2b_workspace_requests_create1",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/SecondmentRequestCreate"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/SecondmentRequest"
+      }
+     }
+    },
+    "summary": "Ask somebody from another workspace for help",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/requests/{request_id}/{action}/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "request_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "action",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/requests/<id>/<accept|decline|cancel>/",
+    "operationId": "b2b_workspace_requests_create2",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/SecondmentDecline"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/SecondmentRequest"
+      }
+     }
+    },
+    "summary": "Accept, decline or cancel a request",
+    "tags": [
+     "B2B / Workspace (mobile)"
     ]
    }
   },
@@ -21914,6 +22978,37 @@
      }
     },
     "summary": "Write to support",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/switch/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/switch/ — the workspaces this person can open.\nPOST /api/b2b/workspace/switch/ — tokens for one of them.\n\nSigning in always lands on the workspace that hired you; this is how\nsomebody gets to one they were lent to. A separate token per workspace\nrather than one token that carries a workspace header: every row in this\nschema references `b2b_employee(id)`, so \"which workspace am I in\" and\n\"which employee am I\" are the same question, and answering it once at\nsign-in is what keeps the other two hundred queries honest.",
+    "operationId": "b2b_workspace_switch_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Workspaces this person can open",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET  /api/b2b/workspace/switch/ — the workspaces this person can open.\nPOST /api/b2b/workspace/switch/ — tokens for one of them.\n\nSigning in always lands on the workspace that hired you; this is how\nsomebody gets to one they were lent to. A separate token per workspace\nrather than one token that carries a workspace header: every row in this\nschema references `b2b_employee(id)`, so \"which workspace am I in\" and\n\"which employee am I\" are the same question, and answering it once at\nsign-in is what keeps the other two hundred queries honest.",
+    "operationId": "b2b_workspace_switch_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Get tokens for another workspace",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -22263,6 +23358,53 @@
     ]
    },
    "parameters": []
+  },
+  "/b2b/workspace/trash/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/trash/ — what has been deleted and can come back.\n\nBehind a permission of its own rather than shown to everybody: the TZ says\nan ordinary user does not see deleted objects at all, and a bin that\nanybody can read is a way to see the deal somebody removed this morning.",
+    "operationId": "b2b_workspace_trash_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Deleted tasks and deals",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/trash/{kind}/{object_id}/restore/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "kind",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "object_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/trash/<kind>/<id>/restore/ — put one back.",
+    "operationId": "b2b_workspace_trash_restore_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Restore a deleted object",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/booking/admin/bookings/": {
    "get": {
