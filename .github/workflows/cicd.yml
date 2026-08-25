@@ -117,10 +117,19 @@ jobs:
       # postgis/postgis ships PostGIS but not pgvector, and the recommendation
       # migration creates the `vector` extension. Both are needed, and no
       # public image carries the pair.
+      # `apt-get install postgresql-16-pgvector` can drag in a newer
+      # postgresql-16 core as a dependency bump — the already-running server
+      # (started from this image's original core) then has extension .so
+      # files on disk that no longer match what it has loaded in memory
+      # (seen as e.g. "undefined symbol: pg_mblen_range" from btree_gist).
+      # Holding the core/postgis packages first makes apt fail loudly on a
+      # version conflict instead of silently installing a mismatched pair.
       - name: Install pgvector into the database container
         run: |
           docker exec ${{ job.services.postgres.id }} sh -c \
-            "apt-get update -qq && apt-get install -y -qq postgresql-16-pgvector"
+            "apt-mark hold postgresql-16 postgresql-16-postgis-3 postgresql-16-postgis-3-scripts && \
+             apt-get update -qq && \
+             apt-get install -y -qq --no-install-recommends postgresql-16-pgvector"
 
       # Extensions, migrations, the raw-schema baseline and the code-owned
       # b2b_* DDL, in that order. Once schema/public_baseline.sql is
