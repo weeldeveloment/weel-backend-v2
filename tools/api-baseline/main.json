@@ -8979,6 +8979,11 @@
      ],
      "title": "Role",
      "type": "string"
+    },
+    "thread_id": {
+     "title": "Thread id",
+     "type": "integer",
+     "x-nullable": true
     }
    },
    "required": [
@@ -10384,6 +10389,23 @@
      "type": "array",
      "x-nullable": true
     },
+    "org_id": {
+     "title": "Org id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "org_join_code": {
+     "minLength": 1,
+     "title": "Org join code",
+     "type": "string",
+     "x-nullable": true
+    },
+    "org_name": {
+     "minLength": 1,
+     "title": "Org name",
+     "type": "string",
+     "x-nullable": true
+    },
     "permissions": {
      "additionalProperties": {
       "type": "boolean"
@@ -10864,6 +10886,30 @@
      "type": "string"
     }
    },
+   "type": "object"
+  },
+  "OwnProfile": {
+   "properties": {
+    "email": {
+     "format": "email",
+     "title": "Email",
+     "type": "string"
+    },
+    "first_name": {
+     "maxLength": 100,
+     "minLength": 1,
+     "title": "First name",
+     "type": "string"
+    },
+    "last_name": {
+     "maxLength": 100,
+     "title": "Last name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "first_name"
+   ],
    "type": "object"
   },
   "PartnerDevice": {
@@ -16121,6 +16167,17 @@
   },
   "WorkspaceCreate": {
    "properties": {
+    "description": {
+     "maxLength": 500,
+     "title": "Description",
+     "type": "string"
+    },
+    "icon": {
+     "maxLength": 20,
+     "title": "Icon",
+     "type": "string",
+     "x-nullable": true
+    },
     "name": {
      "maxLength": 200,
      "minLength": 1,
@@ -16131,6 +16188,16 @@
      "title": "Org id",
      "type": "integer",
      "x-nullable": true
+    },
+    "tax_id": {
+     "maxLength": 20,
+     "title": "Tax id",
+     "type": "string"
+    },
+    "workspace_name": {
+     "maxLength": 200,
+     "title": "Workspace name",
+     "type": "string"
     }
    },
    "required": [
@@ -20411,6 +20478,23 @@
     ]
    }
   },
+  "/b2b/workspace/account/device-token/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/account/device-token/ — address this phone.\n\nThe account-session twin of `/me/device-token/`. Registered as soon as\nregistration finishes, before there is any workspace to belong to, so that\nsomebody waiting on a join request can be told when it is answered — the\nroster's token cannot reach them, because they are not on a roster.\n\nAn empty token clears the row, which is what signing out sends.",
+    "operationId": "b2b_workspace_account_device-token_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Register this phone (account)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/account/invites/{token}/": {
    "get": {
     "description": "GET  /api/b2b/workspace/account/invites/<token>/ — what this link offers.\nPOST /api/b2b/workspace/account/invites/<token>/ — take it.",
@@ -20449,10 +20533,48 @@
     ]
    }
   },
+  "/b2b/workspace/account/join-code/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/account/join-code/?code= — what this string is.\n\nOne field on the app, two things it can hold, and the server decides\nwhich — not the client. The two are genuinely different offers and telling\nthem apart by shape is exactly the kind of rule that goes stale:\n\n* a **workspace invite link** was minted for one room, with a role and a\n  set of modules already chosen. Taking it is immediate.\n* a **company join code** decides nothing. It names a company and lists\n  the rooms inside it, and every one of them still has to be asked\n  through.\n\nA string that is neither is one answer — `404` — whichever it failed to\nbe. Guessing at five characters must not be able to learn that a code\nexists but its company is closed, or that a token was real but expired.",
+    "operationId": "b2b_workspace_account_join-code_list",
+    "parameters": [
+     {
+      "description": "An invite link, an invite token, or a company code.",
+      "in": "query",
+      "name": "code",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Resolve an invite link or company code",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
   "/b2b/workspace/account/join-requests/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/account/join-requests/ — what I have asked for.\nPOST /api/b2b/workspace/account/join-requests/ — ask to be let in.",
+    "operationId": "b2b_workspace_account_join-requests_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "My join requests",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
    "parameters": [],
    "post": {
-    "description": "POST /api/b2b/workspace/account/join-requests/ — ask to be let in.",
+    "description": "GET  /api/b2b/workspace/account/join-requests/ — what I have asked for.\nPOST /api/b2b/workspace/account/join-requests/ — ask to be let in.",
     "operationId": "b2b_workspace_account_join-requests_create",
     "parameters": [
      {
@@ -20521,6 +20643,54 @@
     ]
    }
   },
+  "/b2b/workspace/account/orgs/{org_id}/workspaces/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/account/orgs/<org_id>/workspaces/ — every\nworkspace under this company, for the \"Workspace'lar\" screen.\n\nGated the same way `POST /account/workspaces/` gates opening one inside\nan org: holding any active roster row in it. An org's workspaces are\nalready visible sideways to anyone on one of them — see\n`WorkspaceOrgPeopleView` — this is that same boundary applied to the list\nof workspaces rather than the list of people.",
+    "operationId": "b2b_workspace_account_orgs_workspaces_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "A company's workspaces",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "org_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/account/username-check/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/account/username-check/?username=xusan_design\n\nWhether a handle is free, and what else to try if it is not.\n\nAnswered as the field is typed rather than only on submit. A uniqueness\nrule that is enforced at the end of a form is a form people fill in twice,\nand the handle is the last screen of registration — the worst place to\nsend somebody back to.\n\nReading this tells the caller whether *some* handle exists, which is\nexactly what the screen after it does anyway; it needs an account session,\nso it is not an open directory probe.",
+    "operationId": "b2b_workspace_account_username-check_list",
+    "parameters": [
+     {
+      "description": "The handle to test, with or without its @.",
+      "in": "query",
+      "name": "username",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Is this username free?",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
   "/b2b/workspace/account/username-suggestion/": {
    "get": {
     "description": "GET /api/b2b/workspace/account/username-suggestion/\n\nThe TZ says the system may propose a free handle. Offering one is most of\nwhat gets somebody past this screen — a blank field with a uniqueness rule\nis where registrations stop.",
@@ -20580,6 +20750,30 @@
      "B2B / Workspace (mobile)"
     ]
    }
+  },
+  "/b2b/workspace/account/workspaces/search/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/account/workspaces/search/?q= — find a workspace\nto ask to join.\n\nThe one screen an account that belongs to nothing may look outward from,\nso it is kept to exactly that: at least two characters, a capped number of\nrows, and nothing on a row that is not already on the card the app draws.\nWorkspaces this account is already on are filtered out on the way.",
+    "operationId": "b2b_workspace_account_workspaces_search_list",
+    "parameters": [
+     {
+      "description": "Workspace name or handle, at least 2 characters.",
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Search workspaces",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
   },
   "/b2b/workspace/account/workspaces/{employee_id}/open/": {
    "parameters": [
@@ -22742,6 +22936,35 @@
      }
     },
     "summary": "Register the FCM token for push notifications",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/me/profile/": {
+   "parameters": [],
+   "put": {
+    "description": "PUT /api/b2b/workspace/me/profile/ — correct your own entry.\n\nYours alone, and only the parts that are actually yours: the name people\nsee and the address they write to. The position, the department and the\nrole are the workspace's account of what you do here and are set by whoever\nruns it, so the app draws them greyed out with that said in words rather\nthan leaving them off the screen — somebody looking for the field that\nfixes their job title should find the answer, not an absence.\n\nThe phone is not editable here either. It is what the login is checked\nagainst, and moving it is a different act with an OTP behind it.",
+    "operationId": "b2b_workspace_me_profile_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/OwnProfile"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Me"
+      }
+     }
+    },
+    "summary": "Edit your own profile",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
