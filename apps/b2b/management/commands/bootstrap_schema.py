@@ -5,7 +5,8 @@ Order matters and is not obvious, so it lives here rather than in five places:
   1. extensions   — postgis and vector, which migrations and columns depend on
   2. migrate      — the Django-managed tables (auth, contenttypes, recommendation)
   3. baseline SQL — the raw-SQL tables captured by `dump_raw_schema`
-  4. code DDL     — b2b_*, which the code creates at runtime anyway
+  4. code DDL     — b2b_*, activity_*, avia_* and hotelios_*, which the code
+                    creates at runtime anyway
 
 Step 3 is skipped with a warning when no baseline file has been committed yet.
 Until one is, a database built by this command is missing every raw table that
@@ -58,6 +59,15 @@ class Command(BaseCommand):
 
         self.stdout.write("Creating b2b_* tables...")
         call_command("create_b2b_tables")
+
+        self.stdout.write("Creating activity tables...")
+        call_command("create_activities_tables")
+
+        self.stdout.write("Creating avia tables...")
+        call_command("create_avia_tables")
+
+        self.stdout.write("Creating Hotelios tables...")
+        call_command("create_hotels_tables")
 
         self.stdout.write(self.style.SUCCESS("Schema bootstrap complete."))
 

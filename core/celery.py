@@ -22,8 +22,6 @@ TASK_MODULES = [
     # is a sub-package of it. A beat entry sends by name, so a worker that
     # never imported the module answers with "Received unregistered task".
     "apps.b2b.workspace.tasks",
-    "booking.tasks",
-    "property.tasks",
     "stories.tasks",
     "notification.tasks",
     "payment.tasks",
@@ -85,17 +83,9 @@ app.conf.beat_schedule = {
         "task": "notification.tasks.send_review_reminders",
         "schedule": crontab(hour=11, minute=30),  # daily at 11:30
     },
-    "send_pending_booking_payment_reminders": {
-        "task": "booking.tasks.send_pending_booking_payment_reminders",
-        "schedule": crontab(minute="*/5"),  # every 5 min — 24m / 6m / 1m left to pay
-    },
     "send_partner_property_check_reminders": {
         "task": "users.send_partner_property_check_reminders",
         "schedule": crontab(hour=11, minute=0),  # daily at 11:00 (3-day gating inside task)
-    },
-    "send_cottage_price_reminders": {
-        "task": "property.tasks.send_cottage_price_reminders",
-        "schedule": crontab(day_of_month=1, hour=9, minute=0),  # 1st of every month at 09:00
     },
     "expire_stale_activity_bookings": {
         "task": "activities.expire_stale_pending_bookings",
@@ -105,9 +95,31 @@ app.conf.beat_schedule = {
         "task": "b2b.sync_trip_statuses",
         "schedule": crontab(hour=0, minute=5),  # daily just after midnight (Asia/Tashkent)
     },
-    "sync_bookingcom_reservations": {
-        "task": "bookingcom.sync_reservations",
+    # Flights: payment answers `paid` and the carrier issues the ticket up to
+    # ten minutes later. Bookhara pushes a status callback when one is
+    # registered for the account, but that lives on their side and can be
+    # missing, so the paid orders are chased as well. Re-reading is idempotent.
+    "avia_poll_ticketing_status": {
+        "task": "avia.poll_ticketing_status",
+        "schedule": crontab(minute="*/2"),
+    },
+    # Hotels: a confirmed booking sits at PENDING until the hotel answers, and
+    # Hotelios has no callback for it — asking is the only way to find out.
+    "hotels_poll_booking_statuses": {
+        "task": "hotels.poll_booking_statuses",
+        "schedule": crontab(minute="*/10"),
+    },
+    # Holds nobody paid for. They count against our credit limit at Hotelios
+    # and, at some hotels, against real availability.
+    "hotels_release_abandoned_drafts": {
+        "task": "hotels.release_abandoned_drafts",
         "schedule": crontab(minute="*/15"),
+    },
+    # The static catalogue — a thousand hotels and their room types. Nightly,
+    # at an hour when nobody is searching.
+    "hotels_sync_inventory": {
+        "task": "hotels.sync_inventory",
+        "schedule": crontab(hour=3, minute=30),
     },
     # Connected mail accounts. No-ops unless B2B_MAIL_ENABLED is on.
     "b2b_mail_sync": {

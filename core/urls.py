@@ -63,6 +63,10 @@ def _build_b2b_patterns():
     return [
         path("api/b2b/", include("apps.b2b.urls")),
         path("api/documents/", include("apps.documents.urls")),
+        # Corporate travel books the same flight and hotel endpoints the
+        # consumer apps do, so they belong in the B2B schema too.
+        path("api/avia/", include("apps.avia.urls")),
+        path("api/hotels/", include("apps.hotels.urls")),
         # Only B2B-company admin endpoints (no login/register/users)
         path("api/admin-auth/b2b/companies/", AdminB2BCompaniesView.as_view()),
         path("api/admin-auth/b2b/companies/<int:company_id>/", AdminB2BCompanyDetailView.as_view()),
@@ -282,6 +286,11 @@ urlpatterns += [
     path("api/b2b/", include("apps.b2b.urls")),
     path("api/documents/", include("apps.documents.urls")),
     path("api/activities/", include("apps.activities.urls")),
+    # Flights and hotels. One surface for both apps: the endpoints scope
+    # themselves to the caller's token — a company's bookings for a B2B user,
+    # their own for a consumer.
+    path("api/avia/", include("apps.avia.urls")),
+    path("api/hotels/", include("apps.hotels.urls")),
 ]
 
 if settings.ENABLE_SWAGGER_UI:

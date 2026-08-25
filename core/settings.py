@@ -175,6 +175,9 @@ LOCAL_APPS: list[str] = [
     "apps.b2b",
     "apps.documents",
     "apps.activities",
+    # Travel inventory, both supplied by third parties.
+    "apps.avia",
+    "apps.hotels",
 ]
 
 THIRD_PART_APPS = [
@@ -677,6 +680,44 @@ ESKIZ_EMAIL = os.getenv("ESKIZ_EMAIL")
 ESKIZ_PASSWORD = os.getenv("ESKIZ_PASSWORD")
 ESKIZ_SENDER = os.getenv("ESKIZ_SENDER", "")
 ESKIZ_CALLBACK_URL = os.getenv("ESKIZ_CALLBACK_URL", "")
+
+# ─── Bookhara Avia (apps/avia) ───────────────────────────────────────────────
+#
+# Flights are not our inventory: search, booking, ticketing and refunds all
+# happen at Bookhara, and we hold a deposit there that ticketing draws on.
+# Access is IP-allowlisted per account, so a new deployment host has to be
+# registered with them before any of this works.
+# Docs: https://docs.bookhara.uz
+BOOKHARA_BASE_URL = (
+    os.getenv("BOOKHARA_BASE_URL") or "https://avia-api-dev.bookhara.uz"
+).strip()
+BOOKHARA_EMAIL = (os.getenv("BOOKHARA_EMAIL") or "").strip()
+BOOKHARA_PASSWORD = os.getenv("BOOKHARA_PASSWORD") or ""
+BOOKHARA_ACCESS_TYPE = (os.getenv("BOOKHARA_ACCESS_TYPE") or "avia").strip()
+BOOKHARA_TIMEOUT_SECONDS = float(
+    (os.getenv("BOOKHARA_TIMEOUT_SECONDS") or "40").strip() or "40"
+)
+# The secret modifier behind the `X-Auth` header on booking status callbacks.
+# Issued when the callback URL is registered; without it the callback endpoint
+# refuses every request, which is the correct failure mode.
+BOOKHARA_CALLBACK_SECRET = (os.getenv("BOOKHARA_CALLBACK_SECRET") or "").strip()
+
+# ─── Hotelios (apps/hotels) ──────────────────────────────────────────────────
+#
+# Hotels come from Hotelios. Its static catalogue is synced into hotelios_*
+# tables (see apps/hotels/sync.py) and availability, booking and cancellation
+# go live through Search → Quote → Create → Confirm.
+# Docs: https://docs.hotelios.uz
+HOTELIOS_BASE_URL = (
+    os.getenv("HOTELIOS_BASE_URL") or "https://integration-staging.hotelios.uz"
+).strip()
+HOTELIOS_LOGIN = (os.getenv("HOTELIOS_LOGIN") or "").strip()
+HOTELIOS_PASSWORD = os.getenv("HOTELIOS_PASSWORD") or ""
+HOTELIOS_ACCESS_KEY = (os.getenv("HOTELIOS_ACCESS_KEY") or "").strip()
+HOTELIOS_TIMEOUT_SECONDS = float(
+    # Search fans out across hotels on their side and is the slowest call here.
+    (os.getenv("HOTELIOS_TIMEOUT_SECONDS") or "60").strip() or "60"
+)
 
 # ─── Mail in the workspace (apps/b2b/mail) ───────────────────────────────────
 #
