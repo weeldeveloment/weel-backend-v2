@@ -1211,7 +1211,7 @@ class Command(BaseCommand):
         # authority and `_free_join_code` is what issues new ones.
         cursor.execute("""
             UPDATE b2b_org
-               SET join_code = 'W-' || LPAD(((id * 7919) %% 90000 + 10000)::text, 5, '0')
+               SET join_code = 'W-' || LPAD((mod(id * 7919, 90000) + 10000)::text, 5, '0')
              WHERE join_code IS NULL;
         """)
         cursor.execute("""
