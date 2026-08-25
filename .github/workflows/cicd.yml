@@ -117,19 +117,24 @@ jobs:
       # postgis/postgis ships PostGIS but not pgvector, and the recommendation
       # migration creates the `vector` extension. Both are needed, and no
       # public image carries the pair.
-      # `apt-get install postgresql-16-pgvector` can drag in a newer
-      # postgresql-16 core as a dependency bump — the already-running server
-      # (started from this image's original core) then has extension .so
-      # files on disk that no longer match what it has loaded in memory
-      # (seen as e.g. "undefined symbol: pg_mblen_range" from btree_gist).
-      # Holding the core/postgis packages first makes apt fail loudly on a
-      # version conflict instead of silently installing a mismatched pair.
+      # `apt-get install postgresql-16-pgvector` pulls in a newer postgresql-16
+      # core as a dependency bump — that replaces the extension .so files
+      # (btree_gist included) on disk, but the server process already running
+      # in this container keeps the OLD core loaded in memory. The mismatch
+      # between what's on disk and what the running process has loaded shows
+      # up as e.g. "undefined symbol: pg_mblen_range" from btree_gist. Let the
+      # upgrade happen, then restart the server so it loads the new core —
+      # the container (and its port mapping) survives a restart, so the
+      # service's own health check still applies once it's back up.
       - name: Install pgvector into the database container
         run: |
           docker exec ${{ job.services.postgres.id }} sh -c \
-            "apt-mark hold postgresql-16 postgresql-16-postgis-3 postgresql-16-postgis-3-scripts && \
-             apt-get update -qq && \
-             apt-get install -y -qq --no-install-recommends postgresql-16-pgvector"
+            "apt-get update -qq && apt-get install -y -qq postgresql-16-pgvector"
+          docker restart ${{ job.services.postgres.id }}
+          for i in $(seq 1 30); do
+            docker exec ${{ job.services.postgres.id }} pg_isready -U weel && break
+            sleep 2
+          done
 
       # Extensions, migrations, the raw-schema baseline and the code-owned
       # b2b_* DDL, in that order. Once schema/public_baseline.sql is
