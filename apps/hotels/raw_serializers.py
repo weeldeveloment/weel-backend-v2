@@ -224,6 +224,33 @@ class HotelBookingRoomSerializer(serializers.Serializer):
     b2b_employee_id = serializers.IntegerField(read_only=True, allow_null=True)
 
 
+class TopHotelSerializer(serializers.Serializer):
+    hotel_id = serializers.IntegerField(read_only=True)
+    names = serializers.JSONField(read_only=True)
+    name_en = serializers.CharField(read_only=True, allow_null=True)
+    photos = serializers.JSONField(read_only=True)
+    star_id = serializers.IntegerField(read_only=True, allow_null=True)
+    city_id = serializers.IntegerField(read_only=True, allow_null=True, required=False)
+    bookings_count = serializers.IntegerField(read_only=True)
+    spend = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True, allow_null=True)
+
+
+class MonthlySummarySerializer(serializers.Serializer):
+    year = serializers.IntegerField(read_only=True)
+    month = serializers.IntegerField(read_only=True)
+    month_spend = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    top_hotels = TopHotelSerializer(many=True, read_only=True)
+
+
+class RecommendedHotelSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    city_id = serializers.IntegerField(read_only=True, allow_null=True)
+    star_id = serializers.IntegerField(read_only=True, allow_null=True)
+    names = serializers.JSONField(read_only=True)
+    photos = serializers.JSONField(read_only=True)
+    address = serializers.JSONField(read_only=True)
+
+
 class HotelBookingSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     guid = serializers.UUIDField(read_only=True)

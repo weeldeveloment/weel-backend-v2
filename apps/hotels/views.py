@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+from django.utils import timezone
+
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -35,8 +37,11 @@ from apps.hotels.raw_serializers import (
     HotelBookingSerializer,
     HotelSearchSerializer,
     HotelSerializer,
+    MonthlySummarySerializer,
     QuoteSerializer,
+    RecommendedHotelSerializer,
     RoomTypeSerializer,
+    TopHotelSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -414,6 +419,71 @@ class HotelBookingEventsView(HoteliosAPIView):
                 for e in events
             ]
         })
+
+
+# ---------------------------------------------------------------------------
+# Analytics — company-scoped, computed from local booking history
+# ---------------------------------------------------------------------------
+
+def _company_id_or_none(request) -> int | None:
+    user = request.user
+    return user.get("company_id") if isinstance(user, dict) else getattr(user, "company_id", None)
+
+
+class HotelMonthlySummaryView(HoteliosAPIView):
+    """GET /api/hotels/monthly-summary/?year=&month= — B2B only."""
+
+    @swagger_auto_schema(responses={200: MonthlySummarySerializer()})
+    def get(self, request):
+        company_id = _company_id_or_none(request)
+        if not company_id:
+            return Response(
+                {"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        now = timezone.now()
+        year = int(request.query_params.get("year") or now.year)
+        month = int(request.query_params.get("month") or now.month)
+        summary = repo.fetch_monthly_summary(b2b_company_id=company_id, year=year, month=month)
+        return Response(MonthlySummarySerializer(summary).data)
+
+
+class HotelTopByBookingsView(HoteliosAPIView):
+    """GET /api/hotels/top-by-bookings/?limit= — B2B only."""
+
+    @swagger_auto_schema(responses={200: TopHotelSerializer(many=True)})
+    def get(self, request):
+        company_id = _company_id_or_none(request)
+        if not company_id:
+            return Response(
+                {"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        limit = min(int(request.query_params.get("limit") or 10), 50)
+        hotels = repo.fetch_top_hotels_by_bookings(b2b_company_id=company_id, limit=limit)
+        return Response({"results": TopHotelSerializer(hotels, many=True).data})
+
+
+class HotelRecommendationsView(HoteliosAPIView):
+    """GET /api/hotels/recommendations/?limit= — B2B only.
+
+    Hotels in cities this company has booked before, top-rated first, minus
+    hotels it's currently staying at. A company with no history yet gets the
+    overall top-rated catalogue instead of an empty widget.
+    """
+
+    @swagger_auto_schema(responses={200: RecommendedHotelSerializer(many=True)})
+    def get(self, request):
+        company_id = _company_id_or_none(request)
+        if not company_id:
+            return Response(
+                {"detail": "Company context required."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        limit = min(int(request.query_params.get("limit") or 10), 50)
+        city_ids = repo.fetch_company_booking_cities(b2b_company_id=company_id)
+        exclude_ids = repo.fetch_company_active_hotel_ids(b2b_company_id=company_id)
+        hotels = repo.fetch_recommended_hotels(
+            city_ids=city_ids or None, exclude_hotel_ids=exclude_ids, limit=limit
+        )
+        return Response({"results": RecommendedHotelSerializer(hotels, many=True).data})
 
 
 # ---------------------------------------------------------------------------

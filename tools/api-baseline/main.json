@@ -5437,6 +5437,34 @@
    ],
    "type": "object"
   },
+  "MonthlySummary": {
+   "properties": {
+    "month": {
+     "readOnly": true,
+     "title": "Month",
+     "type": "integer"
+    },
+    "month_spend": {
+     "format": "decimal",
+     "readOnly": true,
+     "title": "Month spend",
+     "type": "string"
+    },
+    "top_hotels": {
+     "items": {
+      "$ref": "#/definitions/TopHotel"
+     },
+     "readOnly": true,
+     "type": "array"
+    },
+    "year": {
+     "readOnly": true,
+     "title": "Year",
+     "type": "integer"
+    }
+   },
+   "type": "object"
+  },
   "NotificationRead": {
    "properties": {
     "ids": {
@@ -6162,6 +6190,43 @@
     "property_kind",
     "similarity"
    ],
+   "type": "object"
+  },
+  "RecommendedHotel": {
+   "properties": {
+    "address": {
+     "readOnly": true,
+     "title": "Address",
+     "type": "object"
+    },
+    "city_id": {
+     "readOnly": true,
+     "title": "City id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "id": {
+     "readOnly": true,
+     "title": "Id",
+     "type": "integer"
+    },
+    "names": {
+     "readOnly": true,
+     "title": "Names",
+     "type": "object"
+    },
+    "photos": {
+     "readOnly": true,
+     "title": "Photos",
+     "type": "object"
+    },
+    "star_id": {
+     "readOnly": true,
+     "title": "Star id",
+     "type": "integer",
+     "x-nullable": true
+    }
+   },
    "type": "object"
   },
   "ResendOTP": {
@@ -7271,6 +7336,57 @@
     "department_name",
     "trip_count"
    ],
+   "type": "object"
+  },
+  "TopHotel": {
+   "properties": {
+    "bookings_count": {
+     "readOnly": true,
+     "title": "Bookings count",
+     "type": "integer"
+    },
+    "city_id": {
+     "readOnly": true,
+     "title": "City id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "hotel_id": {
+     "readOnly": true,
+     "title": "Hotel id",
+     "type": "integer"
+    },
+    "name_en": {
+     "minLength": 1,
+     "readOnly": true,
+     "title": "Name en",
+     "type": "string",
+     "x-nullable": true
+    },
+    "names": {
+     "readOnly": true,
+     "title": "Names",
+     "type": "object"
+    },
+    "photos": {
+     "readOnly": true,
+     "title": "Photos",
+     "type": "object"
+    },
+    "spend": {
+     "format": "decimal",
+     "readOnly": true,
+     "title": "Spend",
+     "type": "string",
+     "x-nullable": true
+    },
+    "star_id": {
+     "readOnly": true,
+     "title": "Star id",
+     "type": "integer",
+     "x-nullable": true
+    }
+   },
    "type": "object"
   },
   "Transaction": {
@@ -15056,6 +15172,25 @@
    },
    "parameters": []
   },
+  "/hotels/monthly-summary/": {
+   "get": {
+    "description": "GET /api/hotels/monthly-summary/?year=&month= — B2B only.",
+    "operationId": "hotels_monthly-summary_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MonthlySummary"
+      }
+     }
+    },
+    "tags": [
+     "api"
+    ]
+   },
+   "parameters": []
+  },
   "/hotels/quote/": {
    "parameters": [],
    "post": {
@@ -15084,6 +15219,29 @@
      "api"
     ]
    }
+  },
+  "/hotels/recommendations/": {
+   "get": {
+    "description": "Hotels in cities this company has booked before, top-rated first, minus\nhotels it's currently staying at. A company with no history yet gets the\noverall top-rated catalogue instead of an empty widget.",
+    "operationId": "hotels_recommendations_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/RecommendedHotel"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "GET /api/hotels/recommendations/?limit= — B2B only.",
+    "tags": [
+     "api"
+    ]
+   },
+   "parameters": []
   },
   "/hotels/reference/{name}/": {
    "get": {
@@ -15145,6 +15303,28 @@
     "responses": {
      "200": {
       "description": ""
+     }
+    },
+    "tags": [
+     "api"
+    ]
+   },
+   "parameters": []
+  },
+  "/hotels/top-by-bookings/": {
+   "get": {
+    "description": "GET /api/hotels/top-by-bookings/?limit= — B2B only.",
+    "operationId": "hotels_top-by-bookings_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/TopHotel"
+       },
+       "type": "array"
+      }
      }
     },
     "tags": [

@@ -12,10 +12,13 @@ from apps.hotels.views import (
     HotelCityListView,
     HotelDetailView,
     HotelListView,
+    HotelMonthlySummaryView,
     HotelQuoteView,
     HotelReferenceView,
+    HotelRecommendationsView,
     HotelSearchView,
     HotelSyncStatusView,
+    HotelTopByBookingsView,
 )
 
 urlpatterns = [
@@ -34,6 +37,11 @@ urlpatterns = [
     path("bookings/<uuid:guid>/cancel/", HotelBookingCancelView.as_view(), name="hotels-booking-cancel"),
     path("bookings/<uuid:guid>/rooms/", HotelBookingRoomsView.as_view(), name="hotels-booking-rooms"),
     path("bookings/<uuid:guid>/events/", HotelBookingEventsView.as_view(), name="hotels-booking-events"),
+
+    # Analytics (B2B only, computed from local booking history)
+    path("monthly-summary/", HotelMonthlySummaryView.as_view(), name="hotels-monthly-summary"),
+    path("top-by-bookings/", HotelTopByBookingsView.as_view(), name="hotels-top-by-bookings"),
+    path("recommendations/", HotelRecommendationsView.as_view(), name="hotels-recommendations"),
 
     # Operations
     path("balance/", HotelBalanceView.as_view(), name="hotels-balance"),

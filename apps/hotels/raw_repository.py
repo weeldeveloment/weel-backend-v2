@@ -814,3 +814,132 @@ def fetch_status_events(*, booking_id: int, limit: int = 50) -> list[dict[str, A
         """,
         [booking_id, limit],
     )
+
+
+# ---------------------------------------------------------------------------
+# Analytics — company-scoped aggregates over local bookings
+# ---------------------------------------------------------------------------
+
+#: Only a booking that actually reached the hotel counts toward spend/rankings.
+#: DRAFT is ours and never went anywhere; CANCELLED never happened.
+_LIVE_STATUSES = ["PENDING", "WAIT_LIST", "CONFIRMED"]
+
+
+def fetch_monthly_summary(
+    *, b2b_company_id: int, year: int, month: int, top_limit: int = 5
+) -> dict[str, Any]:
+    """This company's spend for one calendar month, booked-on-date basis."""
+    spend_row = fetch_one(
+        f"""
+        SELECT COALESCE(SUM(price), 0) AS month_spend
+        FROM {HOTELIOS_BOOKING_TABLE}
+        WHERE b2b_company_id = %s
+          AND status = __ANY_MARKER__(%s)
+          AND EXTRACT(YEAR FROM created_at) = %s
+          AND EXTRACT(MONTH FROM created_at) = %s
+        """,
+        [b2b_company_id, _LIVE_STATUSES, year, month],
+    )
+    top_hotels = fetch_all(
+        f"""
+        SELECT h.id AS hotel_id, h.names, h.name_en, h.photos, h.star_id,
+               COUNT(b.id) AS bookings_count, SUM(b.price) AS spend
+        FROM {HOTELIOS_BOOKING_TABLE} b
+        JOIN {HOTELIOS_HOTEL_TABLE} h ON h.id = b.hotel_id
+        WHERE b.b2b_company_id = %s
+          AND b.status = __ANY_MARKER__(%s)
+          AND EXTRACT(YEAR FROM b.created_at) = %s
+          AND EXTRACT(MONTH FROM b.created_at) = %s
+        GROUP BY h.id
+        ORDER BY spend DESC
+        LIMIT %s
+        """,
+        [b2b_company_id, _LIVE_STATUSES, year, month, top_limit],
+    )
+    return {
+        "year": year,
+        "month": month,
+        "month_spend": (spend_row or {}).get("month_spend") or 0,
+        "top_hotels": top_hotels,
+    }
+
+
+def fetch_top_hotels_by_bookings(*, b2b_company_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    """This company's most-booked hotels, all-time."""
+    return fetch_all(
+        f"""
+        SELECT h.id AS hotel_id, h.names, h.name_en, h.photos, h.star_id, h.city_id,
+               COUNT(b.id) AS bookings_count, SUM(b.price) AS spend
+        FROM {HOTELIOS_BOOKING_TABLE} b
+        JOIN {HOTELIOS_HOTEL_TABLE} h ON h.id = b.hotel_id
+        WHERE b.b2b_company_id = %s
+          AND b.status = __ANY_MARKER__(%s)
+        GROUP BY h.id
+        ORDER BY bookings_count DESC, spend DESC
+        LIMIT %s
+        """,
+        [b2b_company_id, _LIVE_STATUSES, limit],
+    )
+
+
+def fetch_company_booking_cities(*, b2b_company_id: int) -> list[int]:
+    rows = fetch_all(
+        f"""
+        SELECT DISTINCT h.city_id
+        FROM {HOTELIOS_BOOKING_TABLE} b
+        JOIN {HOTELIOS_HOTEL_TABLE} h ON h.id = b.hotel_id
+        WHERE b.b2b_company_id = %s
+          AND b.status = __ANY_MARKER__(%s)
+          AND h.city_id IS NOT NULL
+        """,
+        [b2b_company_id, _LIVE_STATUSES],
+    )
+    return [row["city_id"] for row in rows]
+
+
+def fetch_company_active_hotel_ids(*, b2b_company_id: int) -> list[int]:
+    """Hotels this company currently has a live, not-yet-checked-out stay at.
+
+    Excluded from recommendations — recommending a hotel someone is already
+    booked into is noise, not a suggestion.
+    """
+    rows = fetch_all(
+        f"""
+        SELECT DISTINCT hotel_id
+        FROM {HOTELIOS_BOOKING_TABLE}
+        WHERE b2b_company_id = %s
+          AND status = __ANY_MARKER__(%s)
+          AND check_out >= NOW()
+          AND hotel_id IS NOT NULL
+        """,
+        [b2b_company_id, _LIVE_STATUSES],
+    )
+    return [row["hotel_id"] for row in rows]
+
+
+def fetch_recommended_hotels(
+    *, city_ids: list[int] | None, exclude_hotel_ids: list[int], limit: int = 10
+) -> list[dict[str, Any]]:
+    """Top-rated hotels in the given cities, or overall if no cities given.
+
+    `city_ids=None`/empty is the fallback for a company with no booking
+    history yet — recommend broadly rather than show nothing.
+    """
+    conditions = ["is_active"]
+    params: list[Any] = []
+    if city_ids:
+        conditions.append("city_id = __ANY_MARKER__(%s)")
+        params.append(city_ids)
+    if exclude_hotel_ids:
+        conditions.append("NOT (id = __ANY_MARKER__(%s))")
+        params.append(exclude_hotel_ids)
+    where = " AND ".join(conditions)
+    return fetch_all(
+        f"""
+        SELECT * FROM {HOTELIOS_HOTEL_TABLE}
+        WHERE {where}
+        ORDER BY star_id DESC NULLS LAST, name_en ASC
+        LIMIT %s
+        """,
+        [*params, limit],
+    )
