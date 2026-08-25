@@ -34,10 +34,10 @@ django.setup()
 
 # ─── Integration schema bootstrap ────────────────────────────────────────────
 #
-# The integration suites (booking, endpoint smoke) read raw-SQL tables that no
-# Django migration owns: `pms_*`, the b2b tables, and `users`. pytest-django
-# builds its own database and applies migrations to it, which leaves all of
-# them missing — that is why those suites errored out and ended up skipped.
+# The integration suites read raw-SQL tables that no Django migration owns:
+# the b2b tables and `users`. pytest-django builds its own database and
+# applies migrations to it, which leaves both missing — that is why those
+# suites errored out and ended up skipped.
 #
 # This only runs when WEEL_INTEGRATION_DB=1, so the default sqlite suite is
 # untouched.
@@ -78,14 +78,9 @@ def django_db_setup(django_db_setup, django_db_blocker):
 
     with django_db_blocker.unblock():
         # Migrations already ran when pytest-django built this database.
-        call_command("bootstrap_schema", "--skip-migrate", verbosity=0)
+        call_command("create_b2b_tables", verbosity=0)
 
-        # Only until schema/public_baseline.sql is committed — after that the
-        # baseline carries the real `users` definition and this goes away.
-        # See schema/README.md.
-        baseline = Path(__file__).parent / "schema" / "public_baseline.sql"
-        if not baseline.exists():
-            with connection.cursor() as cursor:
-                cursor.execute(_USERS_TABLE_DDL)
+        with connection.cursor() as cursor:
+            cursor.execute(_USERS_TABLE_DDL)
 
     yield

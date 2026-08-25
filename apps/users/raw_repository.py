@@ -268,25 +268,6 @@ def create_partner(
     )
 
 
-def create_pms_user(
-    *,
-    phone_number: str,
-    first_name: str = "",
-    last_name: str = "",
-) -> RawUser:
-    normalized = normalized_phone_candidates(phone_number)
-    stored_phone = normalized[0] if normalized else phone_number
-    return _insert_user(
-        role="pms",
-        first_name=first_name,
-        last_name=last_name,
-        phone_number=stored_phone,
-        username="",
-        email=None,
-        is_active=True,
-    )
-
-
 def create_sms_log(phone_number: str, purpose: str | Any, is_sent: bool) -> None:
     if not table_exists("users_smslog"):
         return
@@ -483,47 +464,6 @@ def soft_deactivate_user(user: RawUser) -> None:
         )
 
     log_account_deletion(user_id, user_id, user.role)
-
-
-def hard_delete_pms_user(user_id: int) -> bool:
-    if table_exists("user_map"):
-        execute("DELETE FROM user_map WHERE user_id = %s", [user_id])
-    else:
-        logger.warning("user_map table not found — skipping cleanup for user %s", user_id)
-
-    if table_exists("notification"):
-        execute("DELETE FROM notification WHERE recipient_user_id = %s", [user_id])
-    else:
-        logger.warning("notification table not found — skipping cleanup for user %s", user_id)
-
-    if table_exists("chat_conversation"):
-        execute(
-            f"""
-            UPDATE chat_conversation
-            SET client_user_id = NULL, partner_user_id = NULL
-            WHERE client_user_id = %s OR partner_user_id = %s
-            """,
-            [user_id, user_id],
-        )
-    else:
-        logger.warning("chat_conversation table not found — skipping cleanup for user %s", user_id)
-
-    if table_exists("chat_message"):
-        execute(
-            f"""
-            UPDATE chat_message
-            SET receiver_user_id = NULL
-            WHERE sender_user_id = %s OR receiver_user_id = %s
-            """,
-            [user_id, user_id],
-        )
-    else:
-        logger.warning("chat_message table not found — skipping cleanup for user %s", user_id)
-
-    return execute(
-        f"DELETE FROM {USER_TABLE} WHERE id = %s AND role = 'pms'",
-        [user_id],
-    ) > 0
 
 
 def log_account_deletion(user_id: int, deleted_by: int, role: str) -> None:

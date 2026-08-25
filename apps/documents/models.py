@@ -33,10 +33,9 @@ class DocumentStatus:
 class RecipientType:
     CLIENT = "client"
     PARTNER = "partner"
-    HOTEL = "hotel"
     B2B = "b2b"
 
-    CHOICES = [CLIENT, PARTNER, HOTEL, B2B]
+    CHOICES = [CLIENT, PARTNER, B2B]
 
 
 @dataclass(slots=True)

@@ -234,86 +234,6 @@ class TripEmployeeSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
 
 
-class HotelBookingRoomRequestSerializer(serializers.Serializer):
-    """One room in a booking request — 1 or 2 employees per room."""
-    room_id = serializers.IntegerField()
-    employee_ids = serializers.ListField(
-        child=serializers.IntegerField(), min_length=1, max_length=2,
-    )
-
-
-class HotelBookingRequestCreateSerializer(serializers.Serializer):
-    """POST body for 'bosqich 2': hotel + dates already chosen in bosqich 1,
-    now pick rooms and assign employees, then submit as one booking."""
-    trip_id = serializers.IntegerField()
-    hotel_guid = serializers.CharField()
-    check_in = serializers.DateField()
-    check_out = serializers.DateField()
-    rooms = HotelBookingRoomRequestSerializer(many=True)
-
-    def validate(self, data):
-        if data["check_out"] <= data["check_in"]:
-            raise serializers.ValidationError({"check_out": "check_out must be after check_in."})
-        rooms = data.get("rooms") or []
-        if not rooms:
-            raise serializers.ValidationError({"rooms": "At least one room is required."})
-        seen_rooms: set[int] = set()
-        seen_employees: set[int] = set()
-        for room in rooms:
-            if room["room_id"] in seen_rooms:
-                raise serializers.ValidationError({"rooms": "Duplicate room_id in request."})
-            seen_rooms.add(room["room_id"])
-            for employee_id in room["employee_ids"]:
-                if employee_id in seen_employees:
-                    raise serializers.ValidationError(
-                        {"rooms": "An employee cannot be assigned to more than one room."}
-                    )
-                seen_employees.add(employee_id)
-        return data
-
-
-class HotelBookingRoomEmployeeSerializer(serializers.Serializer):
-    employee_id = serializers.IntegerField()
-    full_name = serializers.CharField(allow_null=True)
-    position = serializers.CharField(allow_null=True)
-
-
-class HotelBookingRoomSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    room_id = serializers.IntegerField()
-    room_name = serializers.CharField(allow_null=True)
-    price_per_night = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
-    total_price = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
-    pms_booking_id = serializers.IntegerField(allow_null=True)
-    employees = HotelBookingRoomEmployeeSerializer(many=True)
-
-
-class HotelBookingRequestSerializer(serializers.Serializer):
-    """Summary row — used in the booking history LIST (shows as ONE entry)."""
-    id = serializers.IntegerField(read_only=True)
-    company_id = serializers.IntegerField(read_only=True)
-    trip_id = serializers.IntegerField(allow_null=True)
-    tenant_schema = serializers.CharField()
-    hotel_property_id = serializers.IntegerField()
-    hotel_name = serializers.CharField(allow_null=True)
-    hotel_guid = serializers.CharField(allow_null=True, required=False)
-    check_in = serializers.DateField()
-    check_out = serializers.DateField()
-    status = serializers.ChoiceField(
-        choices=["pending", "confirmed", "rejected", "cancelled"], read_only=True,
-    )
-    room_count = serializers.IntegerField(default=0)
-    employee_count = serializers.IntegerField(default=0)
-    requested_by = serializers.IntegerField(read_only=True, allow_null=True)
-    reviewed_at = serializers.DateTimeField(read_only=True, allow_null=True)
-    created_at = serializers.DateTimeField(read_only=True)
-
-
-class HotelBookingRequestDetailSerializer(HotelBookingRequestSerializer):
-    """Full detail — used when clicking into one booking ("hammasi ko'rinadi")."""
-    rooms = HotelBookingRoomSerializer(many=True)
-
-
 class TravelPolicySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     company_id = serializers.IntegerField(read_only=True)
@@ -411,7 +331,7 @@ class TransactionSerializer(serializers.Serializer):
         return obj.get("employee_name") or obj.get("department_name") or ""
 
     def get_category(self, obj) -> str:
-        return "hotel" if obj.get("has_hotel") else "trip"
+        return "trip"
 
 
 class TransactionListResponseSerializer(serializers.Serializer):
@@ -526,16 +446,6 @@ class ActiveTripEmployeeSerializer(serializers.Serializer):
     trip_status = serializers.CharField(read_only=True)
     trip_employee_status = serializers.CharField(read_only=True)
     assigned_at = serializers.DateTimeField(read_only=True)
-    hotel_name = serializers.CharField(read_only=True, allow_null=True)
-    voucher_number = serializers.CharField(read_only=True, allow_null=True)
-    room_name = serializers.CharField(read_only=True, allow_null=True)
-    price_per_night = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
-    total_price = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
-    hotel_address = serializers.CharField(read_only=True, allow_null=True)
-    hotel_maps_url = serializers.CharField(read_only=True, allow_null=True)
-    hotel_qr = serializers.CharField(read_only=True, allow_null=True)
-    hotel_check_in_time = serializers.CharField(read_only=True, allow_null=True)
-    hotel_check_out_time = serializers.CharField(read_only=True, allow_null=True)
     pms_accepted = serializers.SerializerMethodField()
 
     def get_pms_accepted(self, obj):
@@ -581,23 +491,6 @@ class TopEmployeeByTripsSerializer(serializers.Serializer):
     department_id = serializers.IntegerField(read_only=True, allow_null=True)
     department_name = serializers.CharField(read_only=True, allow_null=True)
     trip_count = serializers.IntegerField(read_only=True)
-
-
-class TopHotelByBookingsSerializer(serializers.Serializer):
-    """Serializer for the "top N hotels by booking count" endpoint."""
-    tenant_schema = serializers.CharField(read_only=True)
-    hotel_property_id = serializers.IntegerField(read_only=True)
-    hotel_name = serializers.CharField(read_only=True, allow_null=True)
-    hotel_guid = serializers.CharField(read_only=True, allow_null=True)
-    booking_count = serializers.IntegerField(read_only=True)
-    total_spend = serializers.DecimalField(read_only=True, max_digits=14, decimal_places=2)
-
-
-class HotelMonthlySummarySerializer(serializers.Serializer):
-    year = serializers.IntegerField(read_only=True)
-    month = serializers.IntegerField(read_only=True)
-    month_spend = serializers.CharField(read_only=True)
-    top_hotels = TopHotelByBookingsSerializer(many=True, read_only=True)
 
 
 class TripStatusSummarySerializer(serializers.Serializer):
@@ -670,8 +563,3 @@ class TravelPolicyRuleUpdateSerializer(serializers.Serializer):
     budget_limit = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
 
 
-class B2BHotelCalendarSerializer(serializers.Serializer):
-    room_id = serializers.IntegerField(read_only=True)
-    room_name = serializers.CharField(read_only=True, allow_null=True)
-    date = serializers.DateField(read_only=True)
-    status = serializers.CharField(read_only=True)

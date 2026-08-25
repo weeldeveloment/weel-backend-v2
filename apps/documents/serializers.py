@@ -15,7 +15,7 @@ DOC_STATUS_CHOICES = ["created", "sent", "signed", "rejected"]
 class DocumentRecipientSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     document_id = serializers.IntegerField(read_only=True)
-    recipient_type = serializers.ChoiceField(choices=["client", "partner", "hotel", "b2b"])
+    recipient_type = serializers.ChoiceField(choices=["client", "partner", "b2b"])
     inn = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
     org_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     bank_details = serializers.DictField(required=False, default=dict)

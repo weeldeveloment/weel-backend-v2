@@ -1,11 +1,9 @@
 """Walks every registered route and asserts none of them answer with a 500.
 
-Needs PostgreSQL, not the sqlite test database: the requests go through
-TenantMiddleware (`SET search_path`, which sqlite cannot parse) and read the
-raw-SQL `users` table, which no Django migration creates. Under sqlite all of
-this fails as a database error rather than a real result, so the suite is
-gated the same way the booking integration tests are and runs in CI's
-`integration-test` job.
+Needs PostgreSQL, not the sqlite test database: the requests read the raw-SQL
+`users` table, which no Django migration creates. Under sqlite this fails as a
+database error rather than a real result, so the suite is gated and runs in
+CI's `integration-test` job.
 """
 from __future__ import annotations
 
@@ -32,10 +30,10 @@ pytestmark = [
         os.getenv("WEEL_SMOKE_DB") != "1",
         reason=(
             "Needs a database carrying the COMPLETE raw-SQL schema, which the "
-            "repository cannot currently build: only pms_*, the b2b tables and "
-            "(as a test scaffold) users have DDL in code. The chat, stories, "
+            "repository cannot currently build: only the b2b tables and (as a "
+            "test scaffold) users have DDL in code. The chat, stories, "
             "activities, documents and notification tables exist only in the "
-            "live database, so ~87 of these endpoints answer 500 on a freshly "
+            "live database, so many of these endpoints answer 500 on a freshly "
             "built one. Codify those tables, then run this in CI: "
             "WEEL_SMOKE_DB=1 pytest -m smoke against a throwaway database."
         ),
@@ -234,31 +232,13 @@ class AuthenticatedAPIEndpointsSmokeTests(TestCase):
         cases = [
             EndpointCase("client profile", "get", "/api/user/client/profile/", "client", expected_statuses=(200,)),
             EndpointCase("client profile update", "patch", "/api/user/client/profile/update/", "client", data={"first_name": "Smoke2"}, expected_statuses=(200,)),
-            EndpointCase("client favorites", "get", "/api/property/properties/favorites/", "client", expected_statuses=(200,)),
-            EndpointCase("client favorite toggle missing property", "post", f"/api/property/properties/{DUMMY_UUID}/favorite/", "client", expected_statuses=(404,)),
-            EndpointCase("client booking history", "get", "/api/booking/client/history/", "client", expected_statuses=(200,)),
-            EndpointCase("client booking detail missing", "get", f"/api/booking/client/{DUMMY_UUID}/", "client", expected_statuses=(404,)),
-            EndpointCase("client booking cancel missing", "post", f"/api/booking/client/{DUMMY_UUID}/cancel/", "client", expected_statuses=(404,)),
             EndpointCase("client notifications", "get", "/api/notification/client/", "client", expected_statuses=(200,)),
             EndpointCase("client fcm update", "post", "/api/notification/device/", "client", data={"fcm_token": "smoke-client-token", "device_type": "ios"}, expected_statuses=(200,)),
             EndpointCase("partner profile", "get", "/api/user/partner/profile/", "partner", expected_statuses=(200,)),
             EndpointCase("partner profile update", "patch", "/api/user/partner/profile/update/", "partner", data={"first_name": "Smoke2"}, expected_statuses=(200,)),
             EndpointCase("partner passport upload missing file", "post", "/api/user/partner/documents/passport/", "partner", data={}, format="multipart", expected_statuses=(400,)),
-            EndpointCase("partner property list", "get", "/api/property/partner/properties/", "partner", expected_statuses=(200,)),
-            EndpointCase("partner all properties", "get", "/api/property/partner/all/", "partner", expected_statuses=(200,)),
-            EndpointCase("admin partner all missing partner_id", "get", "/api/property/partner/all/", "admin", expected_statuses=(400,)),
-            EndpointCase(
-                "admin partner all with partner_id",
-                "get",
-                f"/api/property/partner/all/?partner_id={self.partner_user.id}",
-                "admin",
-                expected_statuses=(200,),
-            ),
             EndpointCase("partner story list", "get", "/api/story/partner/stories/", "partner", expected_statuses=(200,)),
             EndpointCase("partner story create invalid", "post", "/api/story/stories/", "partner", data={}, format="multipart", expected_statuses=(400,)),
-            EndpointCase("partner calendar block missing property", "post", f"/api/booking/properties/{DUMMY_UUID}/calendar/block/", "partner", data={"from_date": "2026-04-10", "to_date": "2026-04-11"}, expected_statuses=(404,)),
-            EndpointCase("partner booking list", "get", "/api/booking/partner/", "partner", expected_statuses=(200,)),
-            EndpointCase("partner booking accept missing", "post", f"/api/booking/partner/{DUMMY_UUID}/accept/", "partner", expected_statuses=(400, 404)),
             EndpointCase("partner notifications", "get", "/api/notification/partner/", "partner", expected_statuses=(200,)),
             EndpointCase("partner notifications read", "post", "/api/notification/partner/read/", "partner", data={"notification_ids": []}, expected_statuses=(200,)),
             EndpointCase("partner notifications read all", "post", "/api/notification/partner/read-all/", "partner", data={}, expected_statuses=(200,)),
@@ -267,8 +247,6 @@ class AuthenticatedAPIEndpointsSmokeTests(TestCase):
             EndpointCase("admin clients list", "get", "/api/admin-auth/users/clients/", "admin", expected_statuses=(200,)),
             EndpointCase("admin partners list", "get", "/api/admin-auth/users/partners/", "admin", expected_statuses=(200,)),
             EndpointCase("admin register invalid payload", "post", "/api/admin-auth/register/", "admin", data={}, expected_statuses=(400, 403)),
-            EndpointCase("admin booking list", "get", "/api/booking/admin/bookings/", "admin", expected_statuses=(200,)),
-            EndpointCase("admin all properties list", "get", "/api/property/admin/properties/all/", "admin", expected_statuses=(200,)),
             EndpointCase("admin chat conversations", "get", "/api/chat/conversations/", "admin", expected_statuses=(200,)),
             EndpointCase("admin chat messages missing partner", "get", "/api/chat/messages/1/", "admin", expected_statuses=(404,)),
             EndpointCase("admin chat send invalid", "post", "/api/chat/send/", "admin", data={}, expected_statuses=(400,)),

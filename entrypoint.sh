@@ -50,31 +50,11 @@ python manage.py migrate --noinput
 
 python manage.py create_b2b_tables
 
-# Amenity icons. Only rows still on the placeholder are touched, so this is a
-# no-op once applied and hand-uploaded artwork survives it. Non-fatal: a
-# missing icon is a cosmetic problem, not a reason to refuse to serve.
-if ! python manage.py seed_service_icons --apply; then
-  echo "WARNING: amenity icon seeding failed — some amenities will show the placeholder icon" >&2
-fi
-
 # Non-fatal, but never silent: a failure here means unstyled admin pages, and
 # hiding it behind `2>/dev/null || true` is why that goes unnoticed for weeks.
 if ! python manage.py collectstatic --noinput; then
   echo "WARNING: collectstatic failed — static assets may be missing" >&2
 fi
-
-WEBHOOK_BASE="${WEBHOOK_BASE_URL:-https://dev.weel.uz}"
-
-# Backgrounded so the web server starts immediately; Telegram being slow or
-# down must not hold up the API.
-(
-  echo "Setting up hotel bot webhook: $WEBHOOK_BASE"
-  if python manage.py setup_hotel_bot_webhook "$WEBHOOK_BASE"; then
-    echo "Hotel bot webhook setup complete"
-  else
-    echo "WARNING: hotel bot webhook setup failed — the bot will not receive updates" >&2
-  fi
-) &
 
 if [ "$WEEL_ROLE" = "web" ]; then
   run_web

@@ -17,9 +17,6 @@ B2B_TRAVEL_POLICY_TABLE = "b2b_travel_policy"
 B2B_TRAVEL_POLICY_RULE_TABLE = "b2b_travel_policy_rule"
 B2B_BUDGET_REQUEST_TABLE = "b2b_budget_request"
 B2B_TRAVEL_VOUCHER_TABLE = "b2b_travel_voucher"
-B2B_HOTEL_BOOKING_REQUEST_TABLE = "b2b_hotel_booking_request"
-B2B_HOTEL_BOOKING_ROOM_TABLE = "b2b_hotel_booking_room"
-B2B_HOTEL_BOOKING_ROOM_EMPLOYEE_TABLE = "b2b_hotel_booking_room_employee"
 B2B_LEAD_REQUEST_TABLE = "b2b_lead_request"
 
 # Mobile workspace (`/api/b2b/workspace/`)

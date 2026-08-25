@@ -54,29 +54,16 @@ schema_view = get_schema_view(
     generator_class=RequiredFixOpenAPISchemaGenerator,
 )
 
-# Separate Swagger schema — only B2B/Hotels/Documents + admin hotel & b2b endpoints
+# Separate Swagger schema — only B2B/Documents + admin b2b endpoints
 def _build_b2b_patterns():
-    from apps.admin_auth.hotel_views import (
-        AdminHotelListView, AdminHotelDetailView, AdminHotelClassifyView,
-        AdminHotelRoomInventoryView, AdminHotelCalendarView, AdminHotelBookingsView,
-        AdminHotelReviewsView, AdminReviewRespondView, AdminReviewHideView,
+    from apps.admin_auth.b2b_admin_views import (
         AdminB2BCompaniesView, AdminB2BCompanyDetailView, AdminB2BUsersView,
         AdminB2BSupportThreadsView, AdminB2BSupportThreadView,
     )
     return [
         path("api/b2b/", include("apps.b2b.urls")),
         path("api/documents/", include("apps.documents.urls")),
-        path("api/hotels/", include("apps.hotels.urls")),
-        # Only hotel-management and B2B-company admin endpoints (no login/register/users)
-        path("api/admin-auth/hotels/", AdminHotelListView.as_view()),
-        path("api/admin-auth/hotels/<int:property_id>/", AdminHotelDetailView.as_view()),
-        path("api/admin-auth/hotels/<int:property_id>/classify/", AdminHotelClassifyView.as_view()),
-        path("api/admin-auth/hotels/<int:property_id>/rooms/", AdminHotelRoomInventoryView.as_view()),
-        path("api/admin-auth/hotels/<int:property_id>/calendar/", AdminHotelCalendarView.as_view()),
-        path("api/admin-auth/hotels/<int:property_id>/bookings/", AdminHotelBookingsView.as_view()),
-        path("api/admin-auth/hotels/<int:property_id>/reviews/", AdminHotelReviewsView.as_view()),
-        path("api/admin-auth/hotels/<int:property_id>/reviews/<int:review_id>/respond/", AdminReviewRespondView.as_view()),
-        path("api/admin-auth/hotels/<int:property_id>/reviews/<int:review_id>/hide/", AdminReviewHideView.as_view()),
+        # Only B2B-company admin endpoints (no login/register/users)
         path("api/admin-auth/b2b/companies/", AdminB2BCompaniesView.as_view()),
         path("api/admin-auth/b2b/companies/<int:company_id>/", AdminB2BCompanyDetailView.as_view()),
         path("api/admin-auth/b2b/companies/<int:company_id>/users/", AdminB2BUsersView.as_view()),
@@ -90,7 +77,7 @@ b2b_schema_view = get_schema_view(
     openapi.Info(
         "Weel B2B API",
         "v1",
-        "B2B Corporate Travel Management —Business Trips, Documents, Hotel Catalog, Admin",
+        "B2B Corporate Travel Management —Business Trips, Documents, Admin",
         contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
         license=openapi.License(name="Proprietary"),
     ),
@@ -290,15 +277,10 @@ urlpatterns += [
     path("i18n/", include("django.conf.urls.i18n")),
     path("b2b/", include("apps.b2b.urls")),
     path("documents/", include("apps.documents.urls")),
-    path("hotels/", include("apps.hotels.urls")),
     path("activities/", include("apps.activities.urls")),
     path("api/", include("apps.urls")),
-    path("api/platform/", include("apps.platform.urls")),
-    path("api/pms/", include("apps.pms.urls")),
-    path("api/pms/", include("apps.bookingcom.urls")),
     path("api/b2b/", include("apps.b2b.urls")),
     path("api/documents/", include("apps.documents.urls")),
-    path("api/hotels/", include("apps.hotels.urls")),
     path("api/activities/", include("apps.activities.urls")),
 ]
 

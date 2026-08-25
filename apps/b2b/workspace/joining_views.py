@@ -95,6 +95,25 @@ class AccountMeView(AccountAPIView):
         return Response(_account_payload(request.user))
 
     @swagger_auto_schema(
+        tags=WORKSPACE_TAG, operation_summary="Delete this account"
+    )
+    def delete(self, request):
+        """Erase the person, keep the work.
+
+        Required of any app that lets somebody sign up — App Store guideline
+        5.1.1(v) — and it has to be reachable from inside the app rather than
+        by writing to support.
+
+        It always succeeds. Owning a company cannot be handed over anywhere in
+        this product, so refusing while somebody owns one would be refusing
+        for good; instead the companies they solely own are closed with them,
+        and `GET` on this endpoint is what lets the screen say which ones
+        before anybody presses anything.
+        """
+        result = accounts.delete_account(request.user.id)
+        return Response(result, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
         tags=WORKSPACE_TAG,
         operation_summary="Set name and username",
         request_body=ProfileSerializer,
@@ -846,6 +865,32 @@ def _queue_join_decision(request_id: int) -> None:
         notify_join_request_decided.delay(request_id)
     except Exception:  # noqa: BLE001 - the decision itself is stored
         logger.exception("Could not queue the answer to join request %s", request_id)
+
+
+class AccountDeletionPreviewView(AccountAPIView):
+    """GET /api/b2b/workspace/account/me/deletion/ — what deleting would cost.
+
+    Separate from the delete itself so the confirmation can be specific.
+    "This cannot be undone" is a sentence people press through; naming the
+    company that closes and the number of colleagues who lose their workspace
+    is not.
+    """
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG, operation_summary="What deleting this account closes"
+    )
+    def get(self, request):
+        closed = accounts.companies_closed_by_deleting(request.user.id)
+        return Response({
+            "companies": [
+                {
+                    "id": org["id"],
+                    "name": org.get("name"),
+                    "other_members": int(org.get("other_members") or 0),
+                }
+                for org in closed
+            ]
+        })
 
 
 class AccountDeviceTokenView(AccountAPIView):

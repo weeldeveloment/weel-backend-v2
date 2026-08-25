@@ -29,7 +29,7 @@ class Command(BaseCommand):
             type=str,
             choices=["main", "b2b"],
             default="main",
-            help="Schema variant: main (all endpoints) or b2b (B2B/Hotels/Documents only)",
+            help="Schema variant: main (all endpoints) or b2b (B2B/Documents only)",
         )
         parser.add_argument(
             "--base-path",
@@ -99,7 +99,7 @@ class Command(BaseCommand):
             info = openapi.Info(
                 "Weel B2B API",
                 "v1",
-                "B2B Corporate Travel Management — Business Trips, Documents, Hotel Catalog, Admin",
+                "B2B Corporate Travel Management — Business Trips, Documents, Admin",
                 contact=openapi.Contact(name="Weel Support", url="https://weel.uz"),
                 license=openapi.License(name="Proprietary"),
             )

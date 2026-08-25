@@ -1,27 +1,7 @@
 from django.urls import path
 from .views import AdminLoginView, AdminMeView, AdminRefreshTokenView, AdminRegisterView
-from .users_views import AdminClientsListView, AdminPartnersListView, AdminPmsUsersListView
-from .hotel_views import (
-    AdminHotelAnalyticsView,
-    AdminHotelListView,
-    AdminHotelDetailView,
-    AdminHotelClassifyView,
-    AdminHotelRoomInventoryView,
-    AdminHotelRoomUpdateView,
-    AdminHotelRoomImageUploadView,
-    AdminHotelRoomTypeView,
-    AdminHotelCalendarView,
-    AdminHotelBookingsView,
-    AdminHotelBookingDetailView,
-    AdminHotelBookingCreateView,
-    AdminHotelBookingMoveView,
-    AdminHotelBookingAcceptView,
-    AdminHotelBookingCancelView,
-    AdminHotelBookingCheckInView,
-    AdminHotelBookingCheckOutView,
-    AdminHotelReviewsView,
-    AdminReviewRespondView,
-    AdminReviewHideView,
+from .users_views import AdminClientsListView, AdminPartnersListView
+from .b2b_admin_views import (
     AdminB2BCompaniesView,
     AdminB2BCompanyDetailView,
     AdminB2BUsersView,
@@ -42,29 +22,6 @@ urlpatterns = [
     # Users management
     path('users/clients/', AdminClientsListView.as_view(), name='admin-clients-list'),
     path('users/partners/', AdminPartnersListView.as_view(), name='admin-partners-list'),
-    path('users/pms/', AdminPmsUsersListView.as_view(), name='admin-pms-users-list'),
-    # Hotel Management
-    # Specific sub-paths MUST come before the catch-all detail view
-    path('hotels/', AdminHotelListView.as_view(), name='admin-hotels-list'),
-    path('hotels/<path:property_id>/classify/', AdminHotelClassifyView.as_view(), name='admin-hotel-classify'),
-    path('hotels/<path:property_id>/rooms/', AdminHotelRoomInventoryView.as_view(), name='admin-hotel-rooms'),
-    path('hotels/<path:property_id>/rooms/<int:room_id>/', AdminHotelRoomUpdateView.as_view(), name='admin-hotel-room-update'),
-    path('hotels/<path:property_id>/rooms/<int:room_id>/images/', AdminHotelRoomImageUploadView.as_view(), name='admin-hotel-room-image-upload'),
-    path('hotels/<path:property_id>/room-types/', AdminHotelRoomTypeView.as_view(), name='admin-hotel-room-types'),
-    path('hotels/<path:property_id>/calendar/', AdminHotelCalendarView.as_view(), name='admin-hotel-calendar'),
-    path('hotels/<path:property_id>/bookings/', AdminHotelBookingsView.as_view(), name='admin-hotel-bookings'),
-    path('hotels/<path:property_id>/bookings/create/', AdminHotelBookingCreateView.as_view(), name='admin-hotel-booking-create'),
-    path('hotels/<path:property_id>/bookings/<int:booking_id>/', AdminHotelBookingDetailView.as_view(), name='admin-hotel-booking-detail'),
-    path('hotels/<path:property_id>/bookings/<int:booking_id>/accept/', AdminHotelBookingAcceptView.as_view(), name='admin-hotel-booking-accept'),
-    path('hotels/<path:property_id>/bookings/<int:booking_id>/cancel/', AdminHotelBookingCancelView.as_view(), name='admin-hotel-booking-cancel'),
-    path('hotels/<path:property_id>/bookings/<int:booking_id>/check-in/', AdminHotelBookingCheckInView.as_view(), name='admin-hotel-booking-check-in'),
-    path('hotels/<path:property_id>/bookings/<int:booking_id>/check-out/', AdminHotelBookingCheckOutView.as_view(), name='admin-hotel-booking-check-out'),
-    path('hotels/<path:property_id>/bookings/<int:booking_id>/move/', AdminHotelBookingMoveView.as_view(), name='admin-hotel-booking-move'),
-    path('hotels/<path:property_id>/reviews/', AdminHotelReviewsView.as_view(), name='admin-hotel-reviews'),
-    path('hotels/<path:property_id>/reviews/<int:review_id>/respond/', AdminReviewRespondView.as_view(), name='admin-review-respond'),
-    path('hotels/<path:property_id>/reviews/<int:review_id>/hide/', AdminReviewHideView.as_view(), name='admin-review-hide'),
-    path('hotels/<path:property_id>/analytics/', AdminHotelAnalyticsView.as_view(), name='admin-hotel-analytics'),
-    path('hotels/<path:property_id>/', AdminHotelDetailView.as_view(), name='admin-hotel-detail'),
     # B2B Companies
     path('b2b/companies/', AdminB2BCompaniesView.as_view(), name='admin-b2b-companies'),
     path('b2b/companies/<int:company_id>/', AdminB2BCompanyDetailView.as_view(), name='admin-b2b-company-detail'),

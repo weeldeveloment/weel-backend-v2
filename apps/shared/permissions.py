@@ -106,34 +106,6 @@ class IsPartnerOwnerProperty(BasePermission):
         return True
 
 
-class HasOrganization(BasePermission):
-    """Require the authenticated user to have an active organization (PMS) or company (B2B)."""
-
-    message = _("Organization required. Please create an organization to continue.")
-    code = "organization_required"
-
-    def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
-            return False
-
-        user = request.user
-
-        user_type = getattr(user, "user_type", None)
-        if user_type == "pms":
-            org_id = getattr(user, "organization_id", None)
-            if not org_id:
-                return False
-            return True
-
-        if hasattr(user, "company_id"):
-            company_id = getattr(user, "company_id", None)
-            if not company_id:
-                return False
-            return True
-
-        return True
-
-
 class IsTelegramWebApp(BasePermission):
     message = _("This endpoint is available only via Telegram Web App")
 

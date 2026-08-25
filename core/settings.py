@@ -112,10 +112,6 @@ _DEFAULT_PROD_ORIGINS = (
     "https://business.weel.uz",
     "https://admin.weel.uz",
     "https://partners.weel.uz",
-    "https://weelrooms.uz",
-    "https://www.weelrooms.uz",
-    "https://weel-booking.uz",
-    "https://www.weel-booking.uz",
 )
 _DEFAULT_DEV_ORIGINS = (
     "http://localhost:3000",
@@ -176,13 +172,8 @@ USE_NORM_DATASTORE = False  # Explicitly disable norm_* datastore usage
 
 LOCAL_APPS: list[str] = [
     "apps.recommendation",
-    "apps.platform",
-    "apps.pms",
-    "apps.bookingcom",
     "apps.b2b",
     "apps.documents",
-    "apps.hotels",
-    "apps.hotel_bot",
     "apps.activities",
 ]
 
@@ -211,7 +202,6 @@ MIDDLEWARE = [
     "core.middleware.request_tracing.RequestTracingMiddleware",
     "core.middleware.locale.HeaderLocaleMiddleware",
     "django.middleware.locale.LocaleMiddleware",
-    "core.middleware.tenant.TenantMiddleware",
     "core.middleware.cache.CacheMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
     "request_logging.middleware.LoggingMiddleware",  # django-request-logging
@@ -407,6 +397,40 @@ SIMPLE_JWT = {
     "TOKEN_TYPE_CLAIM": "type",
     "JTI_CLAIM": "jti",
 }
+
+# --- WEEL B2B mobile releases ------------------------------------------------
+#
+# What `GET /api/b2b/workspace/app-version/` answers with. The app asks on
+# every launch and on every resume, and blocks itself when the installed
+# version is below `min_version` — so this is the switch that forces a store
+# update, and it lives in the environment rather than in code precisely so
+# raising it does not need another release of the thing being forced.
+#
+# `latest_version` is the newest build actually live in the store: the app
+# offers it as a dismissible prompt. `min_version` is the oldest one still
+# allowed to run; leave it equal to the floor you actually support, because
+# everyone below it is locked out of the app until they update.
+B2B_APP_RELEASES = {
+    "android": {
+        "latest_version": (os.getenv("B2B_ANDROID_LATEST_VERSION") or "1.1.0").strip(),
+        "min_version": (os.getenv("B2B_ANDROID_MIN_VERSION") or "1.0.0").strip(),
+        "store_url": (
+            os.getenv("B2B_ANDROID_STORE_URL")
+            or "https://play.google.com/store/apps/details?id=uz.weel.weel_b2b_v2"
+        ).strip(),
+    },
+    "ios": {
+        "latest_version": (os.getenv("B2B_IOS_LATEST_VERSION") or "1.1.0").strip(),
+        "min_version": (os.getenv("B2B_IOS_MIN_VERSION") or "1.0.0").strip(),
+        # Filled in once App Store Connect issues the numeric id — until then
+        # the app falls back to its own store link.
+        "store_url": (os.getenv("B2B_IOS_STORE_URL") or "").strip(),
+    },
+}
+
+# Shown under the heading on the update screen — "Nima yangilandi". One text
+# for both platforms; blank hides the block entirely.
+B2B_APP_RELEASE_NOTES = (os.getenv("B2B_APP_RELEASE_NOTES") or "").strip()
 
 SWAGGER_URL = (os.getenv("SWAGGER_URL") or "").strip() or None
 ENABLE_SWAGGER_UI = env_bool("ENABLE_SWAGGER_UI", default=DEBUG)
@@ -712,22 +736,12 @@ CURRENT_CURRENCY_EXCHANGE_RATE = os.getenv(
 # Service fee (percentage)
 SERVICE_FEE = (os.getenv("SERVICE_FEE") or "20").strip() or "20"
 
-# Booking: max adults+children per property; each guest above listing standard pays extra (UZS)
-BOOKING_MAX_GUESTS = int((os.getenv("BOOKING_MAX_GUESTS") or "6").strip() or "6")
-BOOKING_EXTRA_GUEST_FEE_UZS = (os.getenv("BOOKING_EXTRA_GUEST_FEE_UZS") or "100000").strip() or "100000"
-
 # Telegram Bot
 TELEGRAM_BOT_TOKEN_APP = os.getenv("TELEGRAM_BOT_TOKEN_APP")
 BOT_TOKEN = TELEGRAM_BOT_TOKEN_APP
 MINIAPP_URL = os.getenv("MINIAPP_URL", "https://partners.weel.uz/")
-HOTEL_BOT_TOKEN = os.getenv("HOTEL_BOT_TOKEN")
 B2B_LEAD_BOT_TOKEN = os.getenv("B2B_LEAD_BOT_TOKEN")
 B2B_LEAD_TELEGRAM_CHAT_ID = os.getenv("B2B_LEAD_TELEGRAM_CHAT_ID")
-# The hotel bot's "PMS ochish" menu button opens this. `pms.weel.uz` was the
-# old name and no longer has a route on the server — it answers the proxy's
-# `404 page not found` — so a deployment that did not override this sent every
-# hotel to a dead page. The PMS is served from weelrooms.uz.
-PMS_MINIAPP_URL = os.getenv("PMS_MINIAPP_URL", "https://weelrooms.uz")
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL") or "https://dev.weel.uz"
 FRONTEND_LOG_TOKEN = (os.getenv("FRONTEND_LOG_TOKEN") or "").strip()
 

@@ -11,6 +11,7 @@ from apps.b2b.workspace.access_views import (
     WorkspaceTrashView,
 )
 from apps.b2b.workspace.joining_views import (
+    AccountDeletionPreviewView,
     AccountDeviceTokenView,
     AccountJoinRequestView,
     AccountMeView,
@@ -34,6 +35,7 @@ from apps.b2b.workspace.secondment_views import (
     WorkspaceSwitchView,
 )
 from apps.b2b.workspace.views import (
+    WorkspaceAppVersionView,
     WorkspaceAttendanceAbsenceView,
     WorkspaceAttendanceCheckInView,
     WorkspaceAttendanceLocationView,
@@ -48,7 +50,6 @@ from apps.b2b.workspace.views import (
     WorkspaceFileListCreateView,
     WorkspaceFolderDetailView,
     WorkspaceFolderListCreateView,
-    WorkspaceHotelListView,
     WorkspaceLeadAssignView,
     WorkspaceLeadClaimView,
     WorkspaceLeadCommentView,
@@ -87,6 +88,9 @@ from apps.b2b.workspace.views import (
 )
 
 urlpatterns = [
+    # Asked before the session is: see [WorkspaceAppVersionView].
+    path("app-version/", WorkspaceAppVersionView.as_view(), name="ws-app-version"),
+
     path("auth/login/", WorkspaceLoginView.as_view(), name="ws-login"),
     path("auth/login/verify/", WorkspaceLoginVerifyView.as_view(), name="ws-login-verify"),
     path("auth/token/refresh/", WorkspaceTokenRefreshView.as_view(), name="ws-token-refresh"),
@@ -138,6 +142,11 @@ urlpatterns = [
         "account/workspaces/",
         AccountWorkspacesView.as_view(),
         name="ws-account-workspaces",
+    ),
+    path(
+        "account/me/deletion/",
+        AccountDeletionPreviewView.as_view(),
+        name="ws-account-deletion-preview",
     ),
     path(
         "account/workspaces/search/",
@@ -259,8 +268,6 @@ urlpatterns = [
     path("chats/<int:thread_id>/flags/", WorkspaceThreadFlagsView.as_view(), name="ws-chat-flags"),
 
     path("support/", WorkspaceSupportView.as_view(), name="ws-support"),
-
-    path("hotels/", WorkspaceHotelListView.as_view(), name="ws-hotels"),
 
     path("customers/", WorkspaceCustomerSearchView.as_view(), name="ws-customers"),
     path("crm/customers/", WorkspaceCrmCustomerListView.as_view(), name="ws-crm-customers"),

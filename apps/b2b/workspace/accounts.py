@@ -513,6 +513,122 @@ def org_ids_for_account(account_id: int) -> list[int]:
     return [row["org_id"] for row in rows]
 
 
+def companies_closed_by_deleting(account_id: int) -> list[dict[str, Any]]:
+    """The companies that would shut if this account went, and who is in them.
+
+    A company's owner is the one standing no invitation and no request can
+    hand out — see `Role`, and the two serializers that refuse it. Nothing in
+    the app transfers it either, which is the whole reason this list exists:
+    somebody who owns a company cannot hand it over first, so deleting their
+    account has to say plainly what it closes.
+
+    Only companies where this account is the *sole* owner are listed. One with
+    a second owner carries on without this one.
+    """
+    return fetch_all(
+        f"""
+        SELECT o.id,
+               o.name,
+               (SELECT COUNT(*) FROM {B2B_EMPLOYEE_TABLE} m
+                  JOIN {B2B_COMPANY_TABLE} mc ON mc.id = m.company_id
+                 WHERE mc.org_id = o.id
+                   AND m.is_active = TRUE
+                   AND m.is_chat_only = FALSE
+                   AND (m.account_id IS NULL OR m.account_id <> %s)
+               ) AS other_members
+          FROM b2b_org o
+         WHERE o.is_active = TRUE
+           AND EXISTS (
+                 SELECT 1 FROM {B2B_EMPLOYEE_TABLE} e
+                   JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
+                  WHERE c.org_id = o.id
+                    AND e.account_id = %s
+                    AND e.is_active = TRUE
+                    AND e.role = 'owner'
+               )
+           AND NOT EXISTS (
+                 SELECT 1 FROM {B2B_EMPLOYEE_TABLE} e2
+                   JOIN {B2B_COMPANY_TABLE} c2 ON c2.id = e2.company_id
+                  WHERE c2.org_id = o.id
+                    AND e2.is_active = TRUE
+                    AND e2.role = 'owner'
+                    AND (e2.account_id IS NULL OR e2.account_id <> %s)
+               )
+         ORDER BY o.name ASC
+        """,
+        [account_id, account_id, account_id],
+    )
+
+
+#: What a roster row says once the person behind it is gone.
+#:
+#: The row itself stays. Tasks, messages and leads are written against employee
+#: ids, and deleting the row would either cascade half the workspace away or
+#: leave dangling references nobody can render. A tombstone keeps the history
+#: readable while carrying none of the person's details.
+DELETED_MEMBER_NAME = "O'chirilgan foydalanuvchi"
+
+
+def delete_account(account_id: int) -> dict[str, Any]:
+    """Erase the person, keep the work.
+
+    Three things happen, and the order matters. Companies this account solely
+    owns are closed first, because closing them reads their owner's roster
+    row. Then every roster row is anonymised — the name, phone, email and
+    photo the workspace kept a copy of — and deactivated. Then the account
+    row itself goes, which is what actually removes the phone number, the
+    handle and the push token.
+
+    `b2b_employee.account_id` is `ON DELETE SET NULL`, so the rows survive the
+    last step on their own; they are anonymised first so that a crash between
+    the two leaves tombstones rather than intact copies of somebody who asked
+    to be forgotten.
+    """
+    now = timezone.now()
+    closed = companies_closed_by_deleting(account_id)
+
+    for org in closed:
+        execute(
+            f"UPDATE {B2B_COMPANY_TABLE} SET is_active = FALSE, updated_at = %s "
+            f"WHERE org_id = %s",
+            [now, org["id"]],
+        )
+        execute(
+            "UPDATE b2b_org SET is_active = FALSE, updated_at = %s WHERE id = %s",
+            [now, org["id"]],
+        )
+
+    seats = execute(
+        f"""
+        UPDATE {B2B_EMPLOYEE_TABLE}
+           SET full_name = %s,
+               phone = NULL,
+               email = NULL,
+               photo = NULL,
+               username = NULL,
+               fcm_token = NULL,
+               -- The roster also keeps identity documents for the trips
+               -- module. Leaving a passport number behind would make this a
+               -- deletion in name only.
+               date_of_birth = NULL,
+               passport_series = NULL,
+               passport_pinfl = NULL,
+               passport_upload_front = NULL,
+               passport_upload_back = NULL,
+               is_active = FALSE,
+               updated_at = %s
+         WHERE account_id = %s
+        """,
+        [DELETED_MEMBER_NAME, now, account_id],
+    )
+
+    execute(f"DELETE FROM {B2B_ACCOUNT_TABLE} WHERE id = %s", [account_id])
+    return {
+        "closed_companies": [org["name"] for org in closed],
+        "seats_removed": seats or 0,
+    }
+
+
 def list_org_workspaces(org_id: int) -> list[dict[str, Any]]:
     """Every workspace under this company — not just the ones the caller
     happens to be on the roster of.

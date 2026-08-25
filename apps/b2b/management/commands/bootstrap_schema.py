@@ -5,7 +5,7 @@ Order matters and is not obvious, so it lives here rather than in five places:
   1. extensions   — postgis and vector, which migrations and columns depend on
   2. migrate      — the Django-managed tables (auth, contenttypes, recommendation)
   3. baseline SQL — the raw-SQL tables captured by `dump_raw_schema`
-  4. code DDL     — pms_* and b2b_*, which the code creates at runtime anyway
+  4. code DDL     — b2b_*, which the code creates at runtime anyway
 
 Step 3 is skipped with a warning when no baseline file has been committed yet.
 Until one is, a database built by this command is missing every raw table that
@@ -55,9 +55,6 @@ class Command(BaseCommand):
             call_command("migrate", "--noinput", verbosity=0)
 
         self._apply_baseline(Path(options["baseline"]))
-
-        self.stdout.write("Creating pms_* tables in public...")
-        call_command("create_tenant_schema", "public")
 
         self.stdout.write("Creating b2b_* tables...")
         call_command("create_b2b_tables")

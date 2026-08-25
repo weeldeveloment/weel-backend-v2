@@ -2,16 +2,14 @@
 
 Most of this project's tables are not Django models: they are raw SQL created
 by hand, and their definition exists only inside whatever database is running.
-That is why a fresh database cannot be built from the repository, why the two
-tenant-provisioning paths drifted apart unnoticed, and why the endpoint smoke
-suite cannot run in CI.
+That is why a fresh database cannot be built from the repository and why the
+endpoint smoke suite cannot run in CI.
 
 This command reads the real shape out of a database and prints it as
 re-appliable SQL. Run it against staging (or a restored dump), commit the
 result, and `bootstrap_schema` can then rebuild the schema anywhere.
 
-    python manage.py dump_raw_schema > schema/public_baseline.sql
-    python manage.py dump_raw_schema --schema tenant_ab12 > schema/tenant_baseline.sql
+    python manage.py dump_raw_schema --output schema/public_baseline.sql
 
 Django-managed tables are skipped by default: `manage.py migrate` owns those,
 and duplicating them here would create two sources of truth for the same

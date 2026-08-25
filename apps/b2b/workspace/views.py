@@ -95,8 +95,6 @@ from apps.b2b.workspace.serializers import (
 from apps.b2b.workspace.geo import distance_meters
 from apps.b2b.workspace import accounts
 from apps.b2b.workspace.tokens import create_account_tokens, create_workspace_tokens, rotate_workspace_tokens
-from apps.hotels.repository import search_hotels
-from apps.hotels.serializers import HotelCardSerializer
 from users.models.logs import SmsPurpose
 from users.services import EskizService, OTPRedisService
 from users.tasks import send_otp_sms_eskiz
@@ -2969,89 +2967,6 @@ class WorkspaceAttendanceMarkView(WorkspaceAPIView):
         )
 
 
-# ─── Hotels ───────────────────────────────────────────────────────────────────
-
-def _hotel_status(hotel: dict) -> str:
-    """Collapses the platform's several hotel flags into the three states the
-    mobile list filters on."""
-    if hotel.get("is_archived") or not hotel.get("is_active", True):
-        return "paused"
-    if not hotel.get("is_verified"):
-        return "pending"
-    return "active"
-
-
-class WorkspaceHotelListView(WorkspaceAPIView):
-    """GET /api/b2b/workspace/hotels/ — partner hotels, shaped for the phone.
-
-    A thin projection of the platform hotel card: the mobile list only renders
-    a name, a location, a rating and a starting price, and shipping the full
-    card (policies, rate plans, legal info) over mobile data for a list of 20
-    would cost far more than it shows.
-    """
-
-    permission_classes = [IsAuthenticated, IsWorkspaceUser]
-
-    @swagger_auto_schema(
-        tags=WORKSPACE_TAG,
-        operation_summary="Partner hotels",
-        manual_parameters=[
-            openapi.Parameter("city", openapi.IN_QUERY, type=openapi.TYPE_STRING),
-            openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
-            openapi.Parameter("limit", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
-            openapi.Parameter("offset", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
-        ],
-        responses={200: openapi.Response(description="Hotel cards")},
-    )
-    def get(self, request):
-        def _int(name: str, default: int, ceiling: int) -> int:
-            try:
-                return min(max(int(request.query_params.get(name, default)), 0), ceiling)
-            except (TypeError, ValueError):
-                return default
-
-        limit = _int("limit", 30, 100)
-        offset = _int("offset", 0, 10_000)
-        city = (request.query_params.get("city") or "").strip() or None
-        search = (request.query_params.get("search") or "").strip().lower()
-
-        rows = search_hotels(city=city, sort_by="weel_recommended", limit=limit, offset=offset)
-
-        # Project from the serialized card, never from the raw row. The raw row
-        # calls the name `name`, the images `photos`, and carries a description
-        # per language — reading `title`, `img` and `description` off it, as
-        # this view used to, produced a list where every hotel was nameless and
-        # imageless, and where searching by name matched nothing.
-        hotels = HotelCardSerializer(rows, many=True, context={"request": request}).data
-
-        if search:
-            hotels = [
-                hotel for hotel in hotels
-                if search in (hotel.get("title") or "").lower()
-                or search in (hotel.get("city") or "").lower()
-                or search in (hotel.get("full_address") or hotel.get("address") or "").lower()
-            ]
-
-        return Response({"results": [{
-            "id": hotel.get("guid") or str(hotel.get("id")),
-            "name": hotel.get("title"),
-            "city": hotel.get("city"),
-            "address": hotel.get("full_address") or hotel.get("address"),
-            "description": hotel.get("description"),
-            "status": _hotel_status(hotel),
-            "stars": hotel.get("star_rating") or 0,
-            "rating": float(hotel.get("rating") or 0),
-            "review_count": hotel.get("review_count") or 0,
-            "available_rooms": hotel.get("available_rooms") or 0,
-            "min_price": float(hotel["min_price"]) if hotel.get("min_price") is not None else None,
-            "amenities": hotel.get("amenities") or [],
-            "images": hotel.get("img") or [],
-            "is_recommended": bool(hotel.get("is_recommended")),
-            "latitude": hotel.get("latitude"),
-            "longitude": hotel.get("longitude"),
-        } for hotel in hotels]})
-
-
 # ─── Employee of the month ──────────────────────────────────────────────────
 
 def _current_year_month() -> tuple[int, int]:
@@ -3182,3 +3097,103 @@ class WorkspaceSupportView(WorkspaceAPIView):
             SupportMessageSerializer(message).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+# --- The release gate --------------------------------------------------------
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    """``"1.10.2"`` → ``(1, 10, 2)``, so versions sort by number and not by text.
+
+    A plain string comparison puts ``1.10`` *below* ``1.9``, which is exactly
+    the case a force-update rule has to get right — the tenth patch of a
+    release is the one that usually carries the fix being forced.
+
+    Anything unparseable degrades to a zero, so a build name the app was not
+    expecting reads as old rather than raising: the caller is a phone on a
+    launch screen and there is nothing useful to hand it but a verdict.
+    """
+    parts: list[int] = []
+    for chunk in str(value or "").split("."):
+        digits = "".join(c for c in chunk if c.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts) or (0,)
+
+
+def _is_older(version: str, than: str) -> bool:
+    left, right = _version_tuple(version), _version_tuple(than)
+    # Padded, so 1.1 and 1.1.0 compare equal rather than by length.
+    width = max(len(left), len(right))
+    left += (0,) * (width - len(left))
+    right += (0,) * (width - len(right))
+    return left < right
+
+
+class WorkspaceAppVersionView(APIView):
+    """GET /api/b2b/workspace/app-version/ — may this build still run?
+
+    The one endpoint in the workspace API that answers before there is a
+    session: the app asks it on launch, before the token storage is even read,
+    so a phone stuck on an old build is stopped at the door rather than after
+    signing in. Hence ``authentication_classes = []`` — an expired token must
+    not turn the gate into a 401, because a locked-out user cannot refresh it.
+
+    Two verdicts, not one. ``update_required`` blocks the app; it is what the
+    store rollout of a breaking change turns on. ``update_available`` is a
+    dismissible nudge — same information, no lock — and the app shows it once
+    per version so a user who said "keyinroq" is not asked again on the next
+    launch.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Whether the installed mobile build may still run",
+        manual_parameters=[
+            openapi.Parameter(
+                "platform",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                enum=["android", "ios"],
+                required=True,
+            ),
+            openapi.Parameter(
+                "version",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description="The installed version name, e.g. 1.1.0",
+                required=True,
+            ),
+        ],
+        responses={200: openapi.Response(description="The release verdict")},
+    )
+    def get(self, request):
+        platform = (request.query_params.get("platform") or "").strip().lower()
+        release = settings.B2B_APP_RELEASES.get(platform)
+        current = (request.query_params.get("version") or "").strip()
+
+        # An unknown platform — the web build, a desktop run — is not an error
+        # to report to a user: nothing is being rolled out there, so it is
+        # simply never out of date.
+        if release is None or not current:
+            return Response({
+                "platform": platform,
+                "current_version": current,
+                "update_required": False,
+                "update_available": False,
+            })
+
+        latest = release["latest_version"]
+        minimum = release["min_version"]
+        return Response({
+            "platform": platform,
+            "current_version": current,
+            "latest_version": latest,
+            "min_version": minimum,
+            "update_required": _is_older(current, minimum),
+            "update_available": _is_older(current, latest),
+            "store_url": release["store_url"],
+            "release_notes": settings.B2B_APP_RELEASE_NOTES,
+        })

@@ -60,11 +60,9 @@ jobs:
           REDIS_CONNECTION_STRING: redis://localhost:6379/0
         run: poetry run python manage.py check --deploy --fail-level ERROR
 
-  # The booking engine is the money path: advisory locks, double-booking
-  # prevention, server-side price checks. Its tests need the raw-SQL schema
-  # (pms_property, pms_room, pms_booking), which no Django migration creates,
-  # so the `test` job above skips every one of them. Without this job that
-  # code ships with zero automated coverage.
+  # Some b2b suites (e.g. employee-of-month) need the raw-SQL b2b_* schema,
+  # which no Django migration creates, so the `test` job above skips them.
+  # Without this job that code ships with zero automated coverage.
   integration-test:
     runs-on: ubuntu-latest
     services:
@@ -125,7 +123,7 @@ jobs:
             "apt-get update -qq && apt-get install -y -qq postgresql-16-pgvector"
 
       # Extensions, migrations, the raw-schema baseline and the code-owned
-      # pms_*/b2b_* DDL, in that order. Once schema/public_baseline.sql is
+      # b2b_* DDL, in that order. Once schema/public_baseline.sql is
       # committed (see schema/README.md) this step also builds `users`,
       # `booking`, `property` and the rest, and the smoke suite can be turned
       # on here with WEEL_SMOKE_DB=1.

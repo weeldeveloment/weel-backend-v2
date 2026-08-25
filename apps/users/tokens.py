@@ -104,29 +104,6 @@ def create_partner_tokens(partner: RawUser, request: Request):
     }
 
 
-def create_pms_tokens(user: RawUser, request: Request):
-    refresh = CustomRefreshToken()
-    access = AccessToken()
-
-    common_claims = {
-        TokenMetadata.TOKEN_SUBJECT: str(user.guid),
-        TokenMetadata.TOKEN_ISSUER: getattr(settings, "JWT_ISSUER"),
-        TokenMetadata.TOKEN_USER_TYPE: "pms",
-    }
-
-    for key, value in common_claims.items():
-        refresh[key] = value
-        access[key] = value
-
-    refresh[TokenMetadata.TOKEN_TYPE_CLAIM] = "refresh"
-    access[TokenMetadata.TOKEN_TYPE_CLAIM] = "access"
-
-    return {
-        "refresh": str(refresh),
-        "access": str(access),
-    }
-
-
 def rotate_tokens(refresh_token: str) -> dict:
     try:
         token = CustomRefreshToken(token=refresh_token)

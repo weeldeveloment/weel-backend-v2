@@ -1,7 +1,7 @@
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
 
-from users.serializers import ClientProfileSerializer, PartnerProfileSerializer, PmsProfileSerializer
+from users.serializers import ClientProfileSerializer, PartnerProfileSerializer
 
 from .authentication import AdminJWTAuthentication
 from .permissions import IsAdminUser
@@ -61,11 +61,3 @@ class AdminPartnersListView(AdminBaseUsersListView):
     role = "partner"
     serializer_class = PartnerProfileSerializer
     search_columns = ["email", "first_name", "last_name", "phone_number", "username"]
-
-
-class AdminPmsUsersListView(AdminBaseUsersListView):
-    """List all PMS/hotel owner users - admin only"""
-
-    role = "pms"
-    serializer_class = PmsProfileSerializer
-    search_columns = ["first_name", "last_name", "phone_number"]

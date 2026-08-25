@@ -1,1 +1,0 @@
-# Property app management package

@@ -38,8 +38,8 @@ EXEMPT_PATHS = {
 # write only clears the cache of the person who made it. A manager creating a
 # task, or a colleague sending a chat message, leaves every other phone in the
 # company serving a stale list for up to a minute — which on a device that
-# refreshes by pull-down reads as a frozen app. Hotels and the roster stay
-# cached: they are the expensive queries and they barely change.
+# refreshes by pull-down reads as a frozen app. The roster stays cached:
+# it is an expensive query and it barely changes.
 EXEMPT_PATH_PREFIXES = (
     "/api/b2b/employees/passport-preview/",
     "/api/b2b/workspace/me/",
