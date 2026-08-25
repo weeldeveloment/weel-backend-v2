@@ -1,6 +1,6 @@
 # Deploydan oldingi tekshiruv (pre-deploy)
 
-Muammo: `weel-backend-v2` o'zgaradi, uni iste'mol qiladigan 7 ta ilova esa
+Muammo: `weel-backend-v2` o'zgaradi, uni iste'mol qiladigan 6 ta ilova esa
 alohida repolarda yashaydi.
 Backenddagi maydon nomi o'zgarsa yoki endpoint o'chsa, buni faqat prodda foydalanuvchi
 ko'radi. Bu papkadagi vositalar ana shuni deploydan **oldin** ushlaydi.
@@ -13,14 +13,13 @@ weel/
 ├── weel-backend-v2/   ← tools/ shu yerda
 ├── dashboard_weel_uz/
 ├── weel-admin/
-├── weel-b2b/
 ├── weel-b2b-mobile/
 ├── weel.uz/
 ├── weel-mobile/
 └── Flutter/           ← weel_booking
 ```
 
-Yettalasi ham shu yerda turishi kerak. Bittasi yetishmasa, skript uni jimgina
+Oltitasi ham shu yerda turishi kerak. Bittasi yetishmasa, skript uni jimgina
 "ishlatmaydi" deb hisoblamaydi — 🟠 deb belgilab, exit 1 qaytaradi.
 
 ## Avtomatik nazorat (o'rnatib qo'yilgan)
@@ -39,8 +38,8 @@ har bir dasturchi bitta buyruq bilan bir xil himoyani oladi.
 **2. GitHub Actions — `frontend-contract` job (`.github/workflows/cicd.yml`).**
 Har PR va har `main` push'da ishlaydi:
 
-- backendni iste'mol qiladigan 7 ta reponi checkout qiladi;
-- kontrakt farqini tekshiradi (baseline bilan) — **yettalasi uchun ham**;
+- backendni iste'mol qiladigan 6 ta reponi checkout qiladi;
+- kontrakt farqini tekshiradi (baseline bilan) — **oltitalasi uchun ham**;
 - ularning bir qismida build darajasidagi tekshiruvni ham ishlatadi.
 
 Qamrov bir xil emas, chunki repolarning imkoniyatlari bir xil emas:
@@ -49,7 +48,6 @@ Qamrov bir xil emas, chunki repolarning imkoniyatlari bir xil emas:
 |---|---|---|
 | dashboard_weel_uz | ✅ | qayta generatsiya + typecheck + lint |
 | weel-admin | ✅ | qayta generatsiya + typecheck + lint |
-| weel-b2b | ✅ | qayta generatsiya + typecheck + lint + testlar |
 | weel-b2b-mobile | ✅ | `flutter analyze` + testlar |
 | weel.uz | ✅ | lint + build (tip generatsiyasi yo'q) |
 | weel-mobile | ✅ | — (pastga qarang) |
@@ -146,7 +144,7 @@ Yuqoridagi ikki qatlam faqat *backend* o'zgarganda ishlaydi. Lekin frontendlar
 alohida deploy bo'ladi: backend oldinga ketgan bo'lsa ham, frontendning o'z CI'si
 committed tiplarga qarab yashil qolaveradi va nomuvofiqlik faqat prodda ko'rinadi.
 
-Shuning uchun uchala web frontendning CI'sida `contract` degan job bor. U
+Shuning uchun ikkala web frontendning CI'sida `contract` degan job bor. U
 `weel-backend-v2` ni `main` dan checkout qilib, o'sha repodagi odatdagi
 generatsiya buyrug'ini ishlatadi va ikki narsani tekshiradi:
 
@@ -158,10 +156,10 @@ sekreti kerak (`Contents: Read-only`, `weel-backend-v2` ga). `deploy.yml` /
 `docker-publish.yml` CI'ni `workflow_call` orqali chaqirgani uchun ularda
 `secrets: inherit` bo'lishi shart — usiz token bo'sh ko'rinadi.
 
-Buning ishlashi generatsiyaning **deterministik** bo'lishiga bog'liq: `weel-b2b`
-da orval va swagger2openapi versiyalari `scripts/gen-api.sh` da qotirilgan, aks
-holda generator versiyasi ko'tarilishi 750 ta faylni o'zgartirib, "tiplar
-eskirgan" degan soxta xato berardi.
+Buning ishlashi generatsiyaning **deterministik** bo'lishiga bog'liq — generator
+versiyasi ko'tarilishi minglab faylni o'zgartirib, "tiplar eskirgan" degan soxta
+xato berishi mumkin, shuning uchun har bir frontendning generator versiyasi
+o'z `package.json`ida qotiriladi.
 
 ## Hozircha ishlamayotgan bosqich: smoke testlar
 
@@ -190,7 +188,6 @@ Har bir frontendda generatsiya buyrug'i:
 |---|---|
 | dashboard_weel_uz | `bun run gen:spec` |
 | weel-admin | `bun run generate:openapi-types` |
-| weel-b2b | `bun run gen:api` |
 | weel-b2b-mobile | generator yo'q — API yo'llari qo'lda yozilgan (pastga qarang) |
 
 ## weel-b2b-mobile haqida

@@ -186,7 +186,7 @@ jobs:
           GH_TOKEN: ${{ secrets.FRONTEND_REPOS_TOKEN }}
         run: |
           missing=""
-          for repo in dashboard_weel_uz weel-admin weel-b2b weel-b2b-mobile Flutter weel-mobile weel.uz; do
+          for repo in dashboard_weel_uz weel-admin weel-b2b-mobile Flutter weel-mobile weel.uz; do
             code=$(curl -s -o /dev/null -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "Accept: application/vnd.github+json" \
@@ -226,12 +226,6 @@ jobs:
           repository: weeldeveloment/weel-admin
           token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
           path: weel-admin
-
-      - uses: actions/checkout@v4
-        with:
-          repository: weeldeveloment/weel-b2b
-          token: ${{ secrets.FRONTEND_REPOS_TOKEN }}
-          path: weel-b2b
 
       - uses: actions/checkout@v4
         with:
@@ -282,10 +276,6 @@ jobs:
         working-directory: weel-admin
         run: bun install --frozen-lockfile && bun run generate:openapi-types && bunx tsc --noEmit
 
-      - name: weel-b2b — tiplarni qayta generatsiya + typecheck
-        working-directory: weel-b2b
-        run: bun install --frozen-lockfile && bun run gen:api && bunx tsc -b --noEmit
-
       # Typecheck alone misses unused variables, bad hook dependencies and
       # dead branches — and it never runs a single assertion. Lint and unit
       # tests were passing locally but nothing enforced them on the way in.
@@ -296,14 +286,6 @@ jobs:
       - name: weel-admin — lint
         working-directory: weel-admin
         run: bunx eslint .
-
-      - name: weel-b2b — lint
-        working-directory: weel-b2b
-        run: bunx eslint .
-
-      - name: weel-b2b — unit testlar
-        working-directory: weel-b2b
-        run: bunx vitest run
 
       - name: weel.uz — lint
         working-directory: weel.uz

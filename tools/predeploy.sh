@@ -69,7 +69,6 @@ contract_check() { python3 "$BACKEND_DIR/tools/api_contract_check.py"; }
 # ── Frontendlar ────────────────────────────────────────────────────
 # Muhim: avval tiplarni backenddan qayta generatsiya qilib, keyin typecheck.
 # Shunda backenddagi o'zgarish frontend kompilyatsiyasini yiqitadimi — ko'rinadi.
-fe_b2b() { (cd weel-b2b && bun run gen:api && npx tsc -b --noEmit && bun run build); }
 fe_admin() { (cd weel-admin && bun run generate:openapi-types && bun run build); }
 fe_dashboard() { (cd dashboard_weel_uz && bun run gen:spec && bun run typecheck && bun run test && bun run build); }
 fe_mobile() { (cd weel-b2b-mobile && flutter analyze && flutter test); }
@@ -84,7 +83,6 @@ case "$SCOPE" in
     step "API kontrakti: frontendlarni buzadigan o'zgarish" contract_check
     ;;&
   frontend|all)
-    step "weel-b2b: gen + typecheck + build" fe_b2b
     step "weel-admin: gen + build" fe_admin
     step "dashboard_weel_uz: gen + typecheck + test + build" fe_dashboard
     step "weel-b2b-mobile: analyze + test" fe_mobile

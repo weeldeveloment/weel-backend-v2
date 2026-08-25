@@ -36,7 +36,6 @@ BASELINE = BACKEND / "tools" / "api-baseline" / "main.json"
 FRONTENDS = [
     {"name": "dashboard_weel_uz", "dir": "dashboard_weel_uz/src", "ext": ("*.ts", "*.tsx"), "prefixes": ["", "/b2b/workspace"]},
     {"name": "weel-admin", "dir": "weel-admin/src", "ext": ("*.ts", "*.tsx"), "prefixes": [""]},
-    {"name": "weel-b2b", "dir": "weel-b2b/src", "ext": ("*.ts", "*.tsx"), "prefixes": [""]},
     {"name": "weel-b2b-mobile", "dir": "weel-b2b-mobile/lib", "ext": ("*.dart",), "prefixes": ["/b2b/workspace", ""]},
     # Bu uchtasi tiplarni backenddan generatsiya qilmaydi — yo'llar qo'lda
     # yozilgan, `baseURL` esa `/api` bilan tugaydi, shuning uchun kodda yo'llar
