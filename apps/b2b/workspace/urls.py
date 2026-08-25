@@ -11,16 +11,21 @@ from apps.b2b.workspace.access_views import (
     WorkspaceTrashView,
 )
 from apps.b2b.workspace.joining_views import (
+    AccountDeviceTokenView,
     AccountJoinRequestView,
     AccountMeView,
     AccountOpenWorkspaceView,
+    AccountOrgWorkspacesView,
+    AccountUsernameCheckView,
     AccountUsernameSuggestionView,
     AccountWorkspacesView,
     InvitePreviewView,
+    JoinCodeView,
     WorkspaceInviteListCreateView,
     WorkspaceInviteRevokeView,
     WorkspaceJoinRequestDecideView,
     WorkspaceJoinRequestListView,
+    WorkspaceSearchView,
 )
 from apps.b2b.workspace.secondment_views import (
     WorkspaceOrgPeopleView,
@@ -125,14 +130,34 @@ urlpatterns = [
         name="ws-account-username-suggestion",
     ),
     path(
+        "account/username-check/",
+        AccountUsernameCheckView.as_view(),
+        name="ws-account-username-check",
+    ),
+    path(
         "account/workspaces/",
         AccountWorkspacesView.as_view(),
         name="ws-account-workspaces",
     ),
     path(
+        "account/workspaces/search/",
+        WorkspaceSearchView.as_view(),
+        name="ws-account-workspace-search",
+    ),
+    path(
         "account/workspaces/<int:employee_id>/open/",
         AccountOpenWorkspaceView.as_view(),
         name="ws-account-open",
+    ),
+    path(
+        "account/orgs/<int:org_id>/workspaces/",
+        AccountOrgWorkspacesView.as_view(),
+        name="ws-account-org-workspaces",
+    ),
+    path(
+        "account/join-code/",
+        JoinCodeView.as_view(),
+        name="ws-account-join-code",
     ),
     path(
         "account/invites/<str:token>/",
@@ -143,6 +168,11 @@ urlpatterns = [
         "account/join-requests/",
         AccountJoinRequestView.as_view(),
         name="ws-account-join-request",
+    ),
+    path(
+        "account/device-token/",
+        AccountDeviceTokenView.as_view(),
+        name="ws-account-device-token",
     ),
 
     # The three doors into a workspace, from the workspace's side.

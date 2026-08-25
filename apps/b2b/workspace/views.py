@@ -25,7 +25,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 from apps.b2b.models import LeadSource, LeadStage, LeadStatus
-from apps.b2b.repository import get_company
+from apps.b2b.repository import get_company, get_org
 from apps.b2b.mail import repository as mail_repo
 from apps.b2b.workspace import push_text
 from apps.b2b.workspace.secondment import Module
@@ -363,11 +363,21 @@ def _me_payload(employee: dict, membership=None) -> dict:
     enforce, and every screen it drew past the grant would 403 on open.
     """
     company = get_company(employee["company_id"]) or {}
+    org = get_org(company.get("org_id")) or {}
     modules = list(membership.modules) if membership else None
     return {
         "id": employee["id"],
         "company_id": employee["company_id"],
         "company_name": company.get("name"),
+        # The organisation this workspace belongs to — see the naming note in
+        # `create_b2b_tables.py`. The profile screen's company switcher groups
+        # by this, not by `company_id`.
+        "org_id": company.get("org_id"),
+        "org_name": org.get("name") or company.get("name"),
+        # What the owner hands out so somebody can see this company's rooms
+        # and ask through one. Carried on every session because the screen
+        # that shows it is the invite sheet, which any admin may open.
+        "org_join_code": org.get("join_code"),
         "full_name": employee.get("full_name"),
         "position": employee.get("position"),
         "role": employee.get("role") or "employee",

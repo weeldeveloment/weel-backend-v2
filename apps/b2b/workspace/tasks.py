@@ -18,8 +18,10 @@ from core.celery import app
 from django.utils import timezone
 
 from apps.b2b.mail.repository import create_notification
+from apps.b2b.workspace import accounts
 from apps.b2b.workspace import push_text
 from apps.b2b.workspace import repository as repo
+from apps.b2b.workspace.joining_repository import JoinStatus
 
 logger = logging.getLogger(__name__)
 
@@ -315,3 +317,74 @@ def expire_secondments() -> int:
     if expired:
         logger.info("Secondments ended: count=%s", len(expired))
     return len(expired)
+
+
+def _push_account(token: str | None, *, title: str, body: str, data: dict[str, str]) -> None:
+    """One message to somebody who is not in a workspace yet.
+
+    A separate path from [_push] because the token comes from a different
+    table and the dead-token cleanup has to write back to that same table —
+    handing Firebase the employee cleanup here would leave a dead account
+    token in place and clear an unrelated employee's instead.
+    """
+    if not token:
+        return
+    try:
+        from apps.notification.service import FCMService, b2b_firebase_app
+
+        FCMService.send_to_tokens(
+            tokens=[token],
+            title=title,
+            body=body,
+            data=data,
+            app=b2b_firebase_app(),
+            deactivate_invalid=accounts.clear_account_fcm_tokens,
+        )
+    except Exception:  # noqa: BLE001 - nothing else depends on this landing
+        logger.exception("Account push failed for %s", data)
+
+
+@app.task(name="b2b.workspace.notify_join_request_decided")
+def notify_join_request_decided(request_id: int) -> int:
+    """A join request has been answered — tell the person who sent it.
+
+    This is the one notification in the workspace app that cannot go through
+    the feed. A feed row is written against an employee, and the asker has no
+    employee row: on a refusal they never will, and on an acceptance the row
+    is seconds old and the app has not opened the workspace it belongs to. So
+    it is a push and nothing else, addressed to the account.
+
+    Nobody else is told. The workspace already knows what it just decided.
+    """
+    from apps.b2b.workspace import joining_repository as jrepo
+
+    ask = jrepo.get_join_request_with_company(request_id)
+    if not ask or ask["status"] == JoinStatus.PENDING:
+        # Still open, or gone. Neither is an answer to report.
+        return 0
+
+    company_name = ask.get("company_name") or ""
+    account = accounts.get_account(ask["account_id"])
+    if not account:
+        return 0
+
+    accepted = ask["status"] == JoinStatus.ACCEPTED
+    if accepted:
+        title = push_text.JOIN_ACCEPTED_TITLE
+        body = push_text.join_accepted_body(company_name)
+    else:
+        title = push_text.JOIN_DECLINED_TITLE
+        body = push_text.join_declined_body(company_name, ask.get("decline_reason"))
+
+    _push_account(
+        account.get("fcm_token"),
+        title=title,
+        body=body,
+        data={
+            "type": "join_request",
+            "request_id": str(request_id),
+            "status": str(ask["status"]),
+            "company_id": str(ask["company_id"]),
+        },
+    )
+    return 1

@@ -1115,6 +1115,20 @@ def create_thread(
     return get_thread_for_member(thread["id"], company_id, created_by)
 
 
+def add_thread_member(thread_id: int, employee_id: int) -> None:
+    """Put somebody in a conversation.
+
+    Idempotent: a link can be followed twice, and the second time should be a
+    no-op rather than a duplicate row or an error.
+    """
+    now = timezone.now()
+    execute(
+        f"INSERT INTO {B2B_CHAT_MEMBER_TABLE} (thread_id, employee_id, created_at, updated_at) "
+        f"VALUES (%s, %s, %s, %s) ON CONFLICT (thread_id, employee_id) DO NOTHING",
+        [thread_id, employee_id, now, now],
+    )
+
+
 def list_messages(
     thread_id: int,
     *,

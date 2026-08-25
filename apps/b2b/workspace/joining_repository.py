@@ -53,6 +53,7 @@ def create_invite(
     modules: Sequence[str] | None,
     permissions: Sequence[str] | None,
     days: int | None = None,
+    thread_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Mint a link.
 
@@ -67,21 +68,34 @@ def create_invite(
     window = min(max(days or DEFAULT_INVITE_DAYS, 1), MAX_INVITE_DAYS)
     now = timezone.now()
     token = secrets.token_urlsafe(32)
+    # A link to one conversation opens nothing else, so it carries no modules
+    # and no permissions whatever was asked for — the flag is what the accept
+    # path reads, and leaving access on the row would be a second answer to
+    # the same question.
+    is_chat_only = thread_id is not None
     execute(
         f"""
         INSERT INTO {B2B_INVITE_TABLE}
             (company_id, token, role, modules, permissions, expires_at,
-             created_by, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             created_by, thread_id, is_chat_only, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         [
             company_id,
             token,
             Role.clean(role),
-            json.dumps(Module.clean(modules)) if modules is not None else None,
-            json.dumps(Permission.clean(permissions)) if permissions is not None else None,
+            None if is_chat_only
+            else (json.dumps(Module.clean(modules)) if modules is not None else None),
+            None if is_chat_only
+            else (
+                json.dumps(Permission.clean(permissions))
+                if permissions is not None
+                else None
+            ),
             now + timedelta(days=window),
             created_by,
+            thread_id,
+            is_chat_only,
             now,
             now,
         ],
@@ -93,10 +107,11 @@ def get_invite_by_token(token: str) -> dict[str, Any] | None:
     return fetch_one(
         f"""
         SELECT i.*, c.name AS company_name, c.slug AS company_slug,
-               e.full_name AS created_by_name
+               e.full_name AS created_by_name, t.group_name AS thread_title
           FROM {B2B_INVITE_TABLE} i
           JOIN {B2B_COMPANY_TABLE} c ON c.id = i.company_id
           LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = i.created_by
+          LEFT JOIN b2b_chat_thread t ON t.id = i.thread_id
          WHERE i.token = %s
         """,
         [token],
@@ -107,10 +122,12 @@ def list_invites(company_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
     return fetch_all(
         f"""
         SELECT i.*, e.full_name AS created_by_name,
-               a.username AS accepted_by_username
+               a.username AS accepted_by_username,
+               t.group_name AS thread_title
           FROM {B2B_INVITE_TABLE} i
           LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = i.created_by
           LEFT JOIN b2b_account a ON a.id = i.accepted_by
+          LEFT JOIN b2b_chat_thread t ON t.id = i.thread_id
          WHERE i.company_id = %s
          ORDER BY i.created_at DESC
          LIMIT %s
@@ -166,6 +183,62 @@ def mark_invite_accepted(invite_id: int, account_id: int) -> int:
 
 # ─── Asking to join ───────────────────────────────────────────────────────────
 
+#: How many workspaces one search may name. Long enough that a common word
+#: still shows the one being looked for, short enough that the endpoint is
+#: never a way to enumerate every workspace on the platform.
+SEARCH_LIMIT = 20
+
+
+def search_companies(
+    query: str, *, account_id: int | None = None, limit: int = SEARCH_LIMIT
+) -> list[dict[str, Any]]:
+    """Workspaces somebody could ask to join, by name or handle.
+
+    Deliberately narrow. This answers a search box on a screen for people who
+    belong to nothing yet, so it may not become a directory: a blank query
+    returns nothing rather than everything, and the rows carry only what the
+    card shows — the name, the handle, the company above it, and how many
+    people are already there. No ids of members, no contact details, nothing
+    that is inside the workspace.
+
+    Workspaces the asker is already on are left out. Offering to ask for a
+    seat somebody already holds is offering a button that can only answer 409.
+    """
+    text = (query or "").strip().lstrip("@")
+    if len(text) < 2:
+        # One letter matches most of the table. The screen says what to type.
+        return []
+    pattern = f"%{text.lower()}%"
+    return fetch_all(
+        f"""
+        SELECT c.id,
+               c.name,
+               c.slug,
+               c.icon,
+               o.name AS org_name,
+               (SELECT COUNT(*) FROM {B2B_EMPLOYEE_TABLE} e
+                 WHERE e.company_id = c.id
+                   AND e.is_active = TRUE
+                   -- A chat-only guest is not on the roster; counting them
+                   -- would tell somebody the team is bigger than it is.
+                   AND e.is_chat_only = FALSE) AS member_count
+          FROM {B2B_COMPANY_TABLE} c
+          LEFT JOIN b2b_org o ON o.id = c.org_id
+         WHERE c.is_active = TRUE
+           AND (LOWER(c.name) LIKE %s OR LOWER(c.slug) LIKE %s)
+           AND NOT EXISTS (
+                SELECT 1 FROM {B2B_EMPLOYEE_TABLE} me
+                 WHERE me.company_id = c.id
+                   AND me.is_active = TRUE
+                   AND me.account_id = %s
+               )
+         ORDER BY (LOWER(c.slug) = %s) DESC, c.name ASC
+         LIMIT %s
+        """,
+        [pattern, pattern, account_id, text.lower(), limit],
+    )
+
+
 def find_company_by_slug(slug: str) -> dict[str, Any] | None:
     return fetch_one(
         f"SELECT id, name, slug FROM {B2B_COMPANY_TABLE} "
@@ -216,6 +289,24 @@ def get_join_request(request_id: int) -> dict[str, Any] | None:
     )
 
 
+def get_join_request_with_company(request_id: int) -> dict[str, Any] | None:
+    """The request, plus the name of the workspace it was sent to.
+
+    What the notification needs and [get_join_request] does not carry: a push
+    that says "your request was accepted" without naming the team is unhelpful
+    to anybody who asked more than one.
+    """
+    return fetch_one(
+        f"""
+        SELECT j.*, c.name AS company_name
+          FROM {B2B_JOIN_REQUEST_TABLE} j
+          JOIN {B2B_COMPANY_TABLE} c ON c.id = j.company_id
+         WHERE j.id = %s
+        """,
+        [request_id],
+    )
+
+
 def list_join_requests(company_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
     return fetch_all(
         f"""
@@ -227,6 +318,44 @@ def list_join_requests(company_id: int, *, limit: int = 50) -> list[dict[str, An
          LIMIT %s
         """,
         [company_id, limit],
+    )
+
+
+def list_account_join_requests(
+    account_id: int, *, limit: int = 20
+) -> list[dict[str, Any]]:
+    """What this account has asked for, and what came of it.
+
+    The other direction from [list_join_requests], which is a workspace
+    looking at who wants in. This is the asker looking at their own outbox —
+    the screen they land on after registering says nothing at all otherwise,
+    and somebody who has asked and heard nothing cannot tell a request that
+    was never sent from one nobody has answered yet.
+
+    Answered rows are kept in the list rather than filtered to pending: being
+    turned down is an answer, and a request that simply vanished reads as one
+    that failed to send.
+    """
+    return fetch_all(
+        f"""
+        SELECT j.id,
+               j.company_id,
+               j.status,
+               j.decline_reason,
+               j.granted_role,
+               j.created_at,
+               j.decided_at,
+               c.name AS company_name,
+               c.slug AS company_slug,
+               o.name AS org_name
+          FROM {B2B_JOIN_REQUEST_TABLE} j
+          JOIN {B2B_COMPANY_TABLE} c ON c.id = j.company_id
+          LEFT JOIN b2b_org o ON o.id = c.org_id
+         WHERE j.account_id = %s
+         ORDER BY j.created_at DESC
+         LIMIT %s
+        """,
+        [account_id, limit],
     )
 
 

@@ -65,6 +65,14 @@ def get_company(company_id: int) -> dict[str, Any] | None:
     return fetch_one(f"SELECT * FROM {B2B_COMPANY_TABLE} WHERE id = %s AND is_active = TRUE", [company_id])
 
 
+def get_org(org_id: int | None) -> dict[str, Any] | None:
+    """The company (product sense) a workspace belongs to — see the note in
+    `create_b2b_tables.py` on the `b2b_org` / `b2b_company` naming split."""
+    if org_id is None:
+        return None
+    return fetch_one("SELECT * FROM b2b_org WHERE id = %s", [org_id])
+
+
 def update_company(company_id: int, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return get_company(company_id)

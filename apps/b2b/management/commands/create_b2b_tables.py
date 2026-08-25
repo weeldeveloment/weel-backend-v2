@@ -1180,6 +1180,55 @@ class Command(BaseCommand):
             ALTER TABLE b2b_company ADD COLUMN IF NOT EXISTS org_id
                 BIGINT REFERENCES b2b_org(id) ON DELETE SET NULL;
         """)
+        # The company's STIR / INN, asked for on the "Kompaniya yaratish"
+        # screen and optional there. Stored as text rather than a number: it
+        # is an identifier that may carry leading zeros, and nothing here does
+        # arithmetic on it.
+        cursor.execute("""
+            ALTER TABLE b2b_org ADD COLUMN IF NOT EXISTS tax_id VARCHAR(20);
+        """)
+        # The company's join code — "W-8932" — which somebody types to be shown
+        # the workspaces inside it.
+        #
+        # Not the same object as a workspace invite link and deliberately so.
+        # A link is the workspace deciding in advance: it names one room, one
+        # role and one set of modules, and taking it is immediate. A company
+        # code decides nothing. It says only "these are our rooms" and every
+        # door behind it still has to be asked through, which is why it is
+        # safe to print on an onboarding sheet or say out loud to a new hire.
+        #
+        # Short and typable rather than a long random token, because it is
+        # meant to be read off a screen and typed on a phone.
+        cursor.execute("""
+            ALTER TABLE b2b_org ADD COLUMN IF NOT EXISTS join_code VARCHAR(16);
+        """)
+        # Companies that existed before the code did, filled in before the
+        # unique index goes on so a collision cannot fail the deploy.
+        #
+        # `id * 7919 mod 90000` is a bijection for every id this will ever see:
+        # 7919 is prime and shares no factor with 90000, so no two ids below
+        # 90000 land on the same code. Past that the index below is the
+        # authority and `_free_join_code` is what issues new ones.
+        cursor.execute("""
+            UPDATE b2b_org
+               SET join_code = 'W-' || LPAD(((id * 7919) %% 90000 + 10000)::text, 5, '0')
+             WHERE join_code IS NULL;
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS b2b_org_join_code_idx
+            ON b2b_org (UPPER(join_code)) WHERE join_code IS NOT NULL;
+        """)
+        # What the "Yangi workspace yaratish" screen collects beyond the name:
+        # a blurb and one of a fixed set of icon keys the app draws its own
+        # colour for — see `WorkspaceIcon` in the Flutter app. Free text, not
+        # an enum column: the set of icons is the client's to grow without a
+        # migration on this side.
+        cursor.execute("""
+            ALTER TABLE b2b_company ADD COLUMN IF NOT EXISTS description TEXT;
+        """)
+        cursor.execute("""
+            ALTER TABLE b2b_company ADD COLUMN IF NOT EXISTS icon VARCHAR(20);
+        """)
         # Every workspace that has no organisation yet gets one of its own,
         # named after it. That is what keeps this change invisible: an org of
         # one workspace can only ever see itself, which is precisely the
@@ -1365,6 +1414,18 @@ class Command(BaseCommand):
             CREATE UNIQUE INDEX IF NOT EXISTS b2b_account_username_idx
             ON b2b_account (LOWER(username)) WHERE username IS NOT NULL;
         """)
+        # This phone, addressable before it has a seat anywhere.
+        #
+        # `b2b_employee.fcm_token` cannot answer for somebody who has asked to
+        # join and is waiting: there is no employee row until the request is
+        # accepted, which is exactly the moment they need to be told. So the
+        # account carries its own token, registered as soon as registration
+        # finishes, and the two live side by side — the employee one addresses
+        # a person *in* a workspace, this one addresses a person who is not in
+        # one yet.
+        cursor.execute("""
+            ALTER TABLE b2b_account ADD COLUMN IF NOT EXISTS fcm_token VARCHAR(500);
+        """)
         cursor.execute("""
             ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS account_id
                 BIGINT REFERENCES b2b_account(id) ON DELETE SET NULL;
@@ -1452,6 +1513,18 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_workspace_invite_company_idx "
             "ON b2b_workspace_invite (company_id, created_at DESC);"
         )
+        # An invite to one conversation rather than to the workspace. Same
+        # table, because it is the same object — a token, an expiry, a revoke
+        # and one accept — and splitting it would mean two of every query that
+        # answers "is this link still good?".
+        cursor.execute("""
+            ALTER TABLE b2b_workspace_invite ADD COLUMN IF NOT EXISTS thread_id
+                BIGINT REFERENCES b2b_chat_thread(id) ON DELETE CASCADE;
+        """)
+        cursor.execute("""
+            ALTER TABLE b2b_workspace_invite ADD COLUMN IF NOT EXISTS is_chat_only
+                BOOLEAN NOT NULL DEFAULT FALSE;
+        """)
         self.stdout.write("  Created b2b_workspace_invite")
 
         # Somebody asking to be let in, having found the workspace by its

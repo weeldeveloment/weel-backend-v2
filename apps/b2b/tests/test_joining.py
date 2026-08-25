@@ -27,12 +27,16 @@ from apps.b2b.workspace.accounts import suggest_username
 from apps.b2b.workspace.authentication import WorkspaceAccount, WorkspaceUser
 from apps.b2b.workspace.joining_repository import JoinStatus, invite_problem
 from apps.b2b.workspace.joining_views import (
+    AccountDeviceTokenView,
     AccountJoinRequestView,
     AccountMeView,
     AccountOpenWorkspaceView,
+    AccountOrgWorkspacesView,
     InvitePreviewView,
+    JoinCodeView,
     WorkspaceInviteListCreateView,
     WorkspaceJoinRequestDecideView,
+    WorkspaceSearchView,
 )
 
 COMPANY = 10
@@ -381,6 +385,67 @@ def test_somebody_already_in_the_workspace_is_not_added_twice():
     join.assert_not_called()
 
 
+# ─── Finding a workspace to ask ───────────────────────────────────────────────
+
+def test_a_search_too_short_to_narrow_anything_returns_nothing():
+    """One letter matches most of the table, so it is refused before the query
+    runs — this endpoint may not become a directory of every workspace."""
+    from apps.b2b.workspace.joining_repository import search_companies
+
+    with patch("apps.b2b.workspace.joining_repository.fetch_all") as fetch:
+        assert search_companies("w", account_id=1) == []
+        assert search_companies("", account_id=1) == []
+        assert search_companies("@a", account_id=1) == []
+
+    fetch.assert_not_called()
+
+
+def test_a_search_carries_only_what_the_card_shows():
+    row = {
+        "id": 7,
+        "name": "Weel HQ",
+        "slug": "weel_hq",
+        "icon": "chart",
+        "org_name": "Weel Tech",
+        "member_count": 12,
+        # Anything the query happens to select beyond the card is not a reason
+        # to hand it out.
+        "owner_phone": "+998901112233",
+    }
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.search_companies", return_value=[row]
+    ):
+        response = _call(
+            WorkspaceSearchView,
+            factory.get("/account/workspaces/search/", {"q": "weel"}),
+            _account(),
+        )
+
+    assert response.status_code == 200
+    assert response.data["results"] == [{
+        "id": 7,
+        "name": "Weel HQ",
+        "slug": "weel_hq",
+        "icon": "chart",
+        "org_name": "Weel Tech",
+        "member_count": 12,
+    }]
+
+
+def test_a_search_is_scoped_to_the_account_asking():
+    """So workspaces they are already on can be left out of the answer."""
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.search_companies", return_value=[]
+    ) as search:
+        _call(
+            WorkspaceSearchView,
+            factory.get("/account/workspaces/search/", {"q": "weel"}),
+            _account(id=42),
+        )
+
+    search.assert_called_once_with("weel", account_id=42)
+
+
 # ─── Asking to join ───────────────────────────────────────────────────────────
 
 def test_a_workspace_nobody_can_find_cannot_be_asked():
@@ -513,6 +578,64 @@ def test_opening_one_you_do_belong_to_hands_back_a_workspace_session():
     assert response.data["company_id"] == COMPANY
 
 
+def test_an_orgs_workspaces_are_closed_to_somebody_outside_it():
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.org_ids_for_account",
+        return_value=[1, 2],
+    ):
+        response = _call(
+            AccountOrgWorkspacesView,
+            factory.get("/account/orgs/9/workspaces/"),
+            _account(),
+            org_id=9,
+        )
+
+    assert response.status_code == 403
+
+
+def test_an_orgs_workspaces_list_the_seat_you_hold_in_each():
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.org_ids_for_account",
+        return_value=[1],
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.list_org_workspaces",
+        return_value=[
+            {
+                "id": 10,
+                "name": "Sotuv bo’limi",
+                "description": None,
+                "icon": "chart",
+                "member_count": 12,
+                "admin_name": "Aziz Karimov",
+            },
+            {
+                "id": 11,
+                "name": "HR bo’limi",
+                "description": None,
+                "icon": "people",
+                "member_count": 5,
+                "admin_name": "Dilnoza Rahimova",
+            },
+        ],
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.list_memberships",
+        # Only a member of the first of the two.
+        return_value=[{"company_id": 10, "employee_id": 7}],
+    ):
+        response = _call(
+            AccountOrgWorkspacesView,
+            factory.get("/account/orgs/1/workspaces/"),
+            _account(),
+            org_id=1,
+        )
+
+    assert response.status_code == 200
+    results = {row["id"]: row for row in response.data["results"]}
+    assert results[10]["employee_id"] == 7
+    assert results[10]["member_count"] == 12
+    assert results[11]["employee_id"] is None
+
+
 def test_an_account_session_cannot_reach_a_workspace_endpoint():
     """The two token types must never be interchangeable: an account id read
     as an employee id is a different table with the same integers."""
@@ -525,3 +648,246 @@ def test_an_account_session_cannot_reach_a_workspace_endpoint():
 
 def test_the_status_names_are_the_ones_stored():
     assert JoinStatus.CHOICES == ["pending", "accepted", "declined"]
+
+
+# ─── Hearing back ─────────────────────────────────────────────────────────────
+
+def test_the_asker_can_read_their_own_outbox():
+    """Somebody who has asked and heard nothing cannot otherwise tell a request
+    that was never sent from one nobody has answered."""
+    rows = [
+        {
+            "id": 5,
+            "company_id": 10,
+            "company_name": "Weel HQ",
+            "company_slug": "weel_hq",
+            "org_name": "Weel Tech",
+            "status": JoinStatus.ACCEPTED,
+            "decline_reason": None,
+            "granted_role": Role.MANAGER,
+            "created_at": None,
+            "decided_at": None,
+        }
+    ]
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.list_account_join_requests",
+        return_value=rows,
+    ) as listed:
+        response = _call(
+            AccountJoinRequestView,
+            factory.get("/account/join-requests/"),
+            _account(id=7),
+        )
+
+    listed.assert_called_once_with(7)
+    assert response.status_code == 200
+    row = response.data["results"][0]
+    assert row["status"] == JoinStatus.ACCEPTED
+    # "You are in" without saying as what is half an answer.
+    assert row["granted_role_label"] == Role.label(Role.MANAGER)
+
+
+def test_a_pending_request_names_no_role_it_has_not_been_given():
+    rows = [{
+        "id": 5,
+        "company_id": 10,
+        "company_name": "Weel HQ",
+        "company_slug": "weel_hq",
+        "org_name": None,
+        "status": JoinStatus.PENDING,
+        "decline_reason": None,
+        "granted_role": None,
+        "created_at": None,
+        "decided_at": None,
+    }]
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.list_account_join_requests",
+        return_value=rows,
+    ):
+        response = _call(
+            AccountJoinRequestView, factory.get("/account/join-requests/"), _account()
+        )
+
+    assert response.data["results"][0]["granted_role_label"] is None
+
+
+def test_this_phone_is_addressable_before_it_belongs_anywhere():
+    """The roster's token cannot reach somebody waiting on a request — they
+    are not on a roster yet, which is the whole point of the wait."""
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.set_account_fcm_token"
+    ) as store:
+        response = _call(
+            AccountDeviceTokenView,
+            factory.post("/account/device-token/", {"fcm_token": " abc "}, format="json"),
+            _account(id=7),
+        )
+
+    assert response.status_code == 200
+    store.assert_called_once_with(7, "abc")
+
+
+def test_signing_out_clears_the_account_token_rather_than_storing_blank():
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.set_account_fcm_token"
+    ) as store:
+        _call(
+            AccountDeviceTokenView,
+            factory.post("/account/device-token/", {"fcm_token": ""}, format="json"),
+            _account(id=7),
+        )
+
+    store.assert_called_once_with(7, None)
+
+
+def test_answering_a_request_tells_the_person_who_sent_it():
+    ask = {"id": 3, "company_id": COMPANY, "account_id": 9, "status": JoinStatus.PENDING}
+    with (
+        _granting(Permission.EMPLOYEE_INVITE),
+        patch("apps.b2b.workspace.joining_views.jrepo.get_join_request", return_value=ask),
+        patch(
+            "apps.b2b.workspace.joining_views.jrepo.close_join_request", return_value=1
+        ),
+        patch("apps.b2b.workspace.joining_views._queue_join_decision") as queued,
+    ):
+        response = _call(
+            WorkspaceJoinRequestDecideView,
+            factory.post("/join-requests/3/decline/", {}, format="json"),
+            _admin(),
+            request_id=3,
+            action="decline",
+        )
+
+    assert response.status_code == 200
+    queued.assert_called_once_with(3)
+
+
+def test_a_broker_that_is_down_does_not_unanswer_the_request():
+    """The decision is already stored; the push is the fast path, not the only
+    one."""
+    from apps.b2b.workspace.joining_views import _queue_join_decision
+
+    with patch(
+        "apps.b2b.workspace.tasks.notify_join_request_decided"
+    ) as task:
+        task.delay.side_effect = RuntimeError("broker down")
+        _queue_join_decision(3)  # must not raise
+
+
+def test_a_request_still_open_is_not_announced_as_answered():
+    from apps.b2b.workspace.tasks import notify_join_request_decided
+
+    with patch(
+        "apps.b2b.workspace.joining_repository.get_join_request_with_company",
+        return_value={"id": 3, "status": JoinStatus.PENDING},
+    ):
+        assert notify_join_request_decided(3) == 0
+
+
+# ─── One field, two things it can hold ────────────────────────────────────────
+
+def _resolve(code: str, account=None):
+    return _call(
+        JoinCodeView,
+        factory.get("/account/join-code/", {"code": code}),
+        account or _account(),
+    )
+
+
+def test_a_link_resolves_to_the_offer_it_carries():
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.get_invite_by_token",
+        return_value=_invite(),
+    ):
+        response = _resolve("https://weel.uz/invite/abc123")
+
+    assert response.status_code == 200
+    assert response.data["kind"] == "invite"
+    assert response.data["invite"]["is_usable"] is True
+
+
+def test_a_dead_link_still_resolves_as_a_link_and_says_why():
+    """Answering 404 would send somebody looking for a company code that does
+    not exist, instead of telling them their link has expired."""
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.get_invite_by_token",
+        return_value=_invite(expires_at=timezone.now() - timedelta(days=1)),
+    ):
+        response = _resolve("abc123")
+
+    assert response.status_code == 200
+    assert response.data["kind"] == "invite"
+    assert response.data["invite"]["is_usable"] is False
+    assert response.data["invite"]["problem"] == "expired"
+
+
+def test_a_company_code_resolves_to_the_rooms_inside_it():
+    rooms = [{
+        "id": 3,
+        "name": "Dizayn jamoasi",
+        "slug": "dizayn",
+        "icon": None,
+        "member_count": 4,
+        "is_member": False,
+        "has_pending_request": True,
+    }]
+    with (
+        patch(
+            "apps.b2b.workspace.joining_views.jrepo.get_invite_by_token",
+            return_value=None,
+        ),
+        patch(
+            "apps.b2b.workspace.joining_views.accounts.find_org_by_join_code",
+            return_value={"id": 1, "name": "Weel Tech", "join_code": "W-8932"},
+        ),
+        patch(
+            "apps.b2b.workspace.joining_views.accounts.org_workspaces_for_joining",
+            return_value=rooms,
+        ),
+    ):
+        response = _resolve("W-8932")
+
+    assert response.status_code == 200
+    assert response.data["kind"] == "company"
+    assert response.data["company"]["name"] == "Weel Tech"
+    room = response.data["workspaces"][0]
+    # Marked rather than hidden: somebody who has already asked should be told
+    # so, not shown the same button and answered with a 409.
+    assert room["has_pending_request"] is True
+    assert room["is_member"] is False
+
+
+def test_a_string_that_is_neither_says_only_that():
+    """Guessing at five characters must not learn that a code exists but its
+    company is closed."""
+    with (
+        patch(
+            "apps.b2b.workspace.joining_views.jrepo.get_invite_by_token",
+            return_value=None,
+        ),
+        patch(
+            "apps.b2b.workspace.joining_views.accounts.find_org_by_join_code",
+            return_value=None,
+        ),
+    ):
+        response = _resolve("nonsense")
+
+    assert response.status_code == 404
+
+
+def test_a_code_is_the_same_code_however_it_was_typed():
+    from apps.b2b.workspace.accounts import normalise_join_code
+
+    # Pasted whole, lower case, spaced, and with the prefix left off.
+    for typed in ["W-8932", "w8932", "w-89 32", "8932", "weel.app/join/W-8932"]:
+        assert normalise_join_code(typed) == "W-8932"
+
+
+def test_an_empty_code_is_refused_before_anything_is_looked_up():
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.get_invite_by_token"
+    ) as invite:
+        response = _resolve("   ")
+
+    assert response.status_code == 400
+    invite.assert_not_called()

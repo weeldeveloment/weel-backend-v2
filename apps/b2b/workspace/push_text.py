@@ -48,3 +48,26 @@ SECONDMENT_TITLE = "Yangi so’rov"
 # The answer, back to whoever asked.
 SECONDMENT_ACCEPTED_TITLE = "So’rov qabul qilindi"
 SECONDMENT_DECLINED_TITLE = "So’rov rad etildi"
+
+# Somebody asked to join a workspace, and it has been answered. Addressed to
+# the asker, who is not in the workspace yet and has no other way of finding
+# out — the screen they are looking at has nothing on it but their own
+# request.
+JOIN_ACCEPTED_TITLE = "So’rovingiz qabul qilindi"
+JOIN_DECLINED_TITLE = "So’rovingiz rad etildi"
+
+
+def join_accepted_body(company_name: str) -> str:
+    return f"«{company_name}» jamoasiga qo’shildingiz. Ilovaga kiring."
+
+
+def join_declined_body(company_name: str, reason: str | None = None) -> str:
+    """Turned down, and why when the workspace said why.
+
+    The reason is carried through rather than softened away: somebody who is
+    told only "rad etildi" asks again, and the second request is refused for
+    the same unstated reason as the first.
+    """
+    text = f"«{company_name}» jamoasi so’rovingizni rad etdi."
+    reason = (reason or "").strip()
+    return f"{text} Sabab: {reason}" if reason else text
