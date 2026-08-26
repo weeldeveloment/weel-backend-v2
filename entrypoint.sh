@@ -50,6 +50,13 @@ python manage.py migrate --noinput
 
 python manage.py create_b2b_tables
 
+# apps.hotels is raw-SQL too (no Django migrations), so its hotelios_* tables
+# — including hotelios_hotel, which every /api/hotels/ request queries — only
+# exist if this runs. It never had been wired in here, so every deploy left
+# production without the tables and every hotel endpoint 500'd on
+# "relation does not exist".
+python manage.py create_hotels_tables
+
 # Non-fatal, but never silent: a failure here means unstyled admin pages, and
 # hiding it behind `2>/dev/null || true` is why that goes unnoticed for weeks.
 if ! python manage.py collectstatic --noinput; then
