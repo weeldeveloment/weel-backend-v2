@@ -18613,6 +18613,29 @@
     }
    ]
   },
+  "/hotels/{hotel_id}/calendar/": {
+   "get": {
+    "description": "GET /api/hotels/{hotel_id}/calendar/?year=&month=&adults= — a\nfree/occupied dot for every day of one month, for one hotel.\n\nHotelios has no per-day availability endpoint, only `search` for a single\ndate range, so this is one 1-night `search` call per day of the month —\nrun a handful at a time, but still dozens of round trips to Hotelios for\na 30-day month. Slow by nature: call it once when a booking drawer's\ncalendar actually opens, never on every keystroke or month flip.",
+    "operationId": "hotels_calendar_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "tags": [
+     "api"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "hotel_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
   "/logs/frontend/": {
    "parameters": [],
    "post": {
