@@ -112,6 +112,12 @@ _DEFAULT_PROD_ORIGINS = (
     "https://business.weel.uz",
     "https://admin.weel.uz",
     "https://partners.weel.uz",
+    # weel-booking.uz is already in CSRF_TRUSTED_ORIGINS below but was never
+    # added here, so django-cors-headers dropped Access-Control-Allow-Origin
+    # from every response and the site's browser fetches failed as a CORS
+    # NetworkError even though the server itself answered 200.
+    "https://weel-booking.uz",
+    "https://www.weel-booking.uz",
 )
 _DEFAULT_DEV_ORIGINS = (
     "http://localhost:3000",
