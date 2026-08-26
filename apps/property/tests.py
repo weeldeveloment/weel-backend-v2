@@ -22,13 +22,9 @@ from property.apartment_repository import (
 from property.apartment_serializers import ApartmentAdminUpdateSerializer, ApartmentCreateSerializer, ApartmentListSerializer, ApartmentDetailSerializer, _parse_int_maybe
 from property.cottage_serializers import CottageCreateSerializer, CottageListSerializer, CottageDetailSerializer
 from property.cottage_serializers import CottageAdminUpdateSerializer
-from property.hotel_serializers import HotelAdminUpdateSerializer, HotelCardSerializer as PropertyHotelCardSerializer
-from property.hotel_repository import create_admin_hotel
-from hotels.serializers import HotelCardSerializer as PublicHotelCardSerializer
 from property.views import (
     ApartmentPropertyListCreateView,
     CottagePropertyListCreateView,
-    HotelPropertyListView,
     PropertyListCreateView,
     RegionPropertyListView,
     UnifiedRecommendationsListView,
@@ -55,80 +51,6 @@ class PropertyRepositoryHelpersTests(SimpleTestCase):
         self.assertEqual(len(rows), 3)
         self.assertIn(str(APARTMENT_TYPE_GUID), {str(row["guid"]) for row in rows})
         self.assertIn(str(COTTAGE_TYPE_GUID), {str(row["guid"]) for row in rows})
-
-    @patch("property.hotel_repository.list_hotel_organizations")
-    @patch("property.hotel_repository._fetch_hotel_rows_for_schema")
-    def test_list_hotels_filters_testing_rows(self, mock_fetch_rows, mock_orgs):
-        from property.hotel_repository import list_hotels
-
-        mock_orgs.return_value = [{"id": 1, "name": "Org", "slug": "org", "schema_name": "tenant1"}]
-        mock_fetch_rows.return_value = [
-            {"id": 1, "tenant_schema": "tenant1", "is_testing": True, "name": "Test Hotel"},
-            {"id": 2, "tenant_schema": "tenant1", "is_testing": False, "name": "Live Hotel"},
-        ]
-
-        testing_rows = list_hotels(testing_only=True)
-        live_rows = list_hotels(testing_only=False)
-
-        self.assertEqual(len(testing_rows), 1)
-        self.assertTrue(testing_rows[0]["is_testing"])
-        self.assertEqual(len(live_rows), 1)
-        self.assertFalse(live_rows[0]["is_testing"])
-
-    @patch("property.hotel_repository.get_admin_hotel", return_value={"guid": "tenant1:10"})
-    @patch("property.hotel_repository._run_in_schema")
-    @patch("property.hotel_repository.get_organization_by_schema")
-    def test_create_admin_hotel_uses_schema_organization_id(
-        self,
-        mock_get_org,
-        mock_run_in_schema,
-        mock_get_admin_hotel,
-    ):
-        captured: dict[str, object] = {}
-
-        def run_in_schema(schema_name, callback):
-            self.assertEqual(schema_name, "tenant1")
-
-            class CursorStub:
-                def execute(self, _sql, params):
-                    captured["params"] = params
-
-                def fetchone(self):
-                    # The insert RETURNINGs (id, guid).
-                    return [10, "tenant1:10"]
-
-            class CursorContext:
-                def __enter__(self_inner):
-                    return CursorStub()
-
-                def __exit__(self_inner, exc_type, exc, tb):
-                    return False
-
-            class ConnectionStub:
-                def cursor(self_inner):
-                    return CursorContext()
-
-            with patch("property.hotel_repository.connection", ConnectionStub()):
-                return callback()
-
-        mock_get_org.return_value = {"id": 5, "schema_name": "tenant1"}
-        mock_run_in_schema.side_effect = run_in_schema
-
-        result = create_admin_hotel(
-            schema_name="tenant1",
-            values={
-                "name": "Hotel A",
-                "organization_id": 999,
-            },
-        )
-
-        self.assertEqual(result, {"guid": "tenant1:10"})
-        # The point of the test: organization_id comes from the schema's own
-        # organization (5), not from the caller-supplied 999. It is the first
-        # bound parameter — the guid column is filled by gen_random_uuid().
-        self.assertEqual(captured["params"][0], 5)
-        mock_get_admin_hotel.assert_called_once_with("tenant1:10")
-
 
 class ApartmentSerializerTests(SimpleTestCase):
     @patch("property.apartment_serializers.to_uzs", side_effect=lambda amount: amount * Decimal("12000"))
@@ -263,157 +185,6 @@ class DetailSerializerTests(SimpleTestCase):
         self.assertEqual(data["comment_count"], 3)
         self.assertEqual(data["img"], ["http://testserver/media/test.jpg"])
         self.assertIn("property_room", data)
-
-    def test_property_hotel_card_serializer_returns_title_from_name(self):
-        row = {
-            "id": 1,
-            "guid": "guid-1",
-            "name": "Legacy hotel name",
-            "description_uz": None,
-            "description_ru": None,
-            "description_en": None,
-            "address": "Main street",
-            "img": [],
-            "star_rating": 4,
-            "weel_classification": "comfort",
-            "themes": [],
-            "city": "Tashkent",
-            "country": "UZ",
-            "latitude": "41.3",
-            "longitude": "69.2",
-            "min_price": Decimal("100.00"),
-            "currency": "UZS",
-            "timezone": "Asia/Tashkent",
-            "rating": Decimal("4.50"),
-            "review_count": 2,
-            "booking_count": 5,
-            "available_rooms": 3,
-            "amenities": [],
-            "legal_info": {},
-            "check_in_time": None,
-            "check_out_time": None,
-            "cancellation_policy": None,
-            "policies": {},
-            "is_favorite": False,
-            "is_verified": True,
-            "is_active": True,
-            "is_testing": False,
-            "is_archived": False,
-            "is_recommended": False,
-            "verification_status": "waiting",
-            "tenant_schema": "tenant1",
-            "organization": {},
-            "partner_user": None,
-            "property_detail": {},
-            "created_at": None,
-            "updated_at": None,
-        }
-        data = PropertyHotelCardSerializer(row).data
-
-        self.assertEqual(data["title"], "Legacy hotel name")
-        self.assertNotIn("name", data)
-
-    @patch("property.hotel_serializers.to_uzs", side_effect=lambda amount: amount * Decimal("12100"))
-    def test_property_hotel_card_uses_min_price_currency_before_hotel_currency(self, mock_to_uzs):
-        row = {
-            "id": 1,
-            "guid": "guid-1",
-            "name": "www",
-            "description_uz": None,
-            "description_ru": None,
-            "description_en": None,
-            "address": "Main street",
-            "img": [],
-            "star_rating": 0,
-            "weel_classification": None,
-            "themes": [],
-            "city": "Tashkent",
-            "country": "UZ",
-            "latitude": None,
-            "longitude": None,
-            "min_price": Decimal("1000.00"),
-            "min_price_currency": "UZS",
-            "currency": "USD",
-            "timezone": "Asia/Tashkent",
-            "rating": None,
-            "review_count": 0,
-            "booking_count": 0,
-            "available_rooms": 1,
-            "amenities": [],
-            "legal_info": {},
-            "check_in_time": None,
-            "check_out_time": None,
-            "cancellation_policy": None,
-            "policies": {},
-            "is_favorite": False,
-            "is_verified": True,
-            "is_active": True,
-            "is_testing": False,
-            "is_archived": False,
-            "is_recommended": False,
-            "verification_status": "waiting",
-            "tenant_schema": "tenant1",
-            "organization": {},
-            "partner_user": None,
-            "property_detail": {},
-            "created_at": None,
-            "updated_at": None,
-        }
-
-        data = PropertyHotelCardSerializer(row).data
-
-        self.assertEqual(str(data["min_price"]), "1000.00")
-        mock_to_uzs.assert_not_called()
-
-    def test_public_hotel_card_serializer_returns_title_from_name(self):
-        row = {
-            "id": 1,
-            "guid": "guid-1",
-            "name": "Legacy hotel name",
-            "city": "Tashkent",
-            "country": "UZ",
-            "description_uz": None,
-            "description_ru": None,
-            "description_en": None,
-            "star_rating": 4,
-            "weel_classification": "comfort",
-            "is_recommended": False,
-            "is_verified": True,
-            "is_active": True,
-            "is_testing": False,
-            "is_archived": False,
-            "verification_status": "waiting",
-            "themes": [],
-            "amenities": [],
-            "legal_info": {},
-            "booking_count": 5,
-            "rating": Decimal("4.50"),
-            "review_count": 2,
-            "available_rooms": 3,
-            "total_estimated_price": None,
-            "matching_rooms": [],
-            "check_in_time": None,
-            "check_out_time": None,
-            "cancellation_policy": None,
-            "policies": {},
-            "currency": "UZS",
-            "timezone": "Asia/Tashkent",
-            "latitude": 41.3,
-            "longitude": 69.2,
-            "min_price": Decimal("100.00"),
-            "img": [],
-            "is_favorite": False,
-            "organization": {},
-            "partner_user": None,
-            "property_detail": {},
-            "tenant_schema": "tenant1",
-            "created_at": None,
-            "updated_at": None,
-        }
-        data = PublicHotelCardSerializer(row).data
-
-        self.assertEqual(data["title"], "Legacy hotel name")
-        self.assertNotIn("name", data)
 
     @patch("property.apartment_serializers.default_storage.url", return_value="/media/test.jpg")
     def test_apartment_detail_defaults_uzbek_description(self, _mock_url):
@@ -676,32 +447,6 @@ class AdminSerializerTestingFlagTests(SimpleTestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertTrue(serializer.validated_data["normalized_values"]["is_testing"])
 
-    def test_hotel_admin_update_accepts_is_testing(self):
-        serializer = HotelAdminUpdateSerializer(
-            data={"title": "Admin hotel", "is_testing": True},
-            partial=True,
-        )
-        self.assertTrue(serializer.is_valid(), serializer.errors)
-        self.assertTrue(serializer.validated_data["values"]["is_testing"])
-
-    def test_hotel_admin_update_maps_public_flag_names_and_ignores_tenant_schema_column(self):
-        serializer = HotelAdminUpdateSerializer(
-            data={
-                "title": "Admin hotel",
-                "tenant_schema": "tenant_c40d93034f48",
-                "is_allowed_alcohol": False,
-                "is_allowed_pets": True,
-                "is_quiet_hours": True,
-            },
-            partial=True,
-        )
-        self.assertTrue(serializer.is_valid(), serializer.errors)
-        values = serializer.validated_data["values"]
-        self.assertEqual(values["tenant_schema"], "tenant_c40d93034f48")
-        self.assertEqual(values["alcohol_allowed"], False)
-        self.assertEqual(values["pets_allowed"], True)
-        self.assertEqual(values["quiet_hours"], True)
-
 
 class PublicTestingModeViewTests(SimpleTestCase):
     databases = ["default"]
@@ -736,19 +481,6 @@ class PublicTestingModeViewTests(SimpleTestCase):
         response = CottagePropertyListCreateView.as_view()(request)
         self.assertEqual(response.status_code, 200)
         self.assertFalse(mock_list_rows.call_args.kwargs["testing_only"])
-
-    @patch("property.views._track_client_search")
-    @patch("property.views._list_hotel_rows", return_value=[])
-    def test_hotel_public_list_passes_testing_only_true(
-        self,
-        _mock_hotel_rows,
-        _mock_track,
-    ):
-        request = self.factory.get("/api/property/hotels/?page=2&limit=10", HTTP_X_TESTING_MODE="true")
-        response = HotelPropertyListView.as_view()(request)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 0)
-        self.assertEqual(response.data["results"], [])
 
     @patch("property.views._favorite_guids_from_request", return_value=set())
     @patch("property.views._list_cottage_rows", return_value=[])
@@ -815,22 +547,6 @@ class PublicTestingModeViewTests(SimpleTestCase):
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(response.data["results"][0]["title"], "Apartment 1")
         self.assertIsNone(mock_list_rows.call_args.kwargs["default_limit"])
-
-    @patch("property.views._favorite_guids_from_request", return_value=set())
-    @patch("property.views._list_hotel_rows", return_value=[])
-    def test_properties_endpoint_returns_empty_for_single_kind_hotels(
-        self,
-        _mock_hotel_rows,
-        _mock_favorites,
-    ):
-        request = self.factory.get(
-            "/api/property/properties/?property_type=hotel&page=2&limit=2"
-        )
-        response = PropertyListCreateView.as_view()(request)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 0)
-        self.assertEqual(response.data["results"], [])
 
     @patch("property.views._favorite_guids_from_request", return_value=set())
     @patch("property.views._list_apartment_rows", return_value=[])
@@ -1534,7 +1250,7 @@ class PropertyKindParsingTests(SimpleTestCase):
         from property.map_views import _parse_kinds
 
         self.assertEqual(
-            _parse_kinds(QueryDict("property_types=cottage,hotel")), ["cottage", "hotel"]
+            _parse_kinds(QueryDict("property_types=cottage,apartment")), ["cottage", "apartment"]
         )
 
     def test_parse_kinds_accepts_ui_labels(self):
@@ -1548,7 +1264,7 @@ class PropertyKindParsingTests(SimpleTestCase):
         from django.http import QueryDict
         from property.map_views import _parse_kinds
 
-        self.assertEqual(_parse_kinds(QueryDict("property_type=hotel")), ["hotel"])
+        self.assertEqual(_parse_kinds(QueryDict("property_type=cottage")), ["cottage"])
 
 
 class MapUrlsTests(SimpleTestCase):
