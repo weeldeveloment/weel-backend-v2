@@ -2,6 +2,7 @@ from django.urls import include, path
 
 urlpatterns = [
     path("user/", include(("users.urls", "users"), "users")),
+    path("property/", include(("property.urls", "property"), "property")),
     path("story/", include(("stories.urls", "stories"), "stories")),
     path("notification/", include(("notification.urls", "notification"), "notification")),
     path("logs/", include(("shared.urls", "shared"), "shared")),
