@@ -38,6 +38,7 @@ from .apartment_repository import (
     COTTAGE_TYPE_GUID,
     PROPERTY_KIND_APARTMENT,
     PROPERTY_KIND_COTTAGE,
+    PROPERTY_KIND_HOTEL,
     TYPE_GUID_TO_KIND,
     _DEFAULT_TYPE_DATA,
     _load_db_icons,
@@ -1749,16 +1750,54 @@ class CategoryListView(APIView):
     @swagger_auto_schema(
         operation_id="listCategories",
         operation_summary="List categories",
-        operation_description="Returns an empty list. Categories are not yet implemented.",
+        operation_description=(
+            "Returns the public property categories (apartment, cottage) with "
+            "localized titles and icon URLs. Hotels are excluded — they are "
+            "served through the separate Bookhara/Hotelios integration. "
+            "Results are cached for 10 minutes."
+        ),
         tags=["Property / Meta"],
-        responses={
-            200: openapi.Schema(
-                type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)
+        manual_parameters=[
+            openapi.Parameter(
+                "Accept-Language",
+                openapi.IN_HEADER,
+                type=openapi.TYPE_STRING,
+                enum=["en", "ru", "uz"],
+                default="uz",
+                description="Preferred language for localized titles. Defaults to Uzbek.",
             ),
+        ],
+        responses={
+            200: RawPropertyTypeSerializer(many=True),
+            500: _ERROR_DETAIL_SCHEMA,
         },
     )
     def get(self, request, *args, **kwargs):
-        return Response([], status=status.HTTP_200_OK)
+        language = _preferred_language(request)
+
+        def _load():
+            rows = [
+                row
+                for row in list_property_types(language)
+                if TYPE_GUID_TO_KIND.get(str(row.get("guid"))) != PROPERTY_KIND_HOTEL
+            ]
+            rows = sorted(
+                rows,
+                key=lambda row: (
+                    0 if str(row.get("guid")) == str(COTTAGE_TYPE_GUID) else 1
+                ),
+            )
+            for row in rows:
+                row["icon_url"] = _build_media_url(request, row.get("icon_url"))
+            return RawPropertyTypeSerializer(rows, many=True).data
+
+        data = _get_or_set_cached_payload(
+            request,
+            _public_cache_key(request, "property:categories"),
+            _PROPERTY_META_CACHE_TTL_SECONDS,
+            _load,
+        )
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class CategoryLatestPropertyListView(APIView):
@@ -1767,15 +1806,50 @@ class CategoryLatestPropertyListView(APIView):
     @swagger_auto_schema(
         operation_id="listCategoryLatestProperties",
         operation_summary="List latest properties by category",
-        operation_description="Returns an empty list. Category-based latest properties are not yet implemented.",
+        operation_description=(
+            "Returns the most recently created public apartment/cottage "
+            "listings for the given category guid, newest first."
+        ),
         tags=["Property / Meta"],
         responses={
-            200: openapi.Schema(
-                type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)
-            ),
+            200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
+            500: _ERROR_DETAIL_SCHEMA,
         },
     )
-    def get(self, request, *args, **kwargs):
+    def get(self, request, category_id, *args, **kwargs):
+        kind = TYPE_GUID_TO_KIND.get(str(category_id))
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        source_params = request.query_params.copy()
+
+        if kind == PROPERTY_KIND_APARTMENT:
+            rows = _list_apartment_rows(
+                source_params,
+                public_only=True,
+                recommended_only=False,
+                default_ordering="-created_at",
+                default_limit=15,
+            )
+            return Response(
+                ApartmentListSerializer(rows, many=True, context=ctx).data,
+                status=status.HTTP_200_OK,
+            )
+
+        if kind == PROPERTY_KIND_COTTAGE:
+            rows = _list_cottage_rows(
+                source_params,
+                public_only=True,
+                recommended_only=False,
+                default_ordering="-created_at",
+                default_limit=15,
+            )
+            return Response(
+                CottageListSerializer(rows, many=True, context=ctx).data,
+                status=status.HTTP_200_OK,
+            )
+
         return Response([], status=status.HTTP_200_OK)
 
 
@@ -1785,15 +1859,52 @@ class CategoryPropertyRecommendationView(APIView):
     @swagger_auto_schema(
         operation_id="listCategoryPropertyRecommendations",
         operation_summary="List property recommendations by category",
-        operation_description="Returns an empty list. Category-based recommendations are not yet implemented.",
+        operation_description=(
+            "Returns public apartment/cottage listings for the given category "
+            "guid (the guid returned by /property/categories/). Unknown or "
+            "hotel category guids return an empty list — hotels are served "
+            "through the separate Bookhara/Hotelios integration."
+        ),
         tags=["Property / Meta"],
         responses={
-            200: openapi.Schema(
-                type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT)
-            ),
+            200: MIXED_PROPERTY_LIST_RESPONSE_SCHEMA,
+            500: _ERROR_DETAIL_SCHEMA,
         },
     )
-    def get(self, request, *args, **kwargs):
+    def get(self, request, category_id, *args, **kwargs):
+        kind = TYPE_GUID_TO_KIND.get(str(category_id))
+        ctx = {
+            "request": request,
+            "favorite_guids": _favorite_guids_from_request(request),
+        }
+        source_params = request.query_params.copy()
+
+        if kind == PROPERTY_KIND_APARTMENT:
+            rows = _list_apartment_rows(
+                source_params,
+                public_only=True,
+                recommended_only=False,
+                default_ordering="-created_at",
+                default_limit=15,
+            )
+            return Response(
+                ApartmentListSerializer(rows, many=True, context=ctx).data,
+                status=status.HTTP_200_OK,
+            )
+
+        if kind == PROPERTY_KIND_COTTAGE:
+            rows = _list_cottage_rows(
+                source_params,
+                public_only=True,
+                recommended_only=False,
+                default_ordering="-created_at",
+                default_limit=15,
+            )
+            return Response(
+                CottageListSerializer(rows, many=True, context=ctx).data,
+                status=status.HTTP_200_OK,
+            )
+
         return Response([], status=status.HTTP_200_OK)
 
 
