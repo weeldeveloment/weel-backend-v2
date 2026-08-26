@@ -5,6 +5,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
+from django.core.cache import cache
 from django.utils import timezone
 
 from rest_framework import status
@@ -19,6 +20,7 @@ from apps.hotels import service
 from apps.hotels.client import (
     ERROR_INSUFFICIENT_BALANCE,
     ERROR_NOT_FOUND,
+    HoteliosClient,
     HoteliosError,
     get_client,
 )
@@ -208,12 +210,19 @@ class HotelCalendarView(HoteliosAPIView):
 
     Hotelios has no per-day availability endpoint, only `search` for a single
     date range, so this is one 1-night `search` call per day of the month —
-    run a handful at a time, but still dozens of round trips to Hotelios for
-    a 30-day month. Slow by nature: call it once when a booking drawer's
-    calendar actually opens, never on every keystroke or month flip.
+    run several at a time, but still dozens of round trips to Hotelios for a
+    30-day month. Genuinely slow on a cold call; the result is cached for
+    `_CACHE_TTL_SECONDS` so the same hotel/month is instant for the next
+    person (or the next open of the drawer) within that window.
     """
 
-    _MAX_CONCURRENT_SEARCHES = 4
+    _MAX_CONCURRENT_SEARCHES = 10
+    # Each day's `search` gets its own short timeout — the calendar dot is
+    # informational, not a booking, so a slow Hotelios response is worth
+    # giving up on quickly (and retrying next load) rather than letting one
+    # bad day hold up the whole month at the client's normal (60s) timeout.
+    _PER_DAY_TIMEOUT_SECONDS = 8.0
+    _CACHE_TTL_SECONDS = 300
 
     def get(self, request, hotel_id: int):
         try:
@@ -230,6 +239,11 @@ class HotelCalendarView(HoteliosAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         adults = max(1, int(request.query_params.get("adults") or 1))
+
+        cache_key = f"hotels:calendar:{hotel_id}:{year}:{month}:{adults}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
 
         today = timezone.localdate()
         days_in_month = calendar.monthrange(year, month)[1]
@@ -252,9 +266,11 @@ class HotelCalendarView(HoteliosAPIView):
                     check_out=check_out.strftime("%Y/%m/%d 12:00"),
                     occupancies=[{"adults": adults, "children_ages": []}],
                     hotel_ids=[hotel_id],
-                    # A fresh client per call, not the shared module-level one —
-                    # `requests.Session` isn't guaranteed safe under concurrent use.
-                    client=get_client(),
+                    # A fresh, short-timeout client per call, not the shared
+                    # module-level one — `requests.Session` isn't guaranteed
+                    # safe under concurrent use, and the default 60s client
+                    # timeout is far too patient for an informational dot.
+                    client=HoteliosClient(timeout=self._PER_DAY_TIMEOUT_SECONDS),
                 )
             except HoteliosError:
                 # Left out of the response entirely rather than guessed at —
@@ -277,7 +293,9 @@ class HotelCalendarView(HoteliosAPIView):
             if outcomes.get(day) is not None
         ]
 
-        return Response({"year": year, "month": month, "days": days_payload})
+        payload = {"year": year, "month": month, "days": days_payload}
+        cache.set(cache_key, payload, self._CACHE_TTL_SECONDS)
+        return Response(payload)
 
 
 # ---------------------------------------------------------------------------
