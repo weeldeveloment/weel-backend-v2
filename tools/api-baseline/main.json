@@ -21240,17 +21240,41 @@
   },
   "/property/categories/": {
    "get": {
-    "description": "Returns an empty list. Categories are not yet implemented.",
+    "description": "Returns the public property categories (apartment, cottage) with localized titles and icon URLs. Hotels are excluded — they are served through the separate Bookhara/Hotelios integration. Results are cached for 10 minutes.",
     "operationId": "listCategories",
-    "parameters": [],
+    "parameters": [
+     {
+      "default": "uz",
+      "description": "Preferred language for localized titles. Defaults to Uzbek.",
+      "enum": [
+       "en",
+       "ru",
+       "uz"
+      ],
+      "in": "header",
+      "name": "Accept-Language",
+      "type": "string"
+     }
+    ],
     "responses": {
      "200": {
       "description": "",
       "schema": {
        "items": {
-        "type": "object"
+        "$ref": "#/definitions/RawPropertyType"
        },
        "type": "array"
+      }
+     },
+     "500": {
+      "description": "",
+      "schema": {
+       "properties": {
+        "detail": {
+         "type": "string"
+        }
+       },
+       "type": "object"
       }
      }
     },
@@ -21263,7 +21287,7 @@
   },
   "/property/categories/{category_id}/properties/": {
    "get": {
-    "description": "Returns an empty list. Category-based recommendations are not yet implemented.",
+    "description": "Returns public apartment/cottage listings for the given category guid (the guid returned by /property/categories/). Unknown or hotel category guids return an empty list — hotels are served through the separate Bookhara/Hotelios integration.",
     "operationId": "listCategoryPropertyRecommendations",
     "parameters": [],
     "responses": {
@@ -21271,9 +21295,105 @@
       "description": "",
       "schema": {
        "items": {
+        "properties": {
+         "guid": {
+          "format": "uuid",
+          "type": "string"
+         },
+         "property_location": {
+          "properties": {
+           "city": {
+            "nullable": true,
+            "type": "string"
+           },
+           "country": {
+            "nullable": true,
+            "type": "string"
+           },
+           "district": {
+            "nullable": true,
+            "properties": {
+             "guid": {
+              "format": "uuid",
+              "nullable": true,
+              "type": "string"
+             },
+             "id": {
+              "nullable": true,
+              "type": "integer"
+             },
+             "name": {
+              "nullable": true,
+              "type": "string"
+             }
+            },
+            "type": "object"
+           },
+           "latitude": {
+            "nullable": true,
+            "type": "string"
+           },
+           "longitude": {
+            "nullable": true,
+            "type": "string"
+           },
+           "prefecture": {
+            "nullable": true,
+            "properties": {
+             "id": {
+              "nullable": true,
+              "type": "string"
+             },
+             "name": {
+              "nullable": true,
+              "type": "string"
+             }
+            },
+            "type": "object"
+           },
+           "region": {
+            "nullable": true,
+            "properties": {
+             "guid": {
+              "format": "uuid",
+              "nullable": true,
+              "type": "string"
+             },
+             "id": {
+              "nullable": true,
+              "type": "integer"
+             },
+             "name": {
+              "nullable": true,
+              "type": "string"
+             }
+            },
+            "type": "object"
+           }
+          },
+          "type": "object"
+         },
+         "property_type": {
+          "type": "object"
+         },
+         "title": {
+          "type": "string"
+         }
+        },
         "type": "object"
        },
        "type": "array"
+      }
+     },
+     "500": {
+      "description": "",
+      "schema": {
+       "properties": {
+        "detail": {
+         "type": "string"
+        }
+       },
+       "type": "object"
       }
      }
     },
@@ -21293,7 +21413,7 @@
   },
   "/property/categories/{category_id}/properties/latest/": {
    "get": {
-    "description": "Returns an empty list. Category-based latest properties are not yet implemented.",
+    "description": "Returns the most recently created public apartment/cottage listings for the given category guid, newest first.",
     "operationId": "listCategoryLatestProperties",
     "parameters": [],
     "responses": {
@@ -21301,9 +21421,105 @@
       "description": "",
       "schema": {
        "items": {
+        "properties": {
+         "guid": {
+          "format": "uuid",
+          "type": "string"
+         },
+         "property_location": {
+          "properties": {
+           "city": {
+            "nullable": true,
+            "type": "string"
+           },
+           "country": {
+            "nullable": true,
+            "type": "string"
+           },
+           "district": {
+            "nullable": true,
+            "properties": {
+             "guid": {
+              "format": "uuid",
+              "nullable": true,
+              "type": "string"
+             },
+             "id": {
+              "nullable": true,
+              "type": "integer"
+             },
+             "name": {
+              "nullable": true,
+              "type": "string"
+             }
+            },
+            "type": "object"
+           },
+           "latitude": {
+            "nullable": true,
+            "type": "string"
+           },
+           "longitude": {
+            "nullable": true,
+            "type": "string"
+           },
+           "prefecture": {
+            "nullable": true,
+            "properties": {
+             "id": {
+              "nullable": true,
+              "type": "string"
+             },
+             "name": {
+              "nullable": true,
+              "type": "string"
+             }
+            },
+            "type": "object"
+           },
+           "region": {
+            "nullable": true,
+            "properties": {
+             "guid": {
+              "format": "uuid",
+              "nullable": true,
+              "type": "string"
+             },
+             "id": {
+              "nullable": true,
+              "type": "integer"
+             },
+             "name": {
+              "nullable": true,
+              "type": "string"
+             }
+            },
+            "type": "object"
+           }
+          },
+          "type": "object"
+         },
+         "property_type": {
+          "type": "object"
+         },
+         "title": {
+          "type": "string"
+         }
+        },
         "type": "object"
        },
        "type": "array"
+      }
+     },
+     "500": {
+      "description": "",
+      "schema": {
+       "properties": {
+        "detail": {
+         "type": "string"
+        }
+       },
+       "type": "object"
       }
      }
     },
