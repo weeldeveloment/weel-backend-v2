@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import calendar
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, timedelta
 
 from django.utils import timezone
 
@@ -197,6 +200,84 @@ class HotelDetailView(HoteliosAPIView):
             **HotelSerializer(hotel).data,
             "room_types": RoomTypeSerializer(room_types, many=True).data,
         })
+
+
+class HotelCalendarView(HoteliosAPIView):
+    """GET /api/hotels/{hotel_id}/calendar/?year=&month=&adults= — a
+    free/occupied dot for every day of one month, for one hotel.
+
+    Hotelios has no per-day availability endpoint, only `search` for a single
+    date range, so this is one 1-night `search` call per day of the month —
+    run a handful at a time, but still dozens of round trips to Hotelios for
+    a 30-day month. Slow by nature: call it once when a booking drawer's
+    calendar actually opens, never on every keystroke or month flip.
+    """
+
+    _MAX_CONCURRENT_SEARCHES = 4
+
+    def get(self, request, hotel_id: int):
+        try:
+            year = int(request.query_params["year"])
+            month = int(request.query_params["month"])
+        except (KeyError, ValueError):
+            return Response(
+                {"detail": "year and month are required integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= month <= 12:
+            return Response(
+                {"detail": "month must be between 1 and 12."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        adults = max(1, int(request.query_params.get("adults") or 1))
+
+        today = timezone.localdate()
+        days_in_month = calendar.monthrange(year, month)[1]
+        candidate_days = [
+            day
+            for day in range(1, days_in_month + 1)
+            if date(year, month, day) >= today
+        ]
+
+        def _check_day(day: int) -> tuple[int, int | None]:
+            check_in = date(year, month, day)
+            check_out = check_in + timedelta(days=1)
+            try:
+                entries = service.search(
+                    # Hotelios wants `YYYY/MM/DD HH:MM`, the same format
+                    # HotelSearchSerializer.provider_dates() builds for the
+                    # live search endpoint — not a plain ISO date, which it
+                    # answers with error 2003 ("check_in value is invalid").
+                    check_in=check_in.strftime("%Y/%m/%d 14:00"),
+                    check_out=check_out.strftime("%Y/%m/%d 12:00"),
+                    occupancies=[{"adults": adults, "children_ages": []}],
+                    hotel_ids=[hotel_id],
+                    # A fresh client per call, not the shared module-level one —
+                    # `requests.Session` isn't guaranteed safe under concurrent use.
+                    client=get_client(),
+                )
+            except HoteliosError:
+                # Left out of the response entirely rather than guessed at —
+                # the frontend only marks a day busy/free when it has an answer.
+                return day, None
+            match = next((e for e in entries if e.get("hotel_id") == hotel_id), None)
+            available = len(match.get("options") or []) if match else 0
+            return day, available
+
+        outcomes: dict[int, int | None] = {}
+        with ThreadPoolExecutor(max_workers=self._MAX_CONCURRENT_SEARCHES) as executor:
+            futures = [executor.submit(_check_day, day) for day in candidate_days]
+            for future in as_completed(futures):
+                day, available = future.result()
+                outcomes[day] = available
+
+        days_payload = [
+            {"date": date(year, month, day).isoformat(), "available": outcomes[day]}
+            for day in candidate_days
+            if outcomes.get(day) is not None
+        ]
+
+        return Response({"year": year, "month": month, "days": days_payload})
 
 
 # ---------------------------------------------------------------------------

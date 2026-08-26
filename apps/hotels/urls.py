@@ -9,6 +9,7 @@ from apps.hotels.views import (
     HotelBookingListCreateView,
     HotelBookingRefreshView,
     HotelBookingRoomsView,
+    HotelCalendarView,
     HotelCityListView,
     HotelDetailView,
     HotelListView,
@@ -46,6 +47,8 @@ urlpatterns = [
     # Operations
     path("balance/", HotelBalanceView.as_view(), name="hotels-balance"),
     path("sync-status/", HotelSyncStatusView.as_view(), name="hotels-sync-status"),
+
+    path("<int:hotel_id>/calendar/", HotelCalendarView.as_view(), name="hotels-calendar"),
 
     # Last: a bare integer must not shadow any of the literal routes above.
     path("<int:hotel_id>/", HotelDetailView.as_view(), name="hotels-detail"),
