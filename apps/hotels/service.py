@@ -20,6 +20,8 @@ import logging
 import uuid
 from typing import Any
 
+from django.conf import settings
+
 from apps.hotels import raw_repository as repo
 from apps.hotels.client import HoteliosClient, HoteliosError, get_client
 from apps.hotels.models import HotelBookingStatus
@@ -64,10 +66,17 @@ def search(
         data["city_id"] = city_id
     if hotel_ids:
         data["hotel_ids"] = hotel_ids
+    # At least one of these must reach Hotelios. Without them the provider
+    # answers `success: true` with an empty `hotels` list — the same shape as
+    # a genuinely sold-out search — so a request that omits both looks like
+    # "no availability anywhere" forever. Fall back to the configured
+    # default rather than letting that happen.
     if nationality:
         data["nationality"] = nationality
     if residence:
         data["residence"] = residence
+    if not (nationality or residence):
+        data["residence"] = settings.HOTELIOS_DEFAULT_RESIDENCE
     data.update({k: v for k, v in (filters or {}).items() if v not in (None, [], "")})
 
     return (client or get_client()).search(data)

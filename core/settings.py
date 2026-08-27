@@ -724,6 +724,15 @@ HOTELIOS_TIMEOUT_SECONDS = float(
     # Search fans out across hotels on their side and is the slowest call here.
     (os.getenv("HOTELIOS_TIMEOUT_SECONDS") or "60").strip() or "60"
 )
+# Hotelios prices a stay against the guest's nationality and country of
+# residence, and answers a search that carries neither with an empty — but
+# successful — `hotels: []`, which reads as "nothing available" rather than
+# "you left a field out". Their integration team confirmed at least one of
+# the two must be present. Every guest this app books is a UZ company's own
+# employee, so `uz` is the right default when the caller sends nothing; a
+# caller that knows the guest's real nationality should still send it,
+# because the price can differ.
+HOTELIOS_DEFAULT_RESIDENCE = (os.getenv("HOTELIOS_DEFAULT_RESIDENCE") or "uz").strip().lower()
 
 # ─── Mail in the workspace (apps/b2b/mail) ───────────────────────────────────
 #

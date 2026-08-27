@@ -387,6 +387,26 @@ def fetch_room_types(hotel_id: int) -> list[dict[str, Any]]:
     )
 
 
+def fetch_room_types_for(hotel_ids: list[int]) -> list[dict[str, Any]]:
+    """Every synced room type across several hotels, in one query.
+
+    The live search answers with `room_type_id` and a bare name; the photos,
+    area, bed type and equipment a room card wants live only in our synced
+    copy. Joining them per hotel would be one query per result, so the search
+    view asks for the whole page's worth at once.
+    """
+    if not hotel_ids:
+        return []
+    return fetch_all(
+        f"""
+        SELECT * FROM {HOTELIOS_ROOM_TYPE_TABLE}
+        WHERE hotel_id = __ANY_MARKER__(%s)
+        ORDER BY hotel_id, room_type_id
+        """,
+        [hotel_ids],
+    )
+
+
 
 def fetch_hotels(
     *,

@@ -335,17 +335,99 @@ class HotelSearchView(HoteliosAPIView):
             filters=serializer.provider_filters(),
         )
 
+        nights = (data["check_out"] - data["check_in"]).days
+
         hotel_ids = [entry.get("hotel_id") for entry in results if entry.get("hotel_id")]
         cards, _ = repo.fetch_hotels(hotel_ids=hotel_ids, limit=len(hotel_ids) or 1)
         by_id = {card["id"]: HotelSerializer(card).data for card in cards}
 
+        # The provider names a room type but sends nothing else about it —
+        # no photo, no area, no bed type. Those live in our synced copy, and
+        # a room card that shows only a name and a price looks unfinished, so
+        # the whole page's room types are joined in with one query.
+        room_types = repo.fetch_room_types_for(hotel_ids)
+        rooms_by_key = {
+            (row["hotel_id"], row["room_type_id"]): RoomTypeSerializer(row).data
+            for row in room_types
+        }
+
         return Response({
             "count": len(results),
+            "nights": nights,
+            "currency": data["currency"].lower(),
             "results": [
-                {**entry, "hotel": by_id.get(entry.get("hotel_id"))}
+                _search_entry(entry, by_id, rooms_by_key, nights)
                 for entry in results
             ],
         })
+
+
+def _search_entry(
+    entry: dict,
+    hotels_by_id: dict,
+    rooms_by_key: dict,
+    nights: int,
+) -> dict:
+    """One search result, shaped the way a hotel card and a room list want it.
+
+    Hotelios sends a flat `options` list where a room type repeats once per
+    rate plan. A screen wants the opposite: one entry per room type, with its
+    rate plans underneath. Both shapes are returned — `options` untouched for
+    anything that wants the raw list, and `rooms` grouped for the UI.
+
+    Every `price` here is the total for the whole stay, for one room at that
+    occupancy — verified against the provider by comparing 1-, 2- and 3-night
+    searches. `price_per_night` is derived so a card never has to guess which
+    of the two a number is.
+    """
+    hotel_id = entry.get("hotel_id")
+    options = entry.get("options") or []
+
+    grouped: dict[int, dict] = {}
+    for option in options:
+        price = option.get("price")
+        priced = {
+            **option,
+            "price_per_night": (round(price / nights, 2) if price and nights else None),
+        }
+        room_type_id = option.get("room_type_id")
+        room = grouped.get(room_type_id)
+        if room is None:
+            room = grouped[room_type_id] = {
+                "room_type_id": room_type_id,
+                "name": option.get("room_type_name"),
+                # Null when the room type isn't in our synced copy — a hotel
+                # synced before the room type was added upstream. The name and
+                # price above still stand on their own.
+                "room_type": rooms_by_key.get((hotel_id, room_type_id)),
+                "options": [],
+            }
+        room["options"].append(priced)
+
+    for room in grouped.values():
+        room["options"].sort(key=lambda o: o.get("price") or 0)
+        room["min_price"] = room["options"][0].get("price") if room["options"] else None
+
+    rooms = sorted(
+        grouped.values(),
+        key=lambda r: (r["min_price"] is None, r["min_price"] or 0),
+    )
+    prices = [o["price"] for o in options if o.get("price")]
+
+    return {
+        **entry,
+        "hotel": hotels_by_id.get(hotel_id),
+        "rooms": rooms,
+        # What the search card prints as "N so'm dan" — the cheapest option
+        # in the whole hotel, for the stay as searched.
+        "min_price": min(prices) if prices else None,
+        "min_price_per_night": (
+            round(min(prices) / nights, 2) if prices and nights else None
+        ),
+        "currency": next(
+            (o.get("currency") for o in options if o.get("currency")), None
+        ),
+    }
 
 
 class HotelQuoteView(HoteliosAPIView):
