@@ -382,3 +382,54 @@ class WorkspaceRestoreView(WorkspaceAPIView):
             target_id=object_id,
         )
         return Response({"restored": True})
+
+
+class WorkspacePurgeView(WorkspaceAPIView):
+    """DELETE /api/b2b/workspace/trash/<kind>/<id>/ — destroy one for good.
+
+    The other half of a bin. Without it the only way out of the trash was back
+    into the working set, so something deleted by mistake and something deleted
+    on purpose sat in the same list for the life of the company — which is what
+    the screen's "Butunlay o'chirish" is for.
+
+    Gated on the same permission as deleting and restoring, and — in the
+    repository — on the row already being in the bin. Nothing live can be
+    reached through this endpoint: an id that was never deleted answers 404
+    exactly as an id that never existed.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG, operation_summary="Permanently delete a binned object"
+    )
+    def delete(self, request, kind: str, object_id: int):
+        if kind not in {"tasks", "leads"}:
+            return Response(
+                {"detail": _("Not something that can be deleted.")},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        needed = (
+            Permission.TASK_DELETE if kind == "tasks" else Permission.DEAL_DELETE
+        )
+        if not request.user.may(needed):
+            return Response(
+                {"detail": _("You may not delete this.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        purge = repo.purge_task if kind == "tasks" else repo.purge_lead
+        if not purge(object_id, request.user.company_id):
+            return Response(
+                {"detail": _("Nothing to delete.")}, status=status.HTTP_404_NOT_FOUND
+            )
+        # The audit log is the only trace a permanent deletion leaves anywhere,
+        # so it is written even though the row it names is already gone.
+        arepo.record_audit(
+            request.user.company_id,
+            actor_employee_id=request.user.id,
+            action=f"{kind[:-1]}.purged",
+            target_type=kind[:-1],
+            target_id=object_id,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)

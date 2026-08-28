@@ -1565,6 +1565,35 @@ def restore_lead(lead_id: int, company_id: int) -> bool:
     )
 
 
+def purge_task(task_id: int, company_id: int) -> bool:
+    """Take a task out of the bin for good.
+
+    `deleted_at IS NOT NULL` is the guard that matters: only something already
+    in the bin may be purged, so a stray id can never destroy a live task, and
+    the row count still says whether anything was there to destroy. Everything
+    hanging off a task — its comments, its checklist, its attachments — is
+    declared `ON DELETE CASCADE`, so this is one statement rather than a
+    sweep, and the calendar rows that merely point at one are `SET NULL`.
+    """
+    return bool(
+        execute(
+            f"DELETE FROM {B2B_TASK_TABLE} "
+            f"WHERE id = %s AND company_id = %s AND deleted_at IS NOT NULL",
+            [task_id, company_id],
+        )
+    )
+
+
+def purge_lead(lead_id: int, company_id: int) -> bool:
+    return bool(
+        execute(
+            f"DELETE FROM {B2B_WORKSPACE_LEAD_TABLE} "
+            f"WHERE id = %s AND company_id = %s AND deleted_at IS NOT NULL",
+            [lead_id, company_id],
+        )
+    )
+
+
 def create_lead(
     *,
     company_id: int,

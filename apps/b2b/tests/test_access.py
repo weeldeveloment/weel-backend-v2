@@ -502,6 +502,81 @@ def test_only_tasks_and_leads_can_be_restored():
     assert response.status_code == 404
 
 
+def test_purging_takes_the_same_authority_as_deleting():
+    """Same reasoning as restoring, with more at stake: this one does not come
+    back."""
+    from apps.b2b.workspace.access_views import WorkspacePurgeView
+
+    with _granting(Permission.TASK_DELETE), patch(
+        "apps.b2b.workspace.access_views.repo.purge_lead"
+    ) as purge:
+        response = _call(
+            WorkspacePurgeView,
+            factory.delete("/trash/leads/7/"),
+            _user(Role.MANAGER),
+            kind="leads",
+            object_id=7,
+        )
+
+    assert response.status_code == 403
+    purge.assert_not_called()
+
+
+def test_purging_something_that_is_not_in_the_bin_is_a_404():
+    """The repository only ever deletes rows already carrying a `deleted_at`,
+    so a live task reached through this endpoint answers exactly as one that
+    does not exist — which is what keeps a stray id from destroying live work.
+    """
+    from apps.b2b.workspace.access_views import WorkspacePurgeView
+
+    with _granting(Permission.TASK_DELETE), patch(
+        "apps.b2b.workspace.access_views.repo.purge_task", return_value=False
+    ):
+        response = _call(
+            WorkspacePurgeView,
+            factory.delete("/trash/tasks/7/"),
+            _user(Role.MANAGER),
+            kind="tasks",
+            object_id=7,
+        )
+
+    assert response.status_code == 404
+
+
+def test_purging_leaves_its_only_trace_in_the_audit_log():
+    from apps.b2b.workspace.access_views import WorkspacePurgeView
+
+    with _granting(Permission.TASK_DELETE), patch(
+        "apps.b2b.workspace.access_views.repo.purge_task", return_value=True
+    ), patch("apps.b2b.workspace.access_views.arepo.record_audit") as audit:
+        response = _call(
+            WorkspacePurgeView,
+            factory.delete("/trash/tasks/7/"),
+            _user(Role.MANAGER),
+            kind="tasks",
+            object_id=7,
+        )
+
+    assert response.status_code == 204
+    assert audit.call_args.kwargs["action"] == "task.purged"
+    assert audit.call_args.kwargs["target_id"] == 7
+
+
+def test_only_tasks_and_leads_can_be_purged():
+    from apps.b2b.workspace.access_views import WorkspacePurgeView
+
+    with _granting(*Permission.all()):
+        response = _call(
+            WorkspacePurgeView,
+            factory.delete("/trash/chats/7/"),
+            _user(Role.OWNER),
+            kind="chats",
+            object_id=7,
+        )
+
+    assert response.status_code == 404
+
+
 # ─── Chat-only members ────────────────────────────────────────────────────────
 
 def test_a_chat_only_member_opens_nothing_at_all():

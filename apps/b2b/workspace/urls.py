@@ -6,6 +6,7 @@ from apps.b2b.workspace.access_views import (
     WorkspaceAuditView,
     WorkspaceEmployeeAccessView,
     WorkspaceRoleDetailView,
+    WorkspacePurgeView,
     WorkspaceRestoreView,
     WorkspaceRoleListView,
     WorkspaceTrashView,
@@ -125,6 +126,11 @@ urlpatterns = [
         "trash/<str:kind>/<int:object_id>/restore/",
         WorkspaceRestoreView.as_view(),
         name="ws-restore",
+    ),
+    path(
+        "trash/<str:kind>/<int:object_id>/",
+        WorkspacePurgeView.as_view(),
+        name="ws-purge",
     ),
 
     # Registration and the account session — see `accounts.py`.
