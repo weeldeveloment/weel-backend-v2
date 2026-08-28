@@ -27,7 +27,12 @@ from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one
 
-from apps.b2b.raw.tables import B2B_COMPANY_TABLE, B2B_EMPLOYEE_TABLE
+from apps.b2b.raw.tables import (
+    B2B_COMPANY_TABLE,
+    B2B_EMPLOYEE_TABLE,
+    B2B_USER_SESSION_TABLE,
+    B2B_USER_TABLE,
+)
 
 B2B_ACCOUNT_TABLE = "b2b_account"
 
@@ -572,19 +577,39 @@ DELETED_MEMBER_NAME = "O'chirilgan foydalanuvchi"
 def delete_account(account_id: int) -> dict[str, Any]:
     """Erase the person, keep the work.
 
-    Three things happen, and the order matters. Companies this account solely
-    owns are closed first, because closing them reads their owner's roster
-    row. Then every roster row is anonymised — the name, phone, email and
-    photo the workspace kept a copy of — and deactivated. Then the account
-    row itself goes, which is what actually removes the phone number, the
-    handle and the push token.
+    The order matters. Companies this account solely owns are closed first,
+    because closing them reads their owner's roster row. Then every roster row
+    is anonymised — the name, phone, email and photo the workspace kept a copy
+    of — and deactivated. Then any legacy `b2b_user` login for this number is
+    revoked and its phone released. Then the account row itself goes, which is
+    what actually removes the phone number, the handle and the push token.
 
     `b2b_employee.account_id` is `ON DELETE SET NULL`, so the rows survive the
     last step on their own; they are anonymised first so that a crash between
     the two leaves tombstones rather than intact copies of somebody who asked
     to be forgotten.
+
+    Roster rows are matched by phone as well as by `account_id`: a secondment
+    carries a second row in another workspace, and a row created before the
+    account was linked carries none of the link at all — leaving either behind
+    with the number intact is what let a re-registration with the same phone
+    walk straight back into the old workspace. The `b2b_user` sweep closes the
+    same door for numbers that were ever a B2B owner or manager login: that
+    table is consulted on sign-in (`_resolve_employee`) and would otherwise
+    rebuild a roster row, with the old role, on the first code entered.
     """
     now = timezone.now()
+    account = get_account(account_id)
+    if account is None:
+        return {"closed_companies": [], "seats_removed": 0}
+    # The last nine digits, matched with a trailing `LIKE` — the exact rule
+    # `find_b2b_user_by_phone` and `find_employee_by_phone` use on sign-in. The
+    # cleanup has to reach every row those lookups could, or re-registration
+    # walks back in through the one it missed.
+    phone_digits = digits(account.get("phone"))
+    phone_suffix = phone_digits[-9:] if len(phone_digits) >= 9 else phone_digits
+    phone_like = f"%{phone_suffix}"
+
     closed = companies_closed_by_deleting(account_id)
 
     for org in closed:
@@ -618,9 +643,44 @@ def delete_account(account_id: int) -> dict[str, Any]:
                is_active = FALSE,
                updated_at = %s
          WHERE account_id = %s
+            OR (
+                %s <> ''
+                AND phone IS NOT NULL
+                AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE %s
+            )
         """,
-        [DELETED_MEMBER_NAME, now, account_id],
+        [DELETED_MEMBER_NAME, now, account_id, phone_suffix, phone_like],
     )
+
+    if phone_suffix:
+        # Sessions first, while the number still matches, then the login row.
+        execute(
+            f"""
+            DELETE FROM {B2B_USER_SESSION_TABLE}
+             WHERE user_id IN (
+                 SELECT id FROM {B2B_USER_TABLE}
+                  WHERE regexp_replace(phone, '[^0-9]', '', 'g') LIKE %s
+             )
+            """,
+            [phone_like],
+        )
+        # `b2b_user.phone` is `NOT NULL UNIQUE`, so it cannot be nulled the way
+        # the roster's is — it is scrambled to a value that carries no real
+        # digits, which both frees the number for a fresh registration and
+        # stops `find_b2b_user_by_phone`'s suffix match from ever finding it.
+        execute(
+            f"""
+            UPDATE {B2B_USER_TABLE}
+               SET is_active = FALSE,
+                   phone = 'deleted-' || id,
+                   email = NULL,
+                   first_name = NULL,
+                   last_name = NULL,
+                   updated_at = %s
+             WHERE regexp_replace(phone, '[^0-9]', '', 'g') LIKE %s
+            """,
+            [now, phone_like],
+        )
 
     execute(f"DELETE FROM {B2B_ACCOUNT_TABLE} WHERE id = %s", [account_id])
     return {
