@@ -14872,6 +14872,35 @@
     }
    ]
   },
+  "/b2b/workspace/account/token/refresh/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/account/token/refresh/\n\nThe account session's half of the refresh above, and its own endpoint\nrather than a second branch inside it: the two token types are\ndeliberately not interchangeable, and one view that answered for both\nwould be the place that eventually hands a workspace token to a caller\nholding an account one.\n\nWithout this the account session could not be renewed at all. It simply\ndied one access lifetime after sign-in, which is what left somebody who\nhad registered but not yet been let into a workspace stuck on \"could not\nload your workspaces\" with a Retry button that could never succeed.",
+    "operationId": "b2b_workspace_account_token_refresh_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/WorkspaceRefresh"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "New token pair"
+     },
+     "401": {
+      "description": "Invalid or expired refresh token"
+     }
+    },
+    "summary": "Exchange an account refresh token for a new pair",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/account/username-check/": {
    "get": {
     "description": "GET /api/b2b/workspace/account/username-check/?username=xusan_design\n\nWhether a handle is free, and what else to try if it is not.\n\nAnswered as the field is typed rather than only on submit. A uniqueness\nrule that is enforced at the end of a form is a form people fill in twice,\nand the handle is the last screen of registration — the worst place to\nsend somebody back to.\n\nReading this tells the caller whether *some* handle exists, which is\nexactly what the screen after it does anyway; it needs an account session,\nso it is not an open directory probe.",
