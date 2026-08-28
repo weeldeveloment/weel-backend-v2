@@ -946,3 +946,188 @@ def test_a_written_name_survives_the_round_trip_through_the_form(written):
 
     first, last = split_full_name(written)
     assert full_name_from(first, last) == written
+
+
+# ─── Join requests share the same inbox ───────────────────────────────────────
+#
+# A join request is the same question as a secondment ask, from the other
+# direction: somebody outside asking in, rather than a colleague asking for
+# help. The mobile app draws both as one card in one list — see
+# `WorkspaceRequest.kind` — so the endpoint that feeds it has to merge them.
+
+def _join_request_row(**overrides):
+    row = {
+        "id": 41,
+        "account_id": 501,
+        "username": "nodir",
+        "phone": "+998901112233",
+        "first_name": "Nodir",
+        "last_name": "Qodirov",
+        "photo": None,
+        "message": "Ishga qabul qiling",
+        "wanted_modules": None,
+        "status": "pending",
+        "decline_reason": None,
+        "created_at": timezone.now(),
+    }
+    row.update(overrides)
+    return row
+
+
+def _account_join_request_row(**overrides):
+    row = {
+        "id": 41,
+        "company_id": HOST_COMPANY,
+        "status": "pending",
+        "decline_reason": None,
+        "granted_role": None,
+        "created_at": timezone.now(),
+        "decided_at": None,
+        "company_name": "Boshqa jamoa",
+        "company_slug": "boshqa-jamoa",
+        "org_name": "Boshqa jamoa",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_a_join_request_appears_in_the_inbox_of_whoever_may_decide_it():
+    """The one thing `_may_send` does not gate: deciding a join request is a
+    different action, answered by `employees.invite` rather than by who may
+    ask another workspace for help."""
+    from apps.b2b.workspace.access import Permission
+
+    admin = _user(EmployeeRole.LIDER, LIDER_ID, HOST_COMPANY)
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.list_requests_for_employee",
+        return_value=[],
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.list_requests_from_company",
+        return_value=[],
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([], [Permission.EMPLOYEE_INVITE]),
+    ), patch(
+        "apps.b2b.workspace.joining_repository.list_join_requests",
+        return_value=[_join_request_row()],
+    ) as list_join:
+        response = _call(WorkspaceRequestListCreateView, factory.get("/requests/"), admin)
+
+    assert response.status_code == 200
+    list_join.assert_called_once_with(HOST_COMPANY)
+    [row] = response.data["received"]
+    assert row["kind"] == "join"
+    assert row["from_full_name"] == "Nodir Qodirov"
+    assert row["phone"] == "+998901112233"
+    assert row["message"] == "Ishga qabul qiling"
+
+
+def test_join_requests_are_left_out_for_somebody_without_the_permission():
+    """A manager who was never handed `employees.invite` sees their own
+    secondment inbox and nothing else — the same boundary the join-request
+    endpoints themselves enforce."""
+    manager = _user(EmployeeRole.PERFORMER, 5, HOST_COMPANY)
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.list_requests_for_employee",
+        return_value=[],
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([], []),
+    ), patch(
+        "apps.b2b.workspace.joining_repository.list_join_requests"
+    ) as list_join:
+        response = _call(WorkspaceRequestListCreateView, factory.get("/requests/"), manager)
+
+    assert response.data["received"] == []
+    list_join.assert_not_called()
+
+
+def test_a_join_request_this_account_sent_appears_in_the_sent_tab():
+    """The "Jo'natgan" half of a join request: addressed to a company rather
+    than to a person, so it carries no `from_employee_id` at all."""
+    asker = _user(EmployeeRole.EMPLOYEE, AZIZ_ID, HOME_COMPANY)
+    asker._data["account_id"] = 501
+
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.list_requests_for_employee",
+        return_value=[],
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([], []),
+    ), patch(
+        "apps.b2b.workspace.joining_repository.list_account_join_requests",
+        return_value=[_account_join_request_row()],
+    ) as list_sent:
+        response = _call(WorkspaceRequestListCreateView, factory.get("/requests/"), asker)
+
+    list_sent.assert_called_once_with(501)
+    [row] = response.data["sent"]
+    assert row["kind"] == "join"
+    assert row["to_company_name"] == "Boshqa jamoa"
+
+
+def test_the_granted_role_is_translated_to_the_apps_own_wire_names():
+    """The mobile app's secondment-era `RequestRole` enum still speaks
+    "lider"/"ghost" rather than the workspace's own "admin"/"guest" — see
+    `Role.ALIASES`. A raw workspace role code would silently fail to match
+    on the other end and the chip would just not show."""
+    asker = _user(EmployeeRole.EMPLOYEE, AZIZ_ID, HOME_COMPANY)
+    asker._data["account_id"] = 501
+
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.list_requests_for_employee",
+        return_value=[],
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([], []),
+    ), patch(
+        "apps.b2b.workspace.joining_repository.list_account_join_requests",
+        return_value=[_account_join_request_row(status="accepted", granted_role="admin")],
+    ):
+        response = _call(WorkspaceRequestListCreateView, factory.get("/requests/"), asker)
+
+    assert response.data["sent"][0]["role"] == "lider"
+
+
+def test_nobody_without_a_linked_account_is_asked_for_their_own_join_requests():
+    """An employee row with no `account_id` predates the accounts migration —
+    asking `list_account_join_requests(None)` would be asking for everyone's."""
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.list_requests_for_employee",
+        return_value=[],
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([], []),
+    ), patch(
+        "apps.b2b.workspace.joining_repository.list_account_join_requests"
+    ) as list_sent:
+        _call(WorkspaceRequestListCreateView, factory.get("/requests/"), AZIZ)
+
+    list_sent.assert_not_called()
+
+
+def test_received_is_ordered_newest_first_across_both_kinds():
+    from apps.b2b.workspace.access import Permission
+
+    admin = _user(EmployeeRole.LIDER, LIDER_ID, HOST_COMPANY)
+    now = timezone.now()
+    secondment_row = _ask(created_at=now - timedelta(minutes=5))
+    join_row = _join_request_row(created_at=now)
+
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.list_requests_for_employee",
+        return_value=[secondment_row],
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.list_requests_from_company",
+        return_value=[],
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([], [Permission.EMPLOYEE_INVITE]),
+    ), patch(
+        "apps.b2b.workspace.joining_repository.list_join_requests",
+        return_value=[join_row],
+    ):
+        response = _call(WorkspaceRequestListCreateView, factory.get("/requests/"), admin)
+
+    kinds = [row["kind"] for row in response.data["received"]]
+    assert kinds == ["join", "message"]

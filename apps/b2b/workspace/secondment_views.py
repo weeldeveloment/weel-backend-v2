@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from apps.b2b.repository import get_company
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import secondment_repository as srepo
+from apps.b2b.workspace.access import Permission
 from apps.b2b.workspace.permissions import IsWorkspaceUser
 from apps.b2b.workspace.secondment import Module, RequestRole, RequestStatus
 from apps.b2b.workspace.serializers import (
@@ -43,6 +44,77 @@ def _may_send(user) -> bool:
     modules, for a stretch of time.
     """
     return bool(user.capabilities.get("can_request_help"))
+
+
+def _join_requests_received(company_id: int) -> list[tuple]:
+    """Somebody outside asking to join, in the same wire shape as a
+    secondment ask — see [WorkspaceRequestListCreateView.get].
+
+    Answered by `Permission.EMPLOYEE_INVITE` here rather than `_may_send`:
+    deciding a join request and asking for help are different actions with
+    different defaults, and this is the one the join-request endpoints
+    themselves gate on.
+    """
+    from apps.b2b.workspace import joining_repository as jrepo
+
+    rows = []
+    for row in jrepo.list_join_requests(company_id):
+        full_name = " ".join(
+            part for part in [row.get("first_name"), row.get("last_name")] if part
+        ).strip()
+        rows.append((
+            row["created_at"],
+            {
+                "kind": "join",
+                "id": row["id"],
+                "company_id": company_id,
+                "from_full_name": full_name,
+                "from_photo": row.get("photo"),
+                "phone": row.get("phone"),
+                "message": row.get("message") or "",
+                "status": row["status"],
+                "decline_reason": row.get("decline_reason"),
+                "created_at": row["created_at"],
+            },
+        ))
+    return rows
+
+
+#: The mobile app's `RequestRole` enum speaks a different wire vocabulary
+#: than the workspace's own `Role` — "lider" and "ghost" rather than "admin"
+#: and "guest", left over from the secondment feature's own history (see
+#: `Role.ALIASES`). A join request's granted role has to be translated into
+#: it, or `_roleLabel` on the other end simply fails to match and drops it.
+_ROLE_TO_REQUEST_WIRE = {
+    "admin": "lider",
+    "manager": "manager",
+    "employee": "employee",
+    "guest": "ghost",
+}
+
+
+def _join_requests_sent(account_id: int) -> list[tuple]:
+    """What this account itself has asked to join — the "Jo'natgan" half of a
+    join request, addressed to the company rather than to a person."""
+    from apps.b2b.workspace import joining_repository as jrepo
+    from apps.b2b.workspace.access import Role
+
+    rows = []
+    for row in jrepo.list_account_join_requests(account_id):
+        granted = row.get("granted_role")
+        rows.append((
+            row["created_at"],
+            {
+                "kind": "join",
+                "id": row["id"],
+                "to_company_name": row.get("company_name"),
+                "status": row["status"],
+                "decline_reason": row.get("decline_reason"),
+                "role": _ROLE_TO_REQUEST_WIRE.get(Role.clean(granted)) if granted else None,
+                "created_at": row["created_at"],
+            },
+        ))
+    return rows
 
 
 class WorkspaceOrgPeopleView(WorkspaceAPIView):
@@ -101,9 +173,34 @@ class WorkspaceRequestListCreateView(WorkspaceAPIView):
             if _may_send(request.user)
             else []
         )
+
+        # A join request is the same question from the other direction —
+        # somebody outside asking in rather than a colleague asking for help —
+        # and the app draws both as one card in one list. See
+        # `WorkspaceRequest.kind` on the mobile side: splitting them would
+        # mean two inboxes to check for the exact people who decide both.
+        received_rows = [
+            (row["created_at"], {**SecondmentRequestSerializer(row).data, "kind": "message"})
+            for row in received
+        ]
+        sent_rows = [
+            (row["created_at"], {**SecondmentRequestSerializer(row).data, "kind": "message"})
+            for row in sent
+        ]
+
+        if request.user.may(Permission.EMPLOYEE_INVITE):
+            received_rows += _join_requests_received(request.user.company_id)
+
+        account_id = request.user.get("account_id")
+        if account_id:
+            sent_rows += _join_requests_sent(account_id)
+
+        received_rows.sort(key=lambda pair: pair[0], reverse=True)
+        sent_rows.sort(key=lambda pair: pair[0], reverse=True)
+
         return Response({
-            "received": SecondmentRequestSerializer(received, many=True).data,
-            "sent": SecondmentRequestSerializer(sent, many=True).data,
+            "received": [row for _, row in received_rows],
+            "sent": [row for _, row in sent_rows],
         })
 
     @swagger_auto_schema(
