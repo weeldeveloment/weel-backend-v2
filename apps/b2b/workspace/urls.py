@@ -80,9 +80,16 @@ from apps.b2b.workspace.views import (
     WorkspaceTaskListCreateView,
     WorkspaceTaskStatusView,
     WorkspaceTaskVoiceView,
+    WorkspaceMessagePinView,
+    WorkspaceMessageReactionView,
+    WorkspacePresenceView,
+    WorkspaceProfilePhotoView,
     WorkspaceTeamView,
     WorkspaceProfileView,
     WorkspaceUsernameView,
+    WorkspaceGroupMemberView,
+    WorkspaceGroupMembersView,
+    WorkspaceGroupView,
     WorkspaceThreadFlagsView,
     WorkspaceThreadListCreateView,
     WorkspaceThreadReadView,
@@ -101,6 +108,7 @@ urlpatterns = [
     path("me/", WorkspaceMeView.as_view(), name="ws-me"),
     path("me/device-token/", WorkspaceDeviceTokenView.as_view(), name="ws-device-token"),
     path("me/profile/", WorkspaceProfileView.as_view(), name="ws-profile"),
+    path("me/photo/", WorkspaceProfilePhotoView.as_view(), name="ws-profile-photo"),
     path("me/username/", WorkspaceUsernameView.as_view(), name="ws-username"),
 
     # Who → where → what. See `access.py`.
@@ -214,6 +222,7 @@ urlpatterns = [
         name="ws-join-request-decide",
     ),
     path("team/", WorkspaceTeamView.as_view(), name="ws-team"),
+    path("presence/", WorkspacePresenceView.as_view(), name="ws-presence"),
 
     # Lending somebody to another workspace — see `secondment_views`.
     path("org/people/", WorkspaceOrgPeopleView.as_view(), name="ws-org-people"),
@@ -276,8 +285,31 @@ urlpatterns = [
         WorkspaceMessageDetailView.as_view(),
         name="ws-chat-message-detail",
     ),
+    path(
+        "chats/<int:thread_id>/messages/<int:message_id>/pin/",
+        WorkspaceMessagePinView.as_view(),
+        name="ws-chat-message-pin",
+    ),
+    path(
+        "chats/<int:thread_id>/messages/<int:message_id>/reactions/",
+        WorkspaceMessageReactionView.as_view(),
+        name="ws-chat-message-reactions",
+    ),
     path("chats/<int:thread_id>/read/", WorkspaceThreadReadView.as_view(), name="ws-chat-read"),
     path("chats/<int:thread_id>/flags/", WorkspaceThreadFlagsView.as_view(), name="ws-chat-flags"),
+    # The group's own screen. Under "group/" rather than at the thread root so
+    # a direct chat's URL space stays empty — there is no such screen for one.
+    path("chats/<int:thread_id>/group/", WorkspaceGroupView.as_view(), name="ws-chat-group"),
+    path(
+        "chats/<int:thread_id>/members/",
+        WorkspaceGroupMembersView.as_view(),
+        name="ws-chat-members",
+    ),
+    path(
+        "chats/<int:thread_id>/members/<int:employee_id>/",
+        WorkspaceGroupMemberView.as_view(),
+        name="ws-chat-member-detail",
+    ),
 
     path("support/", WorkspaceSupportView.as_view(), name="ws-support"),
 

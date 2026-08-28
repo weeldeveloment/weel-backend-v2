@@ -32,7 +32,7 @@ from apps.b2b.workspace.authentication import (
     WorkspaceAccount,
 )
 from apps.b2b.workspace.joining_repository import JoinStatus
-from apps.b2b.workspace.permissions import IsWorkspaceUser
+from apps.b2b.workspace.permissions import IsWorkspaceManager, IsWorkspaceUser
 from apps.b2b.workspace.tokens import create_workspace_tokens
 from apps.b2b.workspace.views import WORKSPACE_TAG, WorkspaceAPIView
 
@@ -1066,10 +1066,18 @@ class JoinDecisionSerializer(serializers.Serializer):
 
 
 class WorkspaceJoinRequestListView(WorkspaceAPIView):
-    """GET /api/b2b/workspace/join-requests/ — who is asking to be let in."""
+    """GET /api/b2b/workspace/join-requests/ — who is asking to be let in.
 
-    permission_classes = [IsAuthenticated, IsWorkspaceUser]
-    required_permission = Permission.EMPLOYEE_INVITE
+    Whoever runs the workspace: the owner, an administrator, or a manager.
+    Deliberately wider than `EMPLOYEE_INVITE`, which is what separates an
+    administrator from a manager and gates *asking another workspace to lend
+    somebody* — a commitment about who is allowed in that is not this. Somebody
+    knocking at the door is the day-to-day of running a workspace, and a
+    request only the owner can answer sits unanswered for as long as the owner
+    is away.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser, IsWorkspaceManager]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Join requests")
     def get(self, request):
@@ -1097,10 +1105,14 @@ class WorkspaceJoinRequestListView(WorkspaceAPIView):
 
 
 class WorkspaceJoinRequestDecideView(WorkspaceAPIView):
-    """POST /api/b2b/workspace/join-requests/<id>/<accept|decline>/"""
+    """POST /api/b2b/workspace/join-requests/<id>/<accept|decline>/
 
-    permission_classes = [IsAuthenticated, IsWorkspaceUser]
-    required_permission = Permission.EMPLOYEE_INVITE
+    Same audience as the list — see [WorkspaceJoinRequestListView]. What
+    standing the person is let in with is chosen per request; changing a role
+    afterwards is a different act and still needs `EMPLOYEE_CHANGE_ROLE`.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser, IsWorkspaceManager]
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,

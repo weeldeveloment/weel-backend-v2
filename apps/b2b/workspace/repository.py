@@ -28,6 +28,7 @@ from apps.b2b.raw.tables import (
     B2B_CALENDAR_REMINDER_TABLE,
     B2B_CHAT_MEMBER_TABLE,
     B2B_CHAT_MESSAGE_TABLE,
+    B2B_CHAT_REACTION_TABLE,
     B2B_CHAT_THREAD_TABLE,
     B2B_COMPANY_TABLE,
     B2B_DEPARTMENT_TABLE,
@@ -376,6 +377,24 @@ def list_team(company_id: int, *, search: str | None = None) -> list[dict[str, A
         params += [needle, needle, needle, needle]
     sql += " ORDER BY e.full_name ASC"
     return fetch_all(sql, params)
+
+
+def company_employee_ids(company_id: int) -> list[int]:
+    """Just the ids on a workspace's roster.
+
+    Presence is answered against this rather than against a set kept in the
+    cache: the roster is the authority on who could be online, it is tens of
+    rows, and a cached set would need every hire and departure to remember to
+    update it.
+    """
+    return [
+        row["id"]
+        for row in fetch_all(
+            f"SELECT id FROM {B2B_EMPLOYEE_TABLE} "
+            "WHERE company_id = %s AND is_active = TRUE",
+            [company_id],
+        )
+    ]
 
 
 def employee_ids_in_company(company_id: int, employee_ids: Iterable[int]) -> set[int]:
@@ -1107,26 +1126,151 @@ def create_thread(
     if not thread:
         return None
     for employee_id in dict.fromkeys([created_by, *member_ids]):
+        # Whoever opened a group runs it. A direct chat has no admin at all —
+        # there is nothing in it to administer, and calling one of two people
+        # its owner would only ever mislead.
+        role = "admin" if group_name and employee_id == created_by else "member"
         execute(
-            f"INSERT INTO {B2B_CHAT_MEMBER_TABLE} (thread_id, employee_id, created_at, updated_at) "
-            f"VALUES (%s, %s, %s, %s) ON CONFLICT (thread_id, employee_id) DO NOTHING",
-            [thread["id"], employee_id, now, now],
+            f"INSERT INTO {B2B_CHAT_MEMBER_TABLE} "
+            f"(thread_id, employee_id, role, created_at, updated_at) "
+            f"VALUES (%s, %s, %s, %s, %s) ON CONFLICT (thread_id, employee_id) DO NOTHING",
+            [thread["id"], employee_id, role, now, now],
         )
     return get_thread_for_member(thread["id"], company_id, created_by)
 
 
-def add_thread_member(thread_id: int, employee_id: int) -> None:
+def add_thread_member(thread_id: int, employee_id: int, *, role: str = "member") -> None:
     """Put somebody in a conversation.
 
     Idempotent: a link can be followed twice, and the second time should be a
-    no-op rather than a duplicate row or an error.
+    no-op rather than a duplicate row or an error. The conflict clause also
+    means re-adding somebody never quietly resets the role they already hold.
     """
     now = timezone.now()
     execute(
-        f"INSERT INTO {B2B_CHAT_MEMBER_TABLE} (thread_id, employee_id, created_at, updated_at) "
-        f"VALUES (%s, %s, %s, %s) ON CONFLICT (thread_id, employee_id) DO NOTHING",
-        [thread_id, employee_id, now, now],
+        f"INSERT INTO {B2B_CHAT_MEMBER_TABLE} "
+        f"(thread_id, employee_id, role, created_at, updated_at) "
+        f"VALUES (%s, %s, %s, %s, %s) ON CONFLICT (thread_id, employee_id) DO NOTHING",
+        [thread_id, employee_id, role, now, now],
     )
+
+
+def get_thread(thread_id: int, company_id: int) -> dict[str, Any] | None:
+    """The room itself, without asking who is looking at it.
+
+    [get_thread_for_member] answers "may this person see it, and what are their
+    own flags"; this one answers "does it exist here at all", which is what a
+    membership change needs before it can decide anything else.
+    """
+    return fetch_one(
+        f"SELECT * FROM {B2B_CHAT_THREAD_TABLE} WHERE id = %s AND company_id = %s",
+        [thread_id, company_id],
+    )
+
+
+def update_thread(thread_id: int, company_id: int, **fields: Any) -> dict[str, Any] | None:
+    """Rename a group, or hang a new picture on it."""
+    allowed = {"group_name", "photo"}
+    changes = {name: value for name, value in fields.items() if name in allowed}
+    if not changes:
+        return get_thread(thread_id, company_id)
+
+    assignments = ", ".join(f"{name} = %s" for name in changes)
+    return fetch_one(
+        f"UPDATE {B2B_CHAT_THREAD_TABLE} SET {assignments}, updated_at = %s "
+        f"WHERE id = %s AND company_id = %s RETURNING *",
+        [*changes.values(), timezone.now(), thread_id, company_id],
+    )
+
+
+def list_thread_members(thread_id: int) -> list[dict[str, Any]]:
+    """Everyone in the room, as the roster describes them plus what they are
+    here — the same employee shape the team endpoint returns, so one row
+    renders in both places.
+
+    Admins first, then by name: the group screen's whole job is to show who
+    runs the room, and burying them in an alphabetical list makes the reader
+    hunt for it.
+    """
+    return fetch_all(
+        f"""
+        SELECT
+            e.*,
+            d.name  AS department_name,
+            d.color AS department_color,
+            m.role  AS member_role,
+            m.created_at AS joined_at
+        FROM {B2B_CHAT_MEMBER_TABLE} m
+        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = m.employee_id
+        LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
+        WHERE m.thread_id = %s
+        ORDER BY (m.role = 'admin') DESC, e.full_name ASC
+        """,
+        [thread_id],
+    )
+
+
+def thread_member(thread_id: int, employee_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {B2B_CHAT_MEMBER_TABLE} "
+        "WHERE thread_id = %s AND employee_id = %s",
+        [thread_id, employee_id],
+    )
+
+
+def thread_admin_ids(thread_id: int) -> list[int]:
+    return [
+        row["employee_id"]
+        for row in fetch_all(
+            f"SELECT employee_id FROM {B2B_CHAT_MEMBER_TABLE} "
+            "WHERE thread_id = %s AND role = 'admin'",
+            [thread_id],
+        )
+    ]
+
+
+def set_thread_member_role(thread_id: int, employee_id: int, role: str) -> bool:
+    return bool(
+        fetch_one(
+            f"UPDATE {B2B_CHAT_MEMBER_TABLE} SET role = %s, updated_at = %s "
+            "WHERE thread_id = %s AND employee_id = %s RETURNING id",
+            [role, timezone.now(), thread_id, employee_id],
+        )
+    )
+
+
+def remove_thread_member(thread_id: int, employee_id: int) -> bool:
+    return bool(
+        fetch_one(
+            f"DELETE FROM {B2B_CHAT_MEMBER_TABLE} "
+            "WHERE thread_id = %s AND employee_id = %s RETURNING id",
+            [thread_id, employee_id],
+        )
+    )
+
+
+def promote_longest_standing_member(thread_id: int) -> int | None:
+    """Hands the room to whoever has been in it longest.
+
+    Called when the last admin walks out. The alternative — a group nobody can
+    rename, add to or remove from — is a room that quietly breaks the day its
+    creator leaves the company, and there is no way back into it from inside
+    the app.
+    """
+    promoted = fetch_one(
+        f"""
+        UPDATE {B2B_CHAT_MEMBER_TABLE} SET role = 'admin', updated_at = %s
+        WHERE id = (
+            SELECT id FROM {B2B_CHAT_MEMBER_TABLE}
+            WHERE thread_id = %s
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1
+        )
+        RETURNING employee_id
+        """,
+        [timezone.now(), thread_id],
+    )
+    return promoted["employee_id"] if promoted else None
 
 
 def list_messages(
@@ -1134,18 +1278,115 @@ def list_messages(
     *,
     before_id: int | None = None,
     limit: int = 50,
+    search: str | None = None,
 ) -> list[dict[str, Any]]:
     """A page of history, oldest-first for rendering but paged from the newest
-    end so opening a room does not read years of backlog."""
+    end so opening a room does not read years of backlog.
+
+    ``search`` narrows it to messages containing a phrase — the room's own
+    search, which is a different question from the thread list's and cannot be
+    answered by it: the list matches names, and what somebody is looking for
+    inside a room is what was said.
+    """
     sql = f"SELECT * FROM {B2B_CHAT_MESSAGE_TABLE} WHERE thread_id = %s"
     params: list[Any] = [thread_id]
     if before_id:
         sql += " AND id < %s"
         params.append(before_id)
+    if search:
+        sql += " AND text ILIKE %s"
+        params.append(f"%{search}%")
     sql += " ORDER BY id DESC LIMIT %s"
     params.append(limit)
 
     return list(reversed(fetch_all(sql, params)))
+
+
+def list_pinned_messages(thread_id: int) -> list[dict[str, Any]]:
+    """What is pinned in a room, newest pin first.
+
+    Its own query rather than a flag read off the history page: a pin is
+    supposed to be reachable from the top of the room however far back it was
+    written, which is precisely when it is not on the page.
+    """
+    return fetch_all(
+        f"SELECT * FROM {B2B_CHAT_MESSAGE_TABLE} "
+        "WHERE thread_id = %s AND pinned_at IS NOT NULL "
+        "ORDER BY pinned_at DESC",
+        [thread_id],
+    )
+
+
+def edit_message(message_id: int, thread_id: int, text: str) -> dict[str, Any] | None:
+    """Rewrites a message, and records that it was rewritten.
+
+    ``edited_at`` is the point: a message whose text changes with nothing to
+    show for it is a worse thing to have in a room than one that cannot be
+    changed at all.
+    """
+    now = timezone.now()
+    return fetch_one(
+        f"UPDATE {B2B_CHAT_MESSAGE_TABLE} SET text = %s, edited_at = %s "
+        "WHERE id = %s AND thread_id = %s RETURNING *",
+        [text, now, message_id, thread_id],
+    )
+
+
+def set_message_pinned(
+    message_id: int, thread_id: int, *, pinned_by: int | None
+) -> dict[str, Any] | None:
+    """Pins or unpins. ``pinned_by`` of None is the unpin."""
+    now = timezone.now() if pinned_by is not None else None
+    return fetch_one(
+        f"UPDATE {B2B_CHAT_MESSAGE_TABLE} SET pinned_at = %s, pinned_by = %s "
+        "WHERE id = %s AND thread_id = %s RETURNING *",
+        [now, pinned_by, message_id, thread_id],
+    )
+
+
+def toggle_reaction(message_id: int, employee_id: int, emoji: str) -> bool:
+    """Adds somebody's reaction, or takes it back if it was already theirs.
+
+    One call for both directions, because the app has one gesture for both:
+    tapping a reaction you already left is how you remove it. Returns whether
+    the reaction is now on.
+    """
+    removed = execute(
+        f"DELETE FROM {B2B_CHAT_REACTION_TABLE} "
+        "WHERE message_id = %s AND employee_id = %s AND emoji = %s",
+        [message_id, employee_id, emoji],
+    )
+    if removed:
+        return False
+    execute(
+        f"INSERT INTO {B2B_CHAT_REACTION_TABLE} "
+        "(message_id, employee_id, emoji, created_at) VALUES (%s, %s, %s, %s) "
+        "ON CONFLICT (message_id, employee_id, emoji) DO NOTHING",
+        [message_id, employee_id, emoji, timezone.now()],
+    )
+    return True
+
+
+def reactions_for_messages(
+    message_ids: Sequence[int],
+) -> dict[int, list[dict[str, Any]]]:
+    """Every reaction on a page of history, in one query.
+
+    Grouped per message here rather than counted in SQL because the bubble
+    needs both the count and whether *this* reader is among them, and the
+    second is not something a GROUP BY can answer without the viewer in it.
+    """
+    if not message_ids:
+        return {}
+    rows = fetch_all(
+        f"SELECT message_id, employee_id, emoji FROM {B2B_CHAT_REACTION_TABLE} "
+        "WHERE message_id = __ANY_MARKER__(%s)",
+        [list(message_ids)],
+    )
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(row["message_id"], []).append(row)
+    return grouped
 
 
 def send_message(
@@ -1153,13 +1394,14 @@ def send_message(
     sender_id: int,
     text: str,
     reply_to_id: int | None = None,
+    forwarded_from_id: int | None = None,
 ) -> dict[str, Any] | None:
     now = timezone.now()
     message = fetch_one(
         f"INSERT INTO {B2B_CHAT_MESSAGE_TABLE} "
-        "(thread_id, sender_id, text, reply_to_id, created_at) "
-        f"VALUES (%s, %s, %s, %s, %s) RETURNING *",
-        [thread_id, sender_id, text, reply_to_id, now],
+        "(thread_id, sender_id, text, reply_to_id, forwarded_from_id, created_at) "
+        f"VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
+        [thread_id, sender_id, text, reply_to_id, forwarded_from_id, now],
     )
     if message:
         execute(
@@ -1175,6 +1417,28 @@ def get_message(message_id: int, thread_id: int) -> dict[str, Any] | None:
     return fetch_one(
         f"SELECT * FROM {B2B_CHAT_MESSAGE_TABLE} WHERE id = %s AND thread_id = %s",
         [message_id, thread_id],
+    )
+
+
+def message_visible_to(
+    message_id: int, company_id: int, employee_id: int
+) -> dict[str, Any] | None:
+    """A message, if the caller is in the room it was written in.
+
+    The guard on forwarding, and it has to be membership rather than the
+    company: a forward copies the *text* into a room the sender chooses, so
+    anything looser would turn a message id into a way to read what colleagues
+    said in a chat nobody invited you to.
+    """
+    return fetch_one(
+        f"""
+        SELECT m.* FROM {B2B_CHAT_MESSAGE_TABLE} m
+        JOIN {B2B_CHAT_THREAD_TABLE} t ON t.id = m.thread_id
+        JOIN {B2B_CHAT_MEMBER_TABLE} mem
+          ON mem.thread_id = t.id AND mem.employee_id = %s
+        WHERE m.id = %s AND t.company_id = %s
+        """,
+        [employee_id, message_id, company_id],
     )
 
 
@@ -1202,12 +1466,49 @@ def delete_message(message_id: int, thread_id: int) -> bool:
     ) > 0
 
 
-def mark_thread_read(thread_id: int, employee_id: int) -> None:
+def mark_thread_read(thread_id: int, employee_id: int) -> str | None:
+    """Marks everything in the room read for one member, and says when.
+
+    The timestamp goes back to the caller because the other side needs it: a
+    read receipt is only useful to the person who *sent* the messages, and
+    "everything up to this moment" is what turns their single ticks into
+    double ones without either client having to guess which bubbles it covers.
+    """
+    now = timezone.now()
     execute(
         f"UPDATE {B2B_CHAT_MEMBER_TABLE} SET last_read_at = %s, updated_at = %s "
         f"WHERE thread_id = %s AND employee_id = %s",
-        [timezone.now(), timezone.now(), thread_id, employee_id],
+        [now, now, thread_id, employee_id],
     )
+    return now.isoformat()
+
+
+def last_message_id(thread_id: int) -> int | None:
+    row = fetch_one(
+        f"SELECT id FROM {B2B_CHAT_MESSAGE_TABLE} WHERE thread_id = %s "
+        "ORDER BY id DESC LIMIT 1",
+        [thread_id],
+    )
+    return row["id"] if row else None
+
+
+def thread_read_state(thread_id: int, viewer_id: int) -> dict[str, Any]:
+    """When each *other* member last read this room.
+
+    The viewer's own row is left out: their ticks are about whether anybody
+    else has seen what they wrote, and including themselves would mark every
+    message read the moment they opened the thread.
+    """
+    rows = fetch_all(
+        f"SELECT employee_id, last_read_at FROM {B2B_CHAT_MEMBER_TABLE} "
+        "WHERE thread_id = %s AND employee_id <> %s",
+        [thread_id, viewer_id],
+    )
+    return {
+        row["employee_id"]: row["last_read_at"]
+        for row in rows
+        if row["last_read_at"] is not None
+    }
 
 
 def set_thread_flags(
@@ -2663,6 +2964,40 @@ def set_own_profile(
             f"UPDATE {B2B_EMPLOYEE_TABLE} SET full_name = %s, updated_at = %s "
             f"WHERE account_id = %s AND id <> %s",
             [full_name, now, account_id, employee_id],
+        )
+    return employee
+
+
+def set_own_photo(employee_id: int, path: str | None) -> dict[str, Any] | None:
+    """Their face, everywhere they work.
+
+    Written to every membership this account holds, the same way the name is
+    (see [set_own_profile]) and for the same reason: a photo is about the
+    person, not about one workspace's record of them, and leaving the other
+    copies behind is how somebody ends up as a face in one room and initials
+    in the next. The account row keeps a copy too, because that is what an
+    invite preview and the workspace picker read — neither of which has a
+    membership to look at yet.
+    """
+    now = timezone.now()
+    execute(
+        f"UPDATE {B2B_EMPLOYEE_TABLE} SET photo = %s, updated_at = %s WHERE id = %s",
+        [path, now, employee_id],
+    )
+    employee = get_workspace_employee(employee_id)
+
+    account_id = (employee or {}).get("account_id")
+    if account_id:
+        execute(
+            f"UPDATE {B2B_EMPLOYEE_TABLE} SET photo = %s, updated_at = %s "
+            "WHERE account_id = %s AND id <> %s",
+            [path, now, account_id, employee_id],
+        )
+        from apps.b2b.workspace.accounts import B2B_ACCOUNT_TABLE
+
+        execute(
+            f"UPDATE {B2B_ACCOUNT_TABLE} SET photo = %s, updated_at = %s WHERE id = %s",
+            [path, now, account_id],
         )
     return employee
 

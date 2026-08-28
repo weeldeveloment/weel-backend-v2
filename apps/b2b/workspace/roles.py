@@ -22,7 +22,18 @@ REQUEST_ROLES = frozenset({EmployeeRole.OWNER, EmployeeRole.LIDER})
 
 
 def is_manager(role: str | None) -> bool:
-    return role in MANAGER_ROLES
+    """Whether somebody runs the workspace: the owner, an administrator
+    ("lider"), or a manager ("performer").
+
+    The role is canonicalised first because the same three ranks are stored
+    under two vocabularies — the column has said `performer` and `lider` since
+    the dashboard was written, and memberships created since the TZ store
+    `manager` and `admin`. Comparing the raw string against one of the two
+    lists answered False for half the rows it was asked about.
+    """
+    from apps.b2b.workspace.access import Role
+
+    return Role.clean(role) in {Role.OWNER, Role.ADMIN, Role.MANAGER}
 
 
 def capabilities_for(role: str | None, modules=None) -> dict[str, bool]:

@@ -33,6 +33,8 @@ B2B_CALENDAR_REMINDER_TABLE = "b2b_calendar_reminder"
 B2B_CHAT_THREAD_TABLE = "b2b_chat_thread"
 B2B_CHAT_MEMBER_TABLE = "b2b_chat_member"
 B2B_CHAT_MESSAGE_TABLE = "b2b_chat_message"
+# One emoji from one person on one message — see `create_b2b_tables`.
+B2B_CHAT_REACTION_TABLE = "b2b_chat_reaction"
 B2B_WORKSPACE_LEAD_TABLE = "b2b_workspace_lead"
 # The priced lines a lead is made of, and everything that has happened to it.
 B2B_WORKSPACE_LEAD_ITEM_TABLE = "b2b_workspace_lead_item"

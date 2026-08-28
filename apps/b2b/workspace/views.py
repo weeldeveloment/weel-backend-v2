@@ -31,7 +31,10 @@ from apps.b2b.workspace import push_text
 from apps.b2b.workspace.secondment import Module
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import storage
-from apps.b2b.workspace.consumers import broadcast_deletion, broadcast_message
+from apps.b2b.workspace import presence
+from apps.b2b.workspace import realtime
+from apps.b2b.workspace.consumers import add_to_thread, remove_from_thread
+from apps.b2b.workspace.realtime import broadcast_deletion, broadcast_message
 from apps.b2b.workspace.authentication import (
     DashboardWorkspaceAuthentication,
     WorkspaceJWTAuthentication,
@@ -50,6 +53,7 @@ from apps.b2b.workspace.serializers import (
     AttendanceMarkSerializer,
     AttendanceSelfAbsenceSerializer,
     CalendarEventSerializer,
+    ChatGroupSerializer,
     ChatMessageSerializer,
     ChatThreadSerializer,
     CrmCustomerDetailSerializer,
@@ -72,6 +76,8 @@ from apps.b2b.workspace.serializers import (
     LeadWriteSerializer,
     MeSerializer,
     OwnProfileSerializer,
+    MessageEditSerializer,
+    MessageReactionSerializer,
     MessageWriteSerializer,
     StorageUsageSerializer,
     SupportMessageCreateSerializer,
@@ -85,6 +91,9 @@ from apps.b2b.workspace.serializers import (
     UsernameSerializer,
     TeamMemberSerializer,
     ThreadCreateSerializer,
+    ThreadMemberRoleSerializer,
+    ThreadMembersSerializer,
+    ThreadUpdateSerializer,
     ThreadFlagsSerializer,
     WorkspaceFileListSerializer,
     WorkspaceFileSerializer,
@@ -142,6 +151,78 @@ class WorkspaceAPIView(APIView):
         from apps.b2b.workspace.permissions import HasModule, HasPermission
 
         return [*super().get_permissions(), HasModule(), HasPermission()]
+
+    #: Which part of the workspace an endpoint belongs to, read off its URL
+    #: name. This is what makes the app live everywhere rather than only in
+    #: chat: any successful write announces the section it changed, and the
+    #: screens built on that section reload.
+    #:
+    #: Longest prefix wins, so `ws-task-status` is a task and not something
+    #: else that happens to start the same way. Chat is absent on purpose —
+    #: its endpoints publish precise events (the message itself, a deletion,
+    #: a read receipt) and a second, vaguer "chat changed" on top of them
+    #: would have every open thread refetching what it had just been handed.
+    LIVE_SECTIONS: tuple[tuple[str, str], ...] = (
+        ("ws-task", realtime.EVENT_TASK),
+        ("ws-subtask", realtime.EVENT_TASK),
+        ("ws-event", realtime.EVENT_CALENDAR),
+        ("ws-lead", realtime.EVENT_LEAD),
+        ("ws-crm", realtime.EVENT_LEAD),
+        ("ws-customers", realtime.EVENT_LEAD),
+        ("ws-attendance", realtime.EVENT_ATTENDANCE),
+        ("ws-join-request", realtime.EVENT_JOIN_REQUEST),
+        ("ws-invite", realtime.EVENT_JOIN_REQUEST),
+        ("ws-request", realtime.EVENT_REQUEST),
+        ("ws-access", realtime.EVENT_ACCESS),
+        ("ws-employee-access", realtime.EVENT_ACCESS),
+        ("ws-file", realtime.EVENT_FILE),
+        ("ws-folder", realtime.EVENT_FILE),
+        ("ws-employee-of-month", realtime.EVENT_TEAM),
+        ("ws-trash", realtime.EVENT_TEAM),
+        ("ws-restore", realtime.EVENT_TEAM),
+        ("ws-purge", realtime.EVENT_TEAM),
+    )
+
+    def _live_section(self) -> str | None:
+        match = getattr(self.request, "resolver_match", None)
+        name = getattr(match, "url_name", None) or ""
+        best: tuple[str, str] | None = None
+        for prefix, section in self.LIVE_SECTIONS:
+            if name.startswith(prefix) and (best is None or len(prefix) > len(best[0])):
+                best = (prefix, section)
+        return best[1] if best else None
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        """Announces a successful write to everyone in the workspace.
+
+        Done once here rather than at forty return statements. The failure
+        mode of the alternative is not a broken screen but a section that is
+        live on some actions and stale on others, which reads as the feature
+        working badly rather than as one call site having been missed.
+        """
+        response = super().finalize_response(request, response, *args, **kwargs)
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return response
+        if not (200 <= response.status_code < 300):
+            return response
+
+        section = self._live_section()
+        company_id = getattr(getattr(request, "user", None), "company_id", None)
+        if not section or not company_id:
+            return response
+
+        # Deliberately payload-free beyond the section and the actor. The
+        # server decides ids, ordering and what a viewer is allowed to see, so
+        # the honest answer to "what does the board look like now" is the one
+        # the client's own reload comes back with — and a ping cannot leak a
+        # row to somebody the list endpoint would have filtered out.
+        realtime.publish_company(
+            company_id,
+            section,
+            action="changed",
+            by=getattr(request.user, "id", None),
+        )
+        return response
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -425,7 +506,7 @@ def _me_payload(employee: dict, membership=None) -> dict:
         "username": employee.get("username"),
         "phone": employee.get("phone"),
         "email": employee.get("email"),
-        "photo": employee.get("photo"),
+        "photo": _photo_url(employee.get("photo")),
         "department_name": employee.get("department_name"),
         "completed_this_month": repo.completed_tasks_this_month(
             employee["id"], *_current_year_month()
@@ -512,6 +593,99 @@ class WorkspaceProfileView(WorkspaceAPIView):
         return Response(_me_payload(updated, request.user.membership))
 
 
+class WorkspaceProfilePhotoView(WorkspaceAPIView):
+    """PUT    /api/b2b/workspace/me/photo/ — set your own picture.
+    DELETE /api/b2b/workspace/me/photo/ — go back to initials.
+
+    Yours alone. There is no path here for changing somebody else's: a photo
+    is the one thing on a roster entry that is unambiguously the person's own,
+    and a workspace that could set it for them is a workspace that can put any
+    face against their name.
+
+    The bytes go through the same door everything else stored here goes
+    through, so they are checked against the company's quota rather than being
+    a way around it.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Set your own photo",
+        consumes=["multipart/form-data"],
+        manual_parameters=[
+            openapi.Parameter("photo", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
+        ],
+        responses={200: MeSerializer(), 413: "Storage limit reached"},
+    )
+    def put(self, request):
+        upload = request.FILES.get("photo")
+        if upload is None:
+            return Response(
+                {"photo": [_("Pick a picture.")]}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        content_type = (getattr(upload, "content_type", "") or "").lower()
+        if not content_type.startswith("image/"):
+            return Response(
+                {"photo": [_("That is not a picture.")]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        employee = repo.get_workspace_employee(request.user.id)
+        if not employee:
+            return Response(
+                {"detail": _("Profile not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+        previous = employee.get("photo")
+
+        file, refusal = store_upload(request=request, upload=upload, kind="avatar")
+        if refusal:
+            return refusal
+
+        updated = repo.set_own_photo(request.user.id, file["path"])
+        if not updated:
+            return Response(
+                {"detail": _("Profile not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # The old picture goes only once the new one is recorded. Deleting it
+        # first would leave somebody with no photo at all if the write failed.
+        self._forget(previous)
+        return Response(_me_payload(updated, request.user.membership))
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Remove your photo",
+        responses={200: MeSerializer()},
+    )
+    def delete(self, request):
+        employee = repo.get_workspace_employee(request.user.id)
+        if not employee:
+            return Response(
+                {"detail": _("Profile not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        previous = employee.get("photo")
+        updated = repo.set_own_photo(request.user.id, None)
+        self._forget(previous)
+        return Response(_me_payload(updated or employee, request.user.membership))
+
+    @staticmethod
+    def _forget(path: str | None) -> None:
+        """Drops the stored object, if there was one.
+
+        Never fatal: a leftover file wastes disk, while a failure here would
+        leave somebody unable to change their picture at all.
+        """
+        if not path or path.startswith("http"):
+            return
+        try:
+            default_storage.delete(path)
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not delete stored object %s", path)
+
+
 class WorkspaceUsernameView(WorkspaceAPIView):
     """PUT /api/b2b/workspace/me/username/ — pick the handle people find you by.
 
@@ -552,6 +726,51 @@ class WorkspaceUsernameView(WorkspaceAPIView):
         return Response(_me_payload(updated, request.user.membership))
 
 
+def _with_presence(members: list[dict]) -> list[dict]:
+    """Stamps `is_online` and `last_seen_at` onto roster rows.
+
+    Two cache reads for the whole list rather than one per row, and it is done
+    here rather than in the repository because presence is not in the database
+    — see `presence.py`. Rows are copied: `list_team` hands back what a query
+    returned, and a caller that reused it would be reading a green dot from a
+    minute ago.
+    """
+    ids = [m["id"] for m in members]
+    online = presence.online_ids(ids)
+    seen = presence.last_seen(ids)
+    return [
+        {
+            **m,
+            "photo": _photo_url(m.get("photo")),
+            "is_online": m["id"] in online,
+            "last_seen_at": seen.get(m["id"]),
+        }
+        for m in members
+    ]
+
+
+class WorkspacePresenceView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/presence/ — who is online right now.
+
+    The socket says so on connect and pushes every change after that, so this
+    is for the case the socket cannot cover: an app that has just come back to
+    the foreground and wants the current picture before its connection is up.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Who is online")
+    def get(self, request):
+        ids = repo.company_employee_ids(request.user.company_id)
+        online = presence.online_ids(ids)
+        seen = presence.last_seen(ids)
+        return Response({
+            "online": sorted(online),
+            "last_seen": {str(k): v for k, v in seen.items()},
+            "heartbeat_seconds": presence.HEARTBEAT_SECONDS,
+        })
+
+
 class WorkspaceTeamView(WorkspaceAPIView):
     """GET /api/b2b/workspace/team/ — the company roster.
 
@@ -572,7 +791,7 @@ class WorkspaceTeamView(WorkspaceAPIView):
             request.user.company_id,
             search=(request.query_params.get("search") or "").strip() or None,
         )
-        return Response(TeamMemberSerializer(members, many=True).data)
+        return Response(TeamMemberSerializer(_with_presence(members), many=True).data)
 
 
 # ─── Tasks ────────────────────────────────────────────────────────────────────
@@ -1252,11 +1471,38 @@ class WorkspaceEventDetailView(WorkspaceAPIView):
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────
 
+def _photo_url(path: str | None) -> str | None:
+    """A stored picture as something a client can load.
+
+    The columns hold a storage path — the convention every stored object here
+    uses — and turning one into a URL is the server's job, because only the
+    server knows which backend the bytes are on. Anything already absolute is
+    left alone: a row written before this existed, or an avatar that came from
+    somewhere else entirely.
+    """
+    if not path:
+        return None
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    return default_storage.url(path)
+
+
+def _thread_photo_url(thread: dict) -> str | None:
+    """A group's picture as something the app can load.
+
+    The column holds a storage path — the same convention every other stored
+    object here uses — and turning it into a URL is the server's job, because
+    only the server knows which backend the bytes are on.
+    """
+    return _photo_url(thread.get("photo"))
+
+
 def _thread_payload(thread: dict) -> dict:
     last_id = thread.get("last_message_id")
     return {
         "id": thread["id"],
         "group_name": thread.get("group_name"),
+        "photo": _thread_photo_url(thread),
         "participant_ids": thread.get("participant_ids") or [],
         "unread": int(thread.get("unread") or 0),
         "is_pinned": bool(thread.get("is_pinned")),
@@ -1330,7 +1576,342 @@ class WorkspaceThreadListCreateView(WorkspaceAPIView):
             member_ids=checked,
             group_name=group_name,
         )
+        # Everyone in the new room starts listening to it now, rather than on
+        # their next reconnect. Without this a group chat opened while all its
+        # members are online is silent for all of them but its creator, which
+        # looks exactly like the feature being broken.
+        add_to_thread([request.user.id, *checked], thread["id"])
+        realtime.publish_employees(
+            checked,
+            realtime.EVENT_THREAD,
+            action="created",
+            thread_id=thread["id"],
+        )
         return Response(_thread_payload(thread), status=status.HTTP_201_CREATED)
+
+
+# ─── Group chats ──────────────────────────────────────────────────────────────
+#
+# A group has a screen of its own — a name, a picture and the people in it —
+# and everything on that screen is written through the four views below. They
+# share one rule about who may write, stated once in [_may_manage_group]: an
+# admin of *this room*, or somebody who runs the company. The room's own admin
+# comes first because a group is not a company asset — it is a conversation,
+# and the person who started it is the one who knows who belongs in it.
+
+
+def _may_manage_group(thread: dict, user, member: dict | None) -> bool:
+    """Whether this caller may rename the room, repaper it, or move people.
+
+    A manager is included so a room does not become unmaintainable when its
+    admins leave the company — which is exactly when somebody needs to get
+    into it and cannot ask its owner.
+    """
+    if member is None:
+        return False
+    if member.get("role") == "admin":
+        return True
+    return bool(user.capabilities["can_manage_team"])
+
+
+def _group_payload(thread: dict, user, member: dict | None) -> dict:
+    members = _with_presence(repo.list_thread_members(thread["id"]))
+    return {
+        "id": thread["id"],
+        "group_name": thread.get("group_name"),
+        "photo": _thread_photo_url(thread),
+        "created_by": thread.get("created_by"),
+        "created_at": thread.get("created_at"),
+        "member_count": len(members),
+        "my_role": (member or {}).get("role") or "member",
+        "can_manage": _may_manage_group(thread, user, member),
+        "members": members,
+    }
+
+
+def _group_for_request(request, thread_id: int):
+    """The room, the caller's membership in it, and the refusal to send back
+    when there is nothing to work with.
+
+    Returns ``(thread, member, None)`` or ``(None, None, Response)``. Every one
+    of the four views starts with these same three checks, and writing them out
+    four times is how the fourth one ends up missing the tenant check.
+    """
+    thread = repo.get_thread(thread_id, request.user.company_id)
+    if not thread:
+        return None, None, Response(
+            {"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND
+        )
+
+    member = repo.thread_member(thread_id, request.user.id)
+    if not member:
+        # Not "forbidden": somebody who is not in the room should not be able
+        # to learn that it exists.
+        return None, None, Response(
+            {"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND
+        )
+
+    if not thread.get("group_name"):
+        return None, None, Response(
+            {"detail": _("This is not a group chat.")},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return thread, member, None
+
+
+def _announce_group(thread_id: int, action: str, **payload) -> None:
+    """Tells the room that something about it changed.
+
+    Sent to the thread rather than to a list of employees, so a member who is
+    reading the room right now sees the new name or the new picture without
+    reopening it — and so the message reaches whoever is in the room *after*
+    the change, which a pre-computed recipient list would get wrong exactly
+    when somebody was added or removed.
+    """
+    # `publish_thread` puts the thread id on the wire itself — a client holds
+    # one socket per room and a frame that does not say which room it belongs
+    # to cannot be placed.
+    realtime.publish_thread(thread_id, realtime.EVENT_THREAD, action=action, **payload)
+
+
+class WorkspaceGroupView(WorkspaceAPIView):
+    """GET   /api/b2b/workspace/chats/<id>/group/ — the group's own screen.
+    PATCH /api/b2b/workspace/chats/<id>/group/ — rename it, or change its picture.
+
+    The picture arrives as multipart, the same door every other upload uses, so
+    it is quota-checked and accounted for like any other stored object.
+    """
+
+    required_module = Module.CHAT
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Group detail with its members",
+        responses={200: ChatGroupSerializer(), 404: "Not found"},
+    )
+    def get(self, request, thread_id: int):
+        thread, member, refusal = _group_for_request(request, thread_id)
+        if refusal:
+            return refusal
+        return Response(_group_payload(thread, request.user, member))
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Rename a group or set its picture",
+        consumes=["application/json", "multipart/form-data"],
+        request_body=ThreadUpdateSerializer,
+        manual_parameters=[
+            openapi.Parameter("photo", openapi.IN_FORM, type=openapi.TYPE_FILE, required=False),
+        ],
+        responses={200: ChatGroupSerializer(), 403: "Not an admin", 413: "Storage limit reached"},
+    )
+    def patch(self, request, thread_id: int):
+        thread, member, refusal = _group_for_request(request, thread_id)
+        if refusal:
+            return refusal
+        if not _may_manage_group(thread, request.user, member):
+            return Response(
+                {"detail": _("Only a group admin can change this.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ThreadUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        changes: dict = {}
+        if "group_name" in serializer.validated_data:
+            changes["group_name"] = serializer.validated_data["group_name"]
+
+        upload = request.FILES.get("photo")
+        previous_photo = thread.get("photo")
+        if upload is not None:
+            file, upload_refusal = store_upload(
+                request=request, upload=upload, kind="chat"
+            )
+            if upload_refusal:
+                return upload_refusal
+            changes["photo"] = file["path"]
+
+        if not changes:
+            return Response(_group_payload(thread, request.user, member))
+
+        updated = repo.update_thread(thread_id, request.user.company_id, **changes)
+        if not updated:
+            return Response(
+                {"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # The old picture goes only once the new one is recorded. Deleting it
+        # first would leave the room with no picture at all if the write failed.
+        if upload is not None and previous_photo:
+            try:
+                default_storage.delete(previous_photo)
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not delete stored object %s", previous_photo)
+
+        payload = _group_payload(updated, request.user, member)
+        _announce_group(
+            thread_id,
+            "updated",
+            group_name=payload["group_name"],
+            photo=payload["photo"],
+        )
+        return Response(payload)
+
+
+class WorkspaceGroupMembersView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/chats/<id>/members/ — add people to a group."""
+
+    required_module = Module.CHAT
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Add members to a group",
+        request_body=ThreadMembersSerializer,
+        responses={200: ChatGroupSerializer(), 403: "Not an admin"},
+    )
+    def post(self, request, thread_id: int):
+        thread, member, refusal = _group_for_request(request, thread_id)
+        if refusal:
+            return refusal
+        if not _may_manage_group(thread, request.user, member):
+            return Response(
+                {"detail": _("Only a group admin can add people.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ThreadMembersSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        checked = _validated_employee_ids(
+            request.user.company_id, serializer.validated_data["member_ids"]
+        )
+        if checked is None:
+            return Response(
+                {"member_ids": [_("Some of these employees are not in your company.")]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        for employee_id in checked:
+            repo.add_thread_member(thread_id, employee_id)
+
+        # Same reason the create endpoint does it: without this, somebody added
+        # to a room while they have the app open hears nothing from it until
+        # they reconnect, which reads as the room being broken for them.
+        add_to_thread(checked, thread_id)
+        realtime.publish_employees(
+            checked, realtime.EVENT_THREAD, action="created", thread_id=thread_id
+        )
+        _announce_group(thread_id, "members")
+        return Response(_group_payload(thread, request.user, member))
+
+
+class WorkspaceGroupMemberView(WorkspaceAPIView):
+    """PATCH  /api/b2b/workspace/chats/<id>/members/<employee_id>/ — admin or member.
+    DELETE /api/b2b/workspace/chats/<id>/members/<employee_id>/ — take them out.
+
+    Removing yourself through this endpoint is how leaving works, and it is the
+    one case that needs no admin rights: nobody can be held in a conversation.
+    """
+
+    required_module = Module.CHAT
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Make a member an admin, or an admin an ordinary member",
+        request_body=ThreadMemberRoleSerializer,
+        responses={200: ChatGroupSerializer(), 403: "Not an admin", 409: "Last admin"},
+    )
+    def patch(self, request, thread_id: int, employee_id: int):
+        thread, member, refusal = _group_for_request(request, thread_id)
+        if refusal:
+            return refusal
+        if not _may_manage_group(thread, request.user, member):
+            return Response(
+                {"detail": _("Only a group admin can change roles.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        target = repo.thread_member(thread_id, employee_id)
+        if not target:
+            return Response(
+                {"detail": _("That person is not in this group.")},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = ThreadMemberRoleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        role = serializer.validated_data["role"]
+
+        # A group with no admin cannot be renamed, added to or repaired from
+        # inside the app, so the last one may not step down. Promote somebody
+        # else first — which is what the app's own screen tells them to do.
+        if role == "member" and target.get("role") == "admin":
+            if len(repo.thread_admin_ids(thread_id)) <= 1:
+                return Response(
+                    {"detail": _("A group needs at least one admin.")},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+        repo.set_thread_member_role(thread_id, employee_id, role)
+        # Re-read: the caller may have just changed their own standing, and the
+        # payload has to say what is true after the write, not before it.
+        member = repo.thread_member(thread_id, request.user.id)
+        _announce_group(thread_id, "members")
+        return Response(_group_payload(thread, request.user, member))
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Remove somebody from a group, or leave it yourself",
+        responses={200: ChatGroupSerializer(), 204: "You left", 403: "Not an admin"},
+    )
+    def delete(self, request, thread_id: int, employee_id: int):
+        thread, member, refusal = _group_for_request(request, thread_id)
+        if refusal:
+            return refusal
+
+        leaving = employee_id == request.user.id
+        if not leaving and not _may_manage_group(thread, request.user, member):
+            return Response(
+                {"detail": _("Only a group admin can remove people.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        target = repo.thread_member(thread_id, employee_id)
+        if not target:
+            return Response(
+                {"detail": _("That person is not in this group.")},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        # An admin is not above another admin. Without this the person who was
+        # promoted a minute ago can remove the one who promoted them.
+        if not leaving and target.get("role") == "admin" and member.get("role") != "admin":
+            return Response(
+                {"detail": _("Only a group admin can remove another admin.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        repo.remove_thread_member(thread_id, employee_id)
+        remove_from_thread([employee_id], thread_id)
+
+        # The room must not be left ownerless — see
+        # `promote_longest_standing_member` for why this is not simply refused.
+        if target.get("role") == "admin" and not repo.thread_admin_ids(thread_id):
+            repo.promote_longest_standing_member(thread_id)
+
+        realtime.publish_employees(
+            [employee_id], realtime.EVENT_THREAD, action="removed", thread_id=thread_id
+        )
+        _announce_group(thread_id, "members")
+
+        if leaving:
+            # Nothing to hand back: the caller is no longer in the room and
+            # would have no right to read its members.
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(_group_payload(thread, request.user, member))
 
 
 # What a quoted message shows in the bubble above a reply. Deliberately short:
@@ -1379,11 +1960,35 @@ def _quote_payload(original: dict | None, attachment: dict | None = None) -> dic
     }
 
 
+def _reaction_payload(reactions: list[dict] | None, viewer_id: int) -> list[dict]:
+    """The reactions on one message, folded into one entry per emoji.
+
+    `mine` rides along because the bubble needs it and a count cannot carry
+    it: tapping a reaction you already left is how it is taken back, so the
+    button has to know which of them are yours.
+    """
+    if not reactions:
+        return []
+    folded: dict[str, dict] = {}
+    for row in reactions:
+        entry = folded.setdefault(
+            row["emoji"], {"emoji": row["emoji"], "count": 0, "mine": False}
+        )
+        entry["count"] += 1
+        if row["employee_id"] == viewer_id:
+            entry["mine"] = True
+    # Most-reacted first, and stable after that: a list that reorders itself
+    # every time somebody taps is one nobody can aim at.
+    return sorted(folded.values(), key=lambda r: (-r["count"], r["emoji"]))
+
+
 def _message_payload(
     message: dict,
     attachment: dict | None = None,
     replied_to: dict | None = None,
     quoted_attachment: dict | None = None,
+    reactions: list[dict] | None = None,
+    viewer_id: int | None = None,
 ) -> dict:
     """One message as the app reads it.
 
@@ -1410,7 +2015,22 @@ def _message_payload(
     # Null once the original is deleted — the reply survives and simply stops
     # quoting, which is what the ON DELETE SET NULL on the column produces.
     data["reply_to"] = _quote_payload(replied_to, quoted_attachment)
+    data["reactions"] = _reaction_payload(reactions, viewer_id or 0)
     return data
+
+
+def _everyone_read_at(read_state: dict, participant_ids) -> str | None:
+    """The moment by which every other member had read the room.
+
+    `read_state` holds only members who have ever opened it, so a shorter map
+    than the roster means somebody has not — and a double tick then would be
+    saying something that is not true. `participant_ids` is already "everyone
+    except the viewer", which is the same population the read state covers.
+    """
+    others = [i for i in participant_ids]
+    if not others or len(read_state) < len(others):
+        return None
+    return min(str(value) for value in read_state.values())
 
 
 class WorkspaceMessageView(WorkspaceAPIView):
@@ -1432,7 +2052,8 @@ class WorkspaceMessageView(WorkspaceAPIView):
         responses={200: ChatMessageSerializer(many=True)},
     )
     def get(self, request, thread_id: int):
-        if not self._thread(request, thread_id):
+        thread = self._thread(request, thread_id)
+        if not thread:
             return Response({"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND)
 
         try:
@@ -1444,7 +2065,10 @@ class WorkspaceMessageView(WorkspaceAPIView):
         except (KeyError, TypeError, ValueError):
             before_id = None
 
-        messages = repo.list_messages(thread_id, before_id=before_id, limit=limit)
+        search = (request.query_params.get("search") or "").strip() or None
+        messages = repo.list_messages(
+            thread_id, before_id=before_id, limit=limit, search=search
+        )
         quoted = repo.messages_by_ids(
             [m["reply_to_id"] for m in messages if m.get("reply_to_id")]
         )
@@ -1454,13 +2078,35 @@ class WorkspaceMessageView(WorkspaceAPIView):
         attachments = repo.attachments_for_messages(
             [m["id"] for m in messages] + list(quoted)
         )
+        reactions = repo.reactions_for_messages([m["id"] for m in messages])
         # Opening a room is what marks it read, so it happens here rather than
         # costing the phone a second round trip. Only the newest page counts —
         # scrolling back through history must not clear newer messages. The
         # path is exempt from the GET cache (see core/middleware/cache.py), so
         # this write is never skipped by a cache hit.
-        if before_id is None:
-            repo.mark_thread_read(thread_id, request.user.id)
+        # A search is a look through history, not a visit to the room. Marking
+        # it read would clear a backlog somebody was searching *for*.
+        if before_id is None and search is None:
+            read_at = repo.mark_thread_read(thread_id, request.user.id)
+            # The other side's ticks move on this, not only on the socket's
+            # own `read` frame: opening the room over HTTP is the commonest
+            # way a thread gets read, and a sender whose app is open should
+            # not have to wait for the reader to type something before their
+            # message stops looking undelivered.
+            realtime.publish_thread(
+                thread_id,
+                realtime.EVENT_READ,
+                employee_id=request.user.id,
+                read_at=read_at,
+                last_message_id=messages[-1]["id"] if messages else None,
+            )
+
+        # Whose ticks are whose: when each *other* member last read the room.
+        # The client turns this into one or two ticks per bubble by comparing
+        # it against the message's own timestamp, which is the only way a
+        # group chat can say "everybody has seen this" without a row per
+        # message per member.
+        read_state = repo.thread_read_state(thread_id, request.user.id)
 
         return Response({
             "results": [
@@ -1469,10 +2115,23 @@ class WorkspaceMessageView(WorkspaceAPIView):
                     attachments.get(m["id"]),
                     quoted.get(m.get("reply_to_id")),
                     attachments.get(m.get("reply_to_id")),
+                    reactions.get(m["id"]),
+                    request.user.id,
                 )
                 for m in messages
             ],
             "has_more": len(messages) == limit,
+            "members_read_at": {str(k): v for k, v in read_state.items()},
+            # The moment by which *everyone* else had read. Null while any
+            # member has never opened the room — which is exactly when a
+            # double tick would be a lie.
+            "read_at": _everyone_read_at(read_state, thread.get("participant_ids") or []),
+            # What is pinned in this room, whatever page of history is open.
+            # A pin nobody can reach from the top of the room is not a pin.
+            "pinned": [
+                _message_payload(m, viewer_id=request.user.id)
+                for m in repo.list_pinned_messages(thread_id)
+            ],
         })
 
     @swagger_auto_schema(
@@ -1527,11 +2186,32 @@ class WorkspaceMessageView(WorkspaceAPIView):
             # caller has no business seeing.
             quoted_attachment = repo.attachments_for_messages([reply_to_id]).get(reply_to_id)
 
+        # A forward copies the original's text on the server. Trusting the
+        # client's would let anyone put words in a colleague's mouth and have
+        # the bubble attribute them.
+        forward_id = serializer.validated_data.get("forward_message_id")
+        forwarded_from_id = None
+        text = serializer.validated_data["text"]
+        if forward_id:
+            original = repo.message_visible_to(
+                forward_id, request.user.company_id, request.user.id
+            )
+            if not original:
+                return Response(
+                    {"forward_message_id": [_("That message is not available.")]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            text = original["text"]
+            # The person, not the message: the label has to keep saying who
+            # wrote it after the original room is gone.
+            forwarded_from_id = original["sender_id"]
+
         message = repo.send_message(
             thread_id,
             request.user.id,
-            serializer.validated_data["text"],
+            text,
             reply_to_id=reply_to_id,
+            forwarded_from_id=forwarded_from_id,
         )
 
         attachment = None
@@ -1563,23 +2243,70 @@ class WorkspaceMessageView(WorkspaceAPIView):
                 thread_id,
                 request.user.id,
                 getattr(request.user, "full_name", "") or "",
-                serializer.validated_data["text"],
+                text,
             )
         except Exception:  # noqa: BLE001
             logger.exception("Could not queue chat notification for thread %s", thread_id)
 
-        payload = _message_payload(message, attachment, replied_to, quoted_attachment)
+        payload = _message_payload(
+            message,
+            attachment,
+            replied_to,
+            quoted_attachment,
+            viewer_id=request.user.id,
+        )
         broadcast_message(thread_id, payload)
         return Response(payload, status=status.HTTP_201_CREATED)
 
 
 class WorkspaceMessageDetailView(WorkspaceAPIView):
-    """DELETE /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/
+    """PATCH  /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/
+    DELETE /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/
 
     Your own message, always. Anyone else's only if you run the company —
     a manager has to be able to take down something posted in a shared room,
     and an employee must not be able to edit the record of what was said.
+
+    Editing is narrower than deleting: only the author, never a manager. A
+    manager removing something is a visible act; a manager rewriting what
+    somebody said is a forgery, and no role should be able to do it.
     """
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Edit your own message",
+        request_body=MessageEditSerializer,
+        responses={200: ChatMessageSerializer(), 403: "Not yours", 404: "Not found"},
+    )
+    def patch(self, request, thread_id: int, message_id: int):
+        if not repo.get_thread_for_member(thread_id, request.user.company_id, request.user.id):
+            return Response({"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        message = repo.get_message(message_id, thread_id)
+        if not message:
+            return Response({"detail": _("Message not found.")}, status=status.HTTP_404_NOT_FOUND)
+        if message["sender_id"] != request.user.id:
+            return Response(
+                {"detail": _("You can only edit your own messages.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = MessageEditSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = repo.edit_message(
+            message_id, thread_id, serializer.validated_data["text"]
+        )
+        if not updated:
+            return Response({"detail": _("Message not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        attachment = repo.attachments_for_messages([message_id]).get(message_id)
+        payload = _message_payload(
+            updated, attachment, viewer_id=request.user.id
+        )
+        # Everyone in the room swaps the text in place rather than showing the
+        # old one until the next refetch.
+        realtime.broadcast_edit(thread_id, payload)
+        return Response(payload)
 
     required_module = Module.CHAT
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -1619,6 +2346,105 @@ class WorkspaceMessageDetailView(WorkspaceAPIView):
         # Everyone in the room drops the bubble without refetching.
         broadcast_deletion(thread_id, message_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkspaceMessagePinView(WorkspaceAPIView):
+    """POST   /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/pin/
+    DELETE the same path — unpin.
+
+    A pin is about the room, not about the message's author: anybody in it can
+    put something at the top, and anybody in it can take it down again. That
+    is the same rule Telegram uses in a group, and the alternative — only the
+    author may pin their own — makes the feature useless for the case it
+    exists for, which is somebody else's address or meeting time.
+    """
+
+    required_module = Module.CHAT
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    def _message(self, request, thread_id: int, message_id: int):
+        if not repo.get_thread_for_member(thread_id, request.user.company_id, request.user.id):
+            return None
+        return repo.get_message(message_id, thread_id)
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Pin a message",
+                         responses={200: ChatMessageSerializer()})
+    def post(self, request, thread_id: int, message_id: int):
+        return self._set(request, thread_id, message_id, pinned_by=request.user.id)
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Unpin a message",
+                         responses={200: ChatMessageSerializer()})
+    def delete(self, request, thread_id: int, message_id: int):
+        return self._set(request, thread_id, message_id, pinned_by=None)
+
+    def _set(self, request, thread_id: int, message_id: int, *, pinned_by: int | None):
+        if not self._message(request, thread_id, message_id):
+            return Response({"detail": _("Message not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        updated = repo.set_message_pinned(message_id, thread_id, pinned_by=pinned_by)
+        if not updated:
+            return Response({"detail": _("Message not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        payload = _message_payload(updated, viewer_id=request.user.id)
+        realtime.publish_thread(
+            thread_id,
+            realtime.EVENT_PINNED,
+            message=payload,
+            pinned=pinned_by is not None,
+        )
+        return Response(payload)
+
+
+class WorkspaceMessageReactionView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/reactions/
+
+    One endpoint for both directions, because the app has one gesture for
+    both: tapping a reaction you already left is how it comes off.
+    """
+
+    required_module = Module.CHAT
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="React to a message, or take the reaction back",
+        request_body=MessageReactionSerializer,
+        responses={200: ChatMessageSerializer()},
+    )
+    def post(self, request, thread_id: int, message_id: int):
+        if not repo.get_thread_for_member(thread_id, request.user.company_id, request.user.id):
+            return Response({"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        message = repo.get_message(message_id, thread_id)
+        if not message:
+            return Response({"detail": _("Message not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = MessageReactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        added = repo.toggle_reaction(
+            message_id, request.user.id, serializer.validated_data["emoji"]
+        )
+
+        reactions = repo.reactions_for_messages([message_id]).get(message_id)
+        attachment = repo.attachments_for_messages([message_id]).get(message_id)
+        payload = _message_payload(
+            message, attachment, reactions=reactions, viewer_id=request.user.id
+        )
+        # Broadcast without `mine`: whose reaction it is depends on who is
+        # reading, and the room is one group. Each client recomputes its own
+        # from `employee_id`.
+        realtime.publish_thread(
+            thread_id,
+            realtime.EVENT_REACTION,
+            message_id=message_id,
+            employee_id=request.user.id,
+            emoji=serializer.validated_data["emoji"],
+            # Which way it went. Without it a listener has to guess whether to
+            # add or subtract, and a guess that is wrong leaves a count that
+            # never comes back.
+            on=added,
+        )
+        return Response(payload)
 
 
 class WorkspaceThreadFlagsView(WorkspaceAPIView):

@@ -36,6 +36,7 @@ from apps.b2b.workspace.joining_views import (
     JoinCodeView,
     WorkspaceInviteListCreateView,
     WorkspaceJoinRequestDecideView,
+    WorkspaceJoinRequestListView,
     WorkspaceSearchView,
 )
 
@@ -1054,3 +1055,78 @@ def test_deleting_an_account_with_no_phone_touches_no_identity_tables():
     assert not any("b2b_user" in sql for sql, _ in statements)
     # The account row itself is still removed.
     assert any("DELETE FROM b2b_account" in sql for sql, _ in statements)
+
+
+def _manager() -> WorkspaceUser:
+    return WorkspaceUser({
+        "id": 4,
+        "company_id": COMPANY,
+        "role": Role.MANAGER,
+        "full_name": "Rahbar Rahimov",
+    })
+
+
+def _employee() -> WorkspaceUser:
+    return WorkspaceUser({
+        "id": 5,
+        "company_id": COMPANY,
+        "role": Role.EMPLOYEE,
+        "full_name": "Xodim Xolmatov",
+    })
+
+
+def test_a_manager_may_answer_somebody_knocking_at_the_door():
+    """Wider than `EMPLOYEE_INVITE` on purpose.
+
+    That permission is what separates an administrator from a manager, and it
+    gates asking *another* workspace to lend somebody — a commitment about who
+    is allowed in. Answering someone who has already asked to join is the
+    day-to-day of running a workspace, and a request only the owner can answer
+    sits unanswered for as long as the owner is away.
+    """
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.get_join_request",
+        return_value={"id": 3, "company_id": COMPANY, "account_id": 9},
+    ), patch(
+        "apps.b2b.workspace.joining_views.jrepo.close_join_request",
+        return_value=True,
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.get_account",
+        return_value=_account(),
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.create_membership",
+        return_value={"id": 42},
+    ), patch(
+        "apps.b2b.workspace.joining_views.arepo.record_audit"
+    ):
+        response = _call(
+            WorkspaceJoinRequestDecideView,
+            factory.post(
+                "/join-requests/3/accept/", {"role": "employee"}, format="json"
+            ),
+            _manager(),
+            request_id=3,
+            action="accept",
+        )
+
+    assert response.status_code == 200
+
+
+def test_a_plain_employee_may_not_let_anybody_in():
+    response = _call(
+        WorkspaceJoinRequestDecideView,
+        factory.post("/join-requests/3/accept/", {"role": "owner"}, format="json"),
+        _employee(),
+        request_id=3,
+        action="accept",
+    )
+    assert response.status_code == 403
+
+
+def test_a_plain_employee_cannot_even_see_who_is_asking():
+    # The list is the other half of the same door. Leaving it open would show
+    # every employee the phone number of everyone who has applied.
+    response = _call(
+        WorkspaceJoinRequestListView, factory.get("/join-requests/"), _employee()
+    )
+    assert response.status_code == 403

@@ -640,10 +640,15 @@ LEGACY_FLAGS = {
         "can_update_task_status", "can_use_mail", "can_view_attendance",
         "can_view_hotels", "can_view_team", "sees_all_company_data",
     },
+    # `can_post_lead` is a deliberate widening, not a drift: raising a lead is
+    # now everybody's job — anybody who meets a customer can bring one in, and
+    # a lead nobody was allowed to write down is a lead the company never had.
+    # What happens to the deal afterwards is still the sales side's, which is
+    # why no other `sales.*` flag appears here.
     "employee": {
         "can_chat", "can_comment_task", "can_create_personal_event",
-        "can_update_task_status", "can_use_mail", "can_view_attendance",
-        "can_view_hotels", "can_view_team",
+        "can_post_lead", "can_update_task_status", "can_use_mail",
+        "can_view_attendance", "can_view_hotels", "can_view_team",
     },
 }
 

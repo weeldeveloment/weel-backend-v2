@@ -65,6 +65,12 @@ class TeamMemberSerializer(serializers.Serializer):
     # Somebody lent to this workspace by another one. The app marks the row so
     # it is clear who is here for a while and who was hired here.
     is_guest = serializers.BooleanField(required=False, default=False)
+    # Whether they are holding a socket open right now, and when they last
+    # were. Not the same thing as `status`, which is available/on_trip/blocked
+    # and is a manager's account of where somebody is for days at a time —
+    # see `presence.py` for why this one never touches the database.
+    is_online = serializers.BooleanField(required=False, default=False)
+    last_seen_at = serializers.CharField(allow_null=True, required=False)
 
 
 class SupportMessageSerializer(serializers.Serializer):
@@ -191,6 +197,15 @@ class ChatMessageSerializer(serializers.Serializer):
     text = serializers.CharField(allow_blank=True)
     reply_to_id = serializers.IntegerField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
+    # Set once a message has been rewritten. The bubble says so; a message
+    # whose text changes with nothing to show for it is worse to have in a
+    # room than one that cannot be changed at all.
+    edited_at = serializers.DateTimeField(allow_null=True, required=False)
+    # Who wrote the original, when this is a forward. The person, not the
+    # message: the label has to keep saying "Sardordan" after the original
+    # room is gone.
+    forwarded_from_id = serializers.IntegerField(allow_null=True, required=False)
+    pinned_at = serializers.DateTimeField(allow_null=True, required=False)
 
     class Meta:
         # `chat.ChatMessageSerializer` is a different shape (conversation_id,
@@ -331,11 +346,45 @@ class WorkspaceFolderWriteSerializer(serializers.Serializer):
 class ChatThreadSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     group_name = serializers.CharField(allow_null=True, required=False)
+    #: The group's picture, already resolved to a URL. Null for a direct chat,
+    #: which is drawn with the other person's own avatar.
+    photo = serializers.CharField(allow_null=True, required=False)
     participant_ids = serializers.ListField(child=serializers.IntegerField())
     unread = serializers.IntegerField()
     is_pinned = serializers.BooleanField()
     is_muted = serializers.BooleanField()
     last_message = ChatMessageSerializer(allow_null=True, required=False)
+
+
+class ChatGroupMemberSerializer(TeamMemberSerializer):
+    """A roster row plus what this person is *in this room*.
+
+    Inherits the team shape on purpose: the group screen draws the same face,
+    name and position the team screen does, and a second, slightly different
+    employee payload is how the two drift apart.
+    """
+
+    #: "admin" or "member" — see `b2b_chat_member.role`.
+    member_role = serializers.CharField()
+
+
+class ChatGroupSerializer(serializers.Serializer):
+    """Everything the group's own screen shows in one response."""
+
+    id = serializers.IntegerField()
+    group_name = serializers.CharField(allow_null=True)
+    photo = serializers.CharField(allow_null=True, required=False)
+    created_by = serializers.IntegerField(allow_null=True, required=False)
+    created_at = serializers.CharField(allow_null=True, required=False)
+    member_count = serializers.IntegerField()
+    #: The caller's own standing, so the app can draw the screen before it has
+    #: found itself in `members`.
+    my_role = serializers.CharField()
+    #: Whether this caller may rename the room, change its picture and move
+    #: people in and out. Computed by the same rule the write endpoints
+    #: enforce, so a button is never offered that the server will refuse.
+    can_manage = serializers.BooleanField()
+    members = ChatGroupMemberSerializer(many=True)
 
 
 class CustomerSerializer(serializers.Serializer):
@@ -579,6 +628,30 @@ class ThreadCreateSerializer(serializers.Serializer):
         return attrs
 
 
+class ThreadUpdateSerializer(serializers.Serializer):
+    """Renaming a group. The picture rides in as a file and is handled by the
+    view, the same way a chat attachment is."""
+
+    group_name = serializers.CharField(max_length=200, required=False)
+
+    def validate_group_name(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("A group needs a name.")
+        return value
+
+
+class ThreadMembersSerializer(serializers.Serializer):
+    member_ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
+
+    def validate_member_ids(self, value: list[int]) -> list[int]:
+        return list(dict.fromkeys(value))
+
+
+class ThreadMemberRoleSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(choices=["admin", "member"])
+
+
 class MessageWriteSerializer(serializers.Serializer):
     """A chat message.
 
@@ -589,11 +662,49 @@ class MessageWriteSerializer(serializers.Serializer):
 
     text = serializers.CharField(max_length=4000, required=False, allow_blank=True, default="")
     reply_to_id = serializers.IntegerField(required=False, allow_null=True)
+    #: The message being forwarded. The server copies its text rather than
+    #: trusting the client's — a forward that could say anything and attribute
+    #: it to somebody else is not a forward.
+    forward_message_id = serializers.IntegerField(required=False, allow_null=True)
 
     def validate_text(self, value: str) -> str:
         value = value.strip()
         if not value and not self.context.get("allow_empty_text"):
             raise serializers.ValidationError("Message cannot be empty.")
+        return value
+
+    def validate(self, attrs):
+        # A forward brings its own text with it, so the usual "say something"
+        # rule does not apply to one.
+        if attrs.get("forward_message_id"):
+            attrs["text"] = attrs.get("text") or ""
+        return attrs
+
+
+class MessageEditSerializer(serializers.Serializer):
+    """The new text of a message that already exists."""
+
+    text = serializers.CharField(max_length=4000)
+
+    def validate_text(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Message cannot be empty.")
+        return value
+
+
+class MessageReactionSerializer(serializers.Serializer):
+    """One reaction, on its way on or off a message."""
+
+    #: Short on purpose. An emoji is one or two code points plus a possible
+    #: variation selector; anything longer is somebody sending a sentence
+    #: through the reaction field.
+    emoji = serializers.CharField(max_length=16)
+
+    def validate_emoji(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Pick a reaction.")
         return value
 
 

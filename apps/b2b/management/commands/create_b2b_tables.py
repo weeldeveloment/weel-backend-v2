@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from django.db import connection
+from django.db import connection, transaction
 
 
 class Command(BaseCommand):
@@ -460,6 +460,13 @@ class Command(BaseCommand):
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
+        # A group's own picture. The stored path, not a URL: the object may
+        # move between storage backends, and every other file the workspace
+        # keeps is addressed the same way — see `b2b_workspace_file.path`.
+        cursor.execute(
+            "ALTER TABLE b2b_chat_thread ADD COLUMN IF NOT EXISTS "
+            "photo VARCHAR(500);"
+        )
         self.stdout.write("  Created b2b_chat_thread")
 
         cursor.execute("""
@@ -479,6 +486,34 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_chat_member_employee_idx "
             "ON b2b_chat_member (employee_id);"
         )
+
+        # Who runs a group. Per membership rather than per employee: somebody
+        # can run the sales room and be an ordinary member of the design one,
+        # and a company-wide "chat admin" role would say neither.
+        #
+        # 'member' is the default, so every existing row becomes an ordinary
+        # member and no one is silently handed control of a room they were
+        # only ever in.
+        cursor.execute(
+            "ALTER TABLE b2b_chat_member ADD COLUMN IF NOT EXISTS "
+            "role VARCHAR(20) NOT NULL DEFAULT 'member';"
+        )
+        # The person who opened the room runs it. Backfilled once — the
+        # WHERE clause makes a second run a no-op, and it deliberately does
+        # not touch a room whose creator has since been demoted by hand.
+        cursor.execute("""
+            UPDATE b2b_chat_member m
+            SET role = 'admin'
+            FROM b2b_chat_thread t
+            WHERE m.thread_id = t.id
+              AND t.group_name IS NOT NULL
+              AND m.employee_id = t.created_by
+              AND m.role = 'member'
+              AND NOT EXISTS (
+                  SELECT 1 FROM b2b_chat_member a
+                  WHERE a.thread_id = t.id AND a.role = 'admin'
+              );
+        """)
         self.stdout.write("  Created b2b_chat_member")
 
         cursor.execute("""
@@ -504,7 +539,85 @@ class Command(BaseCommand):
             "ALTER TABLE b2b_chat_message ADD COLUMN IF NOT EXISTS "
             "reply_to_id BIGINT REFERENCES b2b_chat_message(id) ON DELETE SET NULL;"
         )
+        # Edited in place. The column is the whole feature: the text is
+        # overwritten, and this is what lets the bubble say so — a message
+        # that changed silently is worse than one that cannot be changed.
+        cursor.execute(
+            "ALTER TABLE b2b_chat_message ADD COLUMN IF NOT EXISTS "
+            "edited_at TIMESTAMPTZ;"
+        )
+
+        # Forwarded. Points at the person who wrote the original rather than
+        # at the message: the label says "Sardordan", and it has to keep
+        # saying it after the original room is gone or the original message
+        # deleted — which a reference to the message would not survive.
+        cursor.execute(
+            "ALTER TABLE b2b_chat_message ADD COLUMN IF NOT EXISTS "
+            "forwarded_from_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL;"
+        )
+
+        # Pinned to the top of the room. On the message rather than on the
+        # thread, so a room can hold more than one — and so unpinning is an
+        # edit to the message that was pinned, not to the room.
+        cursor.execute(
+            "ALTER TABLE b2b_chat_message ADD COLUMN IF NOT EXISTS "
+            "pinned_at TIMESTAMPTZ;"
+        )
+        cursor.execute(
+            "ALTER TABLE b2b_chat_message ADD COLUMN IF NOT EXISTS "
+            "pinned_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL;"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_chat_message_pinned_idx "
+            "ON b2b_chat_message (thread_id, pinned_at DESC) "
+            "WHERE pinned_at IS NOT NULL;"
+        )
+
+        # Searching a room. `text_pattern_ops` is wrong for this — the search
+        # is a substring, not a prefix — so it wants a trigram index.
+        #
+        # Optional, deliberately. Creating the extension needs rights a managed
+        # Postgres often does not hand out, and the search is an ILIKE either
+        # way: without the index it reads the room's own messages, which is
+        # thousands of rows, not millions. Failing the whole schema bootstrap
+        # over a speedup would be the wrong trade — so this is attempted, and
+        # the reason is written down if it cannot be.
+        try:
+            with transaction.atomic():
+                cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS b2b_chat_message_text_idx "
+                    "ON b2b_chat_message USING gin (text gin_trgm_ops);"
+                )
+        except Exception as exc:  # noqa: BLE001
+            self.stdout.write(
+                f"  Skipped b2b_chat_message trigram index ({exc.__class__.__name__}); "
+                "in-room search still works, unindexed"
+            )
         self.stdout.write("  Created b2b_chat_message")
+
+        # One emoji from one person on one message. The unique index is the
+        # rule: tapping the same reaction twice takes it back rather than
+        # stacking a second copy of it, and without the index two taps racing
+        # each other would leave one behind that nothing can remove.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_chat_reaction (
+                id BIGSERIAL PRIMARY KEY,
+                message_id BIGINT NOT NULL REFERENCES b2b_chat_message(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                emoji VARCHAR(16) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_chat_reaction_one_idx "
+            "ON b2b_chat_reaction (message_id, employee_id, emoji);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_chat_reaction_message_idx "
+            "ON b2b_chat_reaction (message_id);"
+        )
+        self.stdout.write("  Created b2b_chat_reaction")
 
         # The company's customer directory. A lead is raised against a card
         # here, so the second deal with the same buyer reuses their details

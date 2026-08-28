@@ -292,12 +292,15 @@ DEFAULT_MODULES: dict[str, tuple[str, ...]] = {
         # task without being able to find them.
         Module.EMPLOYEES, Module.REPORTS,
     ),
-    # An employee works what they are given: no reports, no sales board unless
-    # a workspace hands it to them. The roster is there because knowing who
-    # your colleagues are is not an administrative privilege.
+    # An employee works what they are given: no reports. The roster is there
+    # because knowing who your colleagues are is not an administrative
+    # privilege, and the sales board is there because raising a lead is not
+    # one either — anybody who meets a customer can bring one in, and a lead
+    # nobody was allowed to write down is a lead the company never had. What
+    # they may *do* on that board is still narrow: see `DEFAULT_PERMISSIONS`.
     Role.EMPLOYEE: (
         Module.TASKS, Module.CHAT, Module.CALENDAR, Module.FILES,
-        Module.EMPLOYEES,
+        Module.EMPLOYEES, Module.SALES,
         # Seeing where the company books people, not booking anybody: the
         # hotel list has always been open to everyone.
         Module.TRIPS,
@@ -351,6 +354,12 @@ DEFAULT_PERMISSIONS: dict[str, tuple[str, ...]] = {
         Permission.CHAT_DELETE_OWN,
         Permission.EVENT_VIEW,
         Permission.EVENT_CREATE_OWN,
+        # Raising a lead, and seeing the board it lands on. Not editing,
+        # assigning, moving a stage or deleting: bringing a customer in is
+        # everybody's job, and what happens to the deal afterwards is the
+        # sales side's.
+        Permission.DEAL_VIEW,
+        Permission.DEAL_CREATE,
         Permission.FILE_VIEW,
         Permission.FILE_UPLOAD,
         Permission.FILE_DOWNLOAD,
