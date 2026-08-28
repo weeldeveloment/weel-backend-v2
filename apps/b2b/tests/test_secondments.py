@@ -216,9 +216,13 @@ def test_a_request_carries_its_modules_and_its_end_date():
 
     assert response.status_code == 201
     assert create.call_args.kwargs["ends_at"] is not None
-    # What reaches storage is cleaned of anything this screen cannot grant —
-    # see `test_files_cannot_be_granted_through_a_secondment`.
-    assert Module.clean(create.call_args.kwargs["modules"]) == ["chat", "savdo"]
+    # Every module the screen offers reaches storage, files included — see
+    # `test_files_can_be_granted_through_a_secondment`.
+    assert Module.clean(create.call_args.kwargs["modules"]) == [
+        "chat",
+        "savdo",
+        "fayllar",
+    ]
 
 
 def test_an_end_date_in_the_past_is_refused():
@@ -407,8 +411,13 @@ def test_a_permanent_employee_is_answered_by_their_role_alone():
     )
 
 
-def test_files_cannot_be_granted_through_a_secondment():
-    assert Module.clean(["chat", "fayllar"]) == ["chat"]
+def test_files_can_be_granted_through_a_secondment():
+    """It used to be stripped here, on the grounds that files are shared per
+    folder rather than per person. But every file view declares
+    `required_module = Module.FILES`, so this list is what decides whether the
+    Fayllar tab opens at all — dropping it lent somebody the files and then
+    answered 403 on every one of those endpoints."""
+    assert Module.clean(["chat", "fayllar"]) == ["chat", "fayllar"]
 
 
 def test_modules_are_stored_in_a_fixed_order():
@@ -563,6 +572,30 @@ def test_a_guest_with_the_module_gets_through():
         )
 
     assert response.status_code == 200
+
+
+def test_a_guest_lent_the_files_module_may_open_it():
+    """The half that was unreachable: the switch is what this gate reads, and
+    while `Module.clean` dropped `fayllar` no guest could ever pass it."""
+    from apps.b2b.workspace.views import WorkspaceFileListCreateView
+
+    denied = _call(
+        WorkspaceFileListCreateView,
+        factory.get("/files/"),
+        _guest([Module.TASKS]),
+    )
+    assert denied.status_code == 403
+
+    with patch(
+        "apps.b2b.workspace.views.repo.list_files", return_value=[]
+    ):
+        allowed = _call(
+            WorkspaceFileListCreateView,
+            factory.get("/files/"),
+            _guest([Module.FILES]),
+        )
+
+    assert allowed.status_code == 200
 
 
 def test_a_permanent_employee_passes_every_module_gate():

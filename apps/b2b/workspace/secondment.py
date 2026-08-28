@@ -105,17 +105,23 @@ class Module:
 
     CHOICES = [CHAT, SALES, TASKS, CALENDAR, FILES]
 
-    #: Files are shared per folder rather than per person, so there is nothing
-    #: for a per-secondment grant to switch — the app draws the row disabled
-    #: for the same reason. Listed so a stored value is still understood.
-    GRANTABLE = frozenset({CHAT, SALES, TASKS, CALENDAR})
-
     @classmethod
     def clean(cls, modules) -> list[str]:
-        """The stored form of what a request asked for: known, grantable, and
-        in a fixed order so two identical grants compare equal."""
+        """The stored form of what a request asked for: known names only, in a
+        fixed order so two identical grants compare equal.
+
+        `FILES` used to be dropped here, on the grounds that files are shared
+        per folder rather than per person and there was therefore nothing for
+        the switch to set. That was wrong: `WorkspaceFileListCreateView` and
+        every other file view declare `required_module = Module.FILES`, so this
+        list is exactly what decides whether the Fayllar tab opens at all.
+        Stripping it meant a guest could be lent the workspace's files and be
+        answered 403 by every one of those endpoints, with the app drawing the
+        switch permanently off. Per-folder sharing is the narrower question
+        underneath, asked only once the module is open.
+        """
         asked = {str(module) for module in (modules or [])}
-        return [module for module in cls.CHOICES if module in asked and module in cls.GRANTABLE]
+        return [module for module in cls.CHOICES if module in asked]
 
 
 #: Which capabilities each module governs. A capability not named here is not
