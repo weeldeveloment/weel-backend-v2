@@ -17875,6 +17875,36 @@
    },
    "parameters": []
   },
+  "/b2b/workspace/trash/{kind}/{object_id}/": {
+   "delete": {
+    "description": "DELETE /api/b2b/workspace/trash/<kind>/<id>/ — destroy one for good.\n\nThe other half of a bin. Without it the only way out of the trash was back\ninto the working set, so something deleted by mistake and something deleted\non purpose sat in the same list for the life of the company — which is what\nthe screen's \"Butunlay o'chirish\" is for.\n\nGated on the same permission as deleting and restoring, and — in the\nrepository — on the row already being in the bin. Nothing live can be\nreached through this endpoint: an id that was never deleted answers 404\nexactly as an id that never existed.",
+    "operationId": "b2b_workspace_trash_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Permanently delete a binned object",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "kind",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "object_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
   "/b2b/workspace/trash/{kind}/{object_id}/restore/": {
    "parameters": [
     {
