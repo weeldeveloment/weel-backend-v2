@@ -344,6 +344,58 @@ def _push_account(token: str | None, *, title: str, body: str, data: dict[str, s
         logger.exception("Account push failed for %s", data)
 
 
+@app.task(name="b2b.workspace.notify_join_request_created")
+def notify_join_request_created(request_id: int) -> int:
+    """Somebody asked to join — tell whoever may decide it.
+
+    Addressed to every employee this workspace's role editor currently lets
+    invite (``employees.invite``) — owner and admin by default, and anyone
+    else the workspace has granted or withdrawn it from. Without this the
+    request sits on the "Join requests" list until somebody happens to open
+    it, which for a workspace that never checks is never.
+    """
+    from apps.b2b.workspace import access_repository as arepo
+    from apps.b2b.workspace import joining_repository as jrepo
+
+    ask = jrepo.get_join_request_with_company(request_id)
+    if not ask or ask["status"] != JoinStatus.PENDING:
+        # Withdrawn or already answered between the request finishing and
+        # this running — nothing left to tell anyone about.
+        return 0
+
+    recipients = arepo.list_employee_invite_recipients(ask["company_id"])
+    if not recipients:
+        return 0
+
+    account = accounts.get_account(ask["account_id"]) or {}
+    asker_name = " ".join(
+        part
+        for part in [account.get("first_name"), account.get("last_name")]
+        if part
+    ).strip() or "Kimdir"
+
+    title = push_text.JOIN_REQUEST_TITLE
+    body = push_text.join_request_body(asker_name, ask.get("message"))
+
+    for recipient in recipients:
+        create_notification(
+            company_id=recipient["company_id"],
+            employee_id=recipient["employee_id"],
+            kind="join_request",
+            title=title,
+            body=body,
+            payload={"request_id": request_id, "account_id": ask["account_id"]},
+        )
+
+    _push(
+        recipients,
+        title=title,
+        body=body,
+        data={"type": "join_request", "request_id": str(request_id)},
+    )
+    return len(recipients)
+
+
 @app.task(name="b2b.workspace.notify_join_request_decided")
 def notify_join_request_decided(request_id: int) -> int:
     """A join request has been answered — tell the person who sent it.

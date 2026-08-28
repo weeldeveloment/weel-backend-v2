@@ -867,6 +867,21 @@ def _queue_join_decision(request_id: int) -> None:
         logger.exception("Could not queue the answer to join request %s", request_id)
 
 
+def _queue_join_request_created(request_id: int) -> None:
+    """Tell whoever may decide it, off the request.
+
+    Same reasoning as [_queue_join_decision]: the request is already on the
+    roster's list either way, and a broker that is down must not turn asking
+    to join into a 500 for the asker.
+    """
+    try:
+        from apps.b2b.workspace.tasks import notify_join_request_created
+
+        notify_join_request_created.delay(request_id)
+    except Exception:  # noqa: BLE001 - the request itself is stored
+        logger.exception("Could not queue the notice for join request %s", request_id)
+
+
 class AccountDeletionPreviewView(AccountAPIView):
     """GET /api/b2b/workspace/account/me/deletion/ — what deleting would cost.
 
@@ -980,6 +995,8 @@ class AccountJoinRequestView(AccountAPIView):
             message=(data.get("message") or "").strip(),
             wanted_modules=data.get("modules"),
         )
+        if created:
+            _queue_join_request_created(created["id"])
         return Response(
             {
                 "id": created["id"] if created else None,

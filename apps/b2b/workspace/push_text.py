@@ -49,6 +49,17 @@ SECONDMENT_TITLE = "Yangi so’rov"
 SECONDMENT_ACCEPTED_TITLE = "So’rov qabul qilindi"
 SECONDMENT_DECLINED_TITLE = "So’rov rad etildi"
 
+# Somebody asked to join the workspace. Addressed to whoever may decide it —
+# owner, admin, or anyone else the workspace has handed `employees.invite`.
+JOIN_REQUEST_TITLE = "Yangi so’rov"
+
+
+def join_request_body(full_name: str, message: str | None = None) -> str:
+    text = f"{full_name} jamoaga qo’shilishni so’ramoqda"
+    message = (message or "").strip()
+    return f"{text}: {message}" if message else text
+
+
 # Somebody asked to join a workspace, and it has been answered. Addressed to
 # the asker, who is not in the workspace yet and has no other way of finding
 # out — the screen they are looking at has nothing on it but their own
