@@ -3500,6 +3500,158 @@
    ],
    "type": "object"
   },
+  "ChatGroup": {
+   "properties": {
+    "can_manage": {
+     "title": "Can manage",
+     "type": "boolean"
+    },
+    "created_at": {
+     "minLength": 1,
+     "title": "Created at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_by": {
+     "title": "Created by",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "group_name": {
+     "minLength": 1,
+     "title": "Group name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "member_count": {
+     "title": "Member count",
+     "type": "integer"
+    },
+    "members": {
+     "items": {
+      "$ref": "#/definitions/ChatGroupMember"
+     },
+     "type": "array"
+    },
+    "my_role": {
+     "minLength": 1,
+     "title": "My role",
+     "type": "string"
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "group_name",
+    "member_count",
+    "my_role",
+    "can_manage",
+    "members"
+   ],
+   "type": "object"
+  },
+  "ChatGroupMember": {
+   "properties": {
+    "department_color": {
+     "minLength": 1,
+     "title": "Department color",
+     "type": "string",
+     "x-nullable": true
+    },
+    "department_name": {
+     "minLength": 1,
+     "title": "Department name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "email": {
+     "minLength": 1,
+     "title": "Email",
+     "type": "string",
+     "x-nullable": true
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_guest": {
+     "default": false,
+     "title": "Is guest",
+     "type": "boolean"
+    },
+    "is_online": {
+     "default": false,
+     "title": "Is online",
+     "type": "boolean"
+    },
+    "last_seen_at": {
+     "minLength": 1,
+     "title": "Last seen at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "member_role": {
+     "minLength": 1,
+     "title": "Member role",
+     "type": "string"
+    },
+    "phone": {
+     "minLength": 1,
+     "title": "Phone",
+     "type": "string",
+     "x-nullable": true
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "position": {
+     "minLength": 1,
+     "title": "Position",
+     "type": "string",
+     "x-nullable": true
+    },
+    "role": {
+     "minLength": 1,
+     "title": "Role",
+     "type": "string"
+    },
+    "status": {
+     "minLength": 1,
+     "title": "Status",
+     "type": "string"
+    },
+    "username": {
+     "minLength": 1,
+     "title": "Username",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "full_name",
+    "role",
+    "member_role"
+   ],
+   "type": "object"
+  },
   "ChatMessage": {
    "properties": {
     "content": {
@@ -3592,6 +3744,12 @@
       "type": "integer"
      },
      "type": "array"
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
     },
     "unread": {
      "title": "Unread",
@@ -8059,6 +8217,34 @@
    ],
    "type": "object"
   },
+  "MessageEdit": {
+   "properties": {
+    "text": {
+     "maxLength": 4000,
+     "minLength": 1,
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "type": "object"
+  },
+  "MessageReaction": {
+   "properties": {
+    "emoji": {
+     "maxLength": 16,
+     "minLength": 1,
+     "title": "Emoji",
+     "type": "string"
+    }
+   },
+   "required": [
+    "emoji"
+   ],
+   "type": "object"
+  },
   "MonthlySpendingChartPoint": {
    "properties": {
     "change_percent": {
@@ -10430,6 +10616,17 @@
      "title": "Is guest",
      "type": "boolean"
     },
+    "is_online": {
+     "default": false,
+     "title": "Is online",
+     "type": "boolean"
+    },
+    "last_seen_at": {
+     "minLength": 1,
+     "title": "Last seen at",
+     "type": "string",
+     "x-nullable": true
+    },
     "phone": {
      "minLength": 1,
      "title": "Phone",
@@ -10503,6 +10700,36 @@
      "type": "boolean"
     }
    },
+   "type": "object"
+  },
+  "ThreadMemberRole": {
+   "properties": {
+    "role": {
+     "enum": [
+      "admin",
+      "member"
+     ],
+     "title": "Role",
+     "type": "string"
+    }
+   },
+   "required": [
+    "role"
+   ],
+   "type": "object"
+  },
+  "ThreadMembers": {
+   "properties": {
+    "member_ids": {
+     "items": {
+      "type": "integer"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "member_ids"
+   ],
    "type": "object"
   },
   "TokenRefresh": {
@@ -11231,9 +11458,26 @@
      "title": "Created at",
      "type": "string"
     },
+    "edited_at": {
+     "format": "date-time",
+     "title": "Edited at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "forwarded_from_id": {
+     "title": "Forwarded from id",
+     "type": "integer",
+     "x-nullable": true
+    },
     "id": {
      "title": "Id",
      "type": "integer"
+    },
+    "pinned_at": {
+     "format": "date-time",
+     "title": "Pinned at",
+     "type": "string",
+     "x-nullable": true
     },
     "reply_to_id": {
      "title": "Reply to id",
@@ -15471,6 +15715,188 @@
     ]
    }
   },
+  "/b2b/workspace/chats/{thread_id}/group/": {
+   "get": {
+    "description": "GET   /api/b2b/workspace/chats/<id>/group/ — the group's own screen.\nPATCH /api/b2b/workspace/chats/<id>/group/ — rename it, or change its picture.\n\nThe picture arrives as multipart, the same door every other upload uses, so\nit is quota-checked and accounted for like any other stored object.",
+    "operationId": "b2b_workspace_chats_group_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/ChatGroup"
+      }
+     },
+     "404": {
+      "description": "Not found"
+     }
+    },
+    "summary": "Group detail with its members",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "consumes": [
+     "application/json",
+     "multipart/form-data"
+    ],
+    "description": "GET   /api/b2b/workspace/chats/<id>/group/ — the group's own screen.\nPATCH /api/b2b/workspace/chats/<id>/group/ — rename it, or change its picture.\n\nThe picture arrives as multipart, the same door every other upload uses, so\nit is quota-checked and accounted for like any other stored object.",
+    "operationId": "b2b_workspace_chats_group_partial_update",
+    "parameters": [
+     {
+      "in": "formData",
+      "maxLength": 200,
+      "minLength": 1,
+      "name": "group_name",
+      "required": false,
+      "type": "string"
+     },
+     {
+      "in": "formData",
+      "name": "photo",
+      "required": false,
+      "type": "file"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/ChatGroup"
+      }
+     },
+     "403": {
+      "description": "Not an admin"
+     },
+     "413": {
+      "description": "Storage limit reached"
+     }
+    },
+    "summary": "Rename a group or set its picture",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/chats/{thread_id}/members/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/chats/<id>/members/ — add people to a group.",
+    "operationId": "b2b_workspace_chats_members_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/ThreadMembers"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/ChatGroup"
+      }
+     },
+     "403": {
+      "description": "Not an admin"
+     }
+    },
+    "summary": "Add members to a group",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/chats/{thread_id}/members/{employee_id}/": {
+   "delete": {
+    "description": "PATCH  /api/b2b/workspace/chats/<id>/members/<employee_id>/ — admin or member.\nDELETE /api/b2b/workspace/chats/<id>/members/<employee_id>/ — take them out.\n\nRemoving yourself through this endpoint is how leaving works, and it is the\none case that needs no admin rights: nobody can be held in a conversation.",
+    "operationId": "b2b_workspace_chats_members_delete",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/ChatGroup"
+      }
+     },
+     "204": {
+      "description": "You left"
+     },
+     "403": {
+      "description": "Not an admin"
+     }
+    },
+    "summary": "Remove somebody from a group, or leave it yourself",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "PATCH  /api/b2b/workspace/chats/<id>/members/<employee_id>/ — admin or member.\nDELETE /api/b2b/workspace/chats/<id>/members/<employee_id>/ — take them out.\n\nRemoving yourself through this endpoint is how leaving works, and it is the\none case that needs no admin rights: nobody can be held in a conversation.",
+    "operationId": "b2b_workspace_chats_members_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/ThreadMemberRole"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/ChatGroup"
+      }
+     },
+     "403": {
+      "description": "Not an admin"
+     },
+     "409": {
+      "description": "Last admin"
+     }
+    },
+    "summary": "Make a member an admin, or an admin an ordinary member",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/chats/{thread_id}/messages/": {
    "get": {
     "description": "GET / POST messages in a thread the caller belongs to.",
@@ -15536,6 +15962,13 @@
      },
      {
       "in": "formData",
+      "name": "forward_message_id",
+      "required": false,
+      "type": "integer",
+      "x-nullable": true
+     },
+     {
+      "in": "formData",
       "name": "file",
       "required": false,
       "type": "file"
@@ -15560,7 +15993,7 @@
   },
   "/b2b/workspace/chats/{thread_id}/messages/{message_id}/": {
    "delete": {
-    "description": "DELETE /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/\n\nYour own message, always. Anyone else's only if you run the company —\na manager has to be able to take down something posted in a shared room,\nand an employee must not be able to edit the record of what was said.",
+    "description": "PATCH  /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/\nDELETE /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/\n\nYour own message, always. Anyone else's only if you run the company —\na manager has to be able to take down something posted in a shared room,\nand an employee must not be able to edit the record of what was said.\n\nEditing is narrower than deleting: only the author, never a manager. A\nmanager removing something is a visible act; a manager rewriting what\nsomebody said is a forgery, and no role should be able to do it.",
     "operationId": "b2b_workspace_chats_messages_delete",
     "parameters": [],
     "responses": {
@@ -15592,7 +16025,131 @@
      "required": true,
      "type": "string"
     }
-   ]
+   ],
+   "patch": {
+    "description": "PATCH  /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/\nDELETE /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/\n\nYour own message, always. Anyone else's only if you run the company —\na manager has to be able to take down something posted in a shared room,\nand an employee must not be able to edit the record of what was said.\n\nEditing is narrower than deleting: only the author, never a manager. A\nmanager removing something is a visible act; a manager rewriting what\nsomebody said is a forgery, and no role should be able to do it.",
+    "operationId": "b2b_workspace_chats_messages_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MessageEdit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceChatMessage"
+      }
+     },
+     "403": {
+      "description": "Not yours"
+     },
+     "404": {
+      "description": "Not found"
+     }
+    },
+    "summary": "Edit your own message",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/chats/{thread_id}/messages/{message_id}/pin/": {
+   "delete": {
+    "description": "POST   /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/pin/\nDELETE the same path — unpin.\n\nA pin is about the room, not about the message's author: anybody in it can\nput something at the top, and anybody in it can take it down again. That\nis the same rule Telegram uses in a group, and the alternative — only the\nauthor may pin their own — makes the feature useless for the case it\nexists for, which is somebody else's address or meeting time.",
+    "operationId": "b2b_workspace_chats_messages_pin_delete",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceChatMessage"
+      }
+     }
+    },
+    "summary": "Unpin a message",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "message_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST   /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/pin/\nDELETE the same path — unpin.\n\nA pin is about the room, not about the message's author: anybody in it can\nput something at the top, and anybody in it can take it down again. That\nis the same rule Telegram uses in a group, and the alternative — only the\nauthor may pin their own — makes the feature useless for the case it\nexists for, which is somebody else's address or meeting time.",
+    "operationId": "b2b_workspace_chats_messages_pin_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceChatMessage"
+      }
+     }
+    },
+    "summary": "Pin a message",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/chats/{thread_id}/messages/{message_id}/reactions/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "message_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/chats/<thread_id>/messages/<message_id>/reactions/\n\nOne endpoint for both directions, because the app has one gesture for",
+    "operationId": "b2b_workspace_chats_messages_reactions_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MessageReaction"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceChatMessage"
+      }
+     }
+    },
+    "summary": "React to a message, or take the reaction back",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/chats/{thread_id}/read/": {
    "parameters": [
@@ -16209,7 +16766,7 @@
   },
   "/b2b/workspace/join-requests/": {
    "get": {
-    "description": "GET /api/b2b/workspace/join-requests/ — who is asking to be let in.",
+    "description": "GET /api/b2b/workspace/join-requests/ — who is asking to be let in.\n\nWhoever runs the workspace: the owner, an administrator, or a manager.\nDeliberately wider than `EMPLOYEE_INVITE`, which is what separates an\nadministrator from a manager and gates *asking another workspace to lend\nsomebody* — a commitment about who is allowed in that is not this. Somebody\nknocking at the door is the day-to-day of running a workspace, and a\nrequest only the owner can answer sits unanswered for as long as the owner\nis away.",
     "operationId": "b2b_workspace_join-requests_list",
     "parameters": [],
     "responses": {
@@ -16240,7 +16797,7 @@
     }
    ],
    "post": {
-    "description": "POST /api/b2b/workspace/join-requests/<id>/<accept|decline>/",
+    "description": "POST /api/b2b/workspace/join-requests/<id>/<accept|decline>/\n\nSame audience as the list — see [WorkspaceJoinRequestListView]. What\nstanding the person is let in with is chosen per request; changing a role\nafterwards is a different act and still needs `EMPLOYEE_CHANGE_ROLE`.",
     "operationId": "b2b_workspace_join-requests_create",
     "parameters": [
      {
@@ -17172,6 +17729,56 @@
     ]
    }
   },
+  "/b2b/workspace/me/photo/": {
+   "delete": {
+    "description": "PUT    /api/b2b/workspace/me/photo/ — set your own picture.\nDELETE /api/b2b/workspace/me/photo/ — go back to initials.\n\nYours alone. There is no path here for changing somebody else's: a photo\nis the one thing on a roster entry that is unambiguously the person's own,\nand a workspace that could set it for them is a workspace that can put any\nface against their name.\n\nThe bytes go through the same door everything else stored here goes\nthrough, so they are checked against the company's quota rather than being\na way around it.",
+    "operationId": "b2b_workspace_me_photo_delete",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Me"
+      }
+     }
+    },
+    "summary": "Remove your photo",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "put": {
+    "consumes": [
+     "multipart/form-data"
+    ],
+    "description": "PUT    /api/b2b/workspace/me/photo/ — set your own picture.\nDELETE /api/b2b/workspace/me/photo/ — go back to initials.\n\nYours alone. There is no path here for changing somebody else's: a photo\nis the one thing on a roster entry that is unambiguously the person's own,\nand a workspace that could set it for them is a workspace that can put any\nface against their name.\n\nThe bytes go through the same door everything else stored here goes\nthrough, so they are checked against the company's quota rather than being\na way around it.",
+    "operationId": "b2b_workspace_me_photo_update",
+    "parameters": [
+     {
+      "in": "formData",
+      "name": "photo",
+      "required": true,
+      "type": "file"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Me"
+      }
+     },
+     "413": {
+      "description": "Storage limit reached"
+     }
+    },
+    "summary": "Set your own photo",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/me/profile/": {
    "parameters": [],
    "put": {
@@ -17316,6 +17923,23 @@
      }
     },
     "summary": "Search people in the org's other workspaces",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/presence/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/presence/ — who is online right now.\n\nThe socket says so on connect and pushes every change after that, so this\nis for the case the socket cannot cover: an app that has just come back to\nthe foreground and wants the current picture before its connection is up.",
+    "operationId": "b2b_workspace_presence_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Who is online",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
