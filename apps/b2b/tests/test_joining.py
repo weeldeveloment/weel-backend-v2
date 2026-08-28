@@ -851,6 +851,8 @@ def test_a_new_request_reaches_everyone_who_may_decide_it():
         "apps.b2b.workspace.accounts.get_account",
         return_value={"id": 9, "first_name": "Nodir", "last_name": "Qodirov"},
     ), patch("apps.b2b.workspace.tasks.create_notification") as create_row, patch(
+        "apps.notification.service.b2b_firebase_app", return_value=object()
+    ), patch(
         "apps.notification.service.FCMService.send_to_tokens"
     ) as send:
         sent = notify_join_request_created(3)
