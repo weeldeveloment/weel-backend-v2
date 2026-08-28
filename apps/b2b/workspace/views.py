@@ -94,7 +94,12 @@ from apps.b2b.workspace.serializers import (
 )
 from apps.b2b.workspace.geo import distance_meters
 from apps.b2b.workspace import accounts
-from apps.b2b.workspace.tokens import create_account_tokens, create_workspace_tokens, rotate_workspace_tokens
+from apps.b2b.workspace.tokens import (
+    create_account_tokens,
+    create_workspace_tokens,
+    rotate_account_tokens,
+    rotate_workspace_tokens,
+)
 from users.models.logs import SmsPurpose
 from users.services import EskizService, OTPRedisService
 from users.tasks import send_otp_sms_eskiz
@@ -307,6 +312,44 @@ class WorkspaceTokenRefreshView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             tokens = rotate_workspace_tokens(serializer.validated_data["refresh"])
+        except (TokenError, InvalidToken):
+            return Response(
+                {"detail": _("Invalid or expired refresh token")},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return Response(tokens)
+
+
+class AccountTokenRefreshView(APIView):
+    """POST /api/b2b/workspace/account/token/refresh/
+
+    The account session's half of the refresh above, and its own endpoint
+    rather than a second branch inside it: the two token types are
+    deliberately not interchangeable, and one view that answered for both
+    would be the place that eventually hands a workspace token to a caller
+    holding an account one.
+
+    Without this the account session could not be renewed at all. It simply
+    died one access lifetime after sign-in, which is what left somebody who
+    had registered but not yet been let into a workspace stuck on "could not
+    load your workspaces" with a Retry button that could never succeed.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_scope = "token_refresh"
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Exchange an account refresh token for a new pair",
+        request_body=WorkspaceRefreshSerializer,
+        responses={200: openapi.Response(description="New token pair"),
+                   401: openapi.Response(description="Invalid or expired refresh token")},
+    )
+    def post(self, request):
+        serializer = WorkspaceRefreshSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            tokens = rotate_account_tokens(serializer.validated_data["refresh"])
         except (TokenError, InvalidToken):
             return Response(
                 {"detail": _("Invalid or expired refresh token")},

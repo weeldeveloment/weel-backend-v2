@@ -93,3 +93,36 @@ def rotate_workspace_tokens(refresh_token: str) -> dict[str, str]:
     token.blacklist()
 
     return {"refresh": str(new_refresh), "access": str(new_access)}
+
+
+def rotate_account_tokens(refresh_token: str) -> dict[str, str]:
+    """The account session's own rotation.
+
+    Separate from `rotate_workspace_tokens` for the reason the two types exist
+    at all: neither endpoint may hand back a token of the other's type, and a
+    single view that accepted both would be one `if` away from doing exactly
+    that. The account session was left without any rotation at all, which made
+    it expire for good after one access lifetime — somebody who registered and
+    was waiting on a join request simply lost the ability to list their
+    workspaces an hour later, with no way back short of signing in again.
+    """
+    token = CustomRefreshToken(token=refresh_token)
+
+    if token.get(TokenMetadata.TOKEN_USER_TYPE) != WORKSPACE_ACCOUNT_TYPE:
+        raise InvalidToken("Not a B2B account refresh token.")
+
+    token_denylist.assert_not_revoked(token.payload)
+
+    new_refresh = CustomRefreshToken()
+    new_access = AccessToken()
+    for claim in _CLAIMS:
+        if claim in token:
+            new_refresh[claim] = token[claim]
+            new_access[claim] = token[claim]
+
+    new_refresh[TokenMetadata.TOKEN_TYPE_CLAIM] = "refresh"
+    new_access[TokenMetadata.TOKEN_TYPE_CLAIM] = "access"
+
+    token.blacklist()
+
+    return {"refresh": str(new_refresh), "access": str(new_access)}

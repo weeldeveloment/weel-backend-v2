@@ -35,6 +35,7 @@ from apps.b2b.workspace.secondment_views import (
     WorkspaceSwitchView,
 )
 from apps.b2b.workspace.views import (
+    AccountTokenRefreshView,
     WorkspaceAppVersionView,
     WorkspaceAttendanceAbsenceView,
     WorkspaceAttendanceCheckInView,
@@ -127,6 +128,11 @@ urlpatterns = [
     ),
 
     # Registration and the account session — see `accounts.py`.
+    path(
+        "account/token/refresh/",
+        AccountTokenRefreshView.as_view(),
+        name="ws-account-token-refresh",
+    ),
     path("account/me/", AccountMeView.as_view(), name="ws-account-me"),
     path(
         "account/username-suggestion/",
