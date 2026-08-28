@@ -148,6 +148,32 @@ def access_for_employee(employee: dict[str, Any]) -> tuple[list[str], list[str]]
     )
 
 
+def list_employee_invite_recipients(company_id: int) -> list[dict[str, Any]]:
+    """Everyone this workspace lets decide a join request, with their push token.
+
+    Resolved per employee rather than by role alone: a workspace that has
+    handed ``employees.invite`` to a role other than owner/admin, or narrowed
+    it away from one of them, gets exactly the audience its own role editor
+    set — the same rule [access_for_employee] enforces on the endpoints
+    themselves.
+    """
+    rows = fetch_all(
+        f"SELECT * FROM {B2B_EMPLOYEE_TABLE} "
+        f"WHERE company_id = %s AND is_active = TRUE AND is_hidden = FALSE",
+        [company_id],
+    )
+    recipients = []
+    for row in rows:
+        _modules, permissions = access_for_employee(row)
+        if Permission.EMPLOYEE_INVITE in permissions:
+            recipients.append({
+                "employee_id": row["id"],
+                "company_id": row["company_id"],
+                "fcm_token": row.get("fcm_token"),
+            })
+    return recipients
+
+
 #: "This field was not sent", which is not the same as `None`. `None` means
 #: "by role" and clears an override; this leaves whatever is stored alone.
 KEEP = object()

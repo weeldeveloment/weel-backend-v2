@@ -461,6 +461,44 @@ def test_a_workspace_nobody_can_find_cannot_be_asked():
     assert response.status_code == 404
 
 
+def test_asking_to_join_tells_whoever_may_decide_it():
+    """Owner, admin, or anyone else the workspace lets invite must hear about
+    a request as it comes in — not only once somebody happens to open the
+    list. See `notify_join_request_created`."""
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.find_company_by_slug",
+        return_value={"id": COMPANY, "name": "Weel"},
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.employee_in_company",
+        return_value=None,
+    ), patch(
+        "apps.b2b.workspace.joining_views.jrepo.create_join_request",
+        return_value={"id": 5},
+    ), patch(
+        "apps.b2b.workspace.joining_views._queue_join_request_created"
+    ) as queued:
+        response = _call(
+            AccountJoinRequestView,
+            factory.post("/account/join-requests/", {"slug": "weel"}, format="json"),
+            _account(),
+        )
+
+    assert response.status_code == 201
+    queued.assert_called_once_with(5)
+
+
+def test_a_broker_that_is_down_does_not_lose_the_ask():
+    """The request is already stored; the push is the fast path, not the
+    only one — same reasoning as the decision's own broker guard."""
+    from apps.b2b.workspace.joining_views import _queue_join_request_created
+
+    with patch(
+        "apps.b2b.workspace.tasks.notify_join_request_created"
+    ) as task:
+        task.delay.side_effect = RuntimeError("broker down")
+        _queue_join_request_created(5)  # must not raise
+
+
 def test_what_the_asker_wants_is_a_request_and_not_a_grant():
     """The TZ is explicit: choosing modules yourself is a request for that
     access and requires confirmation. The decision reads the workspace's own
@@ -782,6 +820,55 @@ def test_a_request_still_open_is_not_announced_as_answered():
         return_value={"id": 3, "status": JoinStatus.PENDING},
     ):
         assert notify_join_request_decided(3) == 0
+
+
+def test_a_new_request_reaches_everyone_who_may_decide_it():
+    """The other half of the round trip: creating the request must reach the
+    same audience `HasPermission` gates the decision on — not just owner and
+    admin by name, but whoever the workspace's own role editor currently
+    grants `employees.invite`."""
+    from apps.b2b.workspace.tasks import notify_join_request_created
+
+    ask = {
+        "id": 3,
+        "company_id": COMPANY,
+        "account_id": 9,
+        "status": JoinStatus.PENDING,
+        "message": "Iltimos",
+        "company_name": "Weel",
+    }
+    recipients = [
+        {"employee_id": 1, "company_id": COMPANY, "fcm_token": "tok-owner"},
+        {"employee_id": 2, "company_id": COMPANY, "fcm_token": "tok-admin"},
+    ]
+    with patch(
+        "apps.b2b.workspace.joining_repository.get_join_request_with_company",
+        return_value=ask,
+    ), patch(
+        "apps.b2b.workspace.access_repository.list_employee_invite_recipients",
+        return_value=recipients,
+    ) as list_recipients, patch(
+        "apps.b2b.workspace.accounts.get_account",
+        return_value={"id": 9, "first_name": "Nodir", "last_name": "Qodirov"},
+    ), patch("apps.b2b.workspace.tasks.create_notification") as create_row, patch(
+        "apps.notification.service.FCMService.send_to_tokens"
+    ) as send:
+        sent = notify_join_request_created(3)
+
+    list_recipients.assert_called_once_with(COMPANY)
+    assert sent == 2
+    assert create_row.call_count == 2
+    assert send.call_args.kwargs["tokens"] == ["tok-owner", "tok-admin"]
+
+
+def test_a_request_already_answered_is_not_announced_as_new():
+    from apps.b2b.workspace.tasks import notify_join_request_created
+
+    with patch(
+        "apps.b2b.workspace.joining_repository.get_join_request_with_company",
+        return_value={"id": 3, "status": JoinStatus.ACCEPTED},
+    ):
+        assert notify_join_request_created(3) == 0
 
 
 # ─── One field, two things it can hold ────────────────────────────────────────
