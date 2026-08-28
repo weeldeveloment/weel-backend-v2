@@ -891,3 +891,77 @@ def test_an_empty_code_is_refused_before_anything_is_looked_up():
 
     assert response.status_code == 400
     invite.assert_not_called()
+
+
+# ─── Deleting an account frees the number ────────────────────────────────────
+#
+# The bug: delete the account, register again with the same phone, and the
+# first code entered lands you back in the old workspace with the old role.
+# `delete_account` had cleared only the `b2b_account` row and the roster rows
+# it was linked to by `account_id`; a legacy `b2b_user` login for the same
+# number, and any roster row not carrying the link, kept the phone and were
+# what `_resolve_employee` rebuilt a seat from on the next sign-in.
+
+
+def _delete_account_statements(phone: str):
+    from apps.b2b.workspace import accounts
+
+    with (
+        patch.object(
+            accounts, "get_account", return_value={"id": 5, "phone": phone}
+        ),
+        patch.object(accounts, "companies_closed_by_deleting", return_value=[]),
+        patch.object(accounts, "execute", return_value=0) as execute,
+    ):
+        accounts.delete_account(5)
+
+    return [
+        (" ".join(call.args[0].split()), list(call.args[1]) if len(call.args) > 1 else [])
+        for call in execute.call_args_list
+    ]
+
+
+def test_deleting_an_account_revokes_the_legacy_login_for_that_number():
+    statements = _delete_account_statements("+998 90 555 44 33")
+
+    user_update = next(
+        (sql, params)
+        for sql, params in statements
+        if "UPDATE b2b_user" in sql and "is_active = FALSE" in sql
+    )
+    # Matched the way sign-in matches — the last nine digits, trailing LIKE.
+    assert "%905554433" in user_update[1]
+    # And the number is released rather than left on the row.
+    assert "phone = 'deleted-' || id" in user_update[0]
+
+
+def test_deleting_an_account_drops_the_legacy_sessions_for_that_number():
+    statements = _delete_account_statements("+998905554433")
+
+    assert any(
+        "DELETE FROM b2b_user_session" in sql and "%905554433" in params
+        for sql, params in statements
+    )
+
+
+def test_deleting_an_account_anonymises_roster_rows_by_number_not_just_link():
+    statements = _delete_account_statements("+998905554433")
+
+    roster = next(
+        (sql, params)
+        for sql, params in statements
+        if "UPDATE b2b_employee" in sql
+    )
+    # Still keyed on the link, but now also on the number, so a secondment or
+    # an unlinked row is caught too.
+    assert "account_id = %s" in roster[0]
+    assert "LIKE %s" in roster[0]
+    assert "%905554433" in roster[1]
+
+
+def test_deleting_an_account_with_no_phone_touches_no_identity_tables():
+    statements = _delete_account_statements("")
+
+    assert not any("b2b_user" in sql for sql, _ in statements)
+    # The account row itself is still removed.
+    assert any("DELETE FROM b2b_account" in sql for sql, _ in statements)
