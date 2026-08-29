@@ -2,6 +2,14 @@
 import os
 import warnings
 
+# core.settings refuses to import with DEBUG=0 unless the provider base URLs
+# are named explicitly, so that a production deploy cannot fall back to test
+# inventory. A test run is DEBUG=0 too but is not production, and no test
+# talks to a real provider (the clients are mocked), so answer the guard here
+# rather than making every developer and every CI step export these.
+os.environ.setdefault("BOOKHARA_BASE_URL", "https://avia-api-dev.bookhara.uz")
+os.environ.setdefault("HOTELIOS_BASE_URL", "https://integration-staging.hotelios.uz")
+
 from .settings import *
 
 DEBUG = False

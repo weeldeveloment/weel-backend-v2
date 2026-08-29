@@ -12,6 +12,14 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/weel-backend-v2
 
+  # core/settings.py refuses to import with DEBUG=0 unless these are set, so
+  # that a production deploy cannot silently sell test inventory. CI runs
+  # DEBUG=0 as well, so it has to name the environments it wants out loud.
+  # These are the providers' test/staging hosts — the right target for CI,
+  # and deliberately not the values production should ever inherit.
+  BOOKHARA_BASE_URL: https://avia-api-dev.bookhara.uz
+  HOTELIOS_BASE_URL: https://integration-staging.hotelios.uz
+
 permissions:
   contents: read
   packages: write
