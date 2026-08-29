@@ -40,7 +40,46 @@ DUPLICATE_PAID_ERROR_CODE = 5232
 DUPLICATE_ERROR_CODES = {DUPLICATE_UNPAID_ERROR_CODE, DUPLICATE_PAID_ERROR_CODE}
 
 # Refund was allowed by the fare rules but is not actually available right now.
+# 5233 covers the penalty refund, 5234 the penalty-free VOID; in both cases the
+# remaining option is the call-centre request, not a retry.
 REFUND_UNAVAILABLE_ERROR_CODE = 5233
+VOID_UNAVAILABLE_ERROR_CODE = 5234
+REFUND_UNAVAILABLE_ERROR_CODES = {
+    REFUND_UNAVAILABLE_ERROR_CODE,
+    VOID_UNAVAILABLE_ERROR_CODE,
+}
+
+# Bookhara answers HTTP 410 for two very different things. Most of the time it
+# means "the carrier has not confirmed yet, repeat the call" — but the booking
+# endpoint also returns 410 for passenger data it will never accept, and
+# retrying those forever is the wrong answer. Verified against the dev API:
+# a surname of 15 characters comes back as 410 with error_code 1154, and no
+# number of retries changes that.
+#
+# Everything here is a permanent rejection from the "Ошибки поиска и
+# бронирования авиабилетов" table in docs.bookhara.uz/errors.
+PERMANENT_410_ERROR_CODES = {
+    1011,  # infant older than two
+    1018, 1019, 1020, 1021, 1022,  # a required passenger field is missing
+    1023, 1024,  # payer email / phone missing
+    1025,  # invalid data format
+    1124,  # first/last name must be 1-25 characters
+    1125,  # name + surname + birthdate together are too long
+    1126,  # passenger data incomplete for the requested passenger counts
+    1127,  # passenger is on the airline blacklist
+    1129, 1130, 1131, 1132, 1133, 1134, 1135, 1136, 1137, 1138,
+    1145, 1146, 1147,
+    1148, 1149, 1150, 1151, 1152,
+    1153,  # document issuing country wrong for this document type
+    1154,  # passenger data is invalid
+    1155,  # Cyrillic is not allowed for this document type
+    1156,  # check names and document numbers
+    1157, 1158, 1159, 1160, 1161, 1162, 1163,  # citizenship not allowed
+    1168,  # wrong passenger types
+    1169,  # invalid document expiry
+    1183,  # the adult accompanying an infant must be 18+
+    5237,  # a third order for these passengers is refused for 24 hours
+}
 
 
 class BookharaError(Exception):
@@ -73,6 +112,11 @@ class BookharaError(Exception):
         return self.error_code in DUPLICATE_ERROR_CODES
 
     @property
+    def is_refund_unavailable(self) -> bool:
+        """The fare allows a refund on paper, but not one we can take now."""
+        return self.error_code in REFUND_UNAVAILABLE_ERROR_CODES
+
+    @property
     def existing_booking_id(self) -> str | None:
         if isinstance(self.data, dict):
             return self.data.get("existing_booking_id")
@@ -103,6 +147,19 @@ class BookharaUnconfirmedError(BookharaError):
 
     The docs say to retry these: seats, price and cancellation confirmations
     all surface this way when the upstream GDS is slow to answer.
+
+    Not every 410 is one of these — see `PERMANENT_410_ERROR_CODES` and
+    `BookharaRejectedError`, which is what a 410 carrying a passenger-data
+    error code becomes instead.
+    """
+
+
+class BookharaRejectedError(BookharaError):
+    """Bookhara will not accept this request, however many times we send it.
+
+    The booking endpoint answers HTTP 410 for bad passenger data as well as
+    for an unconfirmed carrier, and the two need opposite handling: this one
+    has to reach the person filling in the form, because only they can fix it.
     """
 
 
@@ -228,6 +285,8 @@ class BookharaClient:
         if response.status_code == 404:
             return BookharaExpiredError(message, **kwargs)
         if response.status_code == 410:
+            if payload.get("error_code") in PERMANENT_410_ERROR_CODES:
+                return BookharaRejectedError(message, **kwargs)
             return BookharaUnconfirmedError(message, **kwargs)
         return BookharaError(message, **kwargs)
 

@@ -316,7 +316,14 @@ class HoteliosClient:
         if comment:
             data["comment"] = comment
         if delta_price:
+            # Hotelios contradicts itself here: the OpenAPI schema names the
+            # field `deltaPrice`, the request example beside it `delta_price`.
+            # Their validator ignores properties it does not know — verified
+            # against staging, where a deliberately misspelled field changed
+            # nothing about the response — so sending both spellings is safe
+            # and means the allowance is honoured whichever one they read.
             data["deltaPrice"] = delta_price
+            data["delta_price"] = delta_price
         return self._post(
             "api/v1/booking-flow/booking/create", {"data": data}, action="booking/create"
         )
@@ -355,7 +362,13 @@ class HoteliosClient:
         )
 
     def get_balance(self) -> dict[str, Any]:
-        """POST /api/v1/accounting/balance — the credit bookings are drawn on."""
+        """POST /api/v1/accounting/balance — the credit bookings are drawn on.
+
+        Accounting is enabled per partner. Where it is not — as on staging,
+        which answers a bare `{"enabled": false}` — there are no amounts in the
+        response at all, so callers have to read `enabled` before the figures
+        rather than assuming a zero balance.
+        """
         return self._post("api/v1/accounting/balance", {}, action="accounting/balance")
 
 

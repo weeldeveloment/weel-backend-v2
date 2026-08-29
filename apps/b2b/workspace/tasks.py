@@ -50,7 +50,11 @@ def _push(recipients, *, title: str, body: str, data: dict[str, str]) -> None:
     if not tokens:
         return
     try:
-        from apps.notification.service import FCMService, b2b_firebase_app
+        from apps.notification.service import (
+            B2B_ANDROID_CHANNEL,
+            FCMService,
+            b2b_firebase_app,
+        )
 
         FCMService.send_to_tokens(
             tokens=tokens,
@@ -60,6 +64,7 @@ def _push(recipients, *, title: str, body: str, data: dict[str, str]) -> None:
             # The workspace app has its own Firebase project; its tokens are
             # not addressable from the consumer one.
             app=b2b_firebase_app(),
+            android_channel_id=B2B_ANDROID_CHANNEL,
             deactivate_invalid=repo.clear_employee_fcm_tokens,
         )
     except Exception:  # noqa: BLE001 - the row is already in the feed
@@ -330,7 +335,11 @@ def _push_account(token: str | None, *, title: str, body: str, data: dict[str, s
     if not token:
         return
     try:
-        from apps.notification.service import FCMService, b2b_firebase_app
+        from apps.notification.service import (
+            B2B_ANDROID_CHANNEL,
+            FCMService,
+            b2b_firebase_app,
+        )
 
         FCMService.send_to_tokens(
             tokens=[token],
@@ -338,6 +347,7 @@ def _push_account(token: str | None, *, title: str, body: str, data: dict[str, s
             body=body,
             data=data,
             app=b2b_firebase_app(),
+            android_channel_id=B2B_ANDROID_CHANNEL,
             deactivate_invalid=accounts.clear_account_fcm_tokens,
         )
     except Exception:  # noqa: BLE001 - nothing else depends on this landing

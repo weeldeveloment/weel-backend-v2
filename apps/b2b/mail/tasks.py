@@ -175,7 +175,11 @@ def _notify_new_mail(account: dict, message: dict) -> None:
         return
     try:
         from apps.b2b.workspace.repository import clear_employee_fcm_tokens
-        from apps.notification.service import FCMService, b2b_firebase_app
+        from apps.notification.service import (
+            B2B_ANDROID_CHANNEL,
+            FCMService,
+            b2b_firebase_app,
+        )
 
         FCMService.send_to_tokens(
             tokens=[token],
@@ -189,6 +193,9 @@ def _notify_new_mail(account: dict, message: dict) -> None:
             # The workspace app lives in its own Firebase project, so its
             # tokens are only addressable from that project's app.
             app=b2b_firebase_app(),
+            # And it is posted to the channel that app creates: the workspace
+            # app is the only one of the three that creates any.
+            android_channel_id=B2B_ANDROID_CHANNEL,
             # And a dead one has to be cleared from `b2b_employee`, not from
             # the consumer table the default cleanup knows about.
             deactivate_invalid=clear_employee_fcm_tokens,
@@ -223,7 +230,11 @@ def notify_chat_message(thread_id: int, sender_id: int, sender_name: str, text: 
     if tokens:
         try:
             from apps.b2b.workspace.repository import clear_employee_fcm_tokens
-            from apps.notification.service import FCMService, b2b_firebase_app
+            from apps.notification.service import (
+                B2B_ANDROID_CHANNEL,
+                FCMService,
+                b2b_firebase_app,
+            )
 
             FCMService.send_to_tokens(
                 tokens=tokens,
@@ -231,6 +242,7 @@ def notify_chat_message(thread_id: int, sender_id: int, sender_name: str, text: 
                 body=text[:200],
                 data={"type": "chat", "thread_id": str(thread_id)},
                 app=b2b_firebase_app(),
+                android_channel_id=B2B_ANDROID_CHANNEL,
                 deactivate_invalid=clear_employee_fcm_tokens,
             )
         except Exception:  # noqa: BLE001 - the message is already delivered

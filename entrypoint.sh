@@ -57,6 +57,13 @@ python manage.py create_b2b_tables
 # "relation does not exist".
 python manage.py create_hotels_tables
 
+# apps.avia is raw SQL for the same reason, and has the same failure mode:
+# without this the avia_booking tables do not exist and every flight booking,
+# listing and status callback 500s on "relation does not exist" — while offer
+# search keeps working, because searching never touches the database. That
+# combination is what makes it easy to miss until the first customer books.
+python manage.py create_avia_tables
+
 # Non-fatal, but never silent: a failure here means unstyled admin pages, and
 # hiding it behind `2>/dev/null || true` is why that goes unnoticed for weeks.
 if ! python manage.py collectstatic --noinput; then

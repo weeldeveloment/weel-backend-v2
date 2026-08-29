@@ -26,6 +26,7 @@ from apps.b2b.workspace import access_repository as arepo
 from apps.b2b.workspace import accounts
 from apps.b2b.workspace import joining_repository as jrepo
 from apps.b2b.workspace import repository as repo
+from apps.b2b.workspace import storage
 from apps.b2b.workspace.access import Module, Permission, Role
 from apps.b2b.workspace.authentication import (
     AccountJWTAuthentication,
@@ -448,7 +449,10 @@ def _account_payload(account: WorkspaceAccount) -> dict:
         "username": account.username,
         "first_name": account.get("first_name"),
         "last_name": account.get("last_name"),
-        "photo": account.get("photo"),
+        # Resolved, not raw: the column holds a storage path — see
+        # `storage.photo_url`. Shipped bare, the workspace picker and the
+        # invite preview drew initials for somebody who has a photo.
+        "photo": storage.photo_url(account.get("photo")),
         # What the app routes on: somebody who stopped after the OTP is sent
         # back to the name screen rather than into an empty workspace list.
         "has_profile": account.has_profile,
@@ -1093,7 +1097,7 @@ class WorkspaceJoinRequestListView(WorkspaceAPIView):
                         for part in [row.get("last_name"), row.get("first_name")]
                         if part
                     ).strip(),
-                    "photo": row.get("photo"),
+                    "photo": storage.photo_url(row.get("photo")),
                     "message": row.get("message"),
                     "wanted_modules": row.get("wanted_modules"),
                     "status": row["status"],

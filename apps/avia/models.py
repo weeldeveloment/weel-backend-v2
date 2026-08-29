@@ -40,6 +40,19 @@ class AviaBookingStatus:
     #: Still holding seats and still cancellable without a refund flow.
     UNPAID = frozenset({BOOKED, AWAIT_PAYMENT})
 
+    #: Bookhara reports `refund_request_sent` once, in the reply to
+    #: `manual-refund`, and never again: a later read of the same booking still
+    #: answers `ticketed` until the call centre has acted, and the payload
+    #: carries no other sign that a request is open. So the status is ours to
+    #: keep, and a refresh must not overwrite it — verified on the dev API,
+    #: where a booking sat at `ticketed` minutes after the request went in.
+    #:
+    #: These are the states that genuinely settle a refund and so are allowed
+    #: to replace it.
+    REFUND_SETTLED = frozenset({
+        REFUND_AUTHORIZED, PARTIALLY_REFUNDED, REFUNDED, CANCELLED, NOT_AVAILABLE,
+    })
+
 
 class PassengerAge:
     """Age groups. The counts requested at search must match those booked."""
@@ -72,6 +85,19 @@ class DocumentType:
     #: search still returns a per-age-group `documents` list, and a booking has
     #: to use a type from it, so this is a default rather than the only option.
     UNIVERSAL = "A"
+
+
+class OrderNote:
+    """`order_note` on a booking. Bookhara documents exactly one value.
+
+    Passing it guarantees the buyer's own email reaches the airline, rather
+    than Bookhara's — which is what makes airline notifications about the
+    flight land with our customer instead of with the agency.
+    """
+
+    SPECIAL_BUYER_CONTACTS = "specialbuyercontacts"
+
+    ALL = frozenset({SPECIAL_BUYER_CONTACTS})
 
 
 class FlightType:

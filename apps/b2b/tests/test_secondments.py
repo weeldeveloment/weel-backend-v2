@@ -118,7 +118,7 @@ def test_an_employee_cannot_ask_another_workspace_for_help():
     assert response.status_code == 403
 
 
-def test_the_picker_only_reaches_the_org_and_never_its_own_roster():
+def test_the_picker_spans_the_whole_org_and_only_drops_the_searcher():
     with patch(
         "apps.b2b.workspace.secondment_views.srepo.org_id_for_company", return_value=5
     ), patch(
@@ -131,9 +131,11 @@ def test_the_picker_only_reaches_the_org_and_never_its_own_roster():
 
     assert response.status_code == 200
     assert search.call_args.args[0] == 5
-    # Its own people are already on `/team/`; this screen exists to reach past
-    # them, and offering them here would let a workspace second its own staff.
-    assert search.call_args.kwargs["exclude_company_id"] == HOST_COMPANY
+    # The picker is a "find anyone in the company" box — every workspace in the
+    # org, this one included. Only the person doing the searching is left out,
+    # since a request has to go to somebody else.
+    assert search.call_args.kwargs["exclude_employee_id"] == LIDER_ID
+    assert "exclude_company_id" not in search.call_args.kwargs
 
 
 def test_somebody_outside_the_org_cannot_be_asked():
@@ -153,6 +155,29 @@ def test_somebody_outside_the_org_cannot_be_asked():
         )
 
     assert response.status_code == 404
+
+
+def test_somebody_already_in_this_workspace_is_told_so_plainly():
+    """The picker lists the searcher's own roster too, so a request can be
+    addressed to a colleague by mistake. That is a normal slip, not a probe —
+    it gets its own 400 rather than the vague 404."""
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.org_id_for_company", return_value=5
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.search_org_people",
+        return_value=[_person(company_id=HOST_COMPANY)],
+    ):
+        response = _call(
+            WorkspaceRequestListCreateView,
+            factory.post(
+                "/requests/",
+                {"to_employee_id": AZIZ_ID, "role": "manager"},
+                format="json",
+            ),
+            LIDER,
+        )
+
+    assert response.status_code == 400
 
 
 def test_asking_twice_returns_the_request_that_already_exists():
@@ -749,6 +774,47 @@ def _set_username(user, value):
     )
 
 
+ACCOUNT_ID = 700
+
+
+@contextmanager
+def _username_write(*, taken=False, update=None):
+    """The account-side handle write, stubbed.
+
+    The handle lives on `b2b_account` now — the view checks and writes there,
+    then fans the value out across the roster — so this stubs that path and the
+    `_me_payload` read that follows it.
+    """
+    employee = {
+        "id": AZIZ_ID,
+        "company_id": HOME_COMPANY,
+        "role": "employee",
+        "account_id": ACCOUNT_ID,
+    }
+    with patch(
+        "apps.b2b.workspace.views.repo.get_workspace_employee", return_value=employee
+    ), patch(
+        "apps.b2b.workspace.views.accounts.username_taken", return_value=taken
+    ), patch(
+        "apps.b2b.workspace.views.accounts.update_account",
+        side_effect=update,
+        return_value={"id": ACCOUNT_ID},
+    ) as write, patch(
+        "apps.b2b.workspace.views.repo.sync_username_across_memberships"
+    ) as fanout, patch(
+        "apps.b2b.workspace.views.accounts.get_account",
+        return_value={"id": ACCOUNT_ID, "username": None},
+    ), patch(
+        "apps.b2b.workspace.views.get_company", return_value={}
+    ), patch(
+        "apps.b2b.workspace.views.repo.completed_tasks_this_month", return_value=0
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([], []),
+    ):
+        yield write, fanout
+
+
 @pytest.mark.parametrize(
     "typed, stored",
     [
@@ -759,23 +825,14 @@ def _set_username(user, value):
     ],
 )
 def test_a_handle_is_stored_the_way_it_is_searched_for(typed, stored):
-    with patch(
-        "apps.b2b.workspace.views.repo.username_taken", return_value=False
-    ), patch(
-        "apps.b2b.workspace.views.repo.set_employee_username",
-        return_value={"id": AZIZ_ID, "company_id": HOME_COMPANY, "role": "employee"},
-    ) as write, patch(
-        "apps.b2b.workspace.views.get_company", return_value={}
-    ), patch(
-        "apps.b2b.workspace.views.repo.completed_tasks_this_month", return_value=0
-    ), patch(
-        "apps.b2b.workspace.access_repository.access_for_employee",
-        return_value=([], []),
-    ):
+    with _username_write() as (write, fanout):
         response = _set_username(AZIZ, typed)
 
     assert response.status_code == 200
-    assert write.call_args.args[1] == stored
+    assert write.call_args.kwargs["username"] == stored
+    # Written on the account, then pushed down to every roster row it owns.
+    assert write.call_args.args[0] == ACCOUNT_ID
+    assert fanout.call_args.args == (ACCOUNT_ID, stored)
 
 
 @pytest.mark.parametrize(
@@ -790,27 +847,18 @@ def test_a_handle_has_to_be_typeable(bad):
 
 
 def test_a_blank_handle_gives_it_up():
-    with patch(
-        "apps.b2b.workspace.views.repo.set_employee_username",
-        return_value={"id": AZIZ_ID, "company_id": HOME_COMPANY, "role": "employee"},
-    ) as write, patch(
-        "apps.b2b.workspace.views.get_company", return_value={}
-    ), patch(
-        "apps.b2b.workspace.views.repo.completed_tasks_this_month", return_value=0
-    ), patch(
-        "apps.b2b.workspace.access_repository.access_for_employee",
-        return_value=([], []),
-    ):
+    with _username_write() as (write, fanout):
         response = _set_username(AZIZ, "")
 
     assert response.status_code == 200
     # None, not "": the column is nullable so the partial unique index skips
     # the many rows that have no handle at all.
-    assert write.call_args.args[1] is None
+    assert write.call_args.kwargs["username"] is None
+    assert fanout.call_args.args == (ACCOUNT_ID, None)
 
 
 def test_a_handle_somebody_here_already_uses_is_refused():
-    with patch("apps.b2b.workspace.views.repo.username_taken", return_value=True):
+    with _username_write(taken=True):
         response = _set_username(AZIZ, "aziz")
 
     assert response.status_code == 409
@@ -819,11 +867,9 @@ def test_a_handle_somebody_here_already_uses_is_refused():
 def test_losing_the_race_for_a_handle_is_refused_too():
     """Two people typing "@aziz" in the same second both pass the check; the
     unique index is what actually decides."""
-    with patch(
-        "apps.b2b.workspace.views.repo.username_taken", return_value=False
-    ), patch(
-        "apps.b2b.workspace.views.repo.set_employee_username", return_value=None
-    ):
+    from django.db import IntegrityError
+
+    with _username_write(update=IntegrityError("duplicate key")):
         response = _set_username(AZIZ, "aziz")
 
     assert response.status_code == 409

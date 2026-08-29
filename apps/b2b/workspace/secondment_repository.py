@@ -49,16 +49,23 @@ def list_org_workspaces(org_id: int | None) -> list[dict[str, Any]]:
 def search_org_people(
     org_id: int | None,
     *,
-    exclude_company_id: int,
+    exclude_company_id: int | None = None,
+    exclude_employee_id: int | None = None,
     search: str | None = None,
     limit: int = 30,
 ) -> list[dict[str, Any]]:
-    """People in the org's *other* workspaces, for the picker on "So'rov
-    yuborish".
+    """People across the whole org, for the picker on "So'rov yuborish".
 
-    Guests are left out. Somebody already lent here from a third workspace is
-    not this workspace's to lend on, and the row that represents them is a
-    copy — inviting it would create a guest of a guest.
+    By default this spans every workspace in the org, the searcher's own one
+    included — the picker is a "find anybody in the company by name, handle or
+    phone" box, and leaving out the roster you already stand on made it read as
+    broken for an org that has only one workspace. Pass `exclude_company_id` to
+    go back to *other* workspaces only, and `exclude_employee_id` to drop the
+    person doing the searching.
+
+    Guests are left out. Somebody already lent into a workspace from a third
+    one is not that workspace's to lend on, and the row that represents them is
+    a copy — inviting it would create a guest of a guest.
 
     Bounded by `limit` because this is the one roster query that is not
     naturally small: an org with twenty workspaces has twenty rosters behind
@@ -72,11 +79,16 @@ def search_org_people(
           FROM {B2B_EMPLOYEE_TABLE} e
           JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
          WHERE c.org_id = %s
-           AND e.company_id <> %s
            AND e.is_active = TRUE
            AND e.is_guest = FALSE
     """
-    params: list[Any] = [org_id, exclude_company_id]
+    params: list[Any] = [org_id]
+    if exclude_company_id is not None:
+        sql += " AND e.company_id <> %s"
+        params.append(exclude_company_id)
+    if exclude_employee_id is not None:
+        sql += " AND e.id <> %s"
+        params.append(exclude_employee_id)
     if search:
         needle = f"%{search.lstrip('@')}%"
         sql += (

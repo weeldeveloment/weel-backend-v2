@@ -13,6 +13,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core.files.storage import default_storage
+from django.db import IntegrityError
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.utils.translation import gettext_lazy as _
@@ -487,6 +488,19 @@ def _me_payload(employee: dict, membership=None) -> dict:
     company = get_company(employee["company_id"]) or {}
     org = get_org(company.get("org_id")) or {}
     modules = list(membership.modules) if membership else None
+    # The handle lives on the account now, not on the roster row — one person,
+    # one username, wherever they work (see the account note in
+    # `create_b2b_tables.py`). Registration writes it there and
+    # `create_membership` no longer copies it down, so a freshly signed-up
+    # member whose employee row was created without one still has a handle to
+    # show. The employee column is kept only as a fallback for rows written
+    # before the account existed.
+    account = (
+        accounts.get_account(employee["account_id"])
+        if employee.get("account_id")
+        else None
+    )
+    username = (account or {}).get("username") or employee.get("username")
     return {
         "id": employee["id"],
         "company_id": employee["company_id"],
@@ -503,7 +517,7 @@ def _me_payload(employee: dict, membership=None) -> dict:
         "full_name": employee.get("full_name"),
         "position": employee.get("position"),
         "role": employee.get("role") or "employee",
-        "username": employee.get("username"),
+        "username": username,
         "phone": employee.get("phone"),
         "email": employee.get("email"),
         "photo": _photo_url(employee.get("photo")),
@@ -707,23 +721,45 @@ class WorkspaceUsernameView(WorkspaceAPIView):
         serializer.is_valid(raise_exception=True)
         username = serializer.validated_data["username"]
 
-        if username and repo.username_taken(
-            request.user.company_id, username, exclude_employee_id=request.user.id
+        employee = repo.get_workspace_employee(request.user.id)
+        account_id = (employee or {}).get("account_id")
+        if not account_id:
+            return Response(
+                {"detail": _("Profile not found.")},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Global, per the TZ: one handle per person across every workspace they
+        # work in, so the check and the write are against the account rather
+        # than this one roster row.
+        if username and accounts.username_taken(
+            username, exclude_account_id=account_id
         ):
             return Response(
-                {"username": [_("Somebody here already uses this name.")]},
+                {"username": [_("This handle is already taken.")]},
                 status=status.HTTP_409_CONFLICT,
             )
 
-        updated = repo.set_employee_username(request.user.id, username or None)
-        if not updated:
+        try:
+            accounts.update_account(account_id, username=username or None)
+        except IntegrityError:
             # Lost the race against somebody claiming the same handle between
-            # the check above and the write.
+            # the check above and the write; the unique index is the authority.
             return Response(
-                {"username": [_("Somebody here already uses this name.")]},
+                {"username": [_("This handle is already taken.")]},
                 status=status.HTTP_409_CONFLICT,
             )
-        return Response(_me_payload(updated, request.user.membership))
+
+        # Each roster row keeps its own copy so listing and search need no
+        # join — see `sync_username_across_memberships`.
+        repo.sync_username_across_memberships(account_id, username or None)
+
+        return Response(
+            _me_payload(
+                repo.get_workspace_employee(request.user.id) or employee,
+                request.user.membership,
+            )
+        )
 
 
 def _with_presence(members: list[dict]) -> list[dict]:
@@ -829,6 +865,10 @@ def _task_payload(task: dict, user) -> dict:
         "can_delete": bool(caps["can_delete_task"]),
         # An employee moves only their own work along the board.
         "can_change_status": bool(caps["can_edit_task"] or is_assignee or is_author),
+        # Handing the task to somebody else. Wider than can_edit: the person
+        # who raised it may reassign it — the colleague they gave it to is out
+        # sick and it has to move — without the manager-wide edit right.
+        "can_reassign": bool(caps["can_edit_task"] or is_author),
     }
 
 
@@ -1020,7 +1060,13 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
         task = self._load(request, task_id)
         if not task:
             return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
-        if not request.user.capabilities["can_edit_task"]:
+
+        can_edit = bool(request.user.capabilities["can_edit_task"])
+        is_author = task["author_id"] == request.user.id
+
+        # Anyone who is neither a manager nor the person who raised the task is
+        # done here before the body is even looked at.
+        if not can_edit and not is_author:
             return Response(
                 {"detail": _("Your role does not allow editing tasks.")},
                 status=status.HTTP_403_FORBIDDEN,
@@ -1032,6 +1078,21 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
 
         assignees = data.pop("assignee_ids", None)
         subtasks = data.pop("subtasks", None)
+        other_fields = {key: value for key, value in data.items() if key in {
+            "title", "description", "status", "priority", "project", "due_date",
+        }}
+
+        # A full edit stays manager-only. The author may still PATCH, but only
+        # to change who the task is assigned to — reassigning work they handed
+        # out when the person they gave it to falls through.
+        reassign_only = (
+            assignees is not None and subtasks is None and not other_fields
+        )
+        if not can_edit and not (is_author and reassign_only):
+            return Response(
+                {"detail": _("Your role does not allow editing tasks.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         if assignees is not None:
             checked = _validated_employee_ids(request.user.company_id, assignees)
@@ -1058,11 +1119,8 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
 
         # Only the columns the caller actually sent — PATCH must not reset the
         # serializer's defaults over fields nobody touched.
-        fields = {key: value for key, value in data.items() if key in {
-            "title", "description", "status", "priority", "project", "due_date",
-        }}
         updated = repo.update_task(
-            task_id, request.user.company_id, actor_id=request.user.id, **fields
+            task_id, request.user.company_id, actor_id=request.user.id, **other_fields
         )
         return Response(_task_payload(updated, request.user))
 
@@ -1471,20 +1529,12 @@ class WorkspaceEventDetailView(WorkspaceAPIView):
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────
 
-def _photo_url(path: str | None) -> str | None:
-    """A stored picture as something a client can load.
-
-    The columns hold a storage path — the convention every stored object here
-    uses — and turning one into a URL is the server's job, because only the
-    server knows which backend the bytes are on. Anything already absolute is
-    left alone: a row written before this existed, or an avatar that came from
-    somewhere else entirely.
-    """
-    if not path:
-        return None
-    if path.startswith("http://") or path.startswith("https://"):
-        return path
-    return default_storage.url(path)
+#: A stored picture as a URL.
+#:
+#: Moved to `storage` rather than kept here: the join-request and secondment
+#: payloads live in their own modules and carry the same column, and they were
+#: still shipping the bare path — see the note on `storage.photo_url`.
+_photo_url = storage.photo_url
 
 
 def _thread_photo_url(thread: dict) -> str | None:
@@ -2779,7 +2829,11 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
         tokens = [r["fcm_token"] for r in recipients if r.get("fcm_token")]
         if tokens:
             try:
-                from apps.notification.service import FCMService, b2b_firebase_app
+                from apps.notification.service import (
+                    B2B_ANDROID_CHANNEL,
+                    FCMService,
+                    b2b_firebase_app,
+                )
 
                 FCMService.send_to_tokens(
                     tokens=tokens,
@@ -2790,6 +2844,7 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
                     body=body,
                     data={"type": "lead", "lead_id": str(lead["id"])},
                     app=b2b_firebase_app(),
+                    android_channel_id=B2B_ANDROID_CHANNEL,
                     deactivate_invalid=repo.clear_employee_fcm_tokens,
                 )
             except Exception:

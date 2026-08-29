@@ -99,12 +99,21 @@ def upsert_booking(
     b2b_user_id: int | None = None,
     b2b_trip_id: int | None = None,
     b2b_employee_id: int | None = None,
+    preserve_refund_request: bool = True,
 ) -> dict[str, Any]:
     """Write a Bookhara booking payload into `avia_booking`, creating or updating.
 
     Ownership columns are only ever *set*, never cleared: a re-read of the
     booking has no idea which of our users it belongs to, so passing None for
     them on refresh leaves whatever the create call recorded.
+
+    `refund_request_sent` is held onto for the same reason it exists: Bookhara
+    says it once, in the reply to `manual-refund`, and every read afterwards
+    goes back to reporting `ticketed` until the call centre has acted. Letting
+    a refresh overwrite it would put the booking back in front of the customer
+    as refundable and invite a second request against a provider that rate
+    limits them. Pass False only where the provider's answer really is the
+    whole truth.
     """
     price = payload.get("price") or {}
     payer = payload.get("payer") or {}
@@ -131,7 +140,13 @@ def upsert_booking(
         ON CONFLICT (provider_booking_id) DO UPDATE SET
             booking_number = EXCLUDED.booking_number,
             offer_id = COALESCE(EXCLUDED.offer_id, {AVIA_BOOKING_TABLE}.offer_id),
-            status = EXCLUDED.status,
+            status = CASE
+                WHEN %s
+                     AND {AVIA_BOOKING_TABLE}.status = %s
+                     AND EXCLUDED.status <> ALL(%s)
+                THEN {AVIA_BOOKING_TABLE}.status
+                ELSE EXCLUDED.status
+            END,
             offer_type = EXCLUDED.offer_type,
             flight_type = EXCLUDED.flight_type,
             fare_family_type = EXCLUDED.fare_family_type,
@@ -184,6 +199,12 @@ def upsert_booking(
             _to_json(payload.get("information_for_clients") or []),
             _to_json(payload.get("additional_services")),
             _to_json(payload),
+            # The three parameters of the status CASE above. They sit here
+            # because psycopg binds by position and the ON CONFLICT clause
+            # follows VALUES in the statement.
+            preserve_refund_request,
+            AviaBookingStatus.REFUND_REQUEST_SENT,
+            sorted(AviaBookingStatus.REFUND_SETTLED),
         ],
     )
 

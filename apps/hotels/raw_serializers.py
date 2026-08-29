@@ -104,7 +104,12 @@ class GuestSerializer(serializers.Serializer):
 class BookingRoomSerializer(serializers.Serializer):
     option_ref_id = serializers.CharField(max_length=512)
     price = serializers.DecimalField(max_digits=14, decimal_places=2)
-    currency = serializers.CharField(max_length=8, required=False)
+    # Not sent to Hotelios — the option ref already carries the currency the
+    # room was priced in — but it is what our own row is stamped with, and a
+    # booking with no currency beside its amount is unreadable later. The
+    # search defaults to UZS and prices every option in it, so that is the
+    # fallback when a caller leaves it out.
+    currency = serializers.CharField(max_length=8, required=False, default="uzs")
     guests = GuestSerializer(many=True, min_length=1, max_length=10)
     # Which employee this room is for, on a corporate booking.
     employee_id = serializers.IntegerField(required=False, allow_null=True)

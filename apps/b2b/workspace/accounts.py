@@ -328,11 +328,12 @@ def create_membership(
 ) -> dict[str, Any] | None:
     """Put this account on a workspace's roster.
 
-    The name and photo are copied from the account rather than joined at read
-    time: every screen in the workspace reads `b2b_employee`, and a join on
-    every roster query to fetch a name that changes twice a year is a cost
-    with nothing to show for it. What the account owns is identity — the
-    number and the handle — and those are read from it.
+    The name, phone, photo and handle are copied from the account rather than
+    joined at read time: every screen in the workspace reads `b2b_employee`,
+    and a join on every roster query to fetch fields that change twice a year
+    is a cost with nothing to show for it. The account stays the author — a
+    later change to the name or the handle is propagated back down to every
+    membership (see `set_own_profile` and `sync_username_across_memberships`).
     """
     import json
 
@@ -346,10 +347,10 @@ def create_membership(
     execute(
         f"""
         INSERT INTO {B2B_EMPLOYEE_TABLE}
-            (company_id, account_id, full_name, phone, photo, role,
+            (company_id, account_id, full_name, phone, photo, username, role,
              module_access, permission_access, is_active, is_chat_only,
              created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s)
         """,
         [
             company_id,
@@ -357,6 +358,7 @@ def create_membership(
             full_name,
             account.get("phone"),
             account.get("photo"),
+            account.get("username"),
             Role.clean(role),
             json.dumps(Module.clean(modules)) if modules is not None else None,
             json.dumps(Permission.clean(permissions)) if permissions is not None else None,

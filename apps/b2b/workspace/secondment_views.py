@@ -20,6 +20,7 @@ from rest_framework.response import Response
 
 from apps.b2b.repository import get_company
 from apps.b2b.workspace import repository as repo
+from apps.b2b.workspace import storage
 from apps.b2b.workspace import secondment_repository as srepo
 from apps.b2b.workspace.access import Permission
 from apps.b2b.workspace.permissions import IsWorkspaceUser
@@ -69,7 +70,7 @@ def _join_requests_received(company_id: int) -> list[tuple]:
                 "id": row["id"],
                 "company_id": company_id,
                 "from_full_name": full_name,
-                "from_photo": row.get("photo"),
+                "from_photo": storage.photo_url(row.get("photo")),
                 "phone": row.get("phone"),
                 "message": row.get("message") or "",
                 "status": row["status"],
@@ -118,12 +119,12 @@ def _join_requests_sent(account_id: int) -> list[tuple]:
 
 
 class WorkspaceOrgPeopleView(WorkspaceAPIView):
-    """GET /api/b2b/workspace/org/people/?search= — who else is in the org.
+    """GET /api/b2b/workspace/org/people/?search= — anyone in the org.
 
-    The picker on "So'rov yuborish" searches this rather than `/team/`: the
-    whole point is to reach somebody who is *not* in this workspace. Restricted
-    to the org, so a workspace can only ever ask people who share an owner
-    with it — never the whole of WEEL.
+    The picker on "So'rov yuborish" searches this rather than `/team/`: it
+    spans every workspace under the same owner, this one included, so a name,
+    handle or phone finds the person wherever they sit. Only the searcher is
+    left out. Restricted to the org — never the whole of WEEL.
     """
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -145,7 +146,10 @@ class WorkspaceOrgPeopleView(WorkspaceAPIView):
         org_id = srepo.org_id_for_company(request.user.company_id)
         people = srepo.search_org_people(
             org_id,
-            exclude_company_id=request.user.company_id,
+            # The whole org, this workspace included — see `search_org_people`.
+            # Only the searcher themselves is dropped: a request has to go *to*
+            # somebody else.
+            exclude_employee_id=request.user.id,
             search=(request.query_params.get("search") or "").strip() or None,
         )
         return Response({"results": OrgPersonSerializer(people, many=True).data})
@@ -222,18 +226,27 @@ class WorkspaceRequestListCreateView(WorkspaceAPIView):
 
         org_id = srepo.org_id_for_company(request.user.company_id)
         candidates = srepo.search_org_people(
-            org_id, exclude_company_id=request.user.company_id
+            org_id, exclude_employee_id=request.user.id
         )
         target = next(
             (p for p in candidates if p["id"] == data["to_employee_id"]), None
         )
         if not target:
-            # Covers all of: not in this org, already in this workspace, a
-            # guest row, deactivated. One answer for all of them on purpose —
-            # a 404 that distinguished them would be a way to probe the org.
+            # Covers all of: not in this org, a guest row, deactivated. One
+            # answer for all of them on purpose — a 404 that distinguished them
+            # would be a way to probe the org.
             return Response(
                 {"to_employee_id": [_("This person cannot be asked from here.")]},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+        if target["company_id"] == request.user.company_id:
+            # The picker lists the whole org, this workspace included, so you
+            # can look anyone up — but a secondment brings somebody *in*, and
+            # this person is already here. Said plainly rather than folded into
+            # the 404 above: it is not a probe, it is a normal mistake.
+            return Response(
+                {"to_employee_id": [_("This person is already in your workspace.")]},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         existing = srepo.pending_request_between(

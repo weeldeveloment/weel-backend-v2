@@ -186,6 +186,58 @@ def test_task_payload_tells_the_app_which_buttons_to_show(get_task, _activity):
     assert response.data["can_change_status"] is True
 
 
+@patch("apps.b2b.workspace.tasks.notify_task_assigned.delay")
+@patch("apps.b2b.workspace.views.repo.update_task")
+@patch("apps.b2b.workspace.views.repo.set_task_assignees")
+@patch(
+    "apps.b2b.workspace.views.repo.employee_ids_in_company",
+    return_value={EMPLOYEE_ID},
+)
+@patch("apps.b2b.workspace.views.repo.get_task")
+def test_the_author_may_reassign_a_task_without_edit_rights(
+    get_task, _ids, set_assignees, update_task, _queued
+):
+    """An employee raised the task and gave it to a colleague who is now out
+    sick. They have no ``can_edit_task``, but handing it to somebody else is
+    the one write they keep."""
+    get_task.return_value = _task(author_id=EMPLOYEE_ID, assignee_ids=[OWNER_ID])
+    update_task.return_value = _task(author_id=EMPLOYEE_ID, assignee_ids=[EMPLOYEE_ID])
+
+    request = factory.patch("/tasks/10/", {"assignee_ids": [EMPLOYEE_ID]}, format="json")
+    response = _call(WorkspaceTaskDetailView, request, EMPLOYEE, task_id=10)
+
+    assert response.status_code == 200
+    set_assignees.assert_called_once()
+    assert set_assignees.call_args.args[1] == [EMPLOYEE_ID]
+
+
+@patch("apps.b2b.workspace.views.repo.get_task")
+def test_the_author_still_cannot_edit_anything_but_the_assignees(get_task):
+    get_task.return_value = _task(author_id=EMPLOYEE_ID, assignee_ids=[OWNER_ID])
+    request = factory.patch(
+        "/tasks/10/",
+        {"assignee_ids": [EMPLOYEE_ID], "title": "Boshqa nom"},
+        format="json",
+    )
+    response = _call(WorkspaceTaskDetailView, request, EMPLOYEE, task_id=10)
+    assert response.status_code == 403
+
+
+@patch("apps.b2b.workspace.views.repo.list_task_activity", return_value=[])
+@patch("apps.b2b.workspace.views.repo.get_task")
+def test_can_reassign_is_the_author_or_a_manager_only(get_task, _activity):
+    get_task.return_value = _task(author_id=EMPLOYEE_ID, assignee_ids=[])
+    mine = _call(WorkspaceTaskDetailView, factory.get("/tasks/10/"), EMPLOYEE, task_id=10)
+    assert mine.data["can_edit"] is False
+    assert mine.data["can_reassign"] is True
+
+    get_task.return_value = _task(author_id=OWNER_ID, assignee_ids=[])
+    not_mine = _call(
+        WorkspaceTaskDetailView, factory.get("/tasks/10/"), EMPLOYEE, task_id=10
+    )
+    assert not_mine.data["can_reassign"] is False
+
+
 # ─── Calendar ─────────────────────────────────────────────────────────────────
 
 def test_employee_cannot_invite_colleagues_to_an_event():

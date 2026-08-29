@@ -3021,6 +3021,21 @@ def set_employee_username(employee_id: int, username: str | None) -> dict[str, A
     return get_workspace_employee(employee_id)
 
 
+def sync_username_across_memberships(account_id: int, username: str | None) -> None:
+    """Copy an account's handle down to every roster row it owns.
+
+    The handle lives on the account (see the note in `create_b2b_tables.py`),
+    but each `b2b_employee` row keeps its own copy so roster listing and the
+    member search do not need a join per query — the same reason the name and
+    photo are copied down. This keeps those copies honest after a rename.
+    """
+    execute(
+        f"UPDATE {B2B_EMPLOYEE_TABLE} SET username = %s, updated_at = %s "
+        f"WHERE account_id = %s",
+        [username or None, timezone.now(), account_id],
+    )
+
+
 def username_taken(company_id: int, username: str, *, exclude_employee_id: int) -> bool:
     """Whether this handle is already somebody else's, in this workspace.
 

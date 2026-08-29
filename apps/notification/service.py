@@ -58,6 +58,66 @@ def _mask_token(token: str | None) -> str:
     return f"{token[:8]}...{token[-4:]}"
 
 
+# The workspace app's notification channel: the one `PushService` creates at
+# startup and the one its manifest names as `default_notification_channel_id`.
+# Named here as well because the manifest default only applies to a message
+# that carries no channel of its own, and because it is the *only* channel that
+# may be sent — the consumer and partner apps create none, and a notification
+# addressed to a channel that does not exist on the device is dropped by
+# Android outright rather than falling back to a default.
+B2B_ANDROID_CHANNEL = "weel_workspace"
+
+
+def _android_config(channel_id: str | None) -> messaging.AndroidConfig:
+    """Delivery hints for the Android half of a push.
+
+    `high` priority is what wakes a dozing device to deliver immediately;
+    without it a push can sit until the next maintenance window, which on a
+    phone that has been idle in a pocket is the difference between "instantly"
+    and "twenty minutes later, if at all".
+
+    The channel is only named when the receiving app is known to have created
+    it — see [B2B_ANDROID_CHANNEL]. Left out, Android uses whatever the app's
+    manifest declares as its default.
+    """
+    notification = (
+        messaging.AndroidNotification(
+            channel_id=channel_id,
+            sound="default",
+            default_vibrate_timings=True,
+        )
+        if channel_id
+        else None
+    )
+    return messaging.AndroidConfig(priority="high", notification=notification)
+
+
+def _apns_config(title: str, body: str) -> messaging.APNSConfig:
+    """The APNs half of a push, which FCM does not fill in on its own.
+
+    Without it iOS receives an alert with no `sound` key, and an alert with no
+    sound is delivered quietly: no banner while the phone is in use, and on
+    iOS 15 and up it is eligible to be held back for the scheduled notification
+    summary instead of being shown when it arrives. From the outside that is
+    indistinguishable from a push that never arrived at all.
+
+    `apns-priority: 10` is what asks for immediate delivery. The alert is
+    repeated in the payload because an `aps` dictionary given explicitly
+    replaces the one FCM would otherwise have written, rather than merging
+    into it.
+    """
+    return messaging.APNSConfig(
+        headers={"apns-priority": "10"},
+        payload=messaging.APNSPayload(
+            aps=messaging.Aps(
+                alert=messaging.ApsAlert(title=title, body=body),
+                sound="default",
+                mutable_content=True,
+            ),
+        ),
+    )
+
+
 class FCMService:
     @staticmethod
     def _deactivate_invalid_tokens(tokens: list[str]):
@@ -82,6 +142,7 @@ class FCMService:
         data: dict | None = None,
         app=None,
         deactivate_invalid=None,
+        android_channel_id=None,
     ):
         """Send one message to many tokens.
 
@@ -89,6 +150,13 @@ class FCMService:
         one — which is what every consumer and partner send passes. B2B callers
         hand in `b2b_firebase_app()` instead, because their tokens come from a
         different Firebase project and are not addressable from this one.
+
+        `android_channel_id` names the Android notification channel the push
+        should be posted to, and defaults to none — meaning "whatever the
+        receiving app's manifest calls its default". Only the B2B senders pass
+        one, because only the workspace app creates a channel; naming it for an
+        app that has not created it would have Android drop the notification
+        instead of showing it.
 
         `deactivate_invalid` is what clears the tokens Firebase reports as dead,
         and it exists for the same reason `app` does: a consumer token lives in
@@ -121,6 +189,8 @@ class FCMService:
                 body=body,
             ),
             data=normalized_data,
+            android=_android_config(android_channel_id),
+            apns=_apns_config(title, body),
             tokens=tokens,
         )
         try:

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-from apps.avia.models import DocumentType, Gender, PassengerAge, ServiceClass
+from apps.avia.models import (
+    DocumentType,
+    Gender,
+    OrderNote,
+    PassengerAge,
+    ServiceClass,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -96,13 +102,33 @@ class ScheduleQuerySerializer(serializers.Serializer):
 # Booking
 # ---------------------------------------------------------------------------
 
+#: Bookhara rejects Cyrillic outright (error 1155) and caps each name part at
+#: 25 characters (error 1124). Both come back as HTTP 410, which is otherwise
+#: the "retry me" status, so catching them here keeps a typo from looking like
+#: a provider outage. Hyphens and apostrophes are left in — they are common in
+#: Uzbek and Russian transliterations and the GDS accepts them.
+LATIN_NAME_REGEX = r"^[A-Za-z][A-Za-z \-']*$"
+LATIN_NAME_MESSAGE = (
+    "Names must be written in Latin letters, exactly as they appear in the "
+    "travel document."
+)
+
+
 class PassengerSerializer(serializers.Serializer):
-    first_name = serializers.CharField(max_length=120)
-    last_name = serializers.CharField(max_length=120)
+    first_name = serializers.RegexField(
+        LATIN_NAME_REGEX,
+        max_length=25,
+        error_messages={"invalid": LATIN_NAME_MESSAGE},
+    )
+    last_name = serializers.RegexField(
+        LATIN_NAME_REGEX,
+        max_length=25,
+        error_messages={"invalid": LATIN_NAME_MESSAGE},
+    )
     # Bookhara wants a single space when the document carries no patronymic —
     # omitting the field entirely is the other accepted form, and an empty
     # string is neither.
-    middle_name = serializers.CharField(max_length=120, required=False, allow_null=True)
+    middle_name = serializers.CharField(max_length=25, required=False, allow_null=True)
     age = serializers.ChoiceField(choices=sorted(PassengerAge.ALL))
     birthdate = serializers.DateField()
     gender = serializers.ChoiceField(choices=sorted(Gender.ALL))
@@ -139,7 +165,11 @@ class CreateBookingSerializer(serializers.Serializer):
         r"^\+\d{9,15}$",
         error_messages={"invalid": "Phone must be in international format, e.g. +998901234567."},
     )
-    order_note = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    # Bookhara documents exactly one accepted value; anything else is quietly
+    # ignored upstream, so it is rejected here where the caller can see why.
+    order_note = serializers.ChoiceField(
+        choices=sorted(OrderNote.ALL), required=False, allow_blank=True
+    )
     passengers = PassengerSerializer(many=True, min_length=1, max_length=9)
     additional_services = serializers.ListField(
         child=serializers.CharField(max_length=64), required=False, allow_empty=True

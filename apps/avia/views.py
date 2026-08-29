@@ -18,6 +18,7 @@ from apps.avia import service
 from apps.avia.client import (
     BookharaError,
     BookharaExpiredError,
+    BookharaRejectedError,
     BookharaUnconfirmedError,
     get_client,
 )
@@ -38,6 +39,11 @@ BOOKHARA_VALIDATION_ERROR_CODE = 8
 # Not enough money on the Bookhara deposit to issue this ticket. Operational,
 # not a client mistake, but the caller needs to see it distinctly.
 BOOKHARA_INSUFFICIENT_DEPOSIT_ERROR_CODE = 1048
+# Bookhara throttles per account and answers HTTP 429 with this code. Seen for
+# real on the dev API after three refund calls in a row. It is temporary and
+# the same call works shortly after, so it belongs with the retryable failures
+# rather than in the catch-all gateway error.
+BOOKHARA_RATE_LIMIT_ERROR_CODE = 1009
 
 
 def _language(request) -> str | None:
@@ -71,6 +77,13 @@ def _error_response(exc: BookharaError) -> Response:
         body["expired"] = True
         return Response(body, status=status.HTTP_404_NOT_FOUND)
 
+    if isinstance(exc, BookharaRejectedError):
+        # Also a 410, but a permanent one: the passenger data is wrong and no
+        # amount of retrying will change that. Answering 503 "try again" here
+        # would leave the caller looping on a form only a person can fix.
+        body["retryable"] = False
+        return Response(body, status=status.HTTP_400_BAD_REQUEST)
+
     if isinstance(exc, BookharaUnconfirmedError):
         # The carrier has not answered yet. The documented remedy is to repeat
         # the same call, so say so rather than presenting it as a dead end.
@@ -87,6 +100,28 @@ def _error_response(exc: BookharaError) -> Response:
         body["duplicate"] = True
         body["existing_booking_id"] = exc.existing_booking_id
         return Response(body, status=status.HTTP_409_CONFLICT)
+
+    if exc.is_refund_unavailable:
+        # The fare rules allow a refund, but the airline will not give one
+        # through the API right now. `manual_refund` is the documented way on,
+        # so the response names it instead of reading as a flat failure.
+        body["refund_unavailable"] = True
+        body["manual_refund_available"] = True
+        body["detail"] = (
+            exc.message
+            or "This ticket cannot be refunded automatically. "
+               "Please request a refund through support."
+        )
+        return Response(body, status=status.HTTP_409_CONFLICT)
+
+    if (
+        exc.status_code == 429
+        or exc.error_code == BOOKHARA_RATE_LIMIT_ERROR_CODE
+    ):
+        logger.warning("avia: throttled by Bookhara (request_id=%s)", exc.request_id)
+        body["retryable"] = True
+        body["detail"] = "Too many requests to the provider. Please try again shortly."
+        return Response(body, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     if exc.error_code == BOOKHARA_VALIDATION_ERROR_CODE:
         return Response(body, status=status.HTTP_400_BAD_REQUEST)

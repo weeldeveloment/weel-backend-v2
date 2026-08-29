@@ -694,9 +694,20 @@ ESKIZ_CALLBACK_URL = os.getenv("ESKIZ_CALLBACK_URL", "")
 # Access is IP-allowlisted per account, so a new deployment host has to be
 # registered with them before any of this works.
 # Docs: https://docs.bookhara.uz
-BOOKHARA_BASE_URL = (
-    os.getenv("BOOKHARA_BASE_URL") or "https://avia-api-dev.bookhara.uz"
-).strip()
+# The fallback is the *test* environment, which is the right default to
+# develop against and the wrong one to serve customers from: a production
+# deploy that forgets this variable would take real bookings against test
+# inventory and issue nothing, while looking like it worked. So it is a
+# development-only convenience, and its absence is fatal with DEBUG=0.
+BOOKHARA_BASE_URL = (os.getenv("BOOKHARA_BASE_URL") or "").strip()
+if not BOOKHARA_BASE_URL:
+    if DEBUG:
+        BOOKHARA_BASE_URL = "https://avia-api-dev.bookhara.uz"
+    else:
+        raise ImproperlyConfigured(
+            "BOOKHARA_BASE_URL must be set when DEBUG=0 — the development "
+            "fallback points at Bookhara's test environment."
+        )
 BOOKHARA_EMAIL = (os.getenv("BOOKHARA_EMAIL") or "").strip()
 BOOKHARA_PASSWORD = os.getenv("BOOKHARA_PASSWORD") or ""
 BOOKHARA_ACCESS_TYPE = (os.getenv("BOOKHARA_ACCESS_TYPE") or "avia").strip()
@@ -714,9 +725,18 @@ BOOKHARA_CALLBACK_SECRET = (os.getenv("BOOKHARA_CALLBACK_SECRET") or "").strip()
 # tables (see apps/hotels/sync.py) and availability, booking and cancellation
 # go live through Search → Quote → Create → Confirm.
 # Docs: https://docs.hotelios.uz
-HOTELIOS_BASE_URL = (
-    os.getenv("HOTELIOS_BASE_URL") or "https://integration-staging.hotelios.uz"
-).strip()
+# Staging, and the same trap as BOOKHARA_BASE_URL above: staging happily
+# answers searches and takes bookings, so a production deploy missing this
+# would look healthy while reserving rooms no hotel will ever hear about.
+HOTELIOS_BASE_URL = (os.getenv("HOTELIOS_BASE_URL") or "").strip()
+if not HOTELIOS_BASE_URL:
+    if DEBUG:
+        HOTELIOS_BASE_URL = "https://integration-staging.hotelios.uz"
+    else:
+        raise ImproperlyConfigured(
+            "HOTELIOS_BASE_URL must be set when DEBUG=0 — the development "
+            "fallback points at the Hotelios staging environment."
+        )
 HOTELIOS_LOGIN = (os.getenv("HOTELIOS_LOGIN") or "").strip()
 HOTELIOS_PASSWORD = os.getenv("HOTELIOS_PASSWORD") or ""
 HOTELIOS_ACCESS_KEY = (os.getenv("HOTELIOS_ACCESS_KEY") or "").strip()

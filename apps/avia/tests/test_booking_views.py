@@ -23,7 +23,12 @@ if not settings.configured:  # pragma: no cover - defensive, mirrors the suite
 
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from apps.avia.client import BookharaError, BookharaExpiredError, BookharaUnconfirmedError
+from apps.avia.client import (
+    BookharaError,
+    BookharaExpiredError,
+    BookharaRejectedError,
+    BookharaUnconfirmedError,
+)
 from apps.avia.models import AviaBookingStatus
 from apps.avia.views import (
     AviaBookingCancelView,
@@ -102,6 +107,31 @@ class TestProviderFailures:
         assert response.status_code == 503
         assert response.data["retryable"] is True
 
+    def test_bad_passenger_data_is_a_400_even_though_it_arrives_as_a_410(self):
+        # Bookhara uses HTTP 410 for two opposite things. Error 1154 is the
+        # permanent one — verified against the dev API, where a 15-character
+        # surname comes back this way and never succeeds however often it is
+        # sent. Answering 503 "retryable" would loop the caller forever on a
+        # form only the traveller can fix.
+        response = self._get_offer(
+            BookharaRejectedError(
+                "Passenger data is invalid.", status_code=410, error_code=1154
+            )
+        )
+        assert response.status_code == 400
+        assert response.data["retryable"] is False
+
+    def test_an_unavailable_refund_points_at_the_manual_route(self):
+        # 5233 (refund) and 5234 (VOID) both mean the fare allows it but the
+        # airline will not do it through the API. `manual_refund` is the way
+        # on, so the response has to say so rather than read as a dead end.
+        for code in (5233, 5234):
+            response = self._get_offer(
+                BookharaError("Refund unavailable", error_code=code)
+            )
+            assert response.status_code == 409, code
+            assert response.data["manual_refund_available"] is True
+
     def test_a_price_change_is_a_conflict_not_a_gateway_error(self):
         response = self._get_offer(BookharaError("Price changed", error_code=100500))
         assert response.status_code == 409
@@ -131,6 +161,16 @@ class TestProviderFailures:
         response = self._get_offer(BookharaError("Not enough deposit", error_code=1048))
         assert response.status_code == 503
         assert "deposit" not in response.data["detail"].lower()
+
+    def test_being_throttled_asks_the_caller_to_come_back(self):
+        # Error 1009 / HTTP 429. The dev API produced this after three refund
+        # calls in quick succession; the same call succeeded a minute later,
+        # so it is a wait, not a failure.
+        response = self._get_offer(
+            BookharaError("Request limit exceeded.", status_code=429, error_code=1009)
+        )
+        assert response.status_code == 503
+        assert response.data["retryable"] is True
 
     def test_anything_else_is_a_gateway_error(self):
         response = self._get_offer(BookharaError("Boom", error_code=7))

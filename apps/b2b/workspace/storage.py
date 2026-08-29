@@ -19,9 +19,35 @@ this is a millisecond against a request that is already writing a file.
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.files.storage import default_storage
 
 from apps.b2b.raw.tables import B2B_WORKSPACE_FILE_TABLE
 from shared.raw.db import fetch_all, fetch_one
+
+
+def photo_url(path: str | None) -> str | None:
+    """A stored picture as something a client can load.
+
+    Every column that holds a picture — ``b2b_employee.photo``,
+    ``b2b_account.photo``, ``b2b_chat_thread.photo`` — stores a *path*, because
+    only the server knows which backend the bytes are on and a URL written into
+    a row goes stale the day that changes.
+
+    So every payload carrying one has to resolve it, and this is the single
+    place that does. It exists because they did not: uploading an avatar wrote
+    the path correctly and ``/me/`` resolved it, while the roster, the chat
+    rows and the join requests all shipped the bare path — so the picture
+    appeared on your own profile screen and nowhere else, which reads exactly
+    like the upload having failed.
+
+    Anything already absolute is left alone: a row written before this existed,
+    or an avatar that came from somewhere else entirely.
+    """
+    if not path:
+        return None
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    return default_storage.url(path)
 
 # What a b2b owner gets. Overridable per deployment — a customer on a larger
 # plan is a settings change, not a release.
