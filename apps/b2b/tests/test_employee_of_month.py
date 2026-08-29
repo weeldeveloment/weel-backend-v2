@@ -204,12 +204,19 @@ def employees(company, django_db_blocker):
 def _create_task(company_id: int, assignee_id: int, *, due_in_days: int | None, completed_offset_days: int | None):
     """A done or open task assigned to one employee.
 
-    ``completed_offset_days`` is measured from the due date (or from now, if
-    there is none) — negative finishes early, positive finishes late.
+    ``completed_offset_days`` is measured from the due date (or from the
+    anchor, if there is none) — negative finishes early, positive late.
+
+    Everything hangs off the 10th of the current month rather than off now,
+    for the same reason the attendance test starts at day 1: the stats query
+    only counts tasks whose ``completed_at`` falls inside the month it was
+    asked about, so a run late in the month would push a "finished two days
+    late" task into the next one and lose it. Day 10 leaves room for every
+    offset this helper is given, in a 28-day month as much as a 31-day one.
     """
     from shared.raw.db import execute, fetch_one
 
-    now = timezone.now()
+    now = timezone.now().replace(day=10, hour=12, minute=0, second=0, microsecond=0)
     due_date = now + timedelta(days=due_in_days) if due_in_days is not None else None
     completed_at = None
     status = "todo"
