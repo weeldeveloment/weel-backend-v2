@@ -2477,7 +2477,9 @@
      "x-nullable": true
     },
     "order_note": {
-     "maxLength": 64,
+     "enum": [
+      "specialbuyercontacts"
+     ],
      "title": "Order note",
      "type": "string"
     },
@@ -3124,6 +3126,7 @@
   "BookingRoom": {
    "properties": {
     "currency": {
+     "default": "uzs",
      "maxLength": 8,
      "minLength": 1,
      "title": "Currency",
@@ -8727,8 +8730,9 @@
      "type": "string"
     },
     "first_name": {
-     "maxLength": 120,
+     "maxLength": 25,
      "minLength": 1,
+     "pattern": "^[A-Za-z][A-Za-z \\-']*$",
      "title": "First name",
      "type": "string"
     },
@@ -8741,13 +8745,14 @@
      "type": "string"
     },
     "last_name": {
-     "maxLength": 120,
+     "maxLength": 25,
      "minLength": 1,
+     "pattern": "^[A-Za-z][A-Za-z \\-']*$",
      "title": "Last name",
      "type": "string"
     },
     "middle_name": {
-     "maxLength": 120,
+     "maxLength": 25,
      "minLength": 1,
      "title": "Middle name",
      "type": "string",
@@ -17902,7 +17907,7 @@
   },
   "/b2b/workspace/org/people/": {
    "get": {
-    "description": "GET /api/b2b/workspace/org/people/?search= — who else is in the org.\n\nThe picker on \"So'rov yuborish\" searches this rather than `/team/`: the\nwhole point is to reach somebody who is *not* in this workspace. Restricted\nto the org, so a workspace can only ever ask people who share an owner\nwith it — never the whole of WEEL.",
+    "description": "GET /api/b2b/workspace/org/people/?search= — anyone in the org.\n\nThe picker on \"So'rov yuborish\" searches this rather than `/team/`: it\nspans every workspace under the same owner, this one included, so a name,\nhandle or phone finds the person wherever they sit. Only the searcher is\nleft out. Restricted to the org — never the whole of WEEL.",
     "operationId": "b2b_workspace_org_people_list",
     "parameters": [
      {
