@@ -21,6 +21,12 @@ from __future__ import annotations
 # A lead left on the board for anyone to claim.
 LEAD_TITLE = "Yangi lead"
 
+# A lead that arrived by itself, from a connected Facebook/Instagram form.
+# Said differently from LEAD_TITLE on purpose: a manager posting a lead and a
+# stranger filling in an ad form are two different things to walk into, and
+# the second one is nobody's yet.
+META_LEAD_TITLE = "Meta’dan yangi lead"
+
 # A task somebody was put on.
 TASK_TITLE = "Yangi vazifa"
 

@@ -43,6 +43,11 @@ urlpatterns = [
     # The mobile app for a company's own staff — separate identity (employee,
     # not dashboard user) and its own role rules, so it gets its own namespace.
     path("workspace/", include("apps.b2b.workspace.urls")),
+    # Meta's own two callbacks — the OAuth redirect and the leadgen webhook.
+    # Deliberately outside `workspace/`: neither carries a workspace login,
+    # and burying them under a namespace that otherwise always requires one
+    # would be misleading. See `apps/b2b/integrations/public_urls.py`.
+    path("integrations/", include("apps.b2b.integrations.public_urls")),
     path("auth/login/", B2BLoginSendOTPView.as_view(), name="b2b-login"),
     path("auth/login/verify/", B2BLoginVerifyView.as_view(), name="b2b-login-verify"),
     path("auth/token/refresh/", B2BTokenRefreshView.as_view(), name="b2b-token-refresh"),

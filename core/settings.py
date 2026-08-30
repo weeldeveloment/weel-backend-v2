@@ -787,6 +787,55 @@ B2B_MAIL_MAX_RECIPIENTS = int(os.getenv("B2B_MAIL_MAX_RECIPIENTS", "25"))
 # offline for a week cannot monopolise a worker.
 B2B_MAIL_SYNC_BATCH = int(os.getenv("B2B_MAIL_SYNC_BATCH", "50"))
 
+# ─── Meta lead ads (apps/b2b/integrations) ───────────────────────────────────
+#
+# A company connects its own Facebook/Instagram pages and the lead-ad forms on
+# them fill the sales funnel. We are an OAuth client and a webhook receiver;
+# there is nothing of Meta's to host.
+#
+# **These are one app — ours — not one per customer.** A thousand workspaces
+# connect through the same `META_APP_ID`; each company's own access token is
+# stored against its `company_id` in `b2b_integration`, encrypted. That is what
+# makes this scale: the settings hold the *app*, the database holds the
+# *accounts*. Same shape as the Google sign-in above.
+#
+# A workspace may also bring its **own** Facebook app, which is stored on its
+# integration row and wins over these — for the companies that cannot use ours
+# while it is still in review, or whose policy is that the advertising data
+# never passes through an app they do not own. See
+# `apps/b2b/integrations/credentials.py`; these then act as the fallback, and a
+# deployment that intends every customer to bring their own can leave them
+# unset entirely (keep META_INTEGRATION_ENABLED on).
+#
+# Off by default. `leads_retrieval` and `pages_manage_metadata` are both
+# reviewed permissions: until Meta has approved the app it works only for
+# people listed as testers on it, so a deployment that has not been through
+# review should leave this off rather than offer a button that fails.
+#
+#   META_APP_ID / META_APP_SECRET      — from developers.facebook.com.
+#   META_REDIRECT_URI                  — must match the app's "Valid OAuth
+#                                        Redirect URIs" exactly, and points at
+#                                        `/api/b2b/integrations/meta/callback/`.
+#   META_WEBHOOK_VERIFY_TOKEN          — any string; Meta quotes it back once
+#                                        when the webhook is configured. A
+#                                        workspace on its own app gets its own
+#                                        generated token instead.
+#
+# The webhook itself is `/api/b2b/integrations/meta/webhook/`, subscribed to
+# the `leadgen` field. See apps/b2b/integrations/README.md for the setup, in order.
+META_INTEGRATION_ENABLED = env_bool("META_INTEGRATION_ENABLED", False)
+META_APP_ID = (os.getenv("META_APP_ID") or "").strip()
+META_APP_SECRET = (os.getenv("META_APP_SECRET") or "").strip()
+META_REDIRECT_URI = (os.getenv("META_REDIRECT_URI") or "").strip()
+META_WEBHOOK_VERIFY_TOKEN = (os.getenv("META_WEBHOOK_VERIFY_TOKEN") or "").strip()
+
+# Encrypts the stored Meta tokens. Falls back to B2B_MAIL_SECRET_KEY, which is
+# already a Fernet key on any deployment running mail — see
+# apps/b2b/integrations/crypto.py.
+B2B_INTEGRATIONS_SECRET_KEY = (
+    os.getenv("B2B_INTEGRATIONS_SECRET_KEY") or ""
+).strip()
+
 # DEBUG=True da Celery tasklari sinxron ishlaydi — worker ishlamasa ham OTP SMS yuboriladi
 CELERY_TASK_ALWAYS_EAGER = DEBUG
 

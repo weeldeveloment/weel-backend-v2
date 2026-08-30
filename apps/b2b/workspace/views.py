@@ -2590,6 +2590,12 @@ def _lead_payload(lead: dict, user) -> dict:
         payload["contact_position"] = None
         payload["contact_email"] = None
         payload["contact_address"] = None
+        # And the raw form the customer filled in. A Meta lead-ad form asks
+        # whatever the marketer wrote, which routinely includes a second phone
+        # number or an address — blanking the five columns above while leaving
+        # the answers they came from in plain sight would hand the whole board
+        # the contact the rule exists to withhold.
+        payload["external_data"] = None
     return payload
 
 

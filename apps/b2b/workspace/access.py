@@ -507,6 +507,14 @@ def capabilities_from(
     # scope flags answer "how much of the company do you see", which is a
     # different question from "what may you do" and is not something the role
     # editor offers.
+    # Plugging an outside service into the funnel. Not a permission in the
+    # catalogue: the TZ's modules are parts of the workspace and this is a
+    # company-level commitment — a token to the company's Facebook account,
+    # and every lead that account produces landing on this board. The owner
+    # and the administrator ("lider"), the same two who may ask another
+    # workspace for people. See `apps/b2b/integrations/permissions.py`.
+    flags["can_manage_integrations"] = role in Role.ADMINISTRATIVE
+
     flags["can_view_attendance"] = True
     flags["can_manage_attendance"] = manager
     flags["can_manage_attendance_location"] = owner

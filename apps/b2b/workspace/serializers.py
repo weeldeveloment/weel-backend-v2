@@ -10,6 +10,7 @@ from apps.b2b.models import LeadActivityKind, LeadStage, LeadStatus
 from apps.b2b.workspace.repository import (
     EVENT_TYPES,
     LEAD_LOST_REASONS,
+    LEAD_MANUAL_SOURCES,
     LEAD_SOURCES,
     LEAD_STAGES,
     TASK_PRIORITIES,
@@ -246,6 +247,15 @@ class LeadSerializer(serializers.Serializer):
     #: The directory card this deal is against. Null on every lead raised
     #: before the directory existed.
     customer_id = serializers.IntegerField(allow_null=True, required=False)
+    #: Set only on a lead a connected service brought in — see
+    #: `apps/b2b/integrations`. `external_id` is the other side's own id for
+    #: it, `external_form_name` the form the customer answered, and
+    #: `external_data` everything they typed that has no column of its own.
+    #: Withheld from everyone but the claimant and a manager, exactly like the
+    #: contact fields.
+    external_id = serializers.CharField(allow_null=True, required=False)
+    external_form_name = serializers.CharField(allow_null=True, required=False)
+    external_data = serializers.JSONField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
     can_claim = serializers.BooleanField()
     can_complete = serializers.BooleanField()
@@ -516,7 +526,10 @@ class LeadWriteSerializer(serializers.Serializer):
     contact_address = serializers.CharField(
         required=False, allow_blank=True, allow_null=True
     )
-    source = serializers.ChoiceField(choices=LEAD_SOURCES, required=False)
+    #: `LEAD_MANUAL_SOURCES`, not `LEAD_SOURCES`: `meta` is written only by
+    #: the ingest path, so a card badged "Meta’dan" is one the integration
+    #: actually brought in and not one somebody typed and labelled that way.
+    source = serializers.ChoiceField(choices=LEAD_MANUAL_SOURCES, required=False)
     #: The priced lines. Sent whole; the server totals them onto the lead.
     items = LeadItemWriteSerializer(many=True, required=False)
 
