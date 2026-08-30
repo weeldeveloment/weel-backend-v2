@@ -6741,6 +6741,172 @@
    ],
    "type": "object"
   },
+  "Integration": {
+   "properties": {
+    "account_name": {
+     "minLength": 1,
+     "title": "Account name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "available": {
+     "description": "Whether the server is configured for this provider at all.",
+     "title": "Available",
+     "type": "boolean"
+    },
+    "connected": {
+     "title": "Connected",
+     "type": "boolean"
+    },
+    "connected_at": {
+     "format": "date-time",
+     "title": "Connected at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "connected_by": {
+     "minLength": 1,
+     "title": "Connected by",
+     "type": "string",
+     "x-nullable": true
+    },
+    "last_error": {
+     "minLength": 1,
+     "title": "Last error",
+     "type": "string",
+     "x-nullable": true
+    },
+    "last_sync_at": {
+     "format": "date-time",
+     "title": "Last sync at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "lead_count": {
+     "title": "Lead count",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "pages": {
+     "items": {
+      "$ref": "#/definitions/IntegrationPage"
+     },
+     "type": "array"
+    },
+    "provider": {
+     "minLength": 1,
+     "title": "Provider",
+     "type": "string"
+    },
+    "setup": {
+     "$ref": "#/definitions/MetaSetup"
+    },
+    "status": {
+     "minLength": 1,
+     "title": "Status",
+     "type": "string"
+    },
+    "token_expires_at": {
+     "format": "date-time",
+     "title": "Token expires at",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "provider",
+    "name",
+    "status",
+    "connected",
+    "available",
+    "account_name",
+    "connected_at",
+    "connected_by",
+    "last_sync_at",
+    "last_error",
+    "lead_count",
+    "token_expires_at",
+    "setup",
+    "pages"
+   ],
+   "type": "object"
+  },
+  "IntegrationList": {
+   "properties": {
+    "can_manage": {
+     "title": "Can manage",
+     "type": "boolean"
+    },
+    "results": {
+     "items": {
+      "$ref": "#/definitions/Integration"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results",
+    "can_manage"
+   ],
+   "type": "object"
+  },
+  "IntegrationPage": {
+   "properties": {
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "last_error": {
+     "minLength": 1,
+     "title": "Last error",
+     "type": "string",
+     "x-nullable": true
+    },
+    "last_lead_at": {
+     "format": "date-time",
+     "title": "Last lead at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "lead_count": {
+     "title": "Lead count",
+     "type": "integer"
+    },
+    "page_id": {
+     "minLength": 1,
+     "title": "Page id",
+     "type": "string"
+    },
+    "page_name": {
+     "minLength": 1,
+     "title": "Page name",
+     "type": "string"
+    },
+    "subscribed": {
+     "title": "Subscribed",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "id",
+    "page_id",
+    "page_name",
+    "is_active",
+    "subscribed",
+    "lead_count",
+    "last_lead_at",
+    "last_error"
+   ],
+   "type": "object"
+  },
   "InviteCreate": {
    "properties": {
     "days": {
@@ -6944,6 +7110,23 @@
      "type": "integer",
      "x-nullable": true
     },
+    "external_data": {
+     "title": "External data",
+     "type": "object",
+     "x-nullable": true
+    },
+    "external_form_name": {
+     "minLength": 1,
+     "title": "External form name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "external_id": {
+     "minLength": 1,
+     "title": "External id",
+     "type": "string",
+     "x-nullable": true
+    },
     "id": {
      "title": "Id",
      "type": "integer"
@@ -6988,7 +7171,8 @@
       "call",
       "referral",
       "exhibition",
-      "manual"
+      "manual",
+      "meta"
      ],
      "title": "Source",
      "type": "string"
@@ -7222,6 +7406,23 @@
      "type": "integer",
      "x-nullable": true
     },
+    "external_data": {
+     "title": "External data",
+     "type": "object",
+     "x-nullable": true
+    },
+    "external_form_name": {
+     "minLength": 1,
+     "title": "External form name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "external_id": {
+     "minLength": 1,
+     "title": "External id",
+     "type": "string",
+     "x-nullable": true
+    },
     "id": {
      "title": "Id",
      "type": "integer"
@@ -7272,7 +7473,8 @@
       "call",
       "referral",
       "exhibition",
-      "manual"
+      "manual",
+      "meta"
      ],
      "title": "Source",
      "type": "string"
@@ -8248,6 +8450,94 @@
    ],
    "type": "object"
   },
+  "MetaApp": {
+   "properties": {
+    "app_id": {
+     "maxLength": 64,
+     "minLength": 1,
+     "title": "App id",
+     "type": "string"
+    },
+    "app_secret": {
+     "maxLength": 200,
+     "minLength": 1,
+     "title": "App secret",
+     "type": "string"
+    },
+    "verify_token": {
+     "maxLength": 120,
+     "title": "Verify token",
+     "type": "string"
+    }
+   },
+   "required": [
+    "app_id",
+    "app_secret"
+   ],
+   "type": "object"
+  },
+  "MetaConnect": {
+   "properties": {
+    "authorize_url": {
+     "minLength": 1,
+     "title": "Authorize url",
+     "type": "string"
+    },
+    "expires_in": {
+     "title": "Expires in",
+     "type": "integer"
+    },
+    "state": {
+     "minLength": 1,
+     "title": "State",
+     "type": "string"
+    }
+   },
+   "required": [
+    "authorize_url",
+    "state",
+    "expires_in"
+   ],
+   "type": "object"
+  },
+  "MetaSetup": {
+   "properties": {
+    "app_id": {
+     "minLength": 1,
+     "title": "App id",
+     "type": "string",
+     "x-nullable": true
+    },
+    "redirect_uri": {
+     "minLength": 1,
+     "title": "Redirect uri",
+     "type": "string"
+    },
+    "uses_own_app": {
+     "title": "Uses own app",
+     "type": "boolean"
+    },
+    "verify_token": {
+     "minLength": 1,
+     "title": "Verify token",
+     "type": "string",
+     "x-nullable": true
+    },
+    "webhook_url": {
+     "minLength": 1,
+     "title": "Webhook url",
+     "type": "string"
+    }
+   },
+   "required": [
+    "uses_own_app",
+    "app_id",
+    "redirect_uri",
+    "webhook_url",
+    "verify_token"
+   ],
+   "type": "object"
+  },
   "MonthlySpendingChartPoint": {
    "properties": {
     "change_percent": {
@@ -8502,6 +8792,18 @@
    },
    "required": [
     "first_name"
+   ],
+   "type": "object"
+  },
+  "PageToggle": {
+   "properties": {
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "is_active"
    ],
    "type": "object"
   },
@@ -16701,6 +17003,202 @@
      "type": "string"
     }
    ]
+  },
+  "/b2b/workspace/integrations/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/integrations/ — what can be connected, and what is.",
+    "operationId": "b2b_workspace_integrations_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/IntegrationList"
+      }
+     }
+    },
+    "summary": "List integrations (owner/administrator only)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/integrations/meta/": {
+   "delete": {
+    "description": "GET  /integrations/meta/ — this workspace's Meta connection.\nDELETE /integrations/meta/ — unplug it.",
+    "operationId": "b2b_workspace_integrations_meta_delete",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Integration"
+      }
+     }
+    },
+    "summary": "Disconnect Meta",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "GET  /integrations/meta/ — this workspace's Meta connection.\nDELETE /integrations/meta/ — unplug it.",
+    "operationId": "b2b_workspace_integrations_meta_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Integration"
+      }
+     }
+    },
+    "summary": "The Meta connection",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/integrations/meta/app/": {
+   "delete": {
+    "description": "GET    /integrations/meta/app/ — what to paste into the Facebook app.\nPUT    /integrations/meta/app/ — connect through *this workspace's* app.\nDELETE /integrations/meta/app/ — go back to the deployment's app.\n\nThe second path, and why it exists: while our own Facebook app is in\nMeta's review only its listed testers can authorise it, and some customers\nwill not let their advertising data pass through an app they do not own.\nBoth are real, so a workspace may bring its own — and everything below\nthis line stops caring which, because `credentials.for_company` is the one\nplace that decides.",
+    "operationId": "b2b_workspace_integrations_meta_app_delete",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MetaSetup"
+      }
+     }
+    },
+    "summary": "Stop using this workspace's own app",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "GET    /integrations/meta/app/ — what to paste into the Facebook app.\nPUT    /integrations/meta/app/ — connect through *this workspace's* app.\nDELETE /integrations/meta/app/ — go back to the deployment's app.\n\nThe second path, and why it exists: while our own Facebook app is in\nMeta's review only its listed testers can authorise it, and some customers\nwill not let their advertising data pass through an app they do not own.\nBoth are real, so a workspace may bring its own — and everything below\nthis line stops caring which, because `credentials.for_company` is the one\nplace that decides.",
+    "operationId": "b2b_workspace_integrations_meta_app_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MetaSetup"
+      }
+     }
+    },
+    "summary": "What to configure in the Facebook app",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "put": {
+    "description": "GET    /integrations/meta/app/ — what to paste into the Facebook app.\nPUT    /integrations/meta/app/ — connect through *this workspace's* app.\nDELETE /integrations/meta/app/ — go back to the deployment's app.\n\nThe second path, and why it exists: while our own Facebook app is in\nMeta's review only its listed testers can authorise it, and some customers\nwill not let their advertising data pass through an app they do not own.\nBoth are real, so a workspace may bring its own — and everything below\nthis line stops caring which, because `credentials.for_company` is the one\nplace that decides.",
+    "operationId": "b2b_workspace_integrations_meta_app_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MetaApp"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MetaSetup"
+      }
+     }
+    },
+    "summary": "Use this workspace's own Facebook app",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/integrations/meta/connect/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/integrations/meta/connect/ — start the login.\n\nAnswers with a URL for the phone to open in its browser. The rest happens\nthere and comes back through `public_views.MetaOAuthCallbackView`; the app\npolls the list endpoint when it returns to the foreground.\n\nThe state is random and short-lived rather than the company id: it is what\nties the callback to this workspace, and a guessable one would let anybody\nwho found the callback URL attach *their* Facebook pages to somebody\nelse's funnel.",
+    "operationId": "b2b_workspace_integrations_meta_connect_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MetaConnect"
+      }
+     },
+     "503": {
+      "description": "Meta is not configured on this server"
+     }
+    },
+    "summary": "Begin the Meta connection",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/integrations/meta/pages/{page_row_id}/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "page_row_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "PATCH /integrations/meta/pages/<id>/ — pause or resume one page.",
+    "operationId": "b2b_workspace_integrations_meta_pages_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/PageToggle"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Integration"
+      }
+     }
+    },
+    "summary": "Switch one page's ingest on or off",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/integrations/meta/sync/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /integrations/meta/sync/ — fetch recent submissions now.\n\nThe webhook is how leads arrive; this is the button for the gap it cannot\ncover — a subscription added after a campaign started, an hour our server\nwas down. Queued rather than run inline: it walks every form on every page\nand the phone should not hold a request open for it.",
+    "operationId": "b2b_workspace_integrations_meta_sync_create",
+    "parameters": [],
+    "responses": {
+     "202": {
+      "description": "Sync queued"
+     }
+    },
+    "summary": "Pull recent Meta leads now",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/invites/": {
    "get": {
