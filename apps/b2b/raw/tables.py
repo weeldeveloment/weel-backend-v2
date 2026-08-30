@@ -42,6 +42,16 @@ B2B_WORKSPACE_LEAD_ACTIVITY_TABLE = "b2b_workspace_lead_activity"
 # The company's own customer directory. A lead is raised against one of these,
 # so the second deal with the same buyer reuses the card rather than retyping it.
 B2B_WORKSPACE_CUSTOMER_TABLE = "b2b_workspace_customer"
+# Outside services plugged into the workspace. `b2b_integration` is the
+# connection a workspace made — one row per (company, provider) — and
+# `b2b_integration_page` is what that connection actually watches: a Facebook
+# page or an Instagram account whose lead-ad forms land in the funnel.
+B2B_INTEGRATION_TABLE = "b2b_integration"
+B2B_INTEGRATION_PAGE_TABLE = "b2b_integration_page"
+# Every leadgen Meta has handed us, whether or not it became a lead. This is
+# what makes the webhook safe to retry: Meta redelivers, and a delivery that
+# already has a row here is dropped instead of raising the same deal twice.
+B2B_INTEGRATION_EVENT_TABLE = "b2b_integration_event"
 B2B_WORKSPACE_FILE_TABLE = "b2b_workspace_file"
 B2B_WORKSPACE_FOLDER_TABLE = "b2b_workspace_folder"
 B2B_EMPLOYEE_OF_MONTH_TABLE = "b2b_employee_of_month"

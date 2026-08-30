@@ -22,6 +22,9 @@ TASK_MODULES = [
     # is a sub-package of it. A beat entry sends by name, so a worker that
     # never imported the module answers with "Received unregistered task".
     "apps.b2b.workspace.tasks",
+    # Meta lead ads. Same reason as the line above — a sub-package of
+    # `apps.b2b`, which autodiscovery never reaches on its own.
+    "apps.b2b.integrations.tasks",
     "stories.tasks",
     "notification.tasks",
     "payment.tasks",
@@ -138,6 +141,22 @@ app.conf.beat_schedule = {
     "b2b_workspace_event_reminders": {
         "task": "b2b.workspace.send_event_reminders",
         "schedule": crontab(minute="*"),
+    },
+    # Meta lead ads. The webhook is how leads actually arrive; this is the
+    # catch-up pass for the ones that did not — a subscription added after a
+    # campaign started, an hour this server was unreachable, a delivery Meta
+    # gave up retrying. Every ten minutes, and a no-op unless a workspace has
+    # connected an account.
+    "b2b_integrations_sync_meta": {
+        "task": "b2b.integrations.sync_meta_pages",
+        "schedule": crontab(minute="*/10"),
+    },
+    # A Meta token lasts about sixty days and cannot be renewed without the
+    # person signing in again. Daily, so the workspace is asked to reconnect
+    # a week before the leads would otherwise stop arriving.
+    "b2b_integrations_meta_tokens": {
+        "task": "b2b.integrations.refresh_meta_tokens",
+        "schedule": crontab(hour=6, minute=15),
     },
     # Retire the guest rows whose secondment has run out. Hourly rather than
     # by the minute: this is housekeeping, not the boundary — access itself is

@@ -346,5 +346,8 @@ urlpatterns = [
     path("files/<int:file_id>/", WorkspaceFileDetailView.as_view(), name="ws-file-detail"),
 
     path("mail/", include("apps.b2b.mail.urls")),
+    # Outside services plugged into the funnel. Owner/administrator only —
+    # the gate is on the views, see `apps/b2b/integrations/permissions.py`.
+    path("integrations/", include("apps.b2b.integrations.urls")),
     *notification_urlpatterns,
 ]

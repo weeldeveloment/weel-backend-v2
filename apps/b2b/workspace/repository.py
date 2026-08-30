@@ -5,6 +5,7 @@ out, every query scoped by ``company_id``, no ORM.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Any, Iterable, Sequence
@@ -1760,6 +1761,9 @@ def get_customer_detail(customer_id: int, company_id: int) -> dict[str, Any] | N
 LEAD_STATUSES = tuple(LeadStatus.CHOICES)
 LEAD_STAGES = tuple(LeadStage.CHOICES)
 LEAD_SOURCES = tuple(LeadSource.CHOICES)
+#: What a person may pick when raising a lead by hand — everything but `meta`,
+#: which only the ingest path writes.
+LEAD_MANUAL_SOURCES = tuple(LeadSource.MANUAL_CHOICES)
 LEAD_LOST_REASONS = tuple(LeadLostReason.CHOICES)
 
 
@@ -1782,6 +1786,21 @@ def list_leads(
         params.append(stage)
     sql += " ORDER BY created_at DESC, id DESC"
     return fetch_all(sql, params)
+
+
+def find_lead_by_external_id(
+    company_id: int, source: str, external_id: str
+) -> dict[str, Any] | None:
+    """The lead a connected service's own id already produced.
+
+    Deleted leads included: a Meta delivery whose lead somebody has since
+    binned must not come back as a second card the next time Meta retries.
+    """
+    return fetch_one(
+        f"SELECT * FROM {B2B_WORKSPACE_LEAD_TABLE} "
+        f"WHERE company_id = %s AND source = %s AND external_id = %s",
+        [company_id, source, external_id],
+    )
 
 
 def get_lead(lead_id: int, company_id: int) -> dict[str, Any] | None:
@@ -1913,6 +1932,10 @@ def create_lead(
     amount=None,
     note: str | None = None,
     claim_for_author: bool = False,
+    integration_id: int | None = None,
+    external_id: str | None = None,
+    external_form_name: str | None = None,
+    external_data: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Raises a lead, and files its customer in the directory on the way past.
 
@@ -1924,6 +1947,13 @@ def create_lead(
     is theirs, and ``replace_lead_items`` mirrors it onto the row. A deal priced
     as one round number and a deal broken into lines are both real, and this is
     what lets the sheet accept either without the two disagreeing.
+
+    The four ``external_*``/``integration_*`` arguments are for a lead nobody
+    typed: one that arrived from a connected service (see
+    ``apps/b2b/integrations``). ``external_id`` is the other side's own id for
+    it and carries a unique index per company and source, so an ingest path
+    that runs twice on the same delivery raises the deal once — the insert
+    below is the guard, not a check the caller has to remember.
     """
     now = timezone.now()
     customer = None
@@ -1969,8 +1999,12 @@ def create_lead(
             (company_id, author_id, customer_id, company_name, contact_full_name,
              contact_phone, contact_position, contact_email, contact_address,
              product_name, quantity, amount, status, stage, source,
-             claimed_by_id, claimed_at, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             claimed_by_id, claimed_at, integration_id, external_id,
+             external_form_name, external_data, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s::jsonb, %s, %s)
+        ON CONFLICT (company_id, source, external_id)
+            WHERE external_id IS NOT NULL DO NOTHING
         RETURNING *
         """,
         [
@@ -1979,10 +2013,19 @@ def create_lead(
             contact_address, product_name, quantity, amount or 0,
             LeadStatus.IN_PROGRESS if claim_for_author else LeadStatus.NEW,
             LeadStage.NEW, source,
-            claimed_by, now if claim_for_author else None, now, now,
+            claimed_by, now if claim_for_author else None,
+            integration_id, external_id, external_form_name,
+            json.dumps(external_data) if external_data is not None else None,
+            now, now,
         ],
     )
+    # `ON CONFLICT DO NOTHING` only ever fires on the external-id index — no
+    # hand-raised lead has one — so an empty result here means this delivery
+    # has already been turned into a lead. The caller wants that lead, not a
+    # failure: a webhook Meta retried is a success the second time too.
     if not lead:
+        if external_id:
+            return find_lead_by_external_id(company_id, source, external_id)
         return None
 
     if items:

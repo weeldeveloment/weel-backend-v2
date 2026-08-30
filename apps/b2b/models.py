@@ -150,8 +150,47 @@ class LeadSource:
     REFERRAL = "referral"
     EXHIBITION = "exhibition"
     MANUAL = "manual"
+    #: A Facebook/Instagram lead-ad form, delivered by Meta's `leadgen`
+    #: webhook — see `apps/b2b/integrations`. Unlike the five above, nobody
+    #: may choose it by hand: it is written only by the ingest path, so a
+    #: card marked "Meta" is one the integration actually brought in.
+    META = "meta"
 
-    CHOICES = [WEBSITE, CALL, REFERRAL, EXHIBITION, MANUAL]
+    CHOICES = [WEBSITE, CALL, REFERRAL, EXHIBITION, MANUAL, META]
+
+    #: What a person may pick when raising a lead themselves. `META` is
+    #: deliberately absent — see above.
+    MANUAL_CHOICES = [WEBSITE, CALL, REFERRAL, EXHIBITION, MANUAL]
+
+
+class IntegrationProvider:
+    """The outside services a workspace can plug into its funnel.
+
+    One name so far. It is a column rather than a boolean because the second
+    one (a Telegram bot, a website form) lands in the same table, and a
+    `has_meta` flag would have to become this on the day it does.
+    """
+
+    META = "meta"
+
+    CHOICES = [META]
+
+    LABELS = {META: "Meta (Facebook / Instagram)"}
+
+
+class IntegrationStatus:
+    """Whether the connection is actually working.
+
+    ``ERROR`` is not the same as ``DISCONNECTED``: the first is a token Meta
+    stopped accepting — the rows are still here and reconnecting fixes it —
+    and the second is somebody having deliberately unplugged it.
+    """
+
+    CONNECTED = "connected"
+    ERROR = "error"
+    DISCONNECTED = "disconnected"
+
+    CHOICES = [CONNECTED, ERROR, DISCONNECTED]
 
 
 class LeadActivityKind:

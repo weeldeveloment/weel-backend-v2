@@ -725,6 +725,34 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_workspace_lead_customer_idx "
             "ON b2b_workspace_lead (customer_id) WHERE customer_id IS NOT NULL;"
         )
+
+        # A lead that came from outside. `external_id` is the other side's own
+        # id for it — Meta's `leadgen_id` — and the unique index on it is what
+        # makes ingestion idempotent: Meta retries a webhook it did not get a
+        # 200 for, and without this the same enquiry would land on the board
+        # three times. Partial, because every hand-raised lead has no external
+        # id and a plain unique index would allow exactly one of them.
+        for statement in (
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "integration_id BIGINT;",
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "external_id VARCHAR(120);",
+            # Which lead-ad form filled it in — "Bahorgi aksiya", the name the
+            # marketer gave the form. Printed on the card so a salesperson
+            # knows what the customer was answering.
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "external_form_name VARCHAR(300);",
+            # Everything the form asked that does not map onto a lead column,
+            # kept verbatim so nothing the customer typed is thrown away.
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "external_data JSONB;",
+        ):
+            cursor.execute(statement)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_workspace_lead_external_idx "
+            "ON b2b_workspace_lead (company_id, source, external_id) "
+            "WHERE external_id IS NOT NULL;"
+        )
         self.stdout.write("  Created b2b_workspace_lead")
 
         # What the deal is actually made of — "CRM tizimi — Bazaviy paket,
@@ -779,6 +807,156 @@ class Command(BaseCommand):
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS b2b_task_lead_idx "
             "ON b2b_task (lead_id) WHERE lead_id IS NOT NULL;"
+        )
+
+        # ─── Integrations ─────────────────────────────────────────────────
+        #
+        # An outside service plugged into the workspace: today Meta's lead
+        # ads, tomorrow whatever else fills the funnel. One row per
+        # (company, provider) — the connection itself — with the pages it
+        # watches hanging off it.
+        #
+        # The token is stored encrypted (`apps/b2b/integrations/crypto.py`).
+        # It is a credential to somebody else's account that we hold on their
+        # behalf, exactly like a mail account's, and no endpoint ever reads
+        # one back out.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_integration (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                provider VARCHAR(30) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'connected',
+                -- Who at Meta authorised us: their user id and name, so the
+                -- screen can say whose account this hangs off.
+                account_id VARCHAR(120),
+                account_name VARCHAR(300),
+                access_token_enc TEXT,
+                token_expires_at TIMESTAMPTZ,
+                scopes TEXT NOT NULL DEFAULT '',
+                connected_by_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                connected_at TIMESTAMPTZ,
+                last_sync_at TIMESTAMPTZ,
+                last_error TEXT,
+                lead_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_integration_company_idx "
+            "ON b2b_integration (company_id, provider);"
+        )
+
+        # A workspace may connect through **its own** Meta app rather than
+        # ours. Both models are real and they answer different problems:
+        #
+        #  * Ours (the settings) is the normal path. One Facebook app serves
+        #    every customer, nobody configures anything, and a company that
+        #    just wants their leads in the funnel gets them.
+        #  * Theirs (these columns) is for the company that cannot use ours —
+        #    while our app is still in Meta's review and only its testers can
+        #    authorise it, or a customer whose policy is that the advertising
+        #    data never leaves an app they own.
+        #
+        # Null means "use ours", so this is additive: nothing changes for the
+        # workspaces that never touch it. The secret is encrypted like every
+        # other credential here and no endpoint reads it back out.
+        #
+        # `webhook_verify_token` is the string Meta quotes back once, when
+        # *their* app's webhook is configured. It has to be per company for
+        # the same reason the secret does — their app, their token — and it is
+        # generated rather than typed so nobody picks "12345".
+        for statement in (
+            "ALTER TABLE b2b_integration ADD COLUMN IF NOT EXISTS "
+            "app_id VARCHAR(64);",
+            "ALTER TABLE b2b_integration ADD COLUMN IF NOT EXISTS "
+            "app_secret_enc TEXT;",
+            "ALTER TABLE b2b_integration ADD COLUMN IF NOT EXISTS "
+            "webhook_verify_token VARCHAR(120);",
+        ):
+            cursor.execute(statement)
+        # The webhook is one URL for every app that posts to it, so the
+        # subscription handshake has to be able to find a company by the token
+        # it was quoted — see `MetaWebhookView.get`.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_integration_verify_token_idx "
+            "ON b2b_integration (webhook_verify_token) "
+            "WHERE webhook_verify_token IS NOT NULL;"
+        )
+        self.stdout.write("  Created b2b_integration")
+
+        # One Facebook page (or the Instagram account behind it) whose forms
+        # feed this workspace. `page_id` is unique on its own and not per
+        # company: Meta addresses a webhook by page, and two workspaces
+        # claiming the same page would make "whose lead is this" unanswerable.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_integration_page (
+                id BIGSERIAL PRIMARY KEY,
+                integration_id BIGINT NOT NULL
+                    REFERENCES b2b_integration(id) ON DELETE CASCADE,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                page_id VARCHAR(120) NOT NULL,
+                page_name VARCHAR(300) NOT NULL DEFAULT '',
+                -- The page access token, which is what actually reads a lead.
+                -- Separate from the user token above: a page token issued
+                -- against a long-lived user token does not expire.
+                access_token_enc TEXT,
+                -- Whether the workspace wants this page's leads. Turning it
+                -- off leaves the row (and Meta's subscription) alone and
+                -- simply stops the ingest — reconnecting is not required to
+                -- pause one page of several.
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                subscribed BOOLEAN NOT NULL DEFAULT FALSE,
+                lead_count INTEGER NOT NULL DEFAULT 0,
+                last_lead_at TIMESTAMPTZ,
+                last_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_integration_page_id_idx "
+            "ON b2b_integration_page (page_id);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_integration_page_company_idx "
+            "ON b2b_integration_page (company_id, is_active);"
+        )
+        self.stdout.write("  Created b2b_integration_page")
+
+        # The delivery log. A row is written *before* the lead is fetched, so
+        # a webhook that arrives twice while the first is still being handled
+        # is refused by the unique index rather than racing it.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_integration_event (
+                id BIGSERIAL PRIMARY KEY,
+                provider VARCHAR(30) NOT NULL,
+                external_id VARCHAR(120) NOT NULL,
+                company_id BIGINT REFERENCES b2b_company(id) ON DELETE CASCADE,
+                page_id VARCHAR(120),
+                lead_id BIGINT REFERENCES b2b_workspace_lead(id) ON DELETE SET NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'received',
+                error TEXT,
+                payload JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_integration_event_idx "
+            "ON b2b_integration_event (provider, external_id);"
+        )
+        self.stdout.write("  Created b2b_integration_event")
+
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_lead "
+            "DROP CONSTRAINT IF EXISTS b2b_workspace_lead_integration_fk;"
+        )
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_lead "
+            "ADD CONSTRAINT b2b_workspace_lead_integration_fk "
+            "FOREIGN KEY (integration_id) REFERENCES b2b_integration(id) "
+            "ON DELETE SET NULL;"
         )
 
         # Every byte the company stores is a row here, whatever put it there —
