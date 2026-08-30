@@ -28,7 +28,7 @@ from apps.b2b.integrations.credentials import MetaCredentials
 from apps.b2b.integrations.ingest import _clean_phone, _map_fields
 from apps.b2b.integrations.permissions import may_manage_integrations
 from apps.b2b.models import LeadSource
-from apps.b2b.workspace.access import capabilities_for
+from apps.b2b.workspace.roles import capabilities_for
 
 
 def field(name, *values):
