@@ -6097,6 +6097,12 @@
   },
   "EmployeeOfMonth": {
    "properties": {
+    "department_name": {
+     "minLength": 1,
+     "title": "Department name",
+     "type": "string",
+     "x-nullable": true
+    },
     "employee_id": {
      "title": "Employee id",
      "type": "integer"
@@ -6113,6 +6119,12 @@
     "photo": {
      "minLength": 1,
      "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "position": {
+     "minLength": 1,
+     "title": "Position",
      "type": "string",
      "x-nullable": true
     },
@@ -6135,16 +6147,66 @@
    ],
    "type": "object"
   },
+  "EmployeeOfMonthList": {
+   "properties": {
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "month": {
+     "title": "Month",
+     "type": "integer"
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "results": {
+     "items": {
+      "$ref": "#/definitions/EmployeeOfMonth"
+     },
+     "type": "array"
+    },
+    "selected_at": {
+     "format": "date-time",
+     "title": "Selected at",
+     "type": "string"
+    },
+    "year": {
+     "title": "Year",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "results",
+    "employee_id",
+    "full_name",
+    "year",
+    "month",
+    "selected_at"
+   ],
+   "type": "object"
+  },
   "EmployeeOfMonthSelect": {
    "properties": {
     "employee_id": {
      "title": "Employee id",
      "type": "integer"
+    },
+    "employee_ids": {
+     "items": {
+      "type": "integer"
+     },
+     "type": "array"
     }
    },
-   "required": [
-    "employee_id"
-   ],
    "type": "object"
   },
   "EventPatch": {
@@ -7110,6 +7172,12 @@
      "type": "integer",
      "x-nullable": true
     },
+    "due_date": {
+     "format": "date-time",
+     "title": "Due date",
+     "type": "string",
+     "x-nullable": true
+    },
     "external_data": {
      "title": "External data",
      "type": "object",
@@ -7254,7 +7322,8 @@
       "assigned",
       "stage",
       "comment",
-      "completed"
+      "completed",
+      "due_date"
      ],
      "title": "Kind",
      "type": "string"
@@ -7406,6 +7475,12 @@
      "type": "integer",
      "x-nullable": true
     },
+    "due_date": {
+     "format": "date-time",
+     "title": "Due date",
+     "type": "string",
+     "x-nullable": true
+    },
     "external_data": {
      "title": "External data",
      "type": "object",
@@ -7527,6 +7602,20 @@
     "items",
     "activity",
     "tasks"
+   ],
+   "type": "object"
+  },
+  "LeadDueDateWrite": {
+   "properties": {
+    "due_date": {
+     "format": "date-time",
+     "title": "Due date",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "due_date"
    ],
    "type": "object"
   },
@@ -7693,6 +7782,12 @@
     "customer_id": {
      "title": "Customer id",
      "type": "integer",
+     "x-nullable": true
+    },
+    "due_date": {
+     "format": "date-time",
+     "title": "Due date",
+     "type": "string",
      "x-nullable": true
     },
     "items": {
@@ -16585,14 +16680,14 @@
      "200": {
       "description": "",
       "schema": {
-       "$ref": "#/definitions/EmployeeOfMonth"
+       "$ref": "#/definitions/EmployeeOfMonthList"
       }
      },
      "204": {
       "description": "Not chosen yet this month"
      }
     },
-    "summary": "This month's employee of the month",
+    "summary": "This month's employees of the month",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -16615,14 +16710,14 @@
      "200": {
       "description": "",
       "schema": {
-       "$ref": "#/definitions/EmployeeOfMonth"
+       "$ref": "#/definitions/EmployeeOfMonthList"
       }
      },
      "403": {
       "description": "Owner only"
      }
     },
-    "summary": "Pick this month's employee of the month (owner only)",
+    "summary": "Pick this month's employees of the month (owner only)",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -17560,6 +17655,45 @@
      }
     },
     "summary": "Complete a lead",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/leads/{lead_id}/due-date/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/leads/<id>/due-date/ — set, move or clear the\ndeal's deadline.\n\nThe claimant's, like every other write on the deal, and a manager's over\ntheir head — a deadline is as often the manager's call as the\nsalesperson's, which is the one place this differs from\n``WorkspaceLeadStageView``.\n\nA closed lead keeps whatever date it had. Putting a deadline on a deal that\nis already won or lost sets a clock nothing can run down.",
+    "operationId": "b2b_workspace_leads_due-date_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadDueDateWrite"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Lead"
+      }
+     },
+     "403": {
+      "description": "Not yours"
+     }
+    },
+    "summary": "Set or clear a lead's deadline",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
