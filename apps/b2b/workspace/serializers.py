@@ -239,6 +239,9 @@ class LeadSerializer(serializers.Serializer):
     claimed_by_id = serializers.IntegerField(allow_null=True, required=False)
     claimed_at = serializers.DateTimeField(allow_null=True, required=False)
     completed_at = serializers.DateTimeField(allow_null=True, required=False)
+    #: When the deal is meant to be closed by. Null on most leads — a deadline
+    #: is something a salesperson sets on a deal they have decided to chase.
+    due_date = serializers.DateTimeField(allow_null=True, required=False)
     #: Set only on a lead closed as `lost`, and cleared by any move off it.
     lost_reason = serializers.ChoiceField(
         choices=LEAD_LOST_REASONS, allow_null=True, required=False
@@ -532,6 +535,9 @@ class LeadWriteSerializer(serializers.Serializer):
     source = serializers.ChoiceField(choices=LEAD_MANUAL_SOURCES, required=False)
     #: The priced lines. Sent whole; the server totals them onto the lead.
     items = LeadItemWriteSerializer(many=True, required=False)
+    #: The deadline, where the sheet was given one. Optional, and stays
+    #: optional afterwards — see `LeadDueDateWriteSerializer`.
+    due_date = serializers.DateTimeField(required=False, allow_null=True)
 
     def validate_contact_phone(self, value: str) -> str:
         return _clean_phone(value)
@@ -573,6 +579,18 @@ class LeadStageWriteSerializer(serializers.Serializer):
                 {"lost_reason": _("Choose why the deal was lost.")}
             )
         return attrs
+
+
+class LeadDueDateWriteSerializer(serializers.Serializer):
+    """The deal's deadline, set or cleared.
+
+    ``allow_null`` and no default: sending ``null`` clears the date, and that
+    is a different act from not sending the field at all, which this endpoint
+    rejects. A required-but-nullable field is what makes "no deadline" sayable
+    without making it the accidental outcome of a malformed request.
+    """
+
+    due_date = serializers.DateTimeField(allow_null=True)
 
 
 class LeadAssignWriteSerializer(serializers.Serializer):

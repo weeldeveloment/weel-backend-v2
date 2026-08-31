@@ -32,6 +32,7 @@ from apps.b2b.workspace.views import (
     WorkspaceLeadAssignView,
     WorkspaceLeadCommentView,
     WorkspaceLeadDetailView,
+    WorkspaceLeadDueDateView,
     WorkspaceLeadListCreateView,
     WorkspaceLeadStageView,
     WorkspaceLeadTasksView,
@@ -86,6 +87,7 @@ def _lead(**overrides):
         "claimed_at": None,
         "completed_at": None,
         "created_at": None,
+        "due_date": None,
     }
     lead.update(overrides)
     return lead
@@ -246,6 +248,124 @@ def test_a_closed_lead_does_not_move_again():
         response = _call(
             WorkspaceLeadStageView,
             factory.post("/leads/7/stage/", {"stage": LeadStage.PROPOSAL}, format="json"),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 409
+
+
+# ─── The deal's deadline ──────────────────────────────────────────────────────
+
+def test_the_owner_sets_a_deadline():
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_due_date",
+            return_value=_lead(due_date="2026-09-15T00:00:00Z"),
+        ) as set_due,
+    ):
+        response = _call(
+            WorkspaceLeadDueDateView,
+            factory.post(
+                "/leads/7/due-date/",
+                {"due_date": "2026-09-15T00:00:00Z"},
+                format="json",
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    set_due.assert_called_once()
+    assert set_due.call_args.kwargs["due_date"] is not None
+
+
+def test_a_manager_may_set_a_deadline_over_the_owners_head():
+    """The one write on a deal that is not the claimant's alone.
+
+    A deadline is as often the manager's call as the salesperson's — it is the
+    manager who knows the quarter ends on the 30th.
+    """
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_due_date", return_value=_lead()
+        ),
+    ):
+        response = _call(
+            WorkspaceLeadDueDateView,
+            factory.post(
+                "/leads/7/due-date/",
+                {"due_date": "2026-09-15T00:00:00Z"},
+                format="json",
+            ),
+            MANAGER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+
+
+def test_a_bystander_cannot_set_a_deadline():
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()):
+        response = _call(
+            WorkspaceLeadDueDateView,
+            factory.post(
+                "/leads/7/due-date/",
+                {"due_date": "2026-09-15T00:00:00Z"},
+                format="json",
+            ),
+            BYSTANDER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 403
+
+
+def test_a_null_deadline_clears_it():
+    """Explicitly sayable, and not the same as omitting the field."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_due_date", return_value=_lead()
+        ) as set_due,
+    ):
+        response = _call(
+            WorkspaceLeadDueDateView,
+            factory.post("/leads/7/due-date/", {"due_date": None}, format="json"),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    assert set_due.call_args.kwargs["due_date"] is None
+
+
+def test_a_deadline_needs_a_date():
+    """A bare POST is a malformed request, not a way to clear the date."""
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()):
+        response = _call(
+            WorkspaceLeadDueDateView,
+            factory.post("/leads/7/due-date/", {}, format="json"),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 400
+
+
+def test_a_closed_lead_takes_no_deadline():
+    """A clock nothing can run down."""
+    closed = _lead(status=LeadStatus.COMPLETED, stage=LeadStage.WON)
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed):
+        response = _call(
+            WorkspaceLeadDueDateView,
+            factory.post(
+                "/leads/7/due-date/",
+                {"due_date": "2026-09-15T00:00:00Z"},
+                format="json",
+            ),
             OWNER,
             lead_id=7,
         )

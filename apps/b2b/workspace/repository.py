@@ -1930,6 +1930,7 @@ def create_lead(
     items: Sequence[dict[str, Any]] = (),
     customer_id: int | None = None,
     amount=None,
+    due_date=None,
     note: str | None = None,
     claim_for_author: bool = False,
     integration_id: int | None = None,
@@ -1999,10 +2000,10 @@ def create_lead(
             (company_id, author_id, customer_id, company_name, contact_full_name,
              contact_phone, contact_position, contact_email, contact_address,
              product_name, quantity, amount, status, stage, source,
-             claimed_by_id, claimed_at, integration_id, external_id,
+             claimed_by_id, claimed_at, due_date, integration_id, external_id,
              external_form_name, external_data, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s::jsonb, %s, %s)
+                %s, %s, %s, %s, %s::jsonb, %s, %s)
         ON CONFLICT (company_id, source, external_id)
             WHERE external_id IS NOT NULL DO NOTHING
         RETURNING *
@@ -2013,7 +2014,7 @@ def create_lead(
             contact_address, product_name, quantity, amount or 0,
             LeadStatus.IN_PROGRESS if claim_for_author else LeadStatus.NEW,
             LeadStage.NEW, source,
-            claimed_by, now if claim_for_author else None,
+            claimed_by, now if claim_for_author else None, due_date,
             integration_id, external_id, external_form_name,
             json.dumps(external_data) if external_data is not None else None,
             now, now,
@@ -2165,6 +2166,44 @@ def set_lead_stage(
                 lead_id, kind=LeadActivityKind.COMMENT, author_id=employee_id,
                 text=note.strip(),
             )
+    return lead
+
+
+def set_lead_due_date(
+    lead_id: int,
+    company_id: int,
+    *,
+    due_date,
+    employee_id: int,
+) -> dict[str, Any] | None:
+    """Sets, moves or clears the deal's deadline.
+
+    A ``None`` clears it, which is a real answer rather than a no-op: a
+    salesperson who decides a deal is not on a clock after all has to be able
+    to say so, and leaving a stale date on the card would keep it going red for
+    a reason nobody believes any more.
+
+    Logged either way — a deadline that moves is exactly the kind of thing a
+    manager reading the history wants to see, and a date that quietly slipped
+    twice is the deal worth asking about.
+    """
+    now = timezone.now()
+    lead = fetch_one(
+        f"""
+        UPDATE {B2B_WORKSPACE_LEAD_TABLE}
+        SET due_date = %s, updated_at = %s
+        WHERE id = %s AND company_id = %s
+        RETURNING *
+        """,
+        [due_date, now, lead_id, company_id],
+    )
+    if lead:
+        add_lead_activity(
+            lead_id, kind=LeadActivityKind.DUE_DATE, author_id=employee_id,
+            # The date itself, not a sentence: the app writes the words, in
+            # whichever language the reader has the app set to.
+            text=due_date.isoformat() if due_date else "",
+        )
     return lead
 
 

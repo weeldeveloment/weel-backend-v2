@@ -69,6 +69,7 @@ from apps.b2b.workspace.serializers import (
     LeadAssignWriteSerializer,
     LeadCommentWriteSerializer,
     LeadDetailSerializer,
+    LeadDueDateWriteSerializer,
     LeadItemSerializer,
     LeadItemWriteSerializer,
     LeadListSerializer,
@@ -2796,6 +2797,7 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
             items=data.get("items") or (),
             customer_id=customer_id,
             amount=data.get("amount"),
+            due_date=data.get("due_date"),
             note=data.get("note"),
             claim_for_author=claim_for_author,
         )
@@ -3007,6 +3009,55 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
             employee_id=request.user.id,
             lost_reason=serializer.validated_data.get("lost_reason"),
             note=serializer.validated_data.get("note"),
+        )
+        return Response(_lead_payload(updated or lead, request.user))
+
+
+class WorkspaceLeadDueDateView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/leads/<id>/due-date/ — set, move or clear the
+    deal's deadline.
+
+    The claimant's, like every other write on the deal, and a manager's over
+    their head — a deadline is as often the manager's call as the
+    salesperson's, which is the one place this differs from
+    ``WorkspaceLeadStageView``.
+
+    A closed lead keeps whatever date it had. Putting a deadline on a deal that
+    is already won or lost sets a clock nothing can run down.
+    """
+
+    required_module = Module.SALES
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Set or clear a lead's deadline",
+        request_body=LeadDueDateWriteSerializer,
+        responses={200: LeadSerializer(), 403: openapi.Response(description="Not yours")},
+    )
+    def post(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        if not (_works_lead(lead, request.user) or request.user.is_manager):
+            return Response(
+                {"detail": _("Only the employee working this lead can set its deadline.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if lead.get("status") == LeadStatus.COMPLETED:
+            return Response(
+                {"detail": _("This lead is already closed.")},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = LeadDueDateWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = repo.set_lead_due_date(
+            lead_id,
+            request.user.company_id,
+            due_date=serializer.validated_data["due_date"],
+            employee_id=request.user.id,
         )
         return Response(_lead_payload(updated or lead, request.user))
 

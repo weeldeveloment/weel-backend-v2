@@ -719,6 +719,14 @@ class Command(BaseCommand):
             # removing a customer card must not take their deal history with it.
             "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
             "customer_id BIGINT REFERENCES b2b_workspace_customer(id) ON DELETE SET NULL;",
+            # When the deal is meant to be closed by. Nullable, and most leads
+            # have none: a deadline is something a salesperson sets on a deal
+            # they have decided to chase, not a field the board demands of
+            # every enquiry that comes in. What it buys is the same thing the
+            # task board gets from its own `due_date` — the card can say how
+            # much rope is left, and go red when there is none.
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "due_date TIMESTAMPTZ;",
         ):
             cursor.execute(statement)
         cursor.execute(

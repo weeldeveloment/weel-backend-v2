@@ -206,8 +206,11 @@ class LeadActivityKind:
     STAGE = "stage"
     COMMENT = "comment"
     COMPLETED = "completed"
+    #: The deadline was set, moved or cleared. ``text`` is the new date as
+    #: ISO-8601, or empty where it was cleared.
+    DUE_DATE = "due_date"
 
-    CHOICES = [CREATED, CLAIMED, ASSIGNED, STAGE, COMMENT, COMPLETED]
+    CHOICES = [CREATED, CLAIMED, ASSIGNED, STAGE, COMMENT, COMPLETED, DUE_DATE]
 
 
 class TaskActivityKind:
