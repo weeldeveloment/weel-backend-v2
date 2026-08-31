@@ -110,38 +110,169 @@ class TestStatsSerializer:
         assert data["unexcused_days"] == 1
 
 
+def _winner(employee_id: int, name: str = "Test Person") -> dict:
+    return {
+        "employee_id": employee_id, "full_name": name, "photo": None,
+        "position": None, "department_name": None,
+        "year": 2026, "month": 1, "selected_at": timezone.now(),
+    }
+
+
 class TestSelectionPermission:
     def test_employee_cannot_pick_the_winner(self):
-        request = factory.post("/employee-of-month/", {"employee_id": OWNER_ID}, format="json")
+        request = factory.post(
+            "/employee-of-month/", {"employee_ids": [OWNER_ID]}, format="json"
+        )
         response = _call(WorkspaceEmployeeOfMonthView, request, EMPLOYEE)
         assert response.status_code == 403
 
     def test_owner_can_pick_the_winner(self):
-        request = factory.post("/employee-of-month/", {"employee_id": EMPLOYEE_ID}, format="json")
-        winner = {
-            "employee_id": EMPLOYEE_ID, "full_name": "Test Person", "photo": None,
-            "year": 2026, "month": 1, "selected_at": timezone.now(),
-        }
+        request = factory.post(
+            "/employee-of-month/", {"employee_ids": [EMPLOYEE_ID]}, format="json"
+        )
         with (
             patch(
                 "apps.b2b.workspace.views.repo.employee_ids_in_company",
                 return_value={EMPLOYEE_ID},
             ),
-            patch("apps.b2b.workspace.views.repo.set_employee_of_month", return_value=winner),
+            patch(
+                "apps.b2b.workspace.views.repo.set_employees_of_month",
+                return_value=[_winner(EMPLOYEE_ID)],
+            ),
         ):
             response = _call(WorkspaceEmployeeOfMonthView, request, OWNER)
         assert response.status_code == 200
+        assert [row["employee_id"] for row in response.data["results"]] == [EMPLOYEE_ID]
+
+    def test_the_badge_can_go_to_several_people(self):
+        """A good month is rarely one person's."""
+        request = factory.post(
+            "/employee-of-month/",
+            {"employee_ids": [EMPLOYEE_ID, OWNER_ID]},
+            format="json",
+        )
+        with (
+            patch(
+                "apps.b2b.workspace.views.repo.employee_ids_in_company",
+                return_value={EMPLOYEE_ID, OWNER_ID},
+            ),
+            patch(
+                "apps.b2b.workspace.views.repo.set_employees_of_month",
+                return_value=[_winner(EMPLOYEE_ID), _winner(OWNER_ID, "Owner")],
+            ) as save,
+        ):
+            response = _call(WorkspaceEmployeeOfMonthView, request, OWNER)
+
+        assert response.status_code == 200
+        assert len(response.data["results"]) == 2
+        assert save.call_args.kwargs["employee_ids"] == [EMPLOYEE_ID, OWNER_ID]
+
+    def test_the_first_pick_is_repeated_flat_for_the_older_clients(self):
+        """`dashboard_weel_uz` and the first B2B mobile app read this response
+        as a single winner. They show the first of several rather than failing
+        to parse a list."""
+        request = factory.post(
+            "/employee-of-month/",
+            {"employee_ids": [EMPLOYEE_ID, OWNER_ID]},
+            format="json",
+        )
+        with (
+            patch(
+                "apps.b2b.workspace.views.repo.employee_ids_in_company",
+                return_value={EMPLOYEE_ID, OWNER_ID},
+            ),
+            patch(
+                "apps.b2b.workspace.views.repo.set_employees_of_month",
+                return_value=[_winner(EMPLOYEE_ID), _winner(OWNER_ID, "Owner")],
+            ),
+        ):
+            response = _call(WorkspaceEmployeeOfMonthView, request, OWNER)
+
         assert response.data["employee_id"] == EMPLOYEE_ID
+        assert response.data["full_name"] == "Test Person"
+
+    def test_a_single_employee_id_is_still_accepted(self):
+        """The body the older apps post. Folded into a one-name list."""
+        request = factory.post(
+            "/employee-of-month/", {"employee_id": EMPLOYEE_ID}, format="json"
+        )
+        with (
+            patch(
+                "apps.b2b.workspace.views.repo.employee_ids_in_company",
+                return_value={EMPLOYEE_ID},
+            ),
+            patch(
+                "apps.b2b.workspace.views.repo.set_employees_of_month",
+                return_value=[_winner(EMPLOYEE_ID)],
+            ) as save,
+        ):
+            response = _call(WorkspaceEmployeeOfMonthView, request, OWNER)
+
+        assert response.status_code == 200
+        assert save.call_args.kwargs["employee_ids"] == [EMPLOYEE_ID]
+
+    def test_an_empty_list_takes_the_months_badge_back(self):
+        """The only way to undo a badge given by mistake, and it reports the
+        same 204 as a month nobody has been named in."""
+        request = factory.post(
+            "/employee-of-month/", {"employee_ids": []}, format="json"
+        )
+        with (
+            patch(
+                "apps.b2b.workspace.views.repo.employee_ids_in_company",
+                return_value=set(),
+            ),
+            patch(
+                "apps.b2b.workspace.views.repo.set_employees_of_month",
+                return_value=[],
+            ) as save,
+        ):
+            response = _call(WorkspaceEmployeeOfMonthView, request, OWNER)
+
+        assert response.status_code == 204
+        assert save.call_args.kwargs["employee_ids"] == []
+
+    def test_a_body_with_neither_key_is_refused(self):
+        # Distinct from an empty list: that is a decision, this is a mistake.
+        request = factory.post("/employee-of-month/", {}, format="json")
+        response = _call(WorkspaceEmployeeOfMonthView, request, OWNER)
+        assert response.status_code == 400
 
     def test_owner_cannot_pick_someone_outside_the_company(self):
-        request = factory.post("/employee-of-month/", {"employee_id": 999}, format="json")
+        request = factory.post(
+            "/employee-of-month/", {"employee_ids": [999]}, format="json"
+        )
         with patch("apps.b2b.workspace.views.repo.employee_ids_in_company", return_value=set()):
             response = _call(WorkspaceEmployeeOfMonthView, request, OWNER)
         assert response.status_code == 400
 
+    def test_one_outsider_in_a_good_list_refuses_the_whole_list(self):
+        # Saving the half that checks out would quietly give the badge to a
+        # different set of people than the owner ticked.
+        request = factory.post(
+            "/employee-of-month/",
+            {"employee_ids": [EMPLOYEE_ID, 999]},
+            format="json",
+        )
+        with (
+            patch(
+                "apps.b2b.workspace.views.repo.employee_ids_in_company",
+                return_value={EMPLOYEE_ID},
+            ),
+            patch(
+                "apps.b2b.workspace.views.repo.set_employees_of_month"
+            ) as save,
+        ):
+            response = _call(WorkspaceEmployeeOfMonthView, request, OWNER)
+
+        assert response.status_code == 400
+        save.assert_not_called()
+
     def test_anyone_can_read_the_current_pick(self):
         request = factory.get("/employee-of-month/")
-        with patch("apps.b2b.workspace.views.repo.get_employee_of_month", return_value=None):
+        with patch(
+            "apps.b2b.workspace.views.repo.list_employees_of_month", return_value=[]
+        ):
             response = _call(WorkspaceEmployeeOfMonthView, request, EMPLOYEE)
         assert response.status_code == 204
 
@@ -337,43 +468,107 @@ class TestSelection:
     pytestmark = _needs_db
 
     def test_set_then_get_round_trip(self, company, employees, django_db_blocker):
-        from apps.b2b.workspace.repository import get_employee_of_month, set_employee_of_month
+        from apps.b2b.workspace.repository import (
+            list_employees_of_month,
+            set_employees_of_month,
+        )
 
         winner = employees[0]
         with django_db_blocker.unblock():
             now = timezone.now()
-            set_employee_of_month(
+            set_employees_of_month(
                 company_id=company["id"], year=now.year, month=now.month,
-                employee_id=winner["id"], selected_by_id=winner["id"],
+                employee_ids=[winner["id"]], selected_by_id=winner["id"],
             )
-            fetched = get_employee_of_month(company["id"], now.year, now.month)
+            fetched = list_employees_of_month(company["id"], now.year, now.month)
 
-        assert fetched is not None
-        assert fetched["employee_id"] == winner["id"]
+        assert [row["employee_id"] for row in fetched] == [winner["id"]]
 
-    def test_picking_again_replaces_the_winner(self, company, employees, django_db_blocker):
-        from apps.b2b.workspace.repository import get_employee_of_month, set_employee_of_month
+    def test_a_month_holds_more_than_one_name(self, company, employees, django_db_blocker):
+        """What the old UNIQUE (company, year, month) made impossible."""
+        from apps.b2b.workspace.repository import (
+            list_employees_of_month,
+            set_employees_of_month,
+        )
 
         first, second = employees[0], employees[1]
         with django_db_blocker.unblock():
             now = timezone.now()
-            set_employee_of_month(
+            set_employees_of_month(
                 company_id=company["id"], year=now.year, month=now.month,
-                employee_id=first["id"], selected_by_id=first["id"],
+                employee_ids=[first["id"], second["id"]],
+                selected_by_id=first["id"],
             )
-            set_employee_of_month(
+            fetched = list_employees_of_month(company["id"], now.year, now.month)
+
+        assert {row["employee_id"] for row in fetched} == {first["id"], second["id"]}
+
+    def test_saving_again_replaces_the_whole_list(self, company, employees, django_db_blocker):
+        # A replace, not a merge: somebody the owner unticked has to actually
+        # come off the list.
+        from apps.b2b.workspace.repository import (
+            list_employees_of_month,
+            set_employees_of_month,
+        )
+
+        first, second = employees[0], employees[1]
+        with django_db_blocker.unblock():
+            now = timezone.now()
+            set_employees_of_month(
                 company_id=company["id"], year=now.year, month=now.month,
-                employee_id=second["id"], selected_by_id=second["id"],
+                employee_ids=[first["id"]], selected_by_id=first["id"],
             )
-            fetched = get_employee_of_month(company["id"], now.year, now.month)
+            set_employees_of_month(
+                company_id=company["id"], year=now.year, month=now.month,
+                employee_ids=[second["id"]], selected_by_id=second["id"],
+            )
+            fetched = list_employees_of_month(company["id"], now.year, now.month)
 
-        # One row per company per month — the second pick overwrites, not adds.
-        assert fetched["employee_id"] == second["id"]
+        assert [row["employee_id"] for row in fetched] == [second["id"]]
 
-    def test_no_pick_yet_returns_none(self, company, django_db_blocker):
-        from apps.b2b.workspace.repository import get_employee_of_month
+    def test_an_empty_list_clears_the_month(self, company, employees, django_db_blocker):
+        from apps.b2b.workspace.repository import (
+            list_employees_of_month,
+            set_employees_of_month,
+        )
+
+        winner = employees[0]
+        with django_db_blocker.unblock():
+            now = timezone.now()
+            set_employees_of_month(
+                company_id=company["id"], year=now.year, month=now.month,
+                employee_ids=[winner["id"]], selected_by_id=winner["id"],
+            )
+            set_employees_of_month(
+                company_id=company["id"], year=now.year, month=now.month,
+                employee_ids=[], selected_by_id=winner["id"],
+            )
+            fetched = list_employees_of_month(company["id"], now.year, now.month)
+
+        assert fetched == []
+
+    def test_naming_the_same_person_twice_is_one_award(self, company, employees, django_db_blocker):
+        from apps.b2b.workspace.repository import (
+            list_employees_of_month,
+            set_employees_of_month,
+        )
+
+        winner = employees[0]
+        with django_db_blocker.unblock():
+            now = timezone.now()
+            set_employees_of_month(
+                company_id=company["id"], year=now.year, month=now.month,
+                employee_ids=[winner["id"], winner["id"]],
+                selected_by_id=winner["id"],
+            )
+            fetched = list_employees_of_month(company["id"], now.year, now.month)
+
+        assert len(fetched) == 1
+
+    def test_no_pick_yet_returns_nothing(self, company, django_db_blocker):
+        from apps.b2b.workspace.repository import list_employees_of_month
 
         with django_db_blocker.unblock():
-            fetched = get_employee_of_month(company["id"], 1999, 1)
+            fetched = list_employees_of_month(company["id"], 1999, 1)
 
-        assert fetched is None
+        assert fetched == []

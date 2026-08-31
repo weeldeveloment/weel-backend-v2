@@ -1160,6 +1160,43 @@ class Command(BaseCommand):
                 UNIQUE (company_id, year, month)
             );
         """)
+        # A month has as many winners as the owner wants to name. It used to
+        # have exactly one, enforced by a UNIQUE on (company_id, year, month)
+        # that the INSERT's ON CONFLICT depended on — so widening the award
+        # means dropping that constraint and putting the employee in the key.
+        #
+        # Dropped by lookup rather than by name: the constraint was created
+        # inline in the CREATE TABLE above, so Postgres named it, and a
+        # hard-coded `..._company_id_year_month_key` would silently match
+        # nothing on any database where it came out otherwise.
+        cursor.execute("""
+            DO $$
+            DECLARE existing text;
+            BEGIN
+                SELECT con.conname INTO existing
+                FROM pg_constraint con
+                WHERE con.conrelid = 'b2b_employee_of_month'::regclass
+                  AND con.contype = 'u'
+                  AND (
+                      SELECT array_agg(att.attname::text ORDER BY att.attname)
+                      FROM pg_attribute att
+                      WHERE att.attrelid = con.conrelid
+                        AND att.attnum = ANY(con.conkey)
+                  ) = ARRAY['company_id', 'month', 'year'];
+                IF existing IS NOT NULL THEN
+                    EXECUTE format(
+                        'ALTER TABLE b2b_employee_of_month DROP CONSTRAINT %I',
+                        existing
+                    );
+                END IF;
+            END $$;
+        """)
+        # One row per person per month, so naming the same employee twice is
+        # still refused — that is a double-submitted form, not a second award.
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_employee_of_month_pick_idx "
+            "ON b2b_employee_of_month (company_id, year, month, employee_id);"
+        )
         self.stdout.write("  Created b2b_employee_of_month")
 
         # The help desk. One flat log per employee rather than a thread table

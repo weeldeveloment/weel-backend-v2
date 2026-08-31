@@ -61,6 +61,7 @@ from apps.b2b.workspace.serializers import (
     CrmCustomerListSerializer,
     CustomerListSerializer,
     EmployeeMonthlyStatSerializer,
+    EmployeeOfMonthListSerializer,
     EmployeeOfMonthSelectSerializer,
     EmployeeOfMonthSerializer,
     EventPatchSerializer,
@@ -3977,6 +3978,22 @@ class WorkspaceEmployeeMonthlyStatsView(WorkspaceAPIView):
         return Response(EmployeeMonthlyStatSerializer(stats, many=True).data)
 
 
+def _employees_of_month_payload(winners: list[dict]) -> dict:
+    """The month's award, with the first pick repeated at the top level.
+
+    Two shipped clients read this response as a single winner —
+    `dashboard_weel_uz` and the first B2B mobile app — and neither knows the
+    badge can name more than one person. Repeating the first row flat is what
+    lets them keep working, showing one name instead of failing to parse a
+    list; `results` is the real answer and what the current app reads.
+    """
+    first = winners[0]
+    return {
+        "results": EmployeeOfMonthSerializer(winners, many=True).data,
+        **EmployeeOfMonthSerializer(first).data,
+    }
+
+
 class WorkspaceEmployeeOfMonthView(WorkspaceAPIView):
     """GET/POST /api/b2b/workspace/employee-of-month/
 
@@ -3987,21 +4004,21 @@ class WorkspaceEmployeeOfMonthView(WorkspaceAPIView):
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,
-        operation_summary="This month's employee of the month",
-        responses={200: EmployeeOfMonthSerializer(), 204: "Not chosen yet this month"},
+        operation_summary="This month's employees of the month",
+        responses={200: EmployeeOfMonthListSerializer(), 204: "Not chosen yet this month"},
     )
     def get(self, request):
         year, month = _current_year_month()
-        winner = repo.get_employee_of_month(request.user.company_id, year, month)
-        if not winner:
+        winners = repo.list_employees_of_month(request.user.company_id, year, month)
+        if not winners:
             return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(EmployeeOfMonthSerializer(winner).data)
+        return Response(_employees_of_month_payload(winners))
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,
-        operation_summary="Pick this month's employee of the month (owner only)",
+        operation_summary="Pick this month's employees of the month (owner only)",
         request_body=EmployeeOfMonthSelectSerializer,
-        responses={200: EmployeeOfMonthSerializer(), 403: openapi.Response(description="Owner only")},
+        responses={200: EmployeeOfMonthListSerializer(), 403: openapi.Response(description="Owner only")},
     )
     def post(self, request):
         if not request.user.capabilities["can_pick_employee_of_month"]:
@@ -4012,23 +4029,35 @@ class WorkspaceEmployeeOfMonthView(WorkspaceAPIView):
 
         serializer = EmployeeOfMonthSelectSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        employee_id = serializer.validated_data["employee_id"]
+        employee_ids = serializer.validated_data["employee_ids"]
 
-        if employee_id not in repo.employee_ids_in_company(request.user.company_id, [employee_id]):
+        # The whole list checked in one query rather than one query per name:
+        # the owner picks a handful at a time, and a round trip each would be
+        # a round trip each.
+        known = set(
+            repo.employee_ids_in_company(request.user.company_id, employee_ids)
+        )
+        outsiders = [eid for eid in employee_ids if eid not in known]
+        if outsiders:
             return Response(
-                {"employee_id": [_("This employee is not in your company.")]},
+                {"employee_ids": [_("This employee is not in your company.")]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         year, month = _current_year_month()
-        winner = repo.set_employee_of_month(
+        winners = repo.set_employees_of_month(
             company_id=request.user.company_id,
             year=year,
             month=month,
-            employee_id=employee_id,
+            employee_ids=employee_ids,
             selected_by_id=request.user.id,
         )
-        return Response(EmployeeOfMonthSerializer(winner).data)
+        # 204 rather than an object with nothing in it: an owner who saved an
+        # empty list has taken the month's badge back, and that is the same
+        # state GET reports when nobody has been named at all.
+        if not winners:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(_employees_of_month_payload(winners))
 
 
 # ─── Yordam markazi ───────────────────────────────────────────────────────────

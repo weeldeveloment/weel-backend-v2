@@ -802,6 +802,31 @@ class EmployeeMonthlyStatSerializer(serializers.Serializer):
 
 
 class EmployeeOfMonthSerializer(serializers.Serializer):
+    """One person the owner named this month."""
+
+    employee_id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    photo = serializers.CharField(allow_null=True, required=False)
+    #: Printed under the name on the card, which is why the query carries them
+    #: rather than the app fetching the roster to label two tiles.
+    position = serializers.CharField(allow_null=True, required=False)
+    department_name = serializers.CharField(allow_null=True, required=False)
+    year = serializers.IntegerField()
+    month = serializers.IntegerField()
+    selected_at = serializers.DateTimeField()
+
+
+class EmployeeOfMonthListSerializer(serializers.Serializer):
+    """The month's award: everyone on it, and the first of them repeated flat.
+
+    ``results`` is the answer. The flat fields beside it are the old
+    single-winner response, kept because two shipped clients read them —
+    `dashboard_weel_uz` and the first B2B mobile app — and neither knows the
+    award can name more than one person. They show the first pick instead of
+    breaking, which is the right way for them to age out.
+    """
+
+    results = EmployeeOfMonthSerializer(many=True)
     employee_id = serializers.IntegerField()
     full_name = serializers.CharField()
     photo = serializers.CharField(allow_null=True, required=False)
@@ -811,7 +836,32 @@ class EmployeeOfMonthSerializer(serializers.Serializer):
 
 
 class EmployeeOfMonthSelectSerializer(serializers.Serializer):
-    employee_id = serializers.IntegerField()
+    """Who the owner is naming — the whole list, replacing whatever is on file.
+
+    Both keys are accepted and ``validate`` folds them into one: ``employee_ids``
+    is what the current app sends, ``employee_id`` is the single-winner body the
+    older clients still post. An empty ``employee_ids`` clears the month, which
+    is the only way to take back a badge given by mistake — so it is a valid
+    request, and sending neither key is not.
+    """
+
+    employee_ids = serializers.ListField(
+        child=serializers.IntegerField(), required=False, allow_empty=True
+    )
+    employee_id = serializers.IntegerField(required=False)
+
+    def validate(self, attrs: dict) -> dict:
+        if attrs.get("employee_ids") is None:
+            if "employee_id" not in attrs:
+                raise serializers.ValidationError(
+                    {"employee_ids": _("Choose who the badge goes to.")}
+                )
+            attrs["employee_ids"] = [attrs["employee_id"]]
+        # De-duplicated here rather than in the repository, so the error a
+        # client gets for naming somebody twice is nothing at all — a form
+        # submitted twice is not two awards.
+        attrs["employee_ids"] = list(dict.fromkeys(attrs["employee_ids"]))
+        return attrs
 
 
 # ─── Attendance ─────────────────────────────────────────────────────────────

@@ -2715,35 +2715,66 @@ def completed_tasks_this_month(employee_id: int, year: int, month: int) -> int:
     )["n"]
 
 
-def get_employee_of_month(company_id: int, year: int, month: int) -> dict[str, Any] | None:
-    return fetch_one(
+def list_employees_of_month(
+    company_id: int, year: int, month: int
+) -> list[dict[str, Any]]:
+    """Everyone the owner named this month, in the order they were named.
+
+    A month used to have exactly one winner. It has as many as the owner
+    wants: a good month is rarely one person's, and a badge that can only go
+    to one of four people who all had it is a badge that annoys three of them.
+
+    The job title and the department ride along because the card that reads
+    this prints the department under the name and has nowhere else to get it
+    — the alternative is fetching the whole roster to label two cards.
+    """
+    return fetch_all(
         f"""
-        SELECT eom.year, eom.month, eom.selected_at, e.id AS employee_id, e.full_name, e.photo
+        SELECT eom.year, eom.month, eom.selected_at,
+               e.id AS employee_id, e.full_name, e.photo, e.position,
+               d.name AS department_name
         FROM {B2B_EMPLOYEE_OF_MONTH_TABLE} eom
         JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = eom.employee_id
+        LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
         WHERE eom.company_id = %s AND eom.year = %s AND eom.month = %s
+        ORDER BY eom.selected_at, eom.id
         """,
         [company_id, year, month],
     )
 
 
-def set_employee_of_month(
-    *, company_id: int, year: int, month: int, employee_id: int, selected_by_id: int
-) -> dict[str, Any] | None:
-    fetch_one(
-        f"""
-        INSERT INTO {B2B_EMPLOYEE_OF_MONTH_TABLE}
-            (company_id, year, month, employee_id, selected_by_id, selected_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        ON CONFLICT (company_id, year, month) DO UPDATE
-            SET employee_id = EXCLUDED.employee_id,
-                selected_by_id = EXCLUDED.selected_by_id,
-                selected_at = EXCLUDED.selected_at
-        RETURNING *
-        """,
-        [company_id, year, month, employee_id, selected_by_id, timezone.now()],
+def set_employees_of_month(
+    *,
+    company_id: int,
+    year: int,
+    month: int,
+    employee_ids: Sequence[int],
+    selected_by_id: int,
+) -> list[dict[str, Any]]:
+    """Replaces the month's whole list with the one given.
+
+    A replace, not a merge, because that is what the screen sending it means:
+    the owner ticks the people they want and saves, and somebody taken off the
+    list has to actually come off it. An empty list therefore clears the month,
+    which is the only way to take a badge back after it was given by mistake.
+    """
+    now = timezone.now()
+    execute(
+        f"DELETE FROM {B2B_EMPLOYEE_OF_MONTH_TABLE} "
+        "WHERE company_id = %s AND year = %s AND month = %s",
+        [company_id, year, month],
     )
-    return get_employee_of_month(company_id, year, month)
+    for employee_id in dict.fromkeys(employee_ids):
+        execute(
+            f"""
+            INSERT INTO {B2B_EMPLOYEE_OF_MONTH_TABLE}
+                (company_id, year, month, employee_id, selected_by_id, selected_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (company_id, year, month, employee_id) DO NOTHING
+            """,
+            [company_id, year, month, employee_id, selected_by_id, now],
+        )
+    return list_employees_of_month(company_id, year, month)
 
 
 # ─── Attendance ─────────────────────────────────────────────────────────────
