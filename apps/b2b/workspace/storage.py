@@ -113,7 +113,10 @@ def usage_by_kind(company_id: int) -> dict[str, dict[str, int]]:
         f"FROM {B2B_WORKSPACE_FILE_TABLE} WHERE company_id = %s GROUP BY kind",
         [company_id],
     )
-    breakdown = {kind: {"bytes": 0, "files": 0} for kind in ("file", "chat", "voucher")}
+    breakdown = {
+        kind: {"bytes": 0, "files": 0}
+        for kind in ("file", "chat", "voucher", "lead")
+    }
     for row in rows:
         breakdown[row["kind"]] = {
             "bytes": int(row["bytes"] or 0),

@@ -6,13 +6,16 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from apps.b2b.models import LeadActivityKind, LeadStage, LeadStatus
+from apps.b2b.models import LeadActivityKind, LeadKind, LeadStage, LeadStatus
 from apps.b2b.workspace.repository import (
     EVENT_TYPES,
+    LEAD_KINDS,
     LEAD_LOST_REASONS,
     LEAD_MANUAL_SOURCES,
+    LEAD_QUALITIES,
     LEAD_SOURCES,
     LEAD_STAGES,
+    PAYMENT_METHODS,
     TASK_PRIORITIES,
     TASK_STATUSES,
 )
@@ -154,6 +157,14 @@ class TaskCommentSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
 
 
+class TaskFileSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    size = serializers.IntegerField()
+    content_type = serializers.CharField(allow_null=True, required=False)
+    url = serializers.CharField()
+
+
 class TaskSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     title = serializers.CharField()
@@ -167,6 +178,7 @@ class TaskSerializer(serializers.Serializer):
     assignee_ids = serializers.ListField(child=serializers.IntegerField())
     subtasks = SubtaskSerializer(many=True)
     comments = TaskCommentSerializer(many=True)
+    files = TaskFileSerializer(many=True, required=False)
     can_edit = serializers.BooleanField()
     can_delete = serializers.BooleanField()
     can_change_status = serializers.BooleanField()
@@ -235,6 +247,14 @@ class LeadSerializer(serializers.Serializer):
     #: Where the lead sits inside `status`; the funnel's own step.
     stage = serializers.ChoiceField(choices=LEAD_STAGES)
     source = serializers.ChoiceField(choices=LEAD_SOURCES)
+    #: A deal being worked, or a sale already made — see `LeadKind`. The board
+    #: only ever asks for the first; the second is here because the CRM and the
+    #: detail card show both and have to be able to tell them apart.
+    kind = serializers.ChoiceField(choices=LEAD_KINDS, required=False)
+    #: How a quick sale was paid for. Null on every ordinary lead.
+    payment_method = serializers.ChoiceField(
+        choices=PAYMENT_METHODS, allow_null=True, required=False
+    )
     author_id = serializers.IntegerField()
     claimed_by_id = serializers.IntegerField(allow_null=True, required=False)
     claimed_at = serializers.DateTimeField(allow_null=True, required=False)
@@ -247,6 +267,11 @@ class LeadSerializer(serializers.Serializer):
         choices=LEAD_LOST_REASONS, allow_null=True, required=False
     )
     lost_note = serializers.CharField(allow_null=True, required=False)
+    #: Whether the enquiry was worth working — see `LeadQuality`. Null on a
+    #: lead nobody has judged, which is most of them.
+    quality = serializers.ChoiceField(
+        choices=LEAD_QUALITIES, allow_null=True, required=False
+    )
     #: The directory card this deal is against. Null on every lead raised
     #: before the directory existed.
     customer_id = serializers.IntegerField(allow_null=True, required=False)
@@ -286,6 +311,27 @@ class LeadItemSerializer(serializers.Serializer):
     position = serializers.IntegerField()
 
 
+class EmployeeStatsSerializer(serializers.Serializer):
+    """What one colleague is carrying, for the card their profile shows."""
+
+    employee_id = serializers.IntegerField()
+    tasks_done = serializers.IntegerField()
+    tasks_in_progress = serializers.IntegerField()
+    tasks_todo = serializers.IntegerField()
+    tasks_overdue = serializers.IntegerField()
+
+
+class LeadActivityAttachmentSerializer(serializers.Serializer):
+    """The document filed with a history row — today only a stage move carries
+    one."""
+
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    size = serializers.IntegerField()
+    content_type = serializers.CharField(allow_null=True, required=False)
+    url = serializers.CharField()
+
+
 class LeadActivitySerializer(serializers.Serializer):
     id = serializers.IntegerField()
     kind = serializers.ChoiceField(choices=LEAD_ACTIVITY_KINDS)
@@ -296,6 +342,8 @@ class LeadActivitySerializer(serializers.Serializer):
     author_name = serializers.CharField(allow_null=True, required=False)
     author_photo = serializers.CharField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
+    #: Null on every row that has no document filed against it, which is most.
+    attachment = LeadActivityAttachmentSerializer(allow_null=True, required=False)
 
 
 class LeadDetailSerializer(LeadSerializer):
@@ -442,6 +490,14 @@ class CrmDealSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=14, decimal_places=2)
     stage = serializers.ChoiceField(choices=LeadStage.CHOICES)
     status = serializers.ChoiceField(choices=LeadStatus.CHOICES)
+    #: A deal worked through the funnel, or a sale recorded after the fact.
+    #: Both are deals to this list — it is the customer's history and a sale
+    #: belongs in it — but the row says which, and prints the matching
+    #: reference.
+    kind = serializers.ChoiceField(choices=LEAD_KINDS, required=False)
+    payment_method = serializers.ChoiceField(
+        choices=PAYMENT_METHODS, allow_null=True, required=False
+    )
     created_at = serializers.DateTimeField()
     completed_at = serializers.DateTimeField(allow_null=True)
 
@@ -463,7 +519,11 @@ class CrmCustomerDetailSerializer(CrmCustomerSerializer):
 # ─── Input ────────────────────────────────────────────────────────────────────
 
 class TaskWriteSerializer(serializers.Serializer):
-    title = serializers.CharField(max_length=300)
+    #: Unbounded on purpose. The mobile sheet has no separate title box — it
+    #: titles a task by the first line of the description — so a long first
+    #: paragraph is a normal title, and a cap here threw the whole draft away.
+    #: The column behind it is TEXT.
+    title = serializers.CharField()
     description = serializers.CharField(allow_blank=True, required=False, default="")
     status = serializers.ChoiceField(choices=TASK_STATUSES, required=False, default="todo")
     priority = serializers.ChoiceField(choices=TASK_PRIORITIES, required=False, default="medium")
@@ -471,7 +531,7 @@ class TaskWriteSerializer(serializers.Serializer):
     due_date = serializers.DateTimeField(required=False, allow_null=True)
     assignee_ids = serializers.ListField(child=serializers.IntegerField(), required=False, default=list)
     subtasks = serializers.ListField(
-        child=serializers.CharField(max_length=300), required=False, default=list
+        child=serializers.CharField(), required=False, default=list
     )
 
 
@@ -538,11 +598,32 @@ class LeadWriteSerializer(serializers.Serializer):
     #: The deadline, where the sheet was given one. Optional, and stays
     #: optional afterwards — see `LeadDueDateWriteSerializer`.
     due_date = serializers.DateTimeField(required=False, allow_null=True)
+    #: Which of the two things the "+" menu offers this is. Defaults to the
+    #: funnel's own row, so every caller written before the quick sale existed
+    #: keeps raising leads.
+    kind = serializers.ChoiceField(
+        choices=LEAD_KINDS, required=False, default=LeadKind.LEAD
+    )
+    #: Required on a quick sale and refused on a lead — see `validate`.
+    payment_method = serializers.ChoiceField(
+        choices=PAYMENT_METHODS, required=False, allow_null=True
+    )
 
     def validate_contact_phone(self, value: str) -> str:
         return _clean_phone(value)
 
     def validate(self, attrs: dict) -> dict:
+        # A sale that has already happened was settled somehow, and the one
+        # figure a sales report cannot reconstruct afterwards is how. So the
+        # quick sale sheet has to say — and a lead, which has nothing to pay
+        # with yet, is not allowed to pretend it does.
+        if attrs.get("kind") == LeadKind.QUICK_SALE:
+            if not attrs.get("payment_method"):
+                raise serializers.ValidationError(
+                    {"payment_method": _("Choose how the sale was paid for.")}
+                )
+        else:
+            attrs.pop("payment_method", None)
         # The board prints a company on every card and the funnel prints a
         # product; neither is worth blocking a lead over, so they fall back to
         # what the sheet does know rather than being demanded from it.
@@ -593,6 +674,17 @@ class LeadDueDateWriteSerializer(serializers.Serializer):
     due_date = serializers.DateTimeField(allow_null=True)
 
 
+class LeadQualityWriteSerializer(serializers.Serializer):
+    """The mark saying whether the enquiry was worth working.
+
+    ``allow_null`` and no default, for the reason [LeadDueDateWriteSerializer]
+    gives: ``null`` takes the mark off, and that has to be sayable without
+    being what a malformed request accidentally does.
+    """
+
+    quality = serializers.ChoiceField(choices=LEAD_QUALITIES, allow_null=True)
+
+
 class LeadAssignWriteSerializer(serializers.Serializer):
     employee_id = serializers.IntegerField()
 
@@ -604,12 +696,12 @@ class LeadCommentWriteSerializer(serializers.Serializer):
 class TaskPatchSerializer(TaskWriteSerializer):
     """Same fields, all optional — PATCH only touches what it was sent."""
 
-    title = serializers.CharField(max_length=300, required=False)
+    title = serializers.CharField(required=False)
     status = serializers.ChoiceField(choices=TASK_STATUSES, required=False)
     priority = serializers.ChoiceField(choices=TASK_PRIORITIES, required=False)
     description = serializers.CharField(allow_blank=True, required=False)
     assignee_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
-    subtasks = serializers.ListField(child=serializers.CharField(max_length=300), required=False)
+    subtasks = serializers.ListField(child=serializers.CharField(), required=False)
 
 
 class TaskStatusSerializer(serializers.Serializer):
@@ -1107,3 +1199,161 @@ class OrgPersonSerializer(serializers.Serializer):
     role = serializers.CharField(required=False)
     company_id = serializers.IntegerField()
     company_name = serializers.CharField(allow_null=True, required=False)
+
+
+# ─── Hisobot va analitika ───────────────────────────────────────────────────
+#
+# Read-only, and documentation as much as validation: nothing here is ever
+# fed a request body. What they buy is a generated client that knows the shape
+# of a report instead of `Map<String, dynamic>` all the way down.
+
+
+class ReportPeriodSerializer(serializers.Serializer):
+    """The window the numbers below were counted over."""
+
+    period = serializers.CharField()
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    #: How wide one point on a trend line is — "1 day", "1 week", "1 month".
+    #: Sent so the chart can label its axis without re-deriving it from the
+    #: period name.
+    bucket = serializers.CharField()
+
+
+class SalesStagePointSerializer(serializers.Serializer):
+    stage = serializers.CharField()
+    count = serializers.IntegerField()
+    amount = serializers.CharField()
+
+
+class SalesSourcePointSerializer(serializers.Serializer):
+    source = serializers.CharField()
+    count = serializers.IntegerField()
+    won_count = serializers.IntegerField()
+    won_amount = serializers.CharField()
+
+
+class LostReasonPointSerializer(serializers.Serializer):
+    reason = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class SalesTrendPointSerializer(serializers.Serializer):
+    date = serializers.DateTimeField()
+    created_count = serializers.IntegerField()
+    won_count = serializers.IntegerField()
+    won_amount = serializers.CharField()
+
+
+class SalesLeaderSerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    photo = serializers.CharField(allow_null=True, required=False)
+    won_count = serializers.IntegerField()
+    won_amount = serializers.CharField()
+
+
+class SalesReportSerializer(serializers.Serializer):
+    """The funnel over the window.
+
+    Amounts are strings, not numbers: they are NUMERIC(14, 2) in so'm, and a
+    deal of eleven figures does not survive a JSON float intact.
+    """
+
+    created_count = serializers.IntegerField()
+    won_count = serializers.IntegerField()
+    lost_count = serializers.IntegerField()
+    #: As of now, not windowed — a pipeline is a present-tense fact.
+    open_count = serializers.IntegerField()
+    won_amount = serializers.CharField()
+    open_amount = serializers.CharField()
+    #: Won ÷ decided (won + lost), 0–1. Deals still being worked are in
+    #: neither half: one that has not been answered has not been lost.
+    conversion_rate = serializers.FloatField()
+    average_deal = serializers.CharField()
+    by_stage = SalesStagePointSerializer(many=True)
+    by_source = SalesSourcePointSerializer(many=True)
+    lost_reasons = LostReasonPointSerializer(many=True)
+    trend = SalesTrendPointSerializer(many=True)
+    leaders = SalesLeaderSerializer(many=True)
+
+
+class TaskPriorityPointSerializer(serializers.Serializer):
+    priority = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class TaskTrendPointSerializer(serializers.Serializer):
+    date = serializers.DateTimeField()
+    created_count = serializers.IntegerField()
+    completed_count = serializers.IntegerField()
+
+
+class TaskLeaderSerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    photo = serializers.CharField(allow_null=True, required=False)
+    completed_count = serializers.IntegerField()
+    on_time_rate = serializers.FloatField()
+
+
+class TaskReportSerializer(serializers.Serializer):
+    created_count = serializers.IntegerField()
+    completed_count = serializers.IntegerField()
+    open_count = serializers.IntegerField()
+    todo_count = serializers.IntegerField()
+    in_progress_count = serializers.IntegerField()
+    overdue_count = serializers.IntegerField()
+    due_today_count = serializers.IntegerField()
+    #: Out of the completed tasks that had a deadline, 0–1.
+    on_time_rate = serializers.FloatField()
+    by_priority = TaskPriorityPointSerializer(many=True)
+    trend = TaskTrendPointSerializer(many=True)
+    leaders = TaskLeaderSerializer(many=True)
+
+
+class EventTypePointSerializer(serializers.Serializer):
+    event_type = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class EventWeekdayPointSerializer(serializers.Serializer):
+    #: ISO weekday, 1 = Monday, so the week reads the way the calendar screen
+    #: draws it.
+    weekday = serializers.IntegerField()
+    count = serializers.IntegerField()
+
+
+class EventTrendPointSerializer(serializers.Serializer):
+    date = serializers.DateTimeField()
+    count = serializers.IntegerField()
+
+
+class CalendarReportSerializer(serializers.Serializer):
+    total_count = serializers.IntegerField()
+    all_day_count = serializers.IntegerField()
+    #: Everything still to come, from the end of the window onwards.
+    upcoming_count = serializers.IntegerField()
+    #: Hours booked, all-day entries excluded — see `repository.calendar_report`.
+    hours = serializers.FloatField()
+    by_type = EventTypePointSerializer(many=True)
+    by_weekday = EventWeekdayPointSerializer(many=True)
+    trend = EventTrendPointSerializer(many=True)
+
+
+class WorkspaceReportSerializer(serializers.Serializer):
+    """Everything the "Hisobot va analitika" screen draws, in one response.
+
+    A section is null when this caller cannot see it at all — a guest who was
+    lent the sales board and nothing else gets `sales` and two nulls, rather
+    than three sections of zeroes that would read as a quiet company.
+    """
+
+    period = ReportPeriodSerializer()
+    #: `company` for a manager, `own` for everybody else — what the numbers
+    #: cover, printed on the screen so nobody reads their own month as the
+    #: company's.
+    scope = serializers.CharField()
+    sales = SalesReportSerializer(allow_null=True)
+    tasks = TaskReportSerializer(allow_null=True)
+    calendar = CalendarReportSerializer(allow_null=True)

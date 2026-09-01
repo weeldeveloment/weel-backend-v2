@@ -25,7 +25,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
-from apps.b2b.models import LeadSource, LeadStage, LeadStatus
+from apps.b2b.models import LeadKind, LeadSource, LeadStage, LeadStatus
 from apps.b2b.repository import get_company, get_org
 from apps.b2b.mail import repository as mail_repo
 from apps.b2b.workspace import push_text
@@ -44,6 +44,7 @@ from apps.b2b.workspace.permissions import HasCapability, IsWorkspaceManager, Is
 from apps.b2b.workspace.roles import capabilities_for, is_manager
 from apps.b2b.workspace.serializers import (
     WorkspaceFilePatchSerializer,
+    WorkspaceReportSerializer,
     WorkspaceFolderListSerializer,
     WorkspaceFolderSerializer,
     WorkspaceFolderWriteSerializer,
@@ -71,12 +72,14 @@ from apps.b2b.workspace.serializers import (
     LeadCommentWriteSerializer,
     LeadDetailSerializer,
     LeadDueDateWriteSerializer,
+    LeadQualityWriteSerializer,
     LeadItemSerializer,
     LeadItemWriteSerializer,
     LeadListSerializer,
     LeadSerializer,
     LeadStageWriteSerializer,
     LeadWriteSerializer,
+    EmployeeStatsSerializer,
     MeSerializer,
     OwnProfileSerializer,
     MessageEditSerializer,
@@ -832,6 +835,51 @@ class WorkspaceTeamView(WorkspaceAPIView):
         return Response(TeamMemberSerializer(_with_presence(members), many=True).data)
 
 
+class WorkspaceEmployeeStatsView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/employees/<id>/stats/ — what one colleague is
+    carrying.
+
+    The two numbers on the card the chat opens when you tap somebody's name.
+    Its own call rather than fields on `/team/`: the roster is fetched to label
+    rows all over the app — assignees, chat titles, event participants — and
+    four counts per person would put a join over every task in the company
+    behind every one of those screens, to draw numbers only this one page
+    shows.
+
+    Readable by anyone in the workspace, like the roster itself. It says how
+    much work somebody has, never what the work is.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="One employee's task counts",
+        responses={
+            200: EmployeeStatsSerializer(),
+            404: openapi.Response(description="Not on this roster"),
+        },
+    )
+    def get(self, request, employee_id: int):
+        employee = repo.get_workspace_employee(employee_id)
+        # Checked against the caller's company and not only for existence: an
+        # id from another workspace must read as "no such person", not as a
+        # colleague with no work on.
+        if not employee or employee.get("company_id") != request.user.company_id:
+            return Response(
+                {"detail": _("Employee not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        counts = repo.employee_task_counters(request.user.company_id, employee_id)
+        return Response({
+            "employee_id": employee_id,
+            "tasks_done": counts.get("done_count", 0),
+            "tasks_in_progress": counts.get("in_progress_count", 0),
+            "tasks_todo": counts.get("todo_count", 0),
+            "tasks_overdue": counts.get("overdue_count", 0),
+        })
+
+
 # ─── Tasks ────────────────────────────────────────────────────────────────────
 
 def _task_voice_payload(voice: dict | None) -> dict | None:
@@ -853,6 +901,22 @@ def _task_voice_payload(voice: dict | None) -> dict | None:
     }
 
 
+def _task_file_payload(file: dict) -> dict:
+    """One document attached to a task, as the app reads it.
+
+    The same shape a voice note gets, minus the duration: the row's storage
+    path never leaves the server, and `url` is the only way anything can
+    fetch the bytes.
+    """
+    return {
+        "id": file["id"],
+        "name": file["name"],
+        "size": file["size"],
+        "content_type": file.get("content_type"),
+        "url": default_storage.url(file["path"]),
+    }
+
+
 def _task_payload(task: dict, user) -> dict:
     """Adds the per-task permission flags the app uses to decide which buttons
     to render — the same rules the write endpoints enforce."""
@@ -863,6 +927,7 @@ def _task_payload(task: dict, user) -> dict:
     return {
         **task,
         "voice": _task_voice_payload(task.get("voice")),
+        "files": [_task_file_payload(f) for f in (task.get("files") or [])],
         "can_edit": bool(caps["can_edit_task"]),
         "can_delete": bool(caps["can_delete_task"]),
         # An employee moves only their own work along the board.
@@ -1340,6 +1405,108 @@ class WorkspaceTaskVoiceView(WorkspaceAPIView):
         previous = repo.delete_task_voice(task_id)
         if previous:
             default_storage.delete(previous["path"])
+
+
+def _writable_task_or_none(request, task_id: int) -> dict | None:
+    """The task, if this caller may attach to or detach from it.
+
+    Author, assignee or a manager. Narrower than reading — every role sees the
+    whole company board — because attaching spends the company's storage quota
+    and detaching destroys somebody else's file. Anything else gets a 404
+    rather than a 403: a company's task ids are not something to confirm to
+    somebody who cannot act on them.
+    """
+    task = repo.get_task(task_id, request.user.company_id)
+    if not task:
+        return None
+    if request.user.visible_scope is not None and not (
+        task["author_id"] == request.user.id
+        or request.user.id in (task.get("assignee_ids") or [])
+    ):
+        return None
+    return task
+
+
+class WorkspaceTaskFilesView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/tasks/<id>/files/ — attach a document to a task.
+
+    Its own endpoint for the same reason the voice note has one: a task is
+    written as JSON and a document is multipart, so the app posts the task,
+    gets its id, and sends the files straight after.
+
+    Unlike the voice note a task carries as many documents as were attached —
+    a brief, its annexes and a photographed receipt are three files and
+    replacing one with the next would be a data loss, not a correction. One
+    request carries one file; several are several requests, which is what lets
+    the app report and retry them one at a time instead of losing a whole
+    batch to the one that was over the limit.
+    """
+
+    required_module = Module.TASKS
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Attach a document to a task",
+        consumes=["multipart/form-data"],
+        manual_parameters=[
+            openapi.Parameter("file", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
+        ],
+        responses={201: TaskSerializer()},
+    )
+    def post(self, request, task_id: int):
+        task = _writable_task_or_none(request, task_id)
+        if task is None:
+            return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": _("No file provided.")}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Not `_, refusal = ...`: `_` is gettext in this module, and binding
+        # it locally makes every translated string in this method a
+        # NameError.
+        _stored, refusal = store_upload(
+            request=request,
+            upload=upload,
+            kind=repo.TASK_FILE_KIND,
+            task_id=task_id,
+        )
+        if refusal:
+            return refusal
+
+        updated = repo.get_task(task_id, request.user.company_id)
+        return Response(_task_payload(updated, request.user), status=status.HTTP_201_CREATED)
+
+
+class WorkspaceTaskFileDetailView(WorkspaceAPIView):
+    """DELETE /api/b2b/workspace/tasks/<id>/files/<file_id>/ — detach one.
+
+    The bytes go with the row. There is no trash for a task attachment: the
+    drive is where files are kept, and something attached to a task is part of
+    the task rather than a document in its own right.
+    """
+
+    required_module = Module.TASKS
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Detach a document from a task",
+        responses={200: TaskSerializer()},
+    )
+    def delete(self, request, task_id: int, file_id: int):
+        task = _writable_task_or_none(request, task_id)
+        if task is None:
+            return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        removed = repo.delete_task_file(task_id, file_id)
+        if not removed:
+            return Response({"detail": _("File not found.")}, status=status.HTTP_404_NOT_FOUND)
+        default_storage.delete(removed["path"])
+
+        updated = repo.get_task(task_id, request.user.company_id)
+        return Response(_task_payload(updated, request.user))
 
 
 # ─── Calendar ─────────────────────────────────────────────────────────────────
@@ -2552,6 +2719,33 @@ def _works_lead(lead: dict, user) -> bool:
     return claimed_by is not None and claimed_by == user.id
 
 
+def _lead_activity_payload(row: dict) -> dict:
+    """One history row as the app reads it, with the document filed against it.
+
+    Nested rather than flattened — `attachment.url` survives a lead event that
+    one day carries two files, `attachment_url` does not — and the same shape a
+    chat message already uses, so the phone has one attachment reader and not
+    two.
+    """
+    data = {k: v for k, v in row.items() if not k.startswith("attachment_")}
+    data["attachment"] = (
+        {
+            "id": row["attachment_id"],
+            "name": row["attachment_name"],
+            "size": row["attachment_size"],
+            "content_type": row.get("attachment_content_type"),
+            "url": default_storage.url(row["attachment_path"]),
+        }
+        if row.get("attachment_id")
+        else None
+    )
+    return data
+
+
+def _lead_activity_feed(lead_id: int) -> list[dict]:
+    return [_lead_activity_payload(row) for row in repo.list_lead_activity(lead_id)]
+
+
 def _lead_payload(lead: dict, user) -> dict:
     """Shapes a lead for one viewer.
 
@@ -2728,6 +2922,15 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
         manual_parameters=[
             openapi.Parameter("status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
                               enum=list(repo.LEAD_STATUSES)),
+            # `unmarked` is not a quality — it asks for the leads nobody has
+            # judged, which is the list a manager chasing the board wants.
+            openapi.Parameter("quality", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                              enum=list(repo.LEAD_QUALITY_FILTERS)),
+            # Omitted, this is the funnel and answers with leads only. Quick
+            # sales never belong on the board — they are asked for by name, or
+            # with `any` by a reader counting deals rather than working them.
+            openapi.Parameter("kind", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                              enum=list(repo.LEAD_KIND_FILTERS)),
         ],
         responses={200: LeadListSerializer()},
     )
@@ -2736,6 +2939,8 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
             request.user.company_id,
             status=request.query_params.get("status") or None,
             stage=request.query_params.get("stage") or None,
+            quality=request.query_params.get("quality") or None,
+            kind=request.query_params.get("kind") or LeadKind.LEAD,
         )
         # Counted in two queries for the whole board rather than two per lead:
         # the funnel shows every lead in the company, and N+1 here is the
@@ -2775,7 +2980,12 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
                 {"detail": _("Your role does not allow creating leads.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        claim_for_author = bool(data.get("assign_to_me", True))
+        # A sale that has already happened is not posted to the board for
+        # somebody to take — there is nothing left to take. It belongs to
+        # whoever recorded it, whatever the sheet said about assignment.
+        kind = data.get("kind") or LeadKind.LEAD
+        is_quick_sale = kind == LeadKind.QUICK_SALE
+        claim_for_author = is_quick_sale or bool(data.get("assign_to_me", True))
 
         customer_id = data.get("customer_id")
         if customer_id and not repo.get_customer(customer_id, request.user.company_id):
@@ -2801,6 +3011,8 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
             due_date=data.get("due_date"),
             note=data.get("note"),
             claim_for_author=claim_for_author,
+            kind=kind,
+            payment_method=data.get("payment_method"),
         )
 
         # Only a lead left on the board is news to the rest of the company —
@@ -2936,7 +3148,7 @@ class WorkspaceLeadDetailView(WorkspaceAPIView):
             "item_count": len(repo.list_lead_items(lead_id)),
             "task_count": len(tasks),
             "items": repo.list_lead_items(lead_id),
-            "activity": repo.list_lead_activity(lead_id),
+            "activity": _lead_activity_feed(lead_id),
             # Hydrated the same way the tasks tab does it, so a checkbox on this
             # screen and the same task on Vazifa agree about who may tick it.
             "tasks": [
@@ -2974,6 +3186,11 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
     The claimant only, and never on a closed lead. Reaching ``won`` or ``lost``
     completes it; that rule lives in the repository so this view does not have
     to know which stages are terminal.
+
+    Takes JSON or ``multipart/form-data``: a move can carry one document — the
+    signed contract behind "Yutdik", the offer behind "Taklif yuborildi" — and
+    it is filed against the history row the move writes, so the feed shows it
+    beside the event it belongs to rather than loose on the drive.
     """
 
     required_module = Module.SALES
@@ -2982,7 +3199,17 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,
         operation_summary="Change a lead's funnel stage",
+        consumes=["multipart/form-data", "application/json"],
         request_body=LeadStageWriteSerializer,
+        manual_parameters=[
+            openapi.Parameter(
+                "file",
+                openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=False,
+                description="Optional document filed with the move (multipart only).",
+            ),
+        ],
         responses={200: LeadSerializer(), 403: openapi.Response(description="Not yours")},
     )
     def post(self, request, lead_id: int):
@@ -3003,13 +3230,29 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
 
         serializer = LeadStageWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        stage = serializer.validated_data["stage"]
+
+        # A move to where the lead already is writes nothing — the repository
+        # returns early on it — so an upload here would leave a file hanging
+        # off no history row at all: bytes against the company's quota that no
+        # screen can show and nobody can delete.
+        if lead.get("stage") == stage:
+            return Response(_lead_payload(lead, request.user))
+
+        file = None
+        if upload := request.FILES.get("file"):
+            file, refusal = store_upload(request=request, upload=upload, kind="lead")
+            if refusal:
+                return refusal
+
         updated = repo.set_lead_stage(
             lead_id,
             request.user.company_id,
-            stage=serializer.validated_data["stage"],
+            stage=stage,
             employee_id=request.user.id,
             lost_reason=serializer.validated_data.get("lost_reason"),
             note=serializer.validated_data.get("note"),
+            attachment_file_id=file["id"] if file else None,
         )
         return Response(_lead_payload(updated or lead, request.user))
 
@@ -3058,6 +3301,54 @@ class WorkspaceLeadDueDateView(WorkspaceAPIView):
             lead_id,
             request.user.company_id,
             due_date=serializer.validated_data["due_date"],
+            employee_id=request.user.id,
+        )
+        return Response(_lead_payload(updated or lead, request.user))
+
+
+class WorkspaceLeadQualityView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/leads/<id>/quality/ — mark the enquiry good or
+    bad, or take the mark off.
+
+    Who may: whoever is working the deal, and a manager over their head — the
+    same pair as the deadline, and for the same reason. The salesperson who
+    rang the number is the one who knows it was a wrong number; the manager
+    reading the board is the one who has to be able to correct a lead written
+    off too quickly.
+
+    A closed lead is *not* refused here, unlike the deadline. A deadline on a
+    finished deal sets a clock nothing runs down, but "that enquiry was never
+    real" is a judgement most often made about a deal that has already been
+    lost — refusing it there would put the mark out of reach on exactly the
+    leads it is for.
+    """
+
+    required_module = Module.SALES
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Mark a lead good or bad, or clear the mark",
+        request_body=LeadQualityWriteSerializer,
+        responses={200: LeadSerializer(), 403: openapi.Response(description="Not yours")},
+    )
+    def post(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        if not (_works_lead(lead, request.user) or request.user.is_manager):
+            return Response(
+                {"detail": _("Only the employee working this lead can rate it.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = LeadQualityWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = repo.set_lead_quality(
+            lead_id,
+            request.user.company_id,
+            quality=serializer.validated_data["quality"],
             employee_id=request.user.id,
         )
         return Response(_lead_payload(updated or lead, request.user))
@@ -3142,7 +3433,10 @@ class WorkspaceLeadCommentView(WorkspaceAPIView):
         activity = repo.add_lead_comment(
             lead_id, author_id=request.user.id, text=serializer.validated_data["text"]
         )
-        return Response(activity, status=status.HTTP_201_CREATED)
+        return Response(
+            _lead_activity_payload(activity) if activity else activity,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class WorkspaceLeadItemsView(WorkspaceAPIView):
@@ -4206,4 +4500,92 @@ class WorkspaceAppVersionView(APIView):
             "update_available": _is_older(current, latest),
             "store_url": release["store_url"],
             "release_notes": settings.B2B_APP_RELEASE_NOTES,
+        })
+
+
+# ─── Hisobot va analitika ───────────────────────────────────────────────────
+
+class WorkspaceReportView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/reports/
+
+    The profile screen's "Hisobot va analitika": the sales funnel, the task
+    board and the calendar over one window, in one response.
+
+    One endpoint and not three, because the screen is one screen. Three would
+    mean three round trips on open, three spinners, and — since each would
+    take its own `NOW()` — three windows that do not quite line up.
+
+    Who sees what is decided twice over:
+
+    * **Scope.** A manager reads the company; everybody else reads their own
+      work. Not a permission check but the honest reading of the question — a
+      salesperson's report is about their month, and a company total on it
+      would be a number they cannot act on.
+    * **Sections.** A guest lent only the sales board gets `sales` and two
+      nulls. `HasModule` guards one module per view and this view spans three,
+      so the gate is applied per section here rather than on the class.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    def _may_read(self, request, module: str) -> bool:
+        """Whether this caller may see one section of the report.
+
+        The same rule as [HasModule], asked three times instead of once: a
+        permanent employee has no module list and sees everything, a guest
+        sees what their secondment named, and a chat-only member sees none of
+        it.
+        """
+        if request.user.get("is_chat_only"):
+            return False
+        modules = request.user.modules
+        return modules is None or module in modules
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Sales, tasks and calendar over one window",
+        manual_parameters=[
+            openapi.Parameter(
+                "period",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                enum=list(repo.REPORT_PERIODS),
+                description=(
+                    "How far back to count. Defaults to "
+                    f"'{repo.DEFAULT_REPORT_PERIOD}'; an unknown value falls "
+                    "back to it rather than failing."
+                ),
+            ),
+        ],
+        responses={200: WorkspaceReportSerializer()},
+    )
+    def get(self, request):
+        window = repo.report_window(request.query_params.get("period") or "")
+        # One clock for all three sections — see `report_window`.
+        span = {
+            "start": window["start"],
+            "end": window["end"],
+            "bucket": window["bucket"],
+        }
+        company_id = request.user.company_id
+        employee_id = None if request.user.is_manager else request.user.id
+
+        return Response({
+            "period": window,
+            "scope": "company" if employee_id is None else "own",
+            "sales": (
+                repo.sales_report(company_id, employee_id=employee_id, **span)
+                if self._may_read(request, Module.SALES)
+                else None
+            ),
+            "tasks": (
+                repo.task_report(company_id, employee_id=employee_id, **span)
+                if self._may_read(request, Module.TASKS)
+                else None
+            ),
+            "calendar": (
+                repo.calendar_report(company_id, employee_id=employee_id, **span)
+                if self._may_read(request, Module.CALENDAR)
+                else None
+            ),
         })

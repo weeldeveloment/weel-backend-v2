@@ -58,6 +58,7 @@ from apps.b2b.workspace.views import (
     WorkspaceLeadCompleteView,
     WorkspaceLeadDetailView,
     WorkspaceLeadDueDateView,
+    WorkspaceLeadQualityView,
     WorkspaceLeadItemDetailView,
     WorkspaceLeadItemsView,
     WorkspaceCrmCustomerDetailView,
@@ -77,7 +78,10 @@ from apps.b2b.workspace.views import (
     WorkspaceSubtaskToggleView,
     WorkspaceTaskActivityFeedView,
     WorkspaceTaskCommentView,
+    WorkspaceEmployeeStatsView,
     WorkspaceTaskDetailView,
+    WorkspaceTaskFileDetailView,
+    WorkspaceTaskFilesView,
     WorkspaceTaskListCreateView,
     WorkspaceTaskStatusView,
     WorkspaceTaskVoiceView,
@@ -85,6 +89,7 @@ from apps.b2b.workspace.views import (
     WorkspaceMessageReactionView,
     WorkspacePresenceView,
     WorkspaceProfilePhotoView,
+    WorkspaceReportView,
     WorkspaceTeamView,
     WorkspaceProfileView,
     WorkspaceUsernameView,
@@ -223,6 +228,11 @@ urlpatterns = [
         name="ws-join-request-decide",
     ),
     path("team/", WorkspaceTeamView.as_view(), name="ws-team"),
+    path(
+        "employees/<int:employee_id>/stats/",
+        WorkspaceEmployeeStatsView.as_view(),
+        name="ws-employee-stats",
+    ),
     path("presence/", WorkspacePresenceView.as_view(), name="ws-presence"),
 
     # Lending somebody to another workspace — see `secondment_views`.
@@ -257,6 +267,9 @@ urlpatterns = [
         name="ws-attendance-mark",
     ),
 
+    # Hisobot va analitika — one screen, one call. See [WorkspaceReportView].
+    path("reports/", WorkspaceReportView.as_view(), name="ws-reports"),
+
     path("employee-of-month/", WorkspaceEmployeeOfMonthView.as_view(), name="ws-employee-of-month"),
     path(
         "employee-of-month/stats/",
@@ -270,6 +283,12 @@ urlpatterns = [
     path("tasks/<int:task_id>/status/", WorkspaceTaskStatusView.as_view(), name="ws-task-status"),
     path("tasks/<int:task_id>/comments/", WorkspaceTaskCommentView.as_view(), name="ws-task-comments"),
     path("tasks/<int:task_id>/voice/", WorkspaceTaskVoiceView.as_view(), name="ws-task-voice"),
+    path("tasks/<int:task_id>/files/", WorkspaceTaskFilesView.as_view(), name="ws-task-files"),
+    path(
+        "tasks/<int:task_id>/files/<int:file_id>/",
+        WorkspaceTaskFileDetailView.as_view(),
+        name="ws-task-file-detail",
+    ),
     path(
         "tasks/<int:task_id>/subtasks/<int:subtask_id>/toggle/",
         WorkspaceSubtaskToggleView.as_view(),
@@ -327,6 +346,7 @@ urlpatterns = [
     path("leads/<int:lead_id>/complete/", WorkspaceLeadCompleteView.as_view(), name="ws-lead-complete"),
     path("leads/<int:lead_id>/stage/", WorkspaceLeadStageView.as_view(), name="ws-lead-stage"),
     path("leads/<int:lead_id>/due-date/", WorkspaceLeadDueDateView.as_view(), name="ws-lead-due-date"),
+    path("leads/<int:lead_id>/quality/", WorkspaceLeadQualityView.as_view(), name="ws-lead-quality"),
     path("leads/<int:lead_id>/assign/", WorkspaceLeadAssignView.as_view(), name="ws-lead-assign"),
     path("leads/<int:lead_id>/comments/", WorkspaceLeadCommentView.as_view(), name="ws-lead-comments"),
     path("leads/<int:lead_id>/items/", WorkspaceLeadItemsView.as_view(), name="ws-lead-items"),

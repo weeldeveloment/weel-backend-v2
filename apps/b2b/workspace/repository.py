@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, Iterable, Sequence
 
 from django.utils import timezone
@@ -17,10 +18,13 @@ from shared.raw.db import execute, fetch_all, fetch_one
 from apps.b2b.models import (
     EmployeeRole,
     LeadActivityKind,
+    LeadKind,
     LeadLostReason,
+    LeadQuality,
     LeadSource,
     LeadStage,
     LeadStatus,
+    PaymentMethod,
     TaskActivityKind,
 )
 from apps.b2b.raw.tables import (
@@ -424,6 +428,13 @@ def employee_ids_in_company(company_id: int, employee_ids: Iterable[int]) -> set
 TASK_STATUSES = ("todo", "in_progress", "done")
 TASK_PRIORITIES = ("low", "medium", "high", "urgent")
 
+# What a task's uploads are stored as in `b2b_workspace_file.kind`. Two kinds
+# rather than one flag: the drive lists `kind = 'file'`, the storage breakdown
+# groups by the same column, and both stay right without knowing that a task
+# can carry two different sorts of thing.
+TASK_VOICE_KIND = "task"
+TASK_FILE_KIND = "task_file"
+
 
 def _attach_task_children(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Load assignees, subtasks and comments for a page of tasks in three
@@ -438,6 +449,7 @@ def _attach_task_children(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         task["subtasks"] = []
         task["comments"] = []
         task["voice"] = None
+        task["files"] = []
 
     for row in fetch_all(
         f"SELECT task_id, employee_id FROM {B2B_TASK_ASSIGNEE_TABLE} "
@@ -460,15 +472,25 @@ def _attach_task_children(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ):
         by_id[row["task_id"]]["comments"].append(row)
 
-    # The voice note, if one was recorded while the task was written. At most
-    # one per task — a second upload replaces the first, so the newest row wins
-    # here rather than the list growing a clip nobody meant to keep.
+    # Everything a task carries, in one query: the clip recorded while it was
+    # written and the documents attached to it. `kind` is what tells them
+    # apart — both are rows in the one storage table, because the quota is a
+    # SUM over that table and a second table would have to be added to it.
+    #
+    # At most one clip per task: a second upload replaces the first, so the
+    # newest row wins here rather than the list growing a recording nobody
+    # meant to keep. Documents accumulate, oldest first — the order they were
+    # attached in is the order they are read in.
     for row in fetch_all(
         f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} "
-        f"WHERE task_id = __ANY_MARKER__(%s) ORDER BY created_at ASC, id ASC",
-        [ids],
+        f"WHERE task_id = __ANY_MARKER__(%s) AND kind = __ANY_MARKER__(%s) "
+        "ORDER BY created_at ASC, id ASC",
+        [ids, [TASK_VOICE_KIND, TASK_FILE_KIND]],
     ):
-        by_id[row["task_id"]]["voice"] = row
+        if row["kind"] == TASK_VOICE_KIND:
+            by_id[row["task_id"]]["voice"] = row
+        else:
+            by_id[row["task_id"]]["files"].append(row)
 
     return tasks
 
@@ -624,12 +646,49 @@ def update_task(
 
 
 def task_voice(task_id: int) -> dict[str, Any] | None:
-    """The clip attached to a task, or None."""
+    """The clip attached to a task, or None.
+
+    Filtered by kind: documents attached to the same task live in this table
+    with the same `task_id`, and without the filter the newest of *those*
+    would be handed back as the task's voice note — and then deleted by the
+    endpoint that replaces a recording.
+    """
     return fetch_one(
-        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE task_id = %s "
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE task_id = %s AND kind = %s "
         "ORDER BY created_at DESC, id DESC",
-        [task_id],
+        [task_id, TASK_VOICE_KIND],
     )
+
+
+def task_files(task_id: int) -> list[dict[str, Any]]:
+    """The documents attached to a task, oldest first."""
+    return fetch_all(
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE task_id = %s AND kind = %s "
+        "ORDER BY created_at ASC, id ASC",
+        [task_id, TASK_FILE_KIND],
+    )
+
+
+def delete_task_file(task_id: int, file_id: int) -> dict[str, Any] | None:
+    """Detaches one document and hands back the row that owned its bytes.
+
+    Scoped by `task_id` as well as by id: the id comes off a request, and
+    without it a caller who may write to their own task could name any file
+    row in the database. Returned rather than dropped for the same reason
+    [delete_task_voice] returns one — the row is the only record of where the
+    bytes are.
+    """
+    existing = fetch_one(
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} "
+        "WHERE id = %s AND task_id = %s AND kind = %s",
+        [file_id, task_id, TASK_FILE_KIND],
+    )
+    if existing:
+        execute(
+            f"DELETE FROM {B2B_WORKSPACE_FILE_TABLE} WHERE id = %s",
+            [existing["id"]],
+        )
+    return existing
 
 
 def delete_task_voice(task_id: int) -> dict[str, Any] | None:
@@ -820,6 +879,37 @@ def list_company_task_activity(
     sql += " ORDER BY a.created_at DESC, a.id DESC LIMIT %s"
     params.append(limit)
     return fetch_all(sql, params)
+
+
+def employee_task_counters(company_id: int, employee_id: int) -> dict[str, int]:
+    """What one colleague is carrying, for the card their profile shows.
+
+    Counted over the tasks *assigned* to them, not the ones they wrote: the
+    card answers "what is this person working on", and a manager who raises
+    everybody's tasks would otherwise read as the busiest person in the
+    company.
+
+    Deleted tasks are left out, like everywhere else — a task in the trash is
+    not work anybody is doing.
+    """
+    row = fetch_one(
+        f"""
+        SELECT
+            COUNT(*) FILTER (WHERE t.status = 'done')          AS done_count,
+            COUNT(*) FILTER (WHERE t.status = 'in_progress')   AS in_progress_count,
+            COUNT(*) FILTER (WHERE t.status = 'todo')          AS todo_count,
+            COUNT(*) FILTER (WHERE t.status <> 'done'
+                             AND t.due_date IS NOT NULL
+                             AND t.due_date::date < CURRENT_DATE) AS overdue_count
+        FROM {B2B_TASK_ASSIGNEE_TABLE} a
+        JOIN {B2B_TASK_TABLE} t ON t.id = a.task_id
+        WHERE a.employee_id = %s
+          AND t.company_id = %s
+          AND t.deleted_at IS NULL
+        """,
+        [employee_id, company_id],
+    )
+    return {key: int(value or 0) for key, value in (row or {}).items()}
 
 
 def task_counters(company_id: int, visible_to: int | None = None) -> dict[str, int]:
@@ -1711,7 +1801,8 @@ def get_customer_detail(customer_id: int, company_id: int) -> dict[str, Any] | N
 
     deals = fetch_all(
         f"""
-        SELECT id, amount, stage, status, created_at, completed_at
+        SELECT id, amount, stage, status, kind, payment_method,
+               created_at, completed_at
         FROM {B2B_WORKSPACE_LEAD_TABLE}
         WHERE customer_id = %s AND company_id = %s AND deleted_at IS NULL
         ORDER BY created_at DESC, id DESC
@@ -1765,6 +1856,25 @@ LEAD_SOURCES = tuple(LeadSource.CHOICES)
 #: which only the ingest path writes.
 LEAD_MANUAL_SOURCES = tuple(LeadSource.MANUAL_CHOICES)
 LEAD_LOST_REASONS = tuple(LeadLostReason.CHOICES)
+LEAD_QUALITIES = tuple(LeadQuality.CHOICES)
+LEAD_KINDS = tuple(LeadKind.CHOICES)
+PAYMENT_METHODS = tuple(PaymentMethod.CHOICES)
+
+#: What ``list_leads(kind=...)`` takes for "both kinds at once" — the CRM's
+#: view of a customer, where a deal is a deal however it was recorded. Its own
+#: word rather than ``None``, which the default already means: leaving the
+#: filter off asks for the funnel, not for everything.
+LEAD_KIND_ANY = "any"
+
+LEAD_KIND_FILTERS = (*LEAD_KINDS, LEAD_KIND_ANY)
+
+
+#: What ``list_leads(quality=...)`` takes for "the ones nobody has judged".
+#: Its own word rather than an empty string, which the view cannot tell from a
+#: filter that was not asked for at all.
+LEAD_QUALITY_UNMARKED = "unmarked"
+
+LEAD_QUALITY_FILTERS = (*LEAD_QUALITIES, LEAD_QUALITY_UNMARKED)
 
 
 def list_leads(
@@ -1772,18 +1882,38 @@ def list_leads(
     *,
     status: str | None = None,
     stage: str | None = None,
+    quality: str | None = None,
+    kind: str | None = LeadKind.LEAD,
 ) -> list[dict[str, Any]]:
+    """The board, and — with ``kind`` — the two other lists cut from the same
+    table.
+
+    ``kind`` defaults to ``LeadKind.LEAD`` rather than to "everything", which
+    is the whole mechanism behind the quick sale: a sale recorded after the
+    fact must never appear on the funnel as something to work, and the way to
+    guarantee that is for the funnel's own query to ask for leads by name.
+    ``LeadKind.QUICK_SALE`` lists the sales instead, and ``LEAD_KIND_ANY``
+    lifts the filter for the readers that count deals rather than work them.
+    """
     sql = (
         f"SELECT * FROM {B2B_WORKSPACE_LEAD_TABLE} "
         f"WHERE company_id = %s AND deleted_at IS NULL"
     )
     params: list[Any] = [company_id]
+    if kind and kind != LEAD_KIND_ANY:
+        sql += " AND kind = %s"
+        params.append(kind)
     if status:
         sql += " AND status = %s"
         params.append(status)
     if stage:
         sql += " AND stage = %s"
         params.append(stage)
+    if quality == LEAD_QUALITY_UNMARKED:
+        sql += " AND quality IS NULL"
+    elif quality:
+        sql += " AND quality = %s"
+        params.append(quality)
     sql += " ORDER BY created_at DESC, id DESC"
     return fetch_all(sql, params)
 
@@ -1933,6 +2063,8 @@ def create_lead(
     due_date=None,
     note: str | None = None,
     claim_for_author: bool = False,
+    kind: str = LeadKind.LEAD,
+    payment_method: str | None = None,
     integration_id: int | None = None,
     external_id: str | None = None,
     external_form_name: str | None = None,
@@ -1948,6 +2080,13 @@ def create_lead(
     is theirs, and ``replace_lead_items`` mirrors it onto the row. A deal priced
     as one round number and a deal broken into lines are both real, and this is
     what lets the sheet accept either without the two disagreeing.
+
+    ``kind=LeadKind.QUICK_SALE`` records a sale that has already happened
+    rather than a deal to be worked: the row is written closed — won, claimed
+    by its author, completed now — so it lands in the CRM card and every sales
+    total the moment it exists, and never on the funnel, which asks for
+    ``kind = 'lead'``. ``payment_method`` belongs to that case and is ignored
+    on an ordinary lead, which has nothing to pay with yet.
 
     The four ``external_*``/``integration_*`` arguments are for a lead nobody
     typed: one that arrived from a connected service (see
@@ -1993,17 +2132,24 @@ def create_lead(
                 address=contact_address,
             ) or customer
 
+    # A quick sale is a sale, not an offer: it is born won and held by whoever
+    # recorded it, because there is no step left for anyone to take on it.
+    # That is also what puts it in the totals — every figure downstream counts
+    # completed/won rows, and this row is one from the moment it is written.
+    is_quick_sale = kind == LeadKind.QUICK_SALE
+    claim_for_author = claim_for_author or is_quick_sale
     claimed_by = author_id if claim_for_author else None
     lead = fetch_one(
         f"""
         INSERT INTO {B2B_WORKSPACE_LEAD_TABLE}
             (company_id, author_id, customer_id, company_name, contact_full_name,
              contact_phone, contact_position, contact_email, contact_address,
-             product_name, quantity, amount, status, stage, source,
-             claimed_by_id, claimed_at, due_date, integration_id, external_id,
+             product_name, quantity, amount, status, stage, source, kind,
+             payment_method, claimed_by_id, claimed_at, completed_at, due_date,
+             integration_id, external_id,
              external_form_name, external_data, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s::jsonb, %s, %s)
+                %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
         ON CONFLICT (company_id, source, external_id)
             WHERE external_id IS NOT NULL DO NOTHING
         RETURNING *
@@ -2012,9 +2158,12 @@ def create_lead(
             company_id, author_id, (customer or {}).get("id"), company_name,
             contact_full_name, contact_phone, contact_position, contact_email,
             contact_address, product_name, quantity, amount or 0,
-            LeadStatus.IN_PROGRESS if claim_for_author else LeadStatus.NEW,
-            LeadStage.NEW, source,
-            claimed_by, now if claim_for_author else None, due_date,
+            LeadStatus.COMPLETED if is_quick_sale
+            else (LeadStatus.IN_PROGRESS if claim_for_author else LeadStatus.NEW),
+            LeadStage.WON if is_quick_sale else LeadStage.NEW, source, kind,
+            payment_method if is_quick_sale else None,
+            claimed_by, now if claim_for_author else None,
+            now if is_quick_sale else None, due_date,
             integration_id, external_id, external_form_name,
             json.dumps(external_data) if external_data is not None else None,
             now, now,
@@ -2034,6 +2183,19 @@ def create_lead(
     add_lead_activity(lead["id"], kind=LeadActivityKind.CREATED, author_id=author_id)
     if claim_for_author:
         add_lead_activity(lead["id"], kind=LeadActivityKind.CLAIMED, author_id=author_id)
+    # The history of a quick sale is one line long, and it should say what
+    # actually happened: the deal was closed won the second it was entered.
+    # Without this the card would claim it was created and never finished.
+    if is_quick_sale:
+        add_lead_activity(
+            lead["id"],
+            kind=LeadActivityKind.COMPLETED,
+            author_id=author_id,
+            # The same "from>to" the funnel's own moves write, so the feed
+            # reads a quick sale exactly as it reads a deal that was walked to
+            # the same place the long way.
+            text=f"{LeadStage.NEW}>{LeadStage.WON}",
+        )
     # The sheet's "Izoh" is the first thing said about the deal, so it lands in
     # the history as a comment rather than in a column nothing ever reads.
     if note and note.strip():
@@ -2110,6 +2272,7 @@ def set_lead_stage(
     employee_id: int,
     lost_reason: str | None = None,
     note: str | None = None,
+    attachment_file_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Moves a lead along the funnel, and closes it if the stage closes it.
 
@@ -2121,6 +2284,13 @@ def set_lead_stage(
     different reason must not keep the old one. ``note`` is the salesperson's
     own words and goes to the history as a comment, where the rest of what was
     said about this deal already lives.
+
+    ``attachment_file_id`` is a document already stored by the view — a signed
+    contract, the offer that went out — which is hung on the stage row this
+    writes. It is linked here rather than by the caller because only this
+    function knows the id of the history row the move produced, and a file
+    left pointing at nothing is bytes the drive cannot show and nobody can
+    reclaim.
     """
     current = get_lead(lead_id, company_id)
     if not current or current.get("stage") == stage:
@@ -2153,7 +2323,7 @@ def set_lead_stage(
         ],
     )
     if lead:
-        add_lead_activity(
+        moved = add_lead_activity(
             lead_id,
             kind=LeadActivityKind.COMPLETED if closing else LeadActivityKind.STAGE,
             author_id=employee_id,
@@ -2161,6 +2331,8 @@ def set_lead_stage(
             # yuborildi" without having to guess what it moved from.
             text=f"{current.get('stage') or LeadStage.NEW}>{stage}",
         )
+        if attachment_file_id and moved:
+            link_file_to_lead_activity(attachment_file_id, moved["id"])
         if note and note.strip():
             add_lead_activity(
                 lead_id, kind=LeadActivityKind.COMMENT, author_id=employee_id,
@@ -2203,6 +2375,45 @@ def set_lead_due_date(
             # The date itself, not a sentence: the app writes the words, in
             # whichever language the reader has the app set to.
             text=due_date.isoformat() if due_date else "",
+        )
+    return lead
+
+
+def set_lead_quality(
+    lead_id: int,
+    company_id: int,
+    *,
+    quality: str | None,
+    employee_id: int,
+) -> dict[str, Any] | None:
+    """Marks the enquiry good or bad, or takes the mark off.
+
+    A ``None`` clears it, and that is a real answer rather than a no-op: a lead
+    written off as noise on the strength of one unanswered call is exactly the
+    kind of judgement that gets revised when the customer rings back, and a
+    mark that could only be changed and never withdrawn would leave the board
+    counting a bad lead that nobody believes in any more.
+
+    Logged like the deadline is. Which leads a company throws away is a number
+    a manager reads, and the row saying who called this one noise is the
+    difference between a statistic and an argument.
+    """
+    now = timezone.now()
+    lead = fetch_one(
+        f"""
+        UPDATE {B2B_WORKSPACE_LEAD_TABLE}
+        SET quality = %s, updated_at = %s
+        WHERE id = %s AND company_id = %s AND deleted_at IS NULL
+        RETURNING *
+        """,
+        [quality, now, lead_id, company_id],
+    )
+    if lead:
+        add_lead_activity(
+            lead_id, kind=LeadActivityKind.QUALITY, author_id=employee_id,
+            # The value, not a sentence — the app writes the words, in
+            # whichever language the reader has the app set to.
+            text=quality or "",
         )
     return lead
 
@@ -2331,14 +2542,22 @@ def recalc_lead_amount(lead_id: int) -> None:
 
 def list_lead_activity(lead_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
     """Newest first, with the author's name joined on so the feed does not need
-    the roster to render."""
+    the roster to render, and the document filed with the move where there is
+    one — a row carries at most one, so this stays a single query rather than a
+    second pass over the page."""
     return fetch_all(
         f"""
         SELECT a.*,
                e.full_name AS author_name,
-               e.photo AS author_photo
+               e.photo AS author_photo,
+               f.id AS attachment_id,
+               f.name AS attachment_name,
+               f.path AS attachment_path,
+               f.size AS attachment_size,
+               f.content_type AS attachment_content_type
         FROM {B2B_WORKSPACE_LEAD_ACTIVITY_TABLE} a
         LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = a.author_id
+        LEFT JOIN {B2B_WORKSPACE_FILE_TABLE} f ON f.lead_activity_id = a.id
         WHERE a.lead_id = %s
         ORDER BY a.created_at DESC, a.id DESC
         LIMIT %s
@@ -2363,6 +2582,20 @@ def add_lead_activity(
         """,
         [lead_id, author_id, kind, text, timezone.now()],
     )
+
+
+def link_file_to_lead_activity(file_id: int, activity_id: int) -> bool:
+    """Points a stored file at the history row it documents.
+
+    The file is written first — the bytes and the quota row have to exist
+    before anything can reference them — and the history row only exists once
+    the move has been made, so the two are joined here rather than at either
+    end.
+    """
+    return execute(
+        f"UPDATE {B2B_WORKSPACE_FILE_TABLE} SET lead_activity_id = %s WHERE id = %s",
+        [activity_id, file_id],
+    ) > 0
 
 
 def add_lead_comment(lead_id: int, *, author_id: int, text: str) -> dict[str, Any] | None:
@@ -2546,6 +2779,7 @@ def create_file(
     trip_id: int | None = None,
     task_id: int | None = None,
     folder_id: int | None = None,
+    lead_activity_id: int | None = None,
     duration_ms: int | None = None,
 ) -> dict[str, Any] | None:
     """Records stored bytes.
@@ -2559,13 +2793,15 @@ def create_file(
         f"""
         INSERT INTO {B2B_WORKSPACE_FILE_TABLE}
             (company_id, author_id, name, path, size, kind, content_type,
-             message_id, trip_id, task_id, folder_id, duration_ms, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             message_id, trip_id, task_id, folder_id, lead_activity_id,
+             duration_ms, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
             company_id, author_id, name, path, size, kind, content_type,
-            message_id, trip_id, task_id, folder_id, duration_ms, timezone.now(),
+            message_id, trip_id, task_id, folder_id, lead_activity_id,
+            duration_ms, timezone.now(),
         ],
     )
 
@@ -2775,6 +3011,613 @@ def set_employees_of_month(
             [company_id, year, month, employee_id, selected_by_id, now],
         )
     return list_employees_of_month(company_id, year, month)
+
+
+# ─── Reports and analytics ──────────────────────────────────────────────────
+#
+# The "Hisobot va analitika" screen: one read of the three things a workspace
+# actually runs on — the sales funnel, the task board, the calendar — over a
+# window the reader picks.
+#
+# Everything here counts in the database. The screen shows six months of a
+# company's work at once, and the alternative is pulling every lead, task and
+# event into the app to add them up — which is both the slowest thing the API
+# could do and quietly wrong, since the list endpoints are paged.
+#
+# Two scopes, decided by the caller rather than here: a manager reads the
+# company, and a plain employee reads their own work. `employee_id` is what
+# narrows it, and each section defines "theirs" the way that section's screens
+# already do — a lead they raised or claimed, a task they wrote or were given,
+# an event they called or were invited to.
+
+#: Windows the screen offers, and the bucket a trend line is drawn in for
+#: each. A year in days would be 365 points on a phone-width chart, and a week
+#: in months would be one.
+REPORT_PERIODS: dict[str, tuple[int, str]] = {
+    "week": (7, "1 day"),
+    "month": (30, "1 day"),
+    "quarter": (90, "1 week"),
+    "year": (365, "1 month"),
+}
+
+DEFAULT_REPORT_PERIOD = "month"
+
+
+def report_window(period: str, *, now: datetime | None = None) -> dict[str, Any]:
+    """The window a period name stands for, resolved against one clock.
+
+    Read once per request and passed down, so the three sections of a report
+    cannot each take their own `NOW()` and disagree about where the month
+    ended by a few milliseconds.
+
+    An unknown period is the default rather than an error: the parameter comes
+    off a query string, and a report is a page to read, not a form to fail.
+    """
+    period = period if period in REPORT_PERIODS else DEFAULT_REPORT_PERIOD
+    days, bucket = REPORT_PERIODS[period]
+    end = now or timezone.now()
+    return {
+        "period": period,
+        "start": end - timedelta(days=days),
+        "end": end,
+        "bucket": bucket,
+    }
+
+
+def _lead_scope(employee_id: int | None) -> tuple[str, list[Any]]:
+    """"Mine" on the sales board: raised by me, or claimed by me.
+
+    Both, not just the claim: a salesperson who logs an enquiry somebody else
+    then takes on has still done the work of logging it, and a report that
+    showed them nothing for it would be read as broken.
+    """
+    if employee_id is None:
+        return "", []
+    return " AND (l.author_id = %s OR l.claimed_by_id = %s)", [employee_id, employee_id]
+
+
+def _task_scope(employee_id: int | None, alias: str = "t") -> tuple[str, list[Any]]:
+    """"Mine" on the task board — written by me, or handed to me. The same
+    pair [list_tasks] filters its own board by."""
+    if employee_id is None:
+        return "", []
+    return (
+        f"""
+          AND ({alias}.author_id = %s
+               OR EXISTS (
+                   SELECT 1 FROM {B2B_TASK_ASSIGNEE_TABLE} a
+                   WHERE a.task_id = {alias}.id AND a.employee_id = %s
+               ))
+        """,
+        [employee_id, employee_id],
+    )
+
+
+def _event_scope(employee_id: int | None) -> tuple[str, list[Any]]:
+    """"Mine" on the calendar — called by me, or I am on it."""
+    if employee_id is None:
+        return "", []
+    return (
+        f"""
+          AND (e.author_id = %s
+               OR EXISTS (
+                   SELECT 1 FROM {B2B_CALENDAR_PARTICIPANT_TABLE} p
+                   WHERE p.event_id = e.id AND p.employee_id = %s
+               ))
+        """,
+        [employee_id, employee_id],
+    )
+
+
+def _money(value: Any) -> str:
+    """Amounts leave this module as strings.
+
+    They are NUMERIC(14,2) in the database and a deal can run to eleven
+    figures in so'm — through a float that is no longer the number the
+    salesperson typed, and the client formats it for display anyway.
+    """
+    return str(value or 0)
+
+
+def sales_report(
+    company_id: int,
+    *,
+    start: datetime,
+    end: datetime,
+    bucket: str,
+    employee_id: int | None = None,
+) -> dict[str, Any]:
+    """The funnel over one window.
+
+    Two clocks are in play and the difference matters: leads are *created*
+    (``created_at``) and deals are *closed* (``completed_at``). Counting both
+    off the same column would report a deal in the month it was first enquired
+    about rather than the month the money came in, which is not the question
+    the screen is asking.
+
+    ``open_*`` are deliberately as-of-now rather than windowed: a pipeline is
+    a present-tense fact — what is still out there to win — and one clipped to
+    last month's dates would answer a question nobody asked.
+
+    Quick sales are counted, unlike on the funnel board itself. They are money
+    the company took, and a sales report that left them out would disagree
+    with the till.
+    """
+    scope, scope_params = _lead_scope(employee_id)
+
+    totals = fetch_one(
+        f"""
+        SELECT
+            COUNT(*) FILTER (
+                WHERE l.created_at >= %s AND l.created_at < %s
+            )                                                    AS created_count,
+            COUNT(*) FILTER (
+                WHERE l.stage = %s
+                  AND l.completed_at >= %s AND l.completed_at < %s
+            )                                                    AS won_count,
+            COUNT(*) FILTER (
+                WHERE l.stage = %s
+                  AND l.completed_at >= %s AND l.completed_at < %s
+            )                                                    AS lost_count,
+            COALESCE(SUM(l.amount) FILTER (
+                WHERE l.stage = %s
+                  AND l.completed_at >= %s AND l.completed_at < %s
+            ), 0)                                                AS won_amount,
+            COUNT(*) FILTER (WHERE l.stage NOT IN (%s, %s))      AS open_count,
+            COALESCE(SUM(l.amount) FILTER (
+                WHERE l.stage NOT IN (%s, %s)
+            ), 0)                                                AS open_amount
+        FROM {B2B_WORKSPACE_LEAD_TABLE} l
+        WHERE l.company_id = %s AND l.deleted_at IS NULL{scope}
+        """,
+        [
+            start, end,
+            LeadStage.WON, start, end,
+            LeadStage.LOST, start, end,
+            LeadStage.WON, start, end,
+            LeadStage.WON, LeadStage.LOST,
+            LeadStage.WON, LeadStage.LOST,
+            company_id, *scope_params,
+        ],
+    ) or {}
+
+    by_stage = fetch_all(
+        f"""
+        SELECT l.stage, COUNT(*) AS count, COALESCE(SUM(l.amount), 0) AS amount
+        FROM {B2B_WORKSPACE_LEAD_TABLE} l
+        WHERE l.company_id = %s AND l.deleted_at IS NULL
+          AND l.stage NOT IN (%s, %s){scope}
+        GROUP BY l.stage
+        """,
+        [company_id, LeadStage.WON, LeadStage.LOST, *scope_params],
+    )
+    # Ordered here rather than in SQL: the funnel's order is `LeadStage.ORDER`
+    # and not alphabetical, and a stage nobody is sitting in still has to
+    # appear — a funnel with a step missing reads as a bug in the funnel.
+    stage_counts = {row["stage"]: row for row in by_stage}
+    stages = [
+        {
+            "stage": stage,
+            "count": int((stage_counts.get(stage) or {}).get("count") or 0),
+            "amount": _money((stage_counts.get(stage) or {}).get("amount")),
+        }
+        for stage in LeadStage.ORDER
+        if stage not in LeadStage.CLOSED
+    ]
+
+    by_source = fetch_all(
+        f"""
+        SELECT
+            l.source,
+            COUNT(*)                                   AS count,
+            COUNT(*) FILTER (WHERE l.stage = %s)       AS won_count,
+            COALESCE(SUM(l.amount) FILTER (WHERE l.stage = %s), 0) AS won_amount
+        FROM {B2B_WORKSPACE_LEAD_TABLE} l
+        WHERE l.company_id = %s AND l.deleted_at IS NULL
+          AND l.created_at >= %s AND l.created_at < %s{scope}
+        GROUP BY l.source
+        ORDER BY count DESC, l.source ASC
+        """,
+        [LeadStage.WON, LeadStage.WON, company_id, start, end, *scope_params],
+    )
+
+    lost_reasons = fetch_all(
+        f"""
+        SELECT COALESCE(l.lost_reason, %s) AS reason, COUNT(*) AS count
+        FROM {B2B_WORKSPACE_LEAD_TABLE} l
+        WHERE l.company_id = %s AND l.deleted_at IS NULL
+          AND l.stage = %s
+          AND l.completed_at >= %s AND l.completed_at < %s{scope}
+        GROUP BY 1
+        ORDER BY count DESC, reason ASC
+        """,
+        [LeadLostReason.OTHER, company_id, LeadStage.LOST, start, end, *scope_params],
+    )
+
+    # Buckets come from `generate_series` rather than from the rows, so a week
+    # in which nothing was sold is a zero on the chart instead of a gap the
+    # line is drawn straight through.
+    trend = fetch_all(
+        f"""
+        SELECT
+            d.bucket,
+            (
+                SELECT COUNT(*) FROM {B2B_WORKSPACE_LEAD_TABLE} l
+                WHERE l.company_id = %s AND l.deleted_at IS NULL
+                  AND l.created_at >= d.bucket
+                  AND l.created_at < d.bucket + %s::interval{scope}
+            ) AS created_count,
+            (
+                SELECT COUNT(*) FROM {B2B_WORKSPACE_LEAD_TABLE} l
+                WHERE l.company_id = %s AND l.deleted_at IS NULL
+                  AND l.stage = %s
+                  AND l.completed_at >= d.bucket
+                  AND l.completed_at < d.bucket + %s::interval{scope}
+            ) AS won_count,
+            (
+                SELECT COALESCE(SUM(l.amount), 0) FROM {B2B_WORKSPACE_LEAD_TABLE} l
+                WHERE l.company_id = %s AND l.deleted_at IS NULL
+                  AND l.stage = %s
+                  AND l.completed_at >= d.bucket
+                  AND l.completed_at < d.bucket + %s::interval{scope}
+            ) AS won_amount
+        FROM generate_series(%s::timestamptz, %s::timestamptz, %s::interval) AS d(bucket)
+        ORDER BY d.bucket
+        """,
+        [
+            company_id, bucket, *scope_params,
+            company_id, LeadStage.WON, bucket, *scope_params,
+            company_id, LeadStage.WON, bucket, *scope_params,
+            start, end, bucket,
+        ],
+    )
+
+    # Never narrowed by `employee_id`: a leaderboard of one person is not a
+    # leaderboard. An employee's own row is theirs to find in it.
+    leaders = fetch_all(
+        f"""
+        SELECT
+            e.id AS employee_id, e.full_name, e.photo,
+            COUNT(*)                            AS won_count,
+            COALESCE(SUM(l.amount), 0)          AS won_amount
+        FROM {B2B_WORKSPACE_LEAD_TABLE} l
+        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = l.claimed_by_id
+        WHERE l.company_id = %s AND l.deleted_at IS NULL
+          AND l.stage = %s
+          AND l.completed_at >= %s AND l.completed_at < %s
+        GROUP BY e.id, e.full_name, e.photo
+        ORDER BY won_amount DESC, won_count DESC, e.full_name ASC
+        LIMIT 5
+        """,
+        [company_id, LeadStage.WON, start, end],
+    )
+
+    won = int(totals.get("won_count") or 0)
+    lost = int(totals.get("lost_count") or 0)
+    closed = won + lost
+
+    return {
+        "created_count": int(totals.get("created_count") or 0),
+        "won_count": won,
+        "lost_count": lost,
+        "open_count": int(totals.get("open_count") or 0),
+        "won_amount": _money(totals.get("won_amount")),
+        "open_amount": _money(totals.get("open_amount")),
+        # Out of the deals that were *decided* in the window, not out of every
+        # lead created in it: a deal still being worked has not failed to
+        # convert, it simply has not been answered yet, and counting it as a
+        # miss makes every healthy pipeline look like a bad month.
+        "conversion_rate": round(won / closed, 4) if closed else 0.0,
+        # Through `Decimal`, not a float: the sum arrives as NUMERIC and an
+        # average taken in binary floating point comes back with a tail of
+        # digits nobody sold.
+        "average_deal": _money(
+            Decimal(str(totals.get("won_amount") or 0)) / won if won else 0
+        ),
+        "by_stage": stages,
+        "by_source": [
+            {
+                "source": row["source"],
+                "count": int(row["count"] or 0),
+                "won_count": int(row["won_count"] or 0),
+                "won_amount": _money(row["won_amount"]),
+            }
+            for row in by_source
+        ],
+        "lost_reasons": [
+            {"reason": row["reason"], "count": int(row["count"] or 0)}
+            for row in lost_reasons
+        ],
+        "trend": [
+            {
+                "date": row["bucket"].isoformat(),
+                "created_count": int(row["created_count"] or 0),
+                "won_count": int(row["won_count"] or 0),
+                "won_amount": _money(row["won_amount"]),
+            }
+            for row in trend
+        ],
+        "leaders": [
+            {
+                "employee_id": int(row["employee_id"]),
+                "full_name": row["full_name"],
+                "photo": row["photo"],
+                "won_count": int(row["won_count"] or 0),
+                "won_amount": _money(row["won_amount"]),
+            }
+            for row in leaders
+        ],
+    }
+
+
+def task_report(
+    company_id: int,
+    *,
+    start: datetime,
+    end: datetime,
+    bucket: str,
+    employee_id: int | None = None,
+) -> dict[str, Any]:
+    """The board over one window.
+
+    ``on_time_rate`` is out of the tasks that had a deadline, for the same
+    reason [monthly_employee_stats] gives: one with no due date was never late
+    by definition, and counting it either way only dilutes the number.
+
+    ``open_count`` / ``overdue_count`` / ``due_today_count`` are as-of-now.
+    What is late is late today, regardless of which window is on screen.
+    """
+    scope, scope_params = _task_scope(employee_id)
+
+    totals = fetch_one(
+        f"""
+        SELECT
+            COUNT(*) FILTER (
+                WHERE t.created_at >= %s AND t.created_at < %s
+            )                                                       AS created_count,
+            COUNT(*) FILTER (
+                WHERE t.status = 'done'
+                  AND t.completed_at >= %s AND t.completed_at < %s
+            )                                                       AS completed_count,
+            COUNT(*) FILTER (
+                WHERE t.status = 'done' AND t.due_date IS NOT NULL
+                  AND t.completed_at >= %s AND t.completed_at < %s
+            )                                                       AS due_count,
+            COUNT(*) FILTER (
+                WHERE t.status = 'done' AND t.due_date IS NOT NULL
+                  AND t.completed_at >= %s AND t.completed_at < %s
+                  AND t.completed_at <= t.due_date
+            )                                                       AS on_time_count,
+            COUNT(*) FILTER (WHERE t.status <> 'done')               AS open_count,
+            COUNT(*) FILTER (
+                WHERE t.status <> 'done' AND t.due_date IS NOT NULL
+                  AND t.due_date::date < CURRENT_DATE
+            )                                                       AS overdue_count,
+            COUNT(*) FILTER (
+                WHERE t.status <> 'done' AND t.due_date IS NOT NULL
+                  AND t.due_date::date = CURRENT_DATE
+            )                                                       AS due_today_count,
+            COUNT(*) FILTER (WHERE t.status = 'todo')                AS todo_count,
+            COUNT(*) FILTER (WHERE t.status = 'in_progress')         AS in_progress_count
+        FROM {B2B_TASK_TABLE} t
+        WHERE t.company_id = %s AND t.deleted_at IS NULL{scope}
+        """,
+        [
+            start, end,
+            start, end,
+            start, end,
+            start, end,
+            company_id, *scope_params,
+        ],
+    ) or {}
+
+    by_priority = fetch_all(
+        f"""
+        SELECT t.priority, COUNT(*) AS count
+        FROM {B2B_TASK_TABLE} t
+        WHERE t.company_id = %s AND t.deleted_at IS NULL
+          AND t.status <> 'done'{scope}
+        GROUP BY t.priority
+        """,
+        [company_id, *scope_params],
+    )
+    priority_counts = {row["priority"]: int(row["count"] or 0) for row in by_priority}
+
+    trend = fetch_all(
+        f"""
+        SELECT
+            d.bucket,
+            (
+                SELECT COUNT(*) FROM {B2B_TASK_TABLE} t
+                WHERE t.company_id = %s AND t.deleted_at IS NULL
+                  AND t.created_at >= d.bucket
+                  AND t.created_at < d.bucket + %s::interval{scope}
+            ) AS created_count,
+            (
+                SELECT COUNT(*) FROM {B2B_TASK_TABLE} t
+                WHERE t.company_id = %s AND t.deleted_at IS NULL
+                  AND t.status = 'done'
+                  AND t.completed_at >= d.bucket
+                  AND t.completed_at < d.bucket + %s::interval{scope}
+            ) AS completed_count
+        FROM generate_series(%s::timestamptz, %s::timestamptz, %s::interval) AS d(bucket)
+        ORDER BY d.bucket
+        """,
+        [
+            company_id, bucket, *scope_params,
+            company_id, bucket, *scope_params,
+            start, end, bucket,
+        ],
+    )
+
+    # Counted over the tasks people were *given*, like the employee card and
+    # the month's stats — a manager who raises everybody's work would
+    # otherwise top a chart of work done.
+    leaders = fetch_all(
+        f"""
+        SELECT
+            e.id AS employee_id, e.full_name, e.photo,
+            COUNT(*)                                              AS completed_count,
+            COUNT(*) FILTER (WHERE t.due_date IS NOT NULL)        AS due_count,
+            COUNT(*) FILTER (
+                WHERE t.due_date IS NOT NULL AND t.completed_at <= t.due_date
+            )                                                     AS on_time_count
+        FROM {B2B_TASK_ASSIGNEE_TABLE} ta
+        JOIN {B2B_TASK_TABLE} t ON t.id = ta.task_id
+        JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = ta.employee_id
+        WHERE t.company_id = %s AND t.deleted_at IS NULL
+          AND t.status = 'done'
+          AND t.completed_at >= %s AND t.completed_at < %s
+        GROUP BY e.id, e.full_name, e.photo
+        ORDER BY completed_count DESC, on_time_count DESC, e.full_name ASC
+        LIMIT 5
+        """,
+        [company_id, start, end],
+    )
+
+    due = int(totals.get("due_count") or 0)
+    on_time = int(totals.get("on_time_count") or 0)
+
+    return {
+        "created_count": int(totals.get("created_count") or 0),
+        "completed_count": int(totals.get("completed_count") or 0),
+        "open_count": int(totals.get("open_count") or 0),
+        "todo_count": int(totals.get("todo_count") or 0),
+        "in_progress_count": int(totals.get("in_progress_count") or 0),
+        "overdue_count": int(totals.get("overdue_count") or 0),
+        "due_today_count": int(totals.get("due_today_count") or 0),
+        "on_time_rate": round(on_time / due, 4) if due else 0.0,
+        "by_priority": [
+            {"priority": priority, "count": priority_counts.get(priority, 0)}
+            for priority in TASK_PRIORITIES
+        ],
+        "trend": [
+            {
+                "date": row["bucket"].isoformat(),
+                "created_count": int(row["created_count"] or 0),
+                "completed_count": int(row["completed_count"] or 0),
+            }
+            for row in trend
+        ],
+        "leaders": [
+            {
+                "employee_id": int(row["employee_id"]),
+                "full_name": row["full_name"],
+                "photo": row["photo"],
+                "completed_count": int(row["completed_count"] or 0),
+                "on_time_rate": (
+                    round(int(row["on_time_count"] or 0) / int(row["due_count"]), 4)
+                    if int(row["due_count"] or 0)
+                    else 0.0
+                ),
+            }
+            for row in leaders
+        ],
+    }
+
+
+def calendar_report(
+    company_id: int,
+    *,
+    start: datetime,
+    end: datetime,
+    bucket: str,
+    employee_id: int | None = None,
+) -> dict[str, Any]:
+    """The calendar over one window.
+
+    Counted by when an event *starts*, which is the only reading of "meetings
+    in October" anybody means. All-day entries are counted like any other but
+    contribute no hours: a day blocked out for a trip is not eight hours of
+    meetings, and letting it claim twenty-four would swamp every real figure
+    beside it.
+    """
+    scope, scope_params = _event_scope(employee_id)
+
+    totals = fetch_one(
+        f"""
+        SELECT
+            COUNT(*)                                       AS total_count,
+            COUNT(*) FILTER (WHERE e.all_day)              AS all_day_count,
+            COALESCE(SUM(
+                EXTRACT(EPOCH FROM (e.ends_at - e.starts_at)) / 3600.0
+            ) FILTER (WHERE NOT e.all_day), 0)             AS hours
+        FROM {B2B_CALENDAR_EVENT_TABLE} e
+        WHERE e.company_id = %s
+          AND e.starts_at >= %s AND e.starts_at < %s{scope}
+        """,
+        [company_id, start, end, *scope_params],
+    ) or {}
+
+    upcoming = fetch_one(
+        f"""
+        SELECT COUNT(*) AS count
+        FROM {B2B_CALENDAR_EVENT_TABLE} e
+        WHERE e.company_id = %s AND e.starts_at >= %s{scope}
+        """,
+        [company_id, end, *scope_params],
+    ) or {}
+
+    by_type = fetch_all(
+        f"""
+        SELECT e.event_type, COUNT(*) AS count
+        FROM {B2B_CALENDAR_EVENT_TABLE} e
+        WHERE e.company_id = %s
+          AND e.starts_at >= %s AND e.starts_at < %s{scope}
+        GROUP BY e.event_type
+        """,
+        [company_id, start, end, *scope_params],
+    )
+    type_counts = {row["event_type"]: int(row["count"] or 0) for row in by_type}
+
+    # ISODOW, so the week reads Monday-first the way the calendar screen draws
+    # it, rather than Postgres's Sunday-first `DOW`.
+    by_weekday = fetch_all(
+        f"""
+        SELECT EXTRACT(ISODOW FROM e.starts_at)::int AS weekday, COUNT(*) AS count
+        FROM {B2B_CALENDAR_EVENT_TABLE} e
+        WHERE e.company_id = %s
+          AND e.starts_at >= %s AND e.starts_at < %s{scope}
+        GROUP BY 1
+        """,
+        [company_id, start, end, *scope_params],
+    )
+    weekday_counts = {int(row["weekday"]): int(row["count"] or 0) for row in by_weekday}
+
+    trend = fetch_all(
+        f"""
+        SELECT
+            d.bucket,
+            (
+                SELECT COUNT(*) FROM {B2B_CALENDAR_EVENT_TABLE} e
+                WHERE e.company_id = %s
+                  AND e.starts_at >= d.bucket
+                  AND e.starts_at < d.bucket + %s::interval{scope}
+            ) AS count
+        FROM generate_series(%s::timestamptz, %s::timestamptz, %s::interval) AS d(bucket)
+        ORDER BY d.bucket
+        """,
+        [company_id, bucket, *scope_params, start, end, bucket],
+    )
+
+    return {
+        "total_count": int(totals.get("total_count") or 0),
+        "all_day_count": int(totals.get("all_day_count") or 0),
+        "upcoming_count": int(upcoming.get("count") or 0),
+        "hours": round(float(totals.get("hours") or 0), 1),
+        "by_type": [
+            {"event_type": event_type, "count": type_counts.get(event_type, 0)}
+            for event_type in EVENT_TYPES
+        ],
+        "by_weekday": [
+            {"weekday": weekday, "count": weekday_counts.get(weekday, 0)}
+            for weekday in range(1, 8)
+        ],
+        "trend": [
+            {"date": row["bucket"].isoformat(), "count": int(row["count"] or 0)}
+            for row in trend
+        ],
+    }
 
 
 # ─── Attendance ─────────────────────────────────────────────────────────────

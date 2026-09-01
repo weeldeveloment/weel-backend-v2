@@ -24,10 +24,16 @@ logger = logging.getLogger(__name__)
 
 _KEY_PREFIX = "jwt:revoked:"
 
-# Fallback TTL when a token carries no usable `exp`. Longer than the longest
-# refresh-token lifetime so a malformed token can never outlive its denylist
-# entry.
-_MAX_TTL_SECONDS = 60 * 60 * 24 * 31
+# Ceiling on how long an entry is kept, and the fallback when a token carries
+# no usable `exp`.
+#
+# Has to stay above the longest refresh-token lifetime any code path issues,
+# because it is a clamp and not only a fallback: an entry that expires while
+# the token it revokes is still valid brings that token back to life. At 31
+# days it sat *below* the year the b2b mobile sessions are issued for
+# (`WORKSPACE_REFRESH_LIFETIME`), so a token revoked by a logout — or the one
+# retired by a rotation — would have started working again a month later.
+_MAX_TTL_SECONDS = 60 * 60 * 24 * 400
 
 
 def _cache_key(jti: str) -> str:

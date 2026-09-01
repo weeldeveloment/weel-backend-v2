@@ -297,7 +297,7 @@ class Command(BaseCommand):
             CREATE TABLE IF NOT EXISTS b2b_task (
                 id BIGSERIAL PRIMARY KEY,
                 company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
-                title VARCHAR(300) NOT NULL,
+                title TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 status VARCHAR(20) NOT NULL DEFAULT 'todo',
                 priority VARCHAR(20) NOT NULL DEFAULT 'medium',
@@ -313,6 +313,10 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_task_company_due_idx "
             "ON b2b_task (company_id, due_date);"
         )
+        # Titles were VARCHAR(300) until the mobile sheet started deriving one
+        # from the first line of the description: a long opening paragraph is a
+        # legitimate title, and the cap rejected the whole draft.
+        cursor.execute("ALTER TABLE b2b_task ALTER COLUMN title TYPE TEXT;")
         self.stdout.write("  Created b2b_task")
 
         cursor.execute("""
@@ -335,7 +339,7 @@ class Command(BaseCommand):
             CREATE TABLE IF NOT EXISTS b2b_task_subtask (
                 id BIGSERIAL PRIMARY KEY,
                 task_id BIGINT NOT NULL REFERENCES b2b_task(id) ON DELETE CASCADE,
-                title VARCHAR(300) NOT NULL,
+                title TEXT NOT NULL,
                 is_done BOOLEAN NOT NULL DEFAULT FALSE,
                 position INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -346,6 +350,7 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_task_subtask_task_idx "
             "ON b2b_task_subtask (task_id, position);"
         )
+        cursor.execute("ALTER TABLE b2b_task_subtask ALTER COLUMN title TYPE TEXT;")
         self.stdout.write("  Created b2b_task_subtask")
 
         cursor.execute("""
@@ -374,7 +379,7 @@ class Command(BaseCommand):
                 id BIGSERIAL PRIMARY KEY,
                 company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
                 task_id BIGINT REFERENCES b2b_task(id) ON DELETE SET NULL,
-                task_title VARCHAR(300) NOT NULL DEFAULT '',
+                task_title TEXT NOT NULL DEFAULT '',
                 author_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
                 kind VARCHAR(20) NOT NULL DEFAULT 'comment',
                 text TEXT NOT NULL DEFAULT '',
@@ -389,6 +394,8 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_task_activity_company_idx "
             "ON b2b_task_activity (company_id, created_at DESC, id DESC);"
         )
+        # Mirrors b2b_task.title, which it snapshots.
+        cursor.execute("ALTER TABLE b2b_task_activity ALTER COLUMN task_title TYPE TEXT;")
         self.stdout.write("  Created b2b_task_activity")
 
         cursor.execute("""
@@ -727,8 +734,33 @@ class Command(BaseCommand):
             # much rope is left, and go red when there is none.
             "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
             "due_date TIMESTAMPTZ;",
+            # Was this a real customer, or noise — see `LeadQuality`. Nullable
+            # and with no default: unmarked is the state almost every lead is
+            # in, and a default would put an opinion on every row nobody has
+            # looked at yet.
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "quality VARCHAR(20);",
+            # A lead being worked, or a sale already made — see `LeadKind`.
+            # Defaulting to 'lead' is what makes this column invisible to
+            # every row that existed before it: the funnel keeps showing
+            # exactly what it showed yesterday, and only the rows the quick
+            # sale sheet writes carry the other value.
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "kind VARCHAR(20) NOT NULL DEFAULT 'lead';",
+            # How that sale was paid for. Nullable because only a quick sale
+            # has one — a lead is an intention and has nothing to pay with
+            # yet.
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "payment_method VARCHAR(30);",
         ):
             cursor.execute(statement)
+        # The board asks for `kind = 'lead'` on every load and the quick-sale
+        # list for the other value, so the column belongs in the index the two
+        # of them already share.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_lead_company_kind_idx "
+            "ON b2b_workspace_lead (company_id, kind, status);"
+        )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS b2b_workspace_lead_customer_idx "
             "ON b2b_workspace_lead (customer_id) WHERE customer_id IS NOT NULL;"
@@ -1041,6 +1073,22 @@ class Command(BaseCommand):
         cursor.execute(
             "ALTER TABLE b2b_workspace_file ADD COLUMN IF NOT EXISTS "
             "task_id BIGINT REFERENCES b2b_task(id) ON DELETE CASCADE;"
+        )
+        # A document filed with a move along the sales funnel — the signed
+        # contract that made the deal "Yutdik", the offer that went out at
+        # "Taklif yuborildi". It hangs off the history row rather than off the
+        # lead, so the feed can show it beside the event it belongs to, and it
+        # cascades for the same reason a chat attachment does: deleting the
+        # lead takes its history with it, and the bytes have to go too.
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_file ADD COLUMN IF NOT EXISTS "
+            "lead_activity_id BIGINT "
+            "REFERENCES b2b_workspace_lead_activity(id) ON DELETE CASCADE;"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_file_lead_activity_idx "
+            "ON b2b_workspace_file (lead_activity_id) "
+            "WHERE lead_activity_id IS NOT NULL;"
         )
         # The quota reads SUM(size) per company on every upload, and the
         # drive list filters to kind='file'. Both go through this.

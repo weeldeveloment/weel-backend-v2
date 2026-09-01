@@ -20,8 +20,10 @@ if not settings.configured:
 from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework.test import APIRequestFactory
 
+from shared import token_denylist
 from apps.b2b.workspace.tokens import (
     WORKSPACE_ACCOUNT_TYPE,
+    WORKSPACE_REFRESH_LIFETIME,
     WORKSPACE_USER_TYPE,
     create_account_tokens,
     create_workspace_tokens,
@@ -89,3 +91,58 @@ def test_the_endpoint_refuses_a_workspace_token_rather_than_upgrading_it():
     )
 
     assert response.status_code == 401
+
+
+def _days_to_expiry(raw: str) -> float:
+    payload = CustomRefreshToken(token=raw).payload
+    issued = payload[TokenMetadata.TOKEN_CREATED_TIME_CLAIM]
+    expires = payload[TokenMetadata.TOKEN_EXPIRE_TIME_CLAIM]
+    return (expires - issued) / 86400
+
+
+@pytest.mark.parametrize(
+    "mint",
+    [
+        pytest.param(lambda: create_workspace_tokens(EMPLOYEE), id="workspace"),
+        pytest.param(lambda: create_account_tokens(ACCOUNT), id="account"),
+        pytest.param(
+            lambda: rotate_workspace_tokens(
+                create_workspace_tokens(EMPLOYEE)["refresh"]
+            ),
+            id="workspace-rotated",
+        ),
+        pytest.param(
+            lambda: rotate_account_tokens(create_account_tokens(ACCOUNT)["refresh"]),
+            id="account-rotated",
+        ),
+    ],
+)
+def test_mobile_refresh_tokens_last_a_year(mint):
+    """Both sessions, minted and rotated, are issued for a year.
+
+    Signing in on a phone is meant to be something a person does once. Every
+    shorter window ended with somebody who had been away pushed back through
+    OTP for no reason they could see.
+
+    Rotation is checked alongside minting because a rotated token that
+    inherited the project default would move the wall rather than remove it:
+    the session would still die a week after whichever refresh last happened,
+    which is the same bug one refresh further along.
+    """
+    assert _days_to_expiry(mint()["refresh"]) == pytest.approx(365, abs=0.01)
+
+
+def test_a_revoked_token_stays_revoked_for_its_whole_life():
+    """The denylist entry has to outlive the token it revokes.
+
+    `_remaining_seconds` clamps to `_MAX_TTL_SECONDS`, so that ceiling is not
+    only a fallback for a token with no `exp` — it caps every entry. Left at
+    31 days under a year-long token, a logout would have held for a month and
+    then quietly stopped holding.
+    """
+    raw = create_workspace_tokens(EMPLOYEE)["refresh"]
+    token = CustomRefreshToken(token=raw)
+
+    assert token_denylist._remaining_seconds(token.payload) == pytest.approx(
+        WORKSPACE_REFRESH_LIFETIME.total_seconds(), abs=60
+    )

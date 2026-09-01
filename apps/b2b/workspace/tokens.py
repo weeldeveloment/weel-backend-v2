@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
@@ -22,6 +24,41 @@ WORKSPACE_USER_TYPE = "b2b_employee"
 # for a workspace token by an endpoint that expects an employee id.
 WORKSPACE_ACCOUNT_TYPE = "b2b_account"
 
+
+# How long a phone may go untouched and still come back to a live session.
+#
+# A year, deliberately, and not the project-wide `REFRESH_TOKEN_LIFETIME` of a
+# week: signing in on a phone is meant to be something a person does once.
+# Every shorter window this had — seven days, then thirty — ended the same
+# way, with somebody who had been away pushed back through phone and OTP for
+# no reason they could see, and the app was the only thing that knew why.
+#
+# What keeps that from being a year-long credential handed out and forgotten:
+#
+#   * rotation. Every refresh mints a new token and revokes the one it
+#     replaces (`rotate_workspace_tokens` below), so what a phone holds is
+#     never more than one refresh old, and a token lifted off a device stops
+#     working the moment the real phone next refreshes.
+#   * revocation. Logging out, on this phone or from another, denylists the
+#     token for the rest of its life — see `apps/shared/token_denylist.py`,
+#     whose entries now outlive this window rather than expiring under it.
+#   * the app lock. A year-long session is not a year of anybody who picks up
+#     the phone being able to read it; that is the PIN, and it is a separate
+#     thing.
+#
+# Only these two sessions are lengthened. The dashboard and admin tokens keep
+# the short window, because a browser on a shared machine is not a phone.
+WORKSPACE_REFRESH_LIFETIME = timedelta(
+    days=int((os.getenv("B2B_WORKSPACE_REFRESH_DAYS") or "365").strip() or "365")
+)
+
+
+class WorkspaceRefreshToken(CustomRefreshToken):
+    """A [CustomRefreshToken] carrying the mobile session window above."""
+
+    lifetime = WORKSPACE_REFRESH_LIFETIME
+
+
 _CLAIMS = (
     TokenMetadata.TOKEN_SUBJECT,
     TokenMetadata.TOKEN_ISSUER,
@@ -32,7 +69,7 @@ _CLAIMS = (
 
 
 def create_workspace_tokens(employee: dict[str, Any]) -> dict[str, str]:
-    refresh = CustomRefreshToken()
+    refresh = WorkspaceRefreshToken()
     access = AccessToken()
 
     claims = {
@@ -54,7 +91,7 @@ def create_workspace_tokens(employee: dict[str, Any]) -> dict[str, str]:
 
 def create_account_tokens(account: dict[str, Any]) -> dict[str, str]:
     """A session that knows who somebody is and nothing about where they work."""
-    refresh = CustomRefreshToken()
+    refresh = WorkspaceRefreshToken()
     access = AccessToken()
 
     claims = {
@@ -80,7 +117,7 @@ def rotate_workspace_tokens(refresh_token: str) -> dict[str, str]:
 
     token_denylist.assert_not_revoked(token.payload)
 
-    new_refresh = CustomRefreshToken()
+    new_refresh = WorkspaceRefreshToken()
     new_access = AccessToken()
     for claim in _CLAIMS:
         if claim in token:
@@ -113,7 +150,7 @@ def rotate_account_tokens(refresh_token: str) -> dict[str, str]:
 
     token_denylist.assert_not_revoked(token.payload)
 
-    new_refresh = CustomRefreshToken()
+    new_refresh = WorkspaceRefreshToken()
     new_access = AccessToken()
     for claim in _CLAIMS:
         if claim in token:

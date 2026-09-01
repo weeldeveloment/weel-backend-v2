@@ -23,9 +23,16 @@ from django.conf import settings
 if not settings.configured:
     settings.configure(USE_TZ=True, TIME_ZONE="UTC", REST_FRAMEWORK={})
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from apps.b2b.models import LeadStage, LeadStatus
+from apps.b2b.models import (
+    LeadKind,
+    LeadQuality,
+    LeadStage,
+    LeadStatus,
+    PaymentMethod,
+)
 from apps.b2b.workspace.authentication import WorkspaceUser
 from apps.b2b.workspace.views import (
     WorkspaceCustomerSearchView,
@@ -34,6 +41,7 @@ from apps.b2b.workspace.views import (
     WorkspaceLeadDetailView,
     WorkspaceLeadDueDateView,
     WorkspaceLeadListCreateView,
+    WorkspaceLeadQualityView,
     WorkspaceLeadStageView,
     WorkspaceLeadTasksView,
 )
@@ -88,6 +96,7 @@ def _lead(**overrides):
         "completed_at": None,
         "created_at": None,
         "due_date": None,
+        "quality": None,
     }
     lead.update(overrides)
     return lead
@@ -227,6 +236,111 @@ def test_the_owner_moves_the_stage():
     # rule lives — the view must not set the status itself.
     set_stage.assert_called_once()
 
+
+
+
+def test_a_move_can_carry_a_document():
+    """The signed contract behind "Yutdik" goes with the move.
+
+    Stored through the same door as every other upload — the quota is one SUM
+    over that table — and handed to the repository as an id, because only the
+    repository knows which history row the move wrote and that is what the
+    file has to hang off.
+    """
+    contract = SimpleUploadedFile("shartnoma.pdf", b"%PDF-1.4 ...", content_type="application/pdf")
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.store_upload",
+            return_value=({"id": 91, "name": "shartnoma.pdf"}, None),
+        ) as upload,
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_stage",
+            return_value=_lead(stage=LeadStage.WON, status=LeadStatus.COMPLETED),
+        ) as set_stage,
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post(
+                "/leads/7/stage/",
+                {"stage": LeadStage.WON, "file": contract},
+                format="multipart",
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    assert upload.call_args.kwargs["kind"] == "lead"
+    assert set_stage.call_args.kwargs["attachment_file_id"] == 91
+
+
+def test_a_move_that_goes_nowhere_stores_nothing():
+    """A lead posted to the stage it is already on writes no history row, so a
+    file sent with it would be bytes against the quota that no screen can show
+    and nobody can delete."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.store_upload") as upload,
+        patch("apps.b2b.workspace.views.repo.set_lead_stage") as set_stage,
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post(
+                "/leads/7/stage/",
+                {
+                    "stage": LeadStage.PROPOSAL,  # where _lead() already is
+                    "file": SimpleUploadedFile("x.pdf", b"..."),
+                },
+                format="multipart",
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    upload.assert_not_called()
+    set_stage.assert_not_called()
+
+
+def test_a_document_filed_with_a_move_comes_back_on_the_history_row():
+    """The feed shows the file beside the event it belongs to, so the row
+    carries it — nested, like a chat attachment, not flattened."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.repo.list_lead_items", return_value=[]),
+        patch(
+            "apps.b2b.workspace.views.repo.list_lead_activity",
+            return_value=[
+                {
+                    "id": 4,
+                    "kind": "stage",
+                    "text": "proposal>won",
+                    "attachment_id": 91,
+                    "attachment_name": "shartnoma.pdf",
+                    "attachment_path": "b2b/workspace/55/lead/shartnoma.pdf",
+                    "attachment_size": 2048,
+                    "attachment_content_type": "application/pdf",
+                },
+                {"id": 3, "kind": "comment", "text": "Qo’ng’iroq qildim"},
+            ],
+        ),
+        patch("apps.b2b.workspace.views.repo.list_lead_tasks", return_value=[]),
+    ):
+        response = _call(
+            WorkspaceLeadDetailView, factory.get("/leads/7/"), OWNER, lead_id=7
+        )
+
+    assert response.status_code == 200
+    moved, commented = response.data["activity"]
+    assert moved["attachment"]["name"] == "shartnoma.pdf"
+    assert moved["attachment"]["size"] == 2048
+    assert moved["attachment"]["url"]
+    # The flat columns the join produced do not leak into the payload.
+    assert "attachment_path" not in moved
+    # And a row with nothing filed against it says so rather than leaving the
+    # key out, which a client would have to special-case.
+    assert commented["attachment"] is None
 
 def test_a_bystander_cannot_move_somebody_elses_lead():
     with patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()):
@@ -748,3 +862,321 @@ def test_anyone_may_search_the_directory_and_the_query_reaches_the_repository():
     assert response.status_code == 200
     assert search.call_args.kwargs["query"] == "90 123"
     assert response.data["results"][0]["deal_count"] == 2
+
+
+# ─── Was the enquiry worth working ────────────────────────────────────────────
+
+def test_the_owner_marks_a_lead_good():
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_quality",
+            return_value=_lead(quality=LeadQuality.GOOD),
+        ) as set_quality,
+    ):
+        response = _call(
+            WorkspaceLeadQualityView,
+            factory.post(
+                "/leads/7/quality/", {"quality": LeadQuality.GOOD}, format="json"
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    assert response.data["quality"] == LeadQuality.GOOD
+    assert set_quality.call_args.kwargs["quality"] == LeadQuality.GOOD
+
+
+def test_a_manager_may_mark_a_lead_over_the_owners_head():
+    """A lead written off as noise too quickly is the manager's to correct."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_quality",
+            return_value=_lead(quality=LeadQuality.BAD),
+        ),
+    ):
+        response = _call(
+            WorkspaceLeadQualityView,
+            factory.post(
+                "/leads/7/quality/", {"quality": LeadQuality.BAD}, format="json"
+            ),
+            MANAGER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+
+
+def test_a_bystander_cannot_mark_a_lead():
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()):
+        response = _call(
+            WorkspaceLeadQualityView,
+            factory.post(
+                "/leads/7/quality/", {"quality": LeadQuality.BAD}, format="json"
+            ),
+            BYSTANDER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 403
+
+
+def test_a_null_quality_takes_the_mark_off():
+    """Sayable, and not what an omitted field does — see the deadline above."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_quality", return_value=_lead()
+        ) as set_quality,
+    ):
+        response = _call(
+            WorkspaceLeadQualityView,
+            factory.post("/leads/7/quality/", {"quality": None}, format="json"),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    assert set_quality.call_args.kwargs["quality"] is None
+
+
+def test_a_quality_has_to_be_one_of_the_two():
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()):
+        response = _call(
+            WorkspaceLeadQualityView,
+            factory.post("/leads/7/quality/", {"quality": "maybe"}, format="json"),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 400
+
+
+def test_a_bare_post_does_not_clear_the_mark():
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()):
+        response = _call(
+            WorkspaceLeadQualityView,
+            factory.post("/leads/7/quality/", {}, format="json"),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 400
+
+
+def test_a_closed_lead_can_still_be_marked():
+    """Unlike the deadline, deliberately.
+
+    "That enquiry was never real" is a judgement usually made about a deal that
+    has already been lost. Refusing it on a closed lead would put the mark out
+    of reach on exactly the leads it exists for.
+    """
+    closed = _lead(status=LeadStatus.COMPLETED, stage=LeadStage.LOST)
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_quality",
+            return_value=_lead(quality=LeadQuality.BAD),
+        ),
+    ):
+        response = _call(
+            WorkspaceLeadQualityView,
+            factory.post(
+                "/leads/7/quality/", {"quality": LeadQuality.BAD}, format="json"
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+
+
+def test_the_board_can_be_narrowed_to_one_quality():
+    with (
+        patch("apps.b2b.workspace.views.repo.list_leads", return_value=[]) as listed,
+        patch("apps.b2b.workspace.views.repo.count_lead_items", return_value={}),
+        patch("apps.b2b.workspace.views.repo.count_lead_tasks", return_value={}),
+    ):
+        response = _call(
+            WorkspaceLeadListCreateView,
+            factory.get("/leads/", {"quality": LeadQuality.BAD}),
+            MANAGER,
+        )
+
+    assert response.status_code == 200
+    assert listed.call_args.kwargs["quality"] == LeadQuality.BAD
+
+
+def test_the_unmarked_filter_asks_for_a_null_rather_than_a_value():
+    """`unmarked` is not a quality, so it cannot be a parameter.
+
+    Sent as one it would look for the literal string in a column that holds
+    `good`, `bad` or nothing, and quietly answer with an empty board — which is
+    the one wrong answer a filter can give that nobody reports as a bug.
+    """
+    from apps.b2b.workspace import repository
+
+    with patch.object(repository, "fetch_all", return_value=[]) as fetched:
+        repository.list_leads(COMPANY_ID, quality=repository.LEAD_QUALITY_UNMARKED)
+
+    sql, params = fetched.call_args.args
+    assert "quality IS NULL" in sql
+    # The company and the kind the funnel always asks for, and nothing else:
+    # `unmarked` itself must not have become a bound parameter.
+    assert params == [COMPANY_ID, LeadKind.LEAD]
+    assert repository.LEAD_QUALITY_UNMARKED not in params
+
+
+# ─── Tezkor savdo — a sale recorded after the fact ────────────────────────────
+
+def test_a_quick_sale_is_written_closed_and_kept_off_the_board():
+    """The point of the second entry on the "+" menu.
+
+    A sale that has already happened has no step left for anyone to take, so
+    it is born won, held by whoever recorded it and completed — which is what
+    puts it in the CRM card and every sales total without it ever appearing on
+    the funnel as work.
+    """
+    from apps.b2b.workspace import repository
+
+    inserted = {}
+
+    def _capture(sql, params):
+        if "INSERT INTO b2b_workspace_lead" in sql:
+            inserted["sql"], inserted["params"] = sql, params
+            return {"id": 91}
+        return None
+
+    with (
+        patch.object(repository, "fetch_one", side_effect=_capture),
+        patch.object(repository, "upsert_customer", return_value=None),
+        patch.object(repository, "add_lead_activity", return_value={"id": 1}),
+        patch.object(repository, "get_lead", return_value=_lead()),
+    ):
+        repository.create_lead(
+            company_id=COMPANY_ID,
+            author_id=MANAGER_ID,
+            company_name="GlobalTrade Co",
+            contact_full_name="Aziz Karimov",
+            contact_phone="+998901234567",
+            product_name="CRM tizimi",
+            quantity=1,
+            amount=22_000_000,
+            kind=LeadKind.QUICK_SALE,
+            payment_method=PaymentMethod.CARD,
+        )
+
+    params = inserted["params"]
+    assert LeadStatus.COMPLETED in params
+    assert LeadStage.WON in params
+    assert LeadKind.QUICK_SALE in params
+    assert PaymentMethod.CARD in params
+    # Held by its author whatever the caller said about assignment: there is
+    # nothing on it for a colleague to claim.
+    assert MANAGER_ID in params
+
+
+def test_a_quick_sale_ignores_assign_to_me_and_tells_nobody():
+    """A lead posted to the board pushes the whole company. A sale that is
+    already done is news to no one, so the notification path stays shut even
+    when the sheet asked for the lead to be posted."""
+    with (
+        patch(
+            "apps.b2b.workspace.views.repo.create_lead",
+            return_value=_lead(kind=LeadKind.QUICK_SALE),
+        ) as create,
+        patch("apps.b2b.workspace.views.repo.list_company_recipients") as recipients,
+    ):
+        response = _call(
+            WorkspaceLeadListCreateView,
+            factory.post(
+                "/leads/",
+                {
+                    "contact_full_name": "Aziz Karimov",
+                    "contact_phone": "+998 90 123 45 67",
+                    "amount": "22000000",
+                    "kind": LeadKind.QUICK_SALE,
+                    "payment_method": PaymentMethod.CASH,
+                    "assign_to_me": False,
+                },
+                format="json",
+            ),
+            MANAGER,
+        )
+
+    assert response.status_code == 201
+    assert create.call_args.kwargs["kind"] == LeadKind.QUICK_SALE
+    assert create.call_args.kwargs["payment_method"] == PaymentMethod.CASH
+    assert create.call_args.kwargs["claim_for_author"] is True
+    recipients.assert_not_called()
+
+
+def test_a_quick_sale_must_say_how_it_was_paid_for():
+    """The one figure a sales report cannot reconstruct afterwards."""
+    with patch("apps.b2b.workspace.views.repo.create_lead") as create:
+        response = _call(
+            WorkspaceLeadListCreateView,
+            factory.post(
+                "/leads/",
+                {
+                    "contact_full_name": "Aziz Karimov",
+                    "contact_phone": "+998901234567",
+                    "kind": LeadKind.QUICK_SALE,
+                },
+                format="json",
+            ),
+            MANAGER,
+        )
+
+    assert response.status_code == 400
+    assert "payment_method" in str(response.data)
+    create.assert_not_called()
+
+
+def test_an_ordinary_lead_cannot_carry_a_payment_method():
+    """A lead is an intention and has nothing to pay with yet — a sheet that
+    sent one anyway must not leave a paid-looking row on the board."""
+    with patch(
+        "apps.b2b.workspace.views.repo.create_lead", return_value=_lead()
+    ) as create:
+        response = _call(
+            WorkspaceLeadListCreateView,
+            factory.post(
+                "/leads/",
+                {
+                    "contact_full_name": "Aziz Karimov",
+                    "contact_phone": "+998901234567",
+                    "payment_method": PaymentMethod.CASH,
+                },
+                format="json",
+            ),
+            MANAGER,
+        )
+
+    assert response.status_code == 201
+    assert create.call_args.kwargs["kind"] == LeadKind.LEAD
+    assert create.call_args.kwargs["payment_method"] is None
+
+
+def test_the_board_asks_for_leads_and_the_quick_sale_list_for_sales():
+    """Two lists cut from one table. The funnel never passes `kind`, so the
+    default is the guarantee — a quick sale cannot reach the board through a
+    caller that simply forgot about it."""
+    from apps.b2b.workspace import repository
+
+    with patch.object(repository, "fetch_all", return_value=[]) as fetched:
+        repository.list_leads(COMPANY_ID)
+    assert fetched.call_args.args[1] == [COMPANY_ID, LeadKind.LEAD]
+
+    with patch.object(repository, "fetch_all", return_value=[]) as fetched:
+        repository.list_leads(COMPANY_ID, kind=LeadKind.QUICK_SALE)
+    assert fetched.call_args.args[1] == [COMPANY_ID, LeadKind.QUICK_SALE]
+
+    # And the reader that counts deals rather than working them gets both.
+    with patch.object(repository, "fetch_all", return_value=[]) as fetched:
+        repository.list_leads(COMPANY_ID, kind=repository.LEAD_KIND_ANY)
+    sql, params = fetched.call_args.args
+    assert "kind = %s" not in sql
+    assert params == [COMPANY_ID]

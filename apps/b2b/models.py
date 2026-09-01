@@ -142,6 +142,27 @@ class LeadLostReason:
     CHOICES = [PRICE, COMPETITOR, NO_BUDGET, NO_RESPONSE, NOT_NEEDED, POSTPONED, OTHER]
 
 
+class LeadQuality:
+    """Whether the enquiry was worth working at all.
+
+    Two answers and no third, because the question is not how promising a deal
+    looks — the funnel's own stages already say that, and a deal that is
+    progressing is a deal somebody rates. This asks the one thing the stages
+    cannot: was this a real customer, or noise. A wrong number, a competitor
+    fishing for prices, a form filled in by a bot — none of those ever reach a
+    stage that would record what they were.
+
+    Unmarked is the third state and it is the absence of a value, not a member
+    here: most leads are never judged either way, and a default would put an
+    opinion on every row nobody has looked at yet.
+    """
+
+    GOOD = "good"
+    BAD = "bad"
+
+    CHOICES = [GOOD, BAD]
+
+
 class LeadSource:
     """Where a lead came from. Reported on every card, so a company can see
     which channel is actually filling the funnel."""
@@ -161,6 +182,48 @@ class LeadSource:
     #: What a person may pick when raising a lead themselves. `META` is
     #: deliberately absent — see above.
     MANUAL_CHOICES = [WEBSITE, CALL, REFERRAL, EXHIBITION, MANUAL]
+
+
+class LeadKind:
+    """Whether a row in ``b2b_workspace_lead`` is a deal being worked or one
+    already done.
+
+    ``LEAD`` is the funnel's own row: raised, claimed, dragged through the
+    stages. ``QUICK_SALE`` is the sale a salesperson records after the fact —
+    somebody walked in, paid, left. It lives in the same table because it is
+    the same thing to every reader downstream (the CRM card's deal history,
+    the customer's total, the sales figures), and only the funnel screens care
+    about the difference: ``list_leads`` hides quick sales from the board
+    unless asked for them by name.
+
+    A quick sale is therefore born finished — ``LeadStatus.COMPLETED`` /
+    ``LeadStage.WON``, claimed by its author — which is what makes it count in
+    every total without ever appearing as something to work.
+    """
+
+    LEAD = "lead"
+    QUICK_SALE = "quick_sale"
+
+    CHOICES = [LEAD, QUICK_SALE]
+
+
+class PaymentMethod:
+    """How a quick sale was paid for.
+
+    Only quick sales carry one: a lead is an intention and has nothing to pay
+    with yet, while a sale that has already happened was settled somehow, and
+    that is the one thing the funnel never had to record. A fixed list rather
+    than free text for the reason ``LeadLostReason`` gives — five answers that
+    can be counted beat a thousand sentences that cannot.
+    """
+
+    CASH = "cash"
+    CARD = "card"
+    TRANSFER = "transfer"
+    INSTALLMENT = "installment"
+    OTHER = "other"
+
+    CHOICES = [CASH, CARD, TRANSFER, INSTALLMENT, OTHER]
 
 
 class IntegrationProvider:
@@ -209,8 +272,13 @@ class LeadActivityKind:
     #: The deadline was set, moved or cleared. ``text`` is the new date as
     #: ISO-8601, or empty where it was cleared.
     DUE_DATE = "due_date"
+    #: The lead was marked good or bad, or the mark was taken off. ``text`` is
+    #: the new `LeadQuality`, or empty where it was cleared.
+    QUALITY = "quality"
 
-    CHOICES = [CREATED, CLAIMED, ASSIGNED, STAGE, COMMENT, COMPLETED, DUE_DATE]
+    CHOICES = [
+        CREATED, CLAIMED, ASSIGNED, STAGE, COMMENT, COMPLETED, DUE_DATE, QUALITY,
+    ]
 
 
 class TaskActivityKind:
