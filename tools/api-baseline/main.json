@@ -3503,6 +3503,55 @@
    ],
    "type": "object"
   },
+  "CalendarReport": {
+   "properties": {
+    "all_day_count": {
+     "title": "All day count",
+     "type": "integer"
+    },
+    "by_type": {
+     "items": {
+      "$ref": "#/definitions/EventTypePoint"
+     },
+     "type": "array"
+    },
+    "by_weekday": {
+     "items": {
+      "$ref": "#/definitions/EventWeekdayPoint"
+     },
+     "type": "array"
+    },
+    "hours": {
+     "title": "Hours",
+     "type": "number"
+    },
+    "total_count": {
+     "title": "Total count",
+     "type": "integer"
+    },
+    "trend": {
+     "items": {
+      "$ref": "#/definitions/EventTrendPoint"
+     },
+     "type": "array"
+    },
+    "upcoming_count": {
+     "title": "Upcoming count",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "total_count",
+    "all_day_count",
+    "upcoming_count",
+    "hours",
+    "by_type",
+    "by_weekday",
+    "trend"
+   ],
+   "type": "object",
+   "x-nullable": true
+  },
   "ChatGroup": {
    "properties": {
     "can_manage": {
@@ -5401,6 +5450,26 @@
      "title": "Id",
      "type": "integer"
     },
+    "kind": {
+     "enum": [
+      "lead",
+      "quick_sale"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "payment_method": {
+     "enum": [
+      "cash",
+      "card",
+      "transfer",
+      "installment",
+      "other"
+     ],
+     "title": "Payment method",
+     "type": "string",
+     "x-nullable": true
+    },
     "stage": {
      "enum": [
       "new",
@@ -6209,6 +6278,38 @@
    },
    "type": "object"
   },
+  "EmployeeStats": {
+   "properties": {
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    },
+    "tasks_done": {
+     "title": "Tasks done",
+     "type": "integer"
+    },
+    "tasks_in_progress": {
+     "title": "Tasks in progress",
+     "type": "integer"
+    },
+    "tasks_overdue": {
+     "title": "Tasks overdue",
+     "type": "integer"
+    },
+    "tasks_todo": {
+     "title": "Tasks todo",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "employee_id",
+    "tasks_done",
+    "tasks_in_progress",
+    "tasks_todo",
+    "tasks_overdue"
+   ],
+   "type": "object"
+  },
   "EventPatch": {
    "properties": {
     "all_day": {
@@ -6262,6 +6363,59 @@
      "type": "string"
     }
    },
+   "type": "object"
+  },
+  "EventTrendPoint": {
+   "properties": {
+    "count": {
+     "title": "Count",
+     "type": "integer"
+    },
+    "date": {
+     "format": "date-time",
+     "title": "Date",
+     "type": "string"
+    }
+   },
+   "required": [
+    "date",
+    "count"
+   ],
+   "type": "object"
+  },
+  "EventTypePoint": {
+   "properties": {
+    "count": {
+     "title": "Count",
+     "type": "integer"
+    },
+    "event_type": {
+     "minLength": 1,
+     "title": "Event type",
+     "type": "string"
+    }
+   },
+   "required": [
+    "event_type",
+    "count"
+   ],
+   "type": "object"
+  },
+  "EventWeekdayPoint": {
+   "properties": {
+    "count": {
+     "title": "Count",
+     "type": "integer"
+    },
+    "weekday": {
+     "title": "Weekday",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "weekday",
+    "count"
+   ],
    "type": "object"
   },
   "EventWrite": {
@@ -7203,6 +7357,14 @@
      "title": "Item count",
      "type": "integer"
     },
+    "kind": {
+     "enum": [
+      "lead",
+      "quick_sale"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
     "lost_note": {
      "minLength": 1,
      "title": "Lost note",
@@ -7223,10 +7385,31 @@
      "type": "string",
      "x-nullable": true
     },
+    "payment_method": {
+     "enum": [
+      "cash",
+      "card",
+      "transfer",
+      "installment",
+      "other"
+     ],
+     "title": "Payment method",
+     "type": "string",
+     "x-nullable": true
+    },
     "product_name": {
      "minLength": 1,
      "title": "Product name",
      "type": "string"
+    },
+    "quality": {
+     "enum": [
+      "good",
+      "bad"
+     ],
+     "title": "Quality",
+     "type": "string",
+     "x-nullable": true
     },
     "quantity": {
      "format": "decimal",
@@ -7289,6 +7472,9 @@
   },
   "LeadActivity": {
    "properties": {
+    "attachment": {
+     "$ref": "#/definitions/LeadActivityAttachment"
+    },
     "author_id": {
      "title": "Author id",
      "type": "integer",
@@ -7323,7 +7509,8 @@
       "stage",
       "comment",
       "completed",
-      "due_date"
+      "due_date",
+      "quality"
      ],
      "title": "Kind",
      "type": "string"
@@ -7341,6 +7528,42 @@
     "created_at"
    ],
    "type": "object"
+  },
+  "LeadActivityAttachment": {
+   "properties": {
+    "content_type": {
+     "minLength": 1,
+     "title": "Content type",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "size": {
+     "title": "Size",
+     "type": "integer"
+    },
+    "url": {
+     "minLength": 1,
+     "title": "Url",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "size",
+    "url"
+   ],
+   "type": "object",
+   "x-nullable": true
   },
   "LeadAssignWrite": {
    "properties": {
@@ -7512,6 +7735,14 @@
      },
      "type": "array"
     },
+    "kind": {
+     "enum": [
+      "lead",
+      "quick_sale"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
     "lost_note": {
      "minLength": 1,
      "title": "Lost note",
@@ -7532,10 +7763,31 @@
      "type": "string",
      "x-nullable": true
     },
+    "payment_method": {
+     "enum": [
+      "cash",
+      "card",
+      "transfer",
+      "installment",
+      "other"
+     ],
+     "title": "Payment method",
+     "type": "string",
+     "x-nullable": true
+    },
     "product_name": {
      "minLength": 1,
      "title": "Product name",
      "type": "string"
+    },
+    "quality": {
+     "enum": [
+      "good",
+      "bad"
+     ],
+     "title": "Quality",
+     "type": "string",
+     "x-nullable": true
     },
     "quantity": {
      "format": "decimal",
@@ -7691,44 +7943,20 @@
    ],
    "type": "object"
   },
-  "LeadStageWrite": {
+  "LeadQualityWrite": {
    "properties": {
-    "lost_reason": {
+    "quality": {
      "enum": [
-      "price",
-      "competitor",
-      "no_budget",
-      "no_response",
-      "not_needed",
-      "postponed",
-      "other"
+      "good",
+      "bad"
      ],
-     "title": "Lost reason",
+     "title": "Quality",
      "type": "string",
      "x-nullable": true
-    },
-    "note": {
-     "maxLength": 2000,
-     "title": "Note",
-     "type": "string",
-     "x-nullable": true
-    },
-    "stage": {
-     "enum": [
-      "new",
-      "interested",
-      "proposal",
-      "negotiation",
-      "contract",
-      "won",
-      "lost"
-     ],
-     "title": "Stage",
-     "type": "string"
     }
    },
    "required": [
-    "stage"
+    "quality"
    ],
    "type": "object"
   },
@@ -7796,9 +8024,30 @@
      },
      "type": "array"
     },
+    "kind": {
+     "default": "lead",
+     "enum": [
+      "lead",
+      "quick_sale"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
     "note": {
      "maxLength": 2000,
      "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "payment_method": {
+     "enum": [
+      "cash",
+      "card",
+      "transfer",
+      "installment",
+      "other"
+     ],
+     "title": "Payment method",
      "type": "string",
      "x-nullable": true
     },
@@ -7906,6 +8155,24 @@
    "required": [
     "guid",
     "title"
+   ],
+   "type": "object"
+  },
+  "LostReasonPoint": {
+   "properties": {
+    "count": {
+     "title": "Count",
+     "type": "integer"
+    },
+    "reason": {
+     "minLength": 1,
+     "title": "Reason",
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason",
+    "count"
    ],
    "type": "object"
   },
@@ -10071,6 +10338,37 @@
    ],
    "type": "object"
   },
+  "ReportPeriod": {
+   "properties": {
+    "bucket": {
+     "minLength": 1,
+     "title": "Bucket",
+     "type": "string"
+    },
+    "end": {
+     "format": "date-time",
+     "title": "End",
+     "type": "string"
+    },
+    "period": {
+     "minLength": 1,
+     "title": "Period",
+     "type": "string"
+    },
+    "start": {
+     "format": "date-time",
+     "title": "Start",
+     "type": "string"
+    }
+   },
+   "required": [
+    "period",
+    "start",
+    "end",
+    "bucket"
+   ],
+   "type": "object"
+  },
   "ResendOTP": {
    "properties": {
     "phone_number": {
@@ -10126,6 +10424,209 @@
    "required": [
     "modules",
     "permissions"
+   ],
+   "type": "object"
+  },
+  "SalesLeader": {
+   "properties": {
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    },
+    "won_amount": {
+     "minLength": 1,
+     "title": "Won amount",
+     "type": "string"
+    },
+    "won_count": {
+     "title": "Won count",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "employee_id",
+    "full_name",
+    "won_count",
+    "won_amount"
+   ],
+   "type": "object"
+  },
+  "SalesReport": {
+   "properties": {
+    "average_deal": {
+     "minLength": 1,
+     "title": "Average deal",
+     "type": "string"
+    },
+    "by_source": {
+     "items": {
+      "$ref": "#/definitions/SalesSourcePoint"
+     },
+     "type": "array"
+    },
+    "by_stage": {
+     "items": {
+      "$ref": "#/definitions/SalesStagePoint"
+     },
+     "type": "array"
+    },
+    "conversion_rate": {
+     "title": "Conversion rate",
+     "type": "number"
+    },
+    "created_count": {
+     "title": "Created count",
+     "type": "integer"
+    },
+    "leaders": {
+     "items": {
+      "$ref": "#/definitions/SalesLeader"
+     },
+     "type": "array"
+    },
+    "lost_count": {
+     "title": "Lost count",
+     "type": "integer"
+    },
+    "lost_reasons": {
+     "items": {
+      "$ref": "#/definitions/LostReasonPoint"
+     },
+     "type": "array"
+    },
+    "open_amount": {
+     "minLength": 1,
+     "title": "Open amount",
+     "type": "string"
+    },
+    "open_count": {
+     "title": "Open count",
+     "type": "integer"
+    },
+    "trend": {
+     "items": {
+      "$ref": "#/definitions/SalesTrendPoint"
+     },
+     "type": "array"
+    },
+    "won_amount": {
+     "minLength": 1,
+     "title": "Won amount",
+     "type": "string"
+    },
+    "won_count": {
+     "title": "Won count",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "created_count",
+    "won_count",
+    "lost_count",
+    "open_count",
+    "won_amount",
+    "open_amount",
+    "conversion_rate",
+    "average_deal",
+    "by_stage",
+    "by_source",
+    "lost_reasons",
+    "trend",
+    "leaders"
+   ],
+   "type": "object",
+   "x-nullable": true
+  },
+  "SalesSourcePoint": {
+   "properties": {
+    "count": {
+     "title": "Count",
+     "type": "integer"
+    },
+    "source": {
+     "minLength": 1,
+     "title": "Source",
+     "type": "string"
+    },
+    "won_amount": {
+     "minLength": 1,
+     "title": "Won amount",
+     "type": "string"
+    },
+    "won_count": {
+     "title": "Won count",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "source",
+    "count",
+    "won_count",
+    "won_amount"
+   ],
+   "type": "object"
+  },
+  "SalesStagePoint": {
+   "properties": {
+    "amount": {
+     "minLength": 1,
+     "title": "Amount",
+     "type": "string"
+    },
+    "count": {
+     "title": "Count",
+     "type": "integer"
+    },
+    "stage": {
+     "minLength": 1,
+     "title": "Stage",
+     "type": "string"
+    }
+   },
+   "required": [
+    "stage",
+    "count",
+    "amount"
+   ],
+   "type": "object"
+  },
+  "SalesTrendPoint": {
+   "properties": {
+    "created_count": {
+     "title": "Created count",
+     "type": "integer"
+    },
+    "date": {
+     "format": "date-time",
+     "title": "Date",
+     "type": "string"
+    },
+    "won_amount": {
+     "minLength": 1,
+     "title": "Won amount",
+     "type": "string"
+    },
+    "won_count": {
+     "title": "Won count",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "date",
+    "created_count",
+    "won_count",
+    "won_amount"
    ],
    "type": "object"
   },
@@ -10725,6 +11226,12 @@
      "type": "string",
      "x-nullable": true
     },
+    "files": {
+     "items": {
+      "$ref": "#/definitions/TaskFile"
+     },
+     "type": "array"
+    },
     "id": {
      "title": "Id",
      "type": "integer"
@@ -10817,6 +11324,75 @@
    ],
    "type": "object"
   },
+  "TaskFile": {
+   "properties": {
+    "content_type": {
+     "minLength": 1,
+     "title": "Content type",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "size": {
+     "title": "Size",
+     "type": "integer"
+    },
+    "url": {
+     "minLength": 1,
+     "title": "Url",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "size",
+    "url"
+   ],
+   "type": "object"
+  },
+  "TaskLeader": {
+   "properties": {
+    "completed_count": {
+     "title": "Completed count",
+     "type": "integer"
+    },
+    "employee_id": {
+     "title": "Employee id",
+     "type": "integer"
+    },
+    "full_name": {
+     "minLength": 1,
+     "title": "Full name",
+     "type": "string"
+    },
+    "on_time_rate": {
+     "title": "On time rate",
+     "type": "number"
+    },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "employee_id",
+    "full_name",
+    "completed_count",
+    "on_time_rate"
+   ],
+   "type": "object"
+  },
   "TaskList": {
    "properties": {
     "counters": {
@@ -10884,20 +11460,105 @@
     },
     "subtasks": {
      "items": {
-      "maxLength": 300,
       "minLength": 1,
       "type": "string"
      },
      "type": "array"
     },
     "title": {
-     "maxLength": 300,
      "minLength": 1,
      "title": "Title",
      "type": "string"
     }
    },
    "type": "object"
+  },
+  "TaskPriorityPoint": {
+   "properties": {
+    "count": {
+     "title": "Count",
+     "type": "integer"
+    },
+    "priority": {
+     "minLength": 1,
+     "title": "Priority",
+     "type": "string"
+    }
+   },
+   "required": [
+    "priority",
+    "count"
+   ],
+   "type": "object"
+  },
+  "TaskReport": {
+   "properties": {
+    "by_priority": {
+     "items": {
+      "$ref": "#/definitions/TaskPriorityPoint"
+     },
+     "type": "array"
+    },
+    "completed_count": {
+     "title": "Completed count",
+     "type": "integer"
+    },
+    "created_count": {
+     "title": "Created count",
+     "type": "integer"
+    },
+    "due_today_count": {
+     "title": "Due today count",
+     "type": "integer"
+    },
+    "in_progress_count": {
+     "title": "In progress count",
+     "type": "integer"
+    },
+    "leaders": {
+     "items": {
+      "$ref": "#/definitions/TaskLeader"
+     },
+     "type": "array"
+    },
+    "on_time_rate": {
+     "title": "On time rate",
+     "type": "number"
+    },
+    "open_count": {
+     "title": "Open count",
+     "type": "integer"
+    },
+    "overdue_count": {
+     "title": "Overdue count",
+     "type": "integer"
+    },
+    "todo_count": {
+     "title": "Todo count",
+     "type": "integer"
+    },
+    "trend": {
+     "items": {
+      "$ref": "#/definitions/TaskTrendPoint"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "created_count",
+    "completed_count",
+    "open_count",
+    "todo_count",
+    "in_progress_count",
+    "overdue_count",
+    "due_today_count",
+    "on_time_rate",
+    "by_priority",
+    "trend",
+    "leaders"
+   ],
+   "type": "object",
+   "x-nullable": true
   },
   "TaskStatus": {
    "properties": {
@@ -10913,6 +11574,29 @@
    },
    "required": [
     "status"
+   ],
+   "type": "object"
+  },
+  "TaskTrendPoint": {
+   "properties": {
+    "completed_count": {
+     "title": "Completed count",
+     "type": "integer"
+    },
+    "created_count": {
+     "title": "Created count",
+     "type": "integer"
+    },
+    "date": {
+     "format": "date-time",
+     "title": "Date",
+     "type": "string"
+    }
+   },
+   "required": [
+    "date",
+    "created_count",
+    "completed_count"
    ],
    "type": "object"
   },
@@ -10966,14 +11650,12 @@
     "subtasks": {
      "default": [],
      "items": {
-      "maxLength": 300,
       "minLength": 1,
       "type": "string"
      },
      "type": "array"
     },
     "title": {
-     "maxLength": 300,
      "minLength": 1,
      "title": "Title",
      "type": "string"
@@ -12130,6 +12812,35 @@
    },
    "required": [
     "refresh"
+   ],
+   "type": "object"
+  },
+  "WorkspaceReport": {
+   "properties": {
+    "calendar": {
+     "$ref": "#/definitions/CalendarReport"
+    },
+    "period": {
+     "$ref": "#/definitions/ReportPeriod"
+    },
+    "sales": {
+     "$ref": "#/definitions/SalesReport"
+    },
+    "scope": {
+     "minLength": 1,
+     "title": "Scope",
+     "type": "string"
+    },
+    "tasks": {
+     "$ref": "#/definitions/TaskReport"
+    }
+   },
+   "required": [
+    "period",
+    "scope",
+    "sales",
+    "tasks",
+    "calendar"
    ],
    "type": "object"
   }
@@ -16796,6 +17507,36 @@
     ]
    }
   },
+  "/b2b/workspace/employees/{employee_id}/stats/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/employees/<id>/stats/ — what one colleague is\ncarrying.\n\nThe two numbers on the card the chat opens when you tap somebody's name.\nIts own call rather than fields on `/team/`: the roster is fetched to label\nrows all over the app — assignees, chat titles, event participants — and\nfour counts per person would put a join over every task in the company\nbehind every one of those screens, to draw numbers only this one page\nshows.\n\nReadable by anyone in the workspace, like the roster itself. It says how\nmuch work somebody has, never what the work is.",
+    "operationId": "b2b_workspace_employees_stats_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/EmployeeStats"
+      }
+     },
+     "404": {
+      "description": "Not on this roster"
+     }
+    },
+    "summary": "One employee's task counts",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
   "/b2b/workspace/events/": {
    "get": {
     "description": "GET  /api/b2b/workspace/events/ — the calendar window.\nPOST /api/b2b/workspace/events/ — managers create shared events; employees\nmay create personal ones for themselves.",
@@ -17435,6 +18176,26 @@
       "in": "query",
       "name": "status",
       "type": "string"
+     },
+     {
+      "enum": [
+       "good",
+       "bad",
+       "unmarked"
+      ],
+      "in": "query",
+      "name": "quality",
+      "type": "string"
+     },
+     {
+      "enum": [
+       "lead",
+       "quick_sale",
+       "any"
+      ],
+      "in": "query",
+      "name": "kind",
+      "type": "string"
      }
     ],
     "responses": {
@@ -17797,6 +18558,45 @@
     }
    ]
   },
+  "/b2b/workspace/leads/{lead_id}/quality/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/leads/<id>/quality/ — mark the enquiry good or\nbad, or take the mark off.\n\nWho may: whoever is working the deal, and a manager over their head — the\nsame pair as the deadline, and for the same reason. The salesperson who\nrang the number is the one who knows it was a wrong number; the manager\nreading the board is the one who has to be able to correct a lead written\noff too quickly.\n\nA closed lead is *not* refused here, unlike the deadline. A deadline on a\nfinished deal sets a clock nothing runs down, but \"that enquiry was never\nreal\" is a judgement most often made about a deal that has already been\nlost — refusing it there would put the mark out of reach on exactly the\nleads it is for.",
+    "operationId": "b2b_workspace_leads_quality_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadQualityWrite"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Lead"
+      }
+     },
+     "403": {
+      "description": "Not yours"
+     }
+    },
+    "summary": "Mark a lead good or bad, or clear the mark",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/leads/{lead_id}/stage/": {
    "parameters": [
     {
@@ -17807,16 +18607,58 @@
     }
    ],
    "post": {
-    "description": "POST /api/b2b/workspace/leads/<id>/stage/ — move the lead along the funnel.\n\nThe claimant only, and never on a closed lead. Reaching ``won`` or ``lost``\ncompletes it; that rule lives in the repository so this view does not have\nto know which stages are terminal.",
+    "consumes": [
+     "multipart/form-data",
+     "application/json"
+    ],
+    "description": "POST /api/b2b/workspace/leads/<id>/stage/ — move the lead along the funnel.\n\nThe claimant only, and never on a closed lead. Reaching ``won`` or ``lost``\ncompletes it; that rule lives in the repository so this view does not have\nto know which stages are terminal.\n\nTakes JSON or ``multipart/form-data``: a move can carry one document — the\nsigned contract behind \"Yutdik\", the offer behind \"Taklif yuborildi\" — and\nit is filed against the history row the move writes, so the feed shows it\nbeside the event it belongs to rather than loose on the drive.",
     "operationId": "b2b_workspace_leads_stage_create",
     "parameters": [
      {
-      "in": "body",
-      "name": "data",
+      "enum": [
+       "new",
+       "interested",
+       "proposal",
+       "negotiation",
+       "contract",
+       "won",
+       "lost"
+      ],
+      "in": "formData",
+      "name": "stage",
       "required": true,
-      "schema": {
-       "$ref": "#/definitions/LeadStageWrite"
-      }
+      "type": "string"
+     },
+     {
+      "enum": [
+       "price",
+       "competitor",
+       "no_budget",
+       "no_response",
+       "not_needed",
+       "postponed",
+       "other"
+      ],
+      "in": "formData",
+      "name": "lost_reason",
+      "required": false,
+      "type": "string",
+      "x-nullable": true
+     },
+     {
+      "in": "formData",
+      "maxLength": 2000,
+      "name": "note",
+      "required": false,
+      "type": "string",
+      "x-nullable": true
+     },
+     {
+      "description": "Optional document filed with the move (multipart only).",
+      "in": "formData",
+      "name": "file",
+      "required": false,
+      "type": "file"
      }
     ],
     "responses": {
@@ -18583,6 +19425,39 @@
    },
    "parameters": []
   },
+  "/b2b/workspace/reports/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/reports/\n\nThe profile screen's \"Hisobot va analitika\": the sales funnel, the task\nboard and the calendar over one window, in one response.\n\nOne endpoint and not three, because the screen is one screen. Three would\nmean three round trips on open, three spinners, and — since each would\ntake its own `NOW()` — three windows that do not quite line up.\n\nWho sees what is decided twice over:\n\n* **Scope.** A manager reads the company; everybody else reads their own\n  work. Not a permission check but the honest reading of the question — a\n  salesperson's report is about their month, and a company total on it\n  would be a number they cannot act on.\n* **Sections.** A guest lent only the sales board gets `sales` and two\n  nulls. `HasModule` guards one module per view and this view spans three,\n  so the gate is applied per section here rather than on the class.",
+    "operationId": "b2b_workspace_reports_list",
+    "parameters": [
+     {
+      "description": "How far back to count. Defaults to 'month'; an unknown value falls back to it rather than failing.",
+      "enum": [
+       "week",
+       "month",
+       "quarter",
+       "year"
+      ],
+      "in": "query",
+      "name": "period",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceReport"
+      }
+     }
+    },
+    "summary": "Sales, tasks and calendar over one window",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
   "/b2b/workspace/requests/": {
    "get": {
     "description": "GET  /api/b2b/workspace/requests/ — the inbox and the sent list.\nPOST /api/b2b/workspace/requests/ — ask somebody to come and help.",
@@ -18961,6 +19836,76 @@
      "B2B / Workspace (mobile)"
     ]
    }
+  },
+  "/b2b/workspace/tasks/{task_id}/files/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "task_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "consumes": [
+     "multipart/form-data"
+    ],
+    "description": "POST /api/b2b/workspace/tasks/<id>/files/ — attach a document to a task.\n\nIts own endpoint for the same reason the voice note has one: a task is\nwritten as JSON and a document is multipart, so the app posts the task,\ngets its id, and sends the files straight after.\n\nUnlike the voice note a task carries as many documents as were attached —\na brief, its annexes and a photographed receipt are three files and\nreplacing one with the next would be a data loss, not a correction. One\nrequest carries one file; several are several requests, which is what lets\nthe app report and retry them one at a time instead of losing a whole\nbatch to the one that was over the limit.",
+    "operationId": "b2b_workspace_tasks_files_create",
+    "parameters": [
+     {
+      "in": "formData",
+      "name": "file",
+      "required": true,
+      "type": "file"
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Task"
+      }
+     }
+    },
+    "summary": "Attach a document to a task",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/tasks/{task_id}/files/{file_id}/": {
+   "delete": {
+    "description": "DELETE /api/b2b/workspace/tasks/<id>/files/<file_id>/ — detach one.\n\nThe bytes go with the row. There is no trash for a task attachment: the\ndrive is where files are kept, and something attached to a task is part of\nthe task rather than a document in its own right.",
+    "operationId": "b2b_workspace_tasks_files_delete",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Task"
+      }
+     }
+    },
+    "summary": "Detach a document from a task",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "task_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "file_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
   },
   "/b2b/workspace/tasks/{task_id}/status/": {
    "parameters": [
