@@ -649,6 +649,34 @@ def test_a_won_deal_needs_no_reason():
     assert set_stage.call_args.kwargs["lost_reason"] is None
 
 
+def test_an_archived_deal_needs_no_reason_either():
+    """Archive closes the lead the same way won and lost do, but asks
+    nothing — there is no verdict to explain, only a deal taken off the
+    board."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_stage",
+            return_value=_lead(
+                stage=LeadStage.ARCHIVED, status=LeadStatus.COMPLETED
+            ),
+        ) as set_stage,
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post(
+                "/leads/7/stage/", {"stage": LeadStage.ARCHIVED}, format="json"
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    assert response.data["stage"] == LeadStage.ARCHIVED
+    assert response.data["status"] == LeadStatus.COMPLETED
+    assert set_stage.call_args.kwargs["lost_reason"] is None
+
+
 def test_the_contract_stage_is_an_ordinary_move_and_does_not_close_the_lead():
     """"Shartnoma tuzish" sits between negotiation and won. It was added after
     the funnel shipped, so the check is that nothing treats it as an ending."""

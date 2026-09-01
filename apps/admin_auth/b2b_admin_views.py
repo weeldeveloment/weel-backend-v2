@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -13,6 +13,7 @@ from .authentication import AdminJWTAuthentication
 from .permissions import IsAdminUser
 
 from apps.b2b.workspace import repository as workspace_repo
+from apps.b2b.workspace import access_repository as access_repo
 from apps.b2b.workspace.serializers import (
     SupportMessageCreateSerializer,
     SupportMessageSerializer,
@@ -150,3 +151,54 @@ class AdminB2BSupportThreadView(AdminBaseView):
         return Response(
             SupportMessageSerializer(message).data, status=status.HTTP_201_CREATED,
         )
+
+
+class OwnershipRequestDecisionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=["approve", "reject"])
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class AdminB2BOwnershipRequestsView(AdminBaseView):
+    """GET ``/api/admin-auth/b2b/ownership-requests/`` — every company asking
+    to hand itself over or close, waiting on WEEL.
+
+    An owner cannot transfer or close a Company by asking their own workspace
+    — see `WorkspaceOwnershipRequestView` — precisely so that a decision this
+    consequential always has someone outside the company looking at it. This
+    is that someone's inbox.
+    """
+
+    def get(self, request):
+        return Response({"results": access_repo.list_pending_ownership_requests()})
+
+
+class AdminB2BOwnershipRequestView(AdminBaseView):
+    """POST ``/api/admin-auth/b2b/ownership-requests/<id>/decide/`` —
+    approve or reject one.
+
+    Approving is what actually moves the `owner` role or closes the company;
+    there is no separate "apply" step, because a request marked approved that
+    had not yet been carried out is exactly the kind of row that survives a
+    crash and quietly never happens.
+    """
+
+    @swagger_auto_schema(
+        request_body=OwnershipRequestDecisionSerializer,
+        responses={200: "Decided", 404: "Request not found or already decided"},
+    )
+    def post(self, request, request_id: int):
+        serializer = OwnershipRequestDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        decided = access_repo.decide_ownership_request(
+            request_id,
+            approve=serializer.validated_data["action"] == "approve",
+            reviewer_user_id=request.user.id,
+            note=serializer.validated_data.get("note", ""),
+        )
+        if not decided:
+            return Response(
+                {"detail": "Not found, or already decided."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(decided)

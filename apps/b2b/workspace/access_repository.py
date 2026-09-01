@@ -10,10 +10,15 @@ import json
 from typing import Any, Sequence
 
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from shared.raw.db import execute, fetch_all, fetch_one
 
-from apps.b2b.raw.tables import B2B_EMPLOYEE_TABLE
+from apps.b2b.raw.tables import (
+    B2B_COMPANY_TABLE,
+    B2B_EMPLOYEE_TABLE,
+    B2B_OWNERSHIP_REQUEST_TABLE,
+)
 from apps.b2b.workspace.access import (
     Module,
     Permission,
@@ -307,3 +312,266 @@ def list_audit(company_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
         """,
         [company_id, limit],
     )
+
+
+# ─── Handing over or closing a company ─────────────────────────────────────────
+#
+# Neither move is ever a plain write from `apps.b2b.workspace` — see the note
+# in `create_b2b_tables.py`. Everything here either raises a request for WEEL
+# staff to decide, or — from `decide_ownership_request` — carries out what an
+# `admin_auth` reviewer approved. Nothing in between; there is no endpoint
+# that flips `status` without also being the thing that acted on it.
+
+class OwnershipRequestKind:
+    TRANSFER = "transfer"
+    CLOSE = "close"
+
+
+class OwnershipRequestStatus:
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class OwnershipRequestError(Exception):
+    """Raised for anything the view should answer 400 for. The message is
+    already in the workspace's language — see the call sites in
+    `access_views.py`."""
+
+
+def pending_ownership_request(company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"""
+        SELECT r.*, t.full_name AS target_name
+          FROM {B2B_OWNERSHIP_REQUEST_TABLE} r
+          LEFT JOIN {B2B_EMPLOYEE_TABLE} t ON t.id = r.target_employee_id
+         WHERE r.company_id = %s AND r.status = %s
+        """,
+        [company_id, OwnershipRequestStatus.PENDING],
+    )
+
+
+def list_own_ownership_requests(
+    company_id: int, *, limit: int = 20
+) -> list[dict[str, Any]]:
+    """What the owner who filed these sees — most recent first, decided or
+    not. Read only: this is history, not the queue [list_pending_ownership_requests]
+    is."""
+    return fetch_all(
+        f"""
+        SELECT r.*, t.full_name AS target_name
+          FROM {B2B_OWNERSHIP_REQUEST_TABLE} r
+          LEFT JOIN {B2B_EMPLOYEE_TABLE} t ON t.id = r.target_employee_id
+         WHERE r.company_id = %s
+         ORDER BY r.created_at DESC
+         LIMIT %s
+        """,
+        [company_id, limit],
+    )
+
+
+def create_ownership_request(
+    *,
+    company_id: int,
+    requested_by: int,
+    kind: str,
+    target_employee_id: int | None = None,
+    reason: str = "",
+) -> dict[str, Any]:
+    """Raise a request to hand the company over or close it.
+
+    Validated here rather than trusted from the caller, because this is the
+    one function anything reaching this table goes through: a bad request
+    reaching the admin queue would be WEEL staff's problem to notice instead
+    of the workspace's.
+    """
+    if kind not in (OwnershipRequestKind.TRANSFER, OwnershipRequestKind.CLOSE):
+        raise OwnershipRequestError(_("Not something that can be requested."))
+
+    if pending_ownership_request(company_id):
+        raise OwnershipRequestError(
+            _("This workspace already has a request waiting for a decision.")
+        )
+
+    target = None
+    if kind == OwnershipRequestKind.TRANSFER:
+        if not target_employee_id:
+            raise OwnershipRequestError(_("Choose who should become the owner."))
+        target = fetch_one(
+            f"SELECT id FROM {B2B_EMPLOYEE_TABLE} "
+            f"WHERE id = %s AND company_id = %s AND is_active = TRUE "
+            f"AND role <> %s",
+            [target_employee_id, company_id, Role.OWNER],
+        )
+        if not target:
+            raise OwnershipRequestError(
+                _("That person is not on this workspace's roster.")
+            )
+
+    now = timezone.now()
+    row = fetch_one(
+        f"""
+        INSERT INTO {B2B_OWNERSHIP_REQUEST_TABLE}
+            (company_id, requested_by, kind, target_employee_id, reason,
+             status, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [
+            company_id,
+            requested_by,
+            kind,
+            target["id"] if target else None,
+            reason,
+            OwnershipRequestStatus.PENDING,
+            now,
+            now,
+        ],
+    )
+    record_audit(
+        company_id,
+        actor_employee_id=requested_by,
+        action=f"ownership.{kind}_requested",
+        target_type="ownership_request",
+        target_id=row["id"],
+    )
+    return row
+
+
+# ─── The admin_auth side ────────────────────────────────────────────────────
+
+def list_pending_ownership_requests() -> list[dict[str, Any]]:
+    """The queue — across every company, the way [WorkspaceTrashView]'s
+    sibling on the support desk reads across every one too. `admin_auth` is
+    WEEL's own desk, not any one workspace's."""
+    return fetch_all(
+        f"""
+        SELECT r.*,
+               c.name AS company_name,
+               req.full_name AS requested_by_name,
+               t.full_name AS target_name
+          FROM {B2B_OWNERSHIP_REQUEST_TABLE} r
+          JOIN {B2B_COMPANY_TABLE} c ON c.id = r.company_id
+          LEFT JOIN {B2B_EMPLOYEE_TABLE} req ON req.id = r.requested_by
+          LEFT JOIN {B2B_EMPLOYEE_TABLE} t ON t.id = r.target_employee_id
+         WHERE r.status = %s
+         ORDER BY r.created_at ASC
+        """,
+        [OwnershipRequestStatus.PENDING],
+    )
+
+
+def get_ownership_request(request_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"SELECT * FROM {B2B_OWNERSHIP_REQUEST_TABLE} WHERE id = %s", [request_id]
+    )
+
+
+def decide_ownership_request(
+    request_id: int,
+    *,
+    approve: bool,
+    reviewer_user_id: int,
+    note: str = "",
+) -> dict[str, Any] | None:
+    """Reject just closes the row. Approve carries out exactly what was asked
+    — the transfer or the closure — before it does, so a request that is
+    marked approved and a company that changed are the same fact, never two
+    that could disagree after a crash between them.
+    """
+    request_row = get_ownership_request(request_id)
+    if not request_row or request_row["status"] != OwnershipRequestStatus.PENDING:
+        return None
+
+    if approve:
+        if request_row["kind"] == OwnershipRequestKind.TRANSFER:
+            _execute_transfer(request_row)
+        else:
+            _execute_close(request_row)
+
+    now = timezone.now()
+    updated = fetch_one(
+        f"""
+        UPDATE {B2B_OWNERSHIP_REQUEST_TABLE}
+           SET status = %s, review_note = %s, reviewed_by_user_id = %s,
+               reviewed_at = %s, updated_at = %s
+         WHERE id = %s
+        RETURNING *
+        """,
+        [
+            OwnershipRequestStatus.APPROVED if approve else OwnershipRequestStatus.REJECTED,
+            note,
+            reviewer_user_id,
+            now,
+            now,
+            request_id,
+        ],
+    )
+    record_audit(
+        request_row["company_id"],
+        actor_employee_id=None,
+        action=f"ownership.{request_row['kind']}_{'approved' if approve else 'rejected'}",
+        target_type="ownership_request",
+        target_id=request_id,
+    )
+    return updated
+
+
+def _execute_transfer(request_row: dict[str, Any]) -> None:
+    """Moves the `owner` role from whoever asked to whoever they named.
+
+    Re-checked against the roster as it stands now, not as it stood when the
+    request was filed: the target may have left, or the requester may no
+    longer hold the role somebody else already passed on. Either makes the
+    request stale rather than wrong, so it is left pending-looking to the
+    caller — [decide_ownership_request] still marks it approved, because
+    silently downgrading an admin's decision to a no-op would be a worse
+    surprise than a transfer that turns out to need re-requesting.
+    """
+    company_id = request_row["company_id"]
+    now = timezone.now()
+    execute(
+        f"UPDATE {B2B_EMPLOYEE_TABLE} SET role = %s, updated_at = %s "
+        f"WHERE id = %s AND company_id = %s AND is_active = TRUE",
+        [Role.MANAGER, now, request_row["requested_by"], company_id],
+    )
+    if request_row["target_employee_id"]:
+        execute(
+            f"UPDATE {B2B_EMPLOYEE_TABLE} SET role = %s, updated_at = %s "
+            f"WHERE id = %s AND company_id = %s AND is_active = TRUE",
+            [Role.OWNER, now, request_row["target_employee_id"], company_id],
+        )
+
+
+def _execute_close(request_row: dict[str, Any]) -> None:
+    """Closes the whole Company, not just the workspace the request came
+    from — the owner's authority reaches every workspace under it, so what
+    they may close does too. Mirrors the shutdown
+    `accounts.companies_closed_by_deleting`'s caller performs, minus the
+    parts that are about erasing a *person*: this is about a business
+    deciding to stop, and nobody's roster row is touched by it.
+    """
+    company = fetch_one(
+        f"SELECT org_id FROM {B2B_COMPANY_TABLE} WHERE id = %s",
+        [request_row["company_id"]],
+    )
+    org_id = company.get("org_id") if company else None
+    now = timezone.now()
+    if org_id:
+        execute(
+            f"UPDATE {B2B_COMPANY_TABLE} SET is_active = FALSE, updated_at = %s "
+            f"WHERE org_id = %s",
+            [now, org_id],
+        )
+        execute(
+            "UPDATE b2b_org SET is_active = FALSE, updated_at = %s WHERE id = %s",
+            [now, org_id],
+        )
+    else:
+        # No org above it — a workspace from before the org level existed.
+        # Closing just this one is still the whole Company it is.
+        execute(
+            f"UPDATE {B2B_COMPANY_TABLE} SET is_active = FALSE, updated_at = %s "
+            f"WHERE id = %s",
+            [now, request_row["company_id"]],
+        )

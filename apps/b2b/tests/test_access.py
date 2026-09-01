@@ -627,10 +627,10 @@ LEGACY_FLAGS = {
         "can_create_task", "can_delete_task", "can_edit_any_event",
         "can_edit_task", "can_manage_attendance", "can_manage_attendance_location",
         # Plugging an outside service into the funnel — Meta's lead ads. Held
-        # by the owner and the administrator only, the same two who may ask
-        # another workspace for people: connecting one commits the whole
-        # company's board to somebody's advertising account and hands the
-        # server a token to their Facebook. See `apps/b2b/integrations`.
+        # by the owner, the administrator and the manager: connecting one
+        # commits the whole company's board to somebody's advertising account
+        # and hands the server a token to their Facebook, which is why it stops
+        # above the ordinary employee. See `apps/b2b/integrations`.
         "can_manage_integrations",
         "can_manage_team", "can_pick_employee_of_month", "can_post_lead",
         "can_request_help", "can_update_task_status", "can_use_mail",
@@ -642,7 +642,12 @@ LEGACY_FLAGS = {
         "can_assign_task", "can_book_hotel", "can_chat", "can_comment_task",
         "can_create_event", "can_create_group_chat", "can_create_personal_event",
         "can_create_task", "can_delete_task", "can_edit_any_event",
-        "can_edit_task", "can_manage_attendance", "can_post_lead",
+        "can_edit_task", "can_manage_attendance",
+        # A deliberate widening, like `can_post_lead` below. The manager runs
+        # the funnel every Meta lead lands in, and a source only the owner
+        # could reconnect is one that stays broken until they are asked.
+        "can_manage_integrations",
+        "can_post_lead",
         "can_update_task_status", "can_use_mail", "can_view_attendance",
         "can_view_hotels", "can_view_team", "sees_all_company_data",
     },

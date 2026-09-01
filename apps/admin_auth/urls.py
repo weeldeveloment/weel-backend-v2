@@ -4,6 +4,8 @@ from .users_views import AdminClientsListView, AdminPartnersListView
 from .b2b_admin_views import (
     AdminB2BCompaniesView,
     AdminB2BCompanyDetailView,
+    AdminB2BOwnershipRequestsView,
+    AdminB2BOwnershipRequestView,
     AdminB2BUsersView,
     AdminB2BSupportThreadsView,
     AdminB2BSupportThreadView,
@@ -31,6 +33,13 @@ urlpatterns = [
     path('b2b/support/', AdminB2BSupportThreadsView.as_view(), name='admin-b2b-support'),
     path('b2b/support/<int:employee_id>/', AdminB2BSupportThreadView.as_view(),
          name='admin-b2b-support-thread'),
+    # The other end of the mobile app's ownership-transfer / close-company
+    # requests — see `WorkspaceOwnershipRequestView`.
+    path('b2b/ownership-requests/', AdminB2BOwnershipRequestsView.as_view(),
+         name='admin-b2b-ownership-requests'),
+    path('b2b/ownership-requests/<int:request_id>/decide/',
+         AdminB2BOwnershipRequestView.as_view(),
+         name='admin-b2b-ownership-request-decide'),
     # Adventure Activities
     path('activities/', AdminActivityListView.as_view(), name='admin-activities-list'),
     path('activities/<uuid:guid>/', AdminActivityDetailView.as_view(), name='admin-activity-detail'),

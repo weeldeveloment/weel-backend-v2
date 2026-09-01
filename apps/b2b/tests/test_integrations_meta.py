@@ -13,8 +13,8 @@ Three things are worth pinning down and none of them is SQL:
     from several Facebook apps — ours and every workspace that brought its
     own — so the check has to be against the *right* secret, and a body signed
     by one company's app must not pass for another's.
-  * **Who may connect.** Owner and administrator only — not a manager, and not
-    an employee.
+  * **Who may connect.** Owner, administrator and manager — not an employee,
+    and not a guest.
 """
 from unittest.mock import patch
 
@@ -156,22 +156,30 @@ def test_a_company_with_no_app_secret_verifies_nothing():
 
 # ─── Who may connect it ───────────────────────────────────────────────────────
 
-def test_only_the_owner_and_the_administrator_may_manage_integrations():
+def test_the_owner_the_administrator_and_the_manager_may_manage_integrations():
     assert may_manage_integrations("owner")
     # "lider" is the roster's older word for the workspace administrator.
     assert may_manage_integrations("lider")
     assert may_manage_integrations("admin")
-    assert not may_manage_integrations("performer")   # manager
-    assert not may_manage_integrations("manager")
+    # The manager runs the funnel the leads land in, so the source is theirs
+    # to plug in. "performer" is the column's older word for the same role.
+    assert may_manage_integrations("manager")
+    assert may_manage_integrations("performer")
+    # And it stops there: connecting hands us a token to the company's
+    # Facebook account.
     assert not may_manage_integrations("employee")
+    assert not may_manage_integrations("guest")
+    # An unreadable role resolves to `employee`, not to the benefit of the doubt.
     assert not may_manage_integrations(None)
+    assert not may_manage_integrations("wat")
 
 
 def test_the_capability_the_app_draws_its_row_from_agrees():
     assert capabilities_for("owner")["can_manage_integrations"]
     assert capabilities_for("lider")["can_manage_integrations"]
-    assert not capabilities_for("performer")["can_manage_integrations"]
+    assert capabilities_for("performer")["can_manage_integrations"]
     assert not capabilities_for("employee")["can_manage_integrations"]
+    assert not capabilities_for("guest")["can_manage_integrations"]
 
 
 # ─── Whose Facebook app ───────────────────────────────────────────────────────

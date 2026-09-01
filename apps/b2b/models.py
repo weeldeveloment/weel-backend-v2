@@ -96,8 +96,8 @@ class LeadStage:
     ``LeadStatus`` is the board's three columns — unclaimed, somebody is on it,
     done. The stage is the step the salesperson actually moves through, and it
     is what the funnel screen shows on every card. The two are kept in step at
-    one place only (``repository.set_lead_stage``): reaching ``WON`` or ``LOST``
-    completes the lead, and nothing else changes the status.
+    one place only (``repository.set_lead_stage``): reaching ``WON``, ``LOST``
+    or ``ARCHIVED`` completes the lead, and nothing else changes the status.
     """
     NEW = "new"
     INTERESTED = "interested"
@@ -110,17 +110,36 @@ class LeadStage:
     CONTRACT = "contract"
     WON = "won"
     LOST = "lost"
+    #: Closed without a verdict — a duplicate, a wrong number, a lead that
+    #: went quiet and is not worth carrying as an open deal any longer. Not a
+    #: third outcome alongside won and lost: it asks for no reason, and does
+    #: not count toward the conversion rate or either won/lost total, because
+    #: nothing about it was decided. It only takes the deal off the board.
+    #: Added after the funnel screen shipped, for the reason ``CONTRACT`` is
+    #: at the end rather than in ``ORDER``'s place — see the note there.
+    ARCHIVED = "archived"
 
-    CHOICES = [NEW, INTERESTED, PROPOSAL, NEGOTIATION, CONTRACT, WON, LOST]
+    CHOICES = [
+        NEW, INTERESTED, PROPOSAL, NEGOTIATION, CONTRACT, WON, LOST, ARCHIVED,
+    ]
 
     #: The funnel's own order, which ``CHOICES`` cannot carry — a stage added
     #: later has to go on the end of the choices for the existing rows' sake.
     #: This is what "which stages come after this one" is read from.
-    ORDER = [NEW, INTERESTED, PROPOSAL, NEGOTIATION, CONTRACT, WON, LOST]
+    ORDER = [
+        NEW, INTERESTED, PROPOSAL, NEGOTIATION, CONTRACT, WON, LOST, ARCHIVED,
+    ]
 
-    #: The stages that close a lead — reaching either sets the status to
+    #: The stages that close a lead — reaching any of these sets the status to
     #: ``LeadStatus.COMPLETED``.
-    CLOSED = [WON, LOST]
+    CLOSED = [WON, LOST, ARCHIVED]
+
+    #: The two endings the sales report scores — the deals that were actually
+    #: *decided*. ``ARCHIVED`` is deliberately outside both this and
+    #: ``LOST``'s reason requirement: reports read a low win rate as a
+    #: pipeline problem, and a pile of dead numbers and duplicates archived
+    #: out of the funnel is not one.
+    DECIDED = [WON, LOST]
 
 
 class LeadLostReason:

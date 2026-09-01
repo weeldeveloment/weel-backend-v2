@@ -47,6 +47,14 @@ class Role:
     #: what a role may do.
     ADMINISTRATIVE = frozenset({OWNER, ADMIN})
 
+    #: Who may plug an outside service into the workspace — the owner, the
+    #: administrator ("lider") and the manager ("rahbar"). Wider than
+    #: [ADMINISTRATIVE] because connecting Meta is a decision about where the
+    #: funnel's leads come from, and the manager is who answers for the funnel;
+    #: still not the whole roster, because it hands us a token to the company's
+    #: Facebook account. See `apps/b2b/integrations/permissions.py`.
+    INTEGRATION_ROLES = frozenset({OWNER, ADMIN, MANAGER})
+
     LABELS = {
         OWNER: "Egasi",
         ADMIN: "Administrator",
@@ -510,10 +518,11 @@ def capabilities_from(
     # Plugging an outside service into the funnel. Not a permission in the
     # catalogue: the TZ's modules are parts of the workspace and this is a
     # company-level commitment — a token to the company's Facebook account,
-    # and every lead that account produces landing on this board. The owner
-    # and the administrator ("lider"), the same two who may ask another
-    # workspace for people. See `apps/b2b/integrations/permissions.py`.
-    flags["can_manage_integrations"] = role in Role.ADMINISTRATIVE
+    # and every lead that account produces landing on this board. The owner,
+    # the administrator ("lider") and the manager ("rahbar"), who is the one
+    # answering for the funnel those leads land in — but no further down the
+    # roster. See `apps/b2b/integrations/permissions.py`.
+    flags["can_manage_integrations"] = role in Role.INTEGRATION_ROLES
 
     flags["can_view_attendance"] = True
     flags["can_manage_attendance"] = manager

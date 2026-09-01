@@ -287,6 +287,76 @@ class WorkspaceEmployeeAccessView(WorkspaceAPIView):
         return employee
 
 
+class OwnershipRequestSerializer(serializers.Serializer):
+    kind = serializers.ChoiceField(
+        choices=[arepo.OwnershipRequestKind.TRANSFER, arepo.OwnershipRequestKind.CLOSE]
+    )
+    target_employee_id = serializers.IntegerField(required=False, allow_null=True)
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class WorkspaceOwnershipRequestView(WorkspaceAPIView):
+    """GET/POST /api/b2b/workspace/company/ownership-requests/ — handing the
+    company over, or closing it, neither of which this endpoint ever does
+    itself.
+
+    Owner only, and on their own company only: an admin or a manager runs a
+    workspace, not the Company it belongs to, and the whole point of routing
+    this through `admin_auth` is that nobody inside the workspace — owner
+    included — can make either thing happen by themselves. See the note on
+    `Role.OWNER` in `access.py`.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    def _require_owner(self, request):
+        if Role.clean(request.user.role) != Role.OWNER:
+            return Response(
+                {"detail": _("Only the owner may do this.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="This workspace's ownership/closure requests",
+    )
+    def get(self, request):
+        refused = self._require_owner(request)
+        if refused:
+            return refused
+        return Response({
+            "results": arepo.list_own_ownership_requests(request.user.company_id)
+        })
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Ask to transfer or close the company",
+        request_body=OwnershipRequestSerializer,
+    )
+    def post(self, request):
+        refused = self._require_owner(request)
+        if refused:
+            return refused
+
+        serializer = OwnershipRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            created = arepo.create_ownership_request(
+                company_id=request.user.company_id,
+                requested_by=request.user.id,
+                kind=data["kind"],
+                target_employee_id=data.get("target_employee_id"),
+                reason=data.get("reason", ""),
+            )
+        except arepo.OwnershipRequestError as error:
+            return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(created, status=status.HTTP_201_CREATED)
+
+
 class WorkspaceAuditView(WorkspaceAPIView):
     """GET /api/b2b/workspace/audit/ — role changes, access changes, deletions."""
 
@@ -433,3 +503,27 @@ class WorkspacePurgeView(WorkspaceAPIView):
             target_id=object_id,
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkspaceArchiveView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/archive/ — every deleted task and deal, read only.
+
+    A different door onto the same rows [WorkspaceTrashView] reads, open to
+    the whole company rather than gated on the authority to delete: the point
+    is that nobody — owner, lead, or anyone else — can make a deal or a task
+    vanish from what the company can see, only from the working list. There is
+    no restore or purge here on purpose; those stay behind the delete
+    permission on the trash screen, because undoing or finishing a removal is
+    a different authority from being able to see that it happened.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG, operation_summary="Every deleted task and deal"
+    )
+    def get(self, request):
+        return Response({
+            "tasks": repo.list_deleted_tasks(request.user.company_id),
+            "leads": repo.list_deleted_leads(request.user.company_id),
+        })

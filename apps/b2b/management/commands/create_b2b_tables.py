@@ -1952,3 +1952,45 @@ class Command(BaseCommand):
             "ON b2b_audit_event (company_id, created_at DESC);"
         )
         self.stdout.write("  Created b2b_audit_event")
+
+        # ─── Handing over or closing a company ─────────────────────────────────
+        #
+        # The owner holds the Company outright — see the note on `Role.OWNER`
+        # in `access.py` — which is exactly why neither move can be a plain
+        # write on their own say-so: an owner who could reassign or close the
+        # thing unilaterally could just as easily be tricked or coerced into
+        # it, with nobody else in a position to have caught it first. Both go
+        # through WEEL staff instead, in `admin_auth`, the same way a workspace
+        # never invites its way to a bigger seat than a human approved.
+        #
+        # `transfer`'s `target_employee_id` names who takes the `owner` role on
+        # `company_id`; `close` uses only `company_id`, and closing reaches the
+        # whole Company through it — see `close_company_request` in
+        # `access_repository.py`. One row shape for both because a pending
+        # request is a pending request to whoever is reviewing it: the queue
+        # does not need two tables to say "not yet decided".
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_ownership_request (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                requested_by BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                kind VARCHAR(20) NOT NULL,
+                target_employee_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                review_note TEXT NOT NULL DEFAULT '',
+                reviewed_by_user_id BIGINT,
+                reviewed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS b2b_ownership_request_pending_idx
+            ON b2b_ownership_request (company_id) WHERE status = 'pending';
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS b2b_ownership_request_status_idx
+            ON b2b_ownership_request (status, created_at DESC);
+        """)
+        self.stdout.write("  Created b2b_ownership_request")

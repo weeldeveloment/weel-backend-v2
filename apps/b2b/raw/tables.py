@@ -76,3 +76,8 @@ B2B_MAIL_OUTBOX_TABLE = "b2b_mail_outbox"
 # In-app notification feed for workspace employees. The existing `notification`
 # table only knows the `client` and `partner` roles, so B2B gets its own.
 B2B_NOTIFICATION_TABLE = "b2b_notification"
+
+# A request to hand over or close a Company — see `create_b2b_tables` and
+# `access_repository.py`. Reviewed by WEEL staff in `admin_auth`, never
+# actioned on the owner's own say-so.
+B2B_OWNERSHIP_REQUEST_TABLE = "b2b_ownership_request"

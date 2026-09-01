@@ -3,8 +3,10 @@ from django.urls import include, path
 from apps.b2b.mail.urls import notification_urlpatterns
 from apps.b2b.workspace.access_views import (
     WorkspaceAccessCatalogueView,
+    WorkspaceArchiveView,
     WorkspaceAuditView,
     WorkspaceEmployeeAccessView,
+    WorkspaceOwnershipRequestView,
     WorkspaceRoleDetailView,
     WorkspacePurgeView,
     WorkspaceRestoreView,
@@ -135,6 +137,12 @@ urlpatterns = [
         name="ws-employee-access",
     ),
     path("audit/", WorkspaceAuditView.as_view(), name="ws-audit"),
+    path("archive/", WorkspaceArchiveView.as_view(), name="ws-archive"),
+    path(
+        "company/ownership-requests/",
+        WorkspaceOwnershipRequestView.as_view(),
+        name="ws-ownership-requests",
+    ),
     path("trash/", WorkspaceTrashView.as_view(), name="ws-trash"),
     path(
         "trash/<str:kind>/<int:object_id>/restore/",

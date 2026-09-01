@@ -1091,6 +1091,7 @@ def list_threads(company_id: int, employee_id: int) -> list[dict[str, Any]]:
         SELECT
             t.id,
             t.group_name,
+            t.photo,
             t.created_by,
             t.last_message_at,
             m.is_pinned,
@@ -3145,6 +3146,12 @@ def sales_report(
     """
     scope, scope_params = _lead_scope(employee_id)
 
+    # `LeadStage.CLOSED` rather than a literal `(%s, %s)`: a lead archived
+    # without a verdict is off the board exactly like a won or a lost one, so
+    # it has to leave `open_count`/`open_amount`/`by_stage` the same way those
+    # two do — see the note on `LeadStage.ARCHIVED`.
+    closed_stages = ", ".join(["%s"] * len(LeadStage.CLOSED))
+
     totals = fetch_one(
         f"""
         SELECT
@@ -3163,9 +3170,11 @@ def sales_report(
                 WHERE l.stage = %s
                   AND l.completed_at >= %s AND l.completed_at < %s
             ), 0)                                                AS won_amount,
-            COUNT(*) FILTER (WHERE l.stage NOT IN (%s, %s))      AS open_count,
+            COUNT(*) FILTER (
+                WHERE l.stage NOT IN ({closed_stages})
+            )                                                    AS open_count,
             COALESCE(SUM(l.amount) FILTER (
-                WHERE l.stage NOT IN (%s, %s)
+                WHERE l.stage NOT IN ({closed_stages})
             ), 0)                                                AS open_amount
         FROM {B2B_WORKSPACE_LEAD_TABLE} l
         WHERE l.company_id = %s AND l.deleted_at IS NULL{scope}
@@ -3175,8 +3184,8 @@ def sales_report(
             LeadStage.WON, start, end,
             LeadStage.LOST, start, end,
             LeadStage.WON, start, end,
-            LeadStage.WON, LeadStage.LOST,
-            LeadStage.WON, LeadStage.LOST,
+            *LeadStage.CLOSED,
+            *LeadStage.CLOSED,
             company_id, *scope_params,
         ],
     ) or {}
@@ -3186,10 +3195,10 @@ def sales_report(
         SELECT l.stage, COUNT(*) AS count, COALESCE(SUM(l.amount), 0) AS amount
         FROM {B2B_WORKSPACE_LEAD_TABLE} l
         WHERE l.company_id = %s AND l.deleted_at IS NULL
-          AND l.stage NOT IN (%s, %s){scope}
+          AND l.stage NOT IN ({closed_stages}){scope}
         GROUP BY l.stage
         """,
-        [company_id, LeadStage.WON, LeadStage.LOST, *scope_params],
+        [company_id, *LeadStage.CLOSED, *scope_params],
     )
     # Ordered here rather than in SQL: the funnel's order is `LeadStage.ORDER`
     # and not alphabetical, and a stage nobody is sitting in still has to

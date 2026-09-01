@@ -1,11 +1,12 @@
 """Who may plug an outside service into the workspace.
 
-The owner and the workspace administrator — "lider" in the column, which
-[Role.clean] canonicalises to `admin`. Not a manager: connecting Meta points
-somebody else's advertising at this company's sales board and hands us a token
-to their Facebook account, which is a decision about the company rather than
-about the work being handed out. Same two roles that may ask another
-workspace for people (`roles.REQUEST_ROLES`), for the same reason.
+The owner, the workspace administrator — "lider" in the column, which
+[Role.clean] canonicalises to `admin` — and the manager ("rahbar"). The
+manager is in because the thing being connected is the sales funnel's supply:
+every Meta lead lands on the board they run, and a funnel whose source can
+only be changed by asking the owner is one that stays broken all week. It
+stops there. Connecting hands us a token to the company's Facebook account,
+which is not a decision to leave with the roster at large.
 
 Enforced here *and* reported to the app as `can_manage_integrations` so the
 row on the profile screen and the endpoint agree — see
@@ -20,11 +21,14 @@ from apps.b2b.workspace.authentication import WorkspaceUser
 
 
 def may_manage_integrations(role: str | None) -> bool:
-    return Role.clean(role) in Role.ADMINISTRATIVE
+    return Role.clean(role) in Role.INTEGRATION_ROLES
 
 
 class CanManageIntegrations(BasePermission):
-    message = "Only the workspace owner or an administrator can manage integrations."
+    message = (
+        "Only the workspace owner, an administrator or a manager "
+        "can manage integrations."
+    )
 
     def has_permission(self, request, view) -> bool:
         return (
