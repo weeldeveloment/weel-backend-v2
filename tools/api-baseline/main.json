@@ -5478,7 +5478,8 @@
       "negotiation",
       "contract",
       "won",
-      "lost"
+      "lost",
+      "archived"
      ],
      "title": "Stage",
      "type": "string"
@@ -7436,7 +7437,8 @@
       "negotiation",
       "contract",
       "won",
-      "lost"
+      "lost",
+      "archived"
      ],
      "title": "Stage",
      "type": "string"
@@ -7814,7 +7816,8 @@
       "negotiation",
       "contract",
       "won",
-      "lost"
+      "lost",
+      "archived"
      ],
      "title": "Stage",
      "type": "string"
@@ -9154,6 +9157,53 @@
    },
    "required": [
     "first_name"
+   ],
+   "type": "object"
+  },
+  "OwnershipRequest": {
+   "properties": {
+    "kind": {
+     "enum": [
+      "transfer",
+      "close"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "reason": {
+     "default": "",
+     "title": "Reason",
+     "type": "string"
+    },
+    "target_employee_id": {
+     "title": "Target employee id",
+     "type": "integer",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "kind"
+   ],
+   "type": "object"
+  },
+  "OwnershipRequestDecision": {
+   "properties": {
+    "action": {
+     "enum": [
+      "approve",
+      "reject"
+     ],
+     "title": "Action",
+     "type": "string"
+    },
+    "note": {
+     "default": "",
+     "title": "Note",
+     "type": "string"
+    }
+   },
+   "required": [
+    "action"
    ],
    "type": "object"
   },
@@ -13553,6 +13603,59 @@
     ]
    }
   },
+  "/admin-auth/b2b/ownership-requests/": {
+   "get": {
+    "description": "An owner cannot transfer or close a Company by asking their own workspace\n— see `WorkspaceOwnershipRequestView` — precisely so that a decision this\nconsequential always has someone outside the company looking at it. This\nis that someone's inbox.",
+    "operationId": "admin-auth_b2b_ownership-requests_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "GET ``/api/admin-auth/b2b/ownership-requests/`` — every company asking\nto hand itself over or close, waiting on WEEL.",
+    "tags": [
+     "api"
+    ]
+   },
+   "parameters": []
+  },
+  "/admin-auth/b2b/ownership-requests/{request_id}/decide/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "request_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "Approving is what actually moves the `owner` role or closes the company;\nthere is no separate \"apply\" step, because a request marked approved that\nhad not yet been carried out is exactly the kind of row that survives a\ncrash and quietly never happens.",
+    "operationId": "admin-auth_b2b_ownership-requests_decide_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/OwnershipRequestDecision"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Decided"
+     },
+     "404": {
+      "description": "Request not found or already decided"
+     }
+    },
+    "summary": "POST ``/api/admin-auth/b2b/ownership-requests/<id>/decide/`` —\napprove or reject one.",
+    "tags": [
+     "api"
+    ]
+   }
+  },
   "/admin-auth/b2b/support/": {
    "get": {
     "description": "One row per employee who has written in, newest first, with the count of\ntheir own lines nobody has answered yet. Across every company: this is\nWEEL's own desk, not a company's.",
@@ -16425,6 +16528,23 @@
    },
    "parameters": []
   },
+  "/b2b/workspace/archive/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/archive/ — every deleted task and deal, read only.\n\nA different door onto the same rows [WorkspaceTrashView] reads, open to\nthe whole company rather than gated on the authority to delete: the point\nis that nobody — owner, lead, or anyone else — can make a deal or a task\nvanish from what the company can see, only from the working list. There is\nno restore or purge here on purpose; those stay behind the delete\npermission on the trash screen, because undoing or finishing a removal is\na different authority from being able to see that it happened.",
+    "operationId": "b2b_workspace_archive_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Every deleted task and deal",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
   "/b2b/workspace/attendance/": {
    "get": {
     "description": "GET /api/b2b/workspace/attendance/ — today's roll call.\n\nReadable by everyone: it is on the chat home screen, and the point of it is\nknowing who is around. `?date=YYYY-MM-DD` reads another day.",
@@ -17283,6 +17403,49 @@
      }
     },
     "summary": "Mark a chat as read",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/company/ownership-requests/": {
+   "get": {
+    "description": "GET/POST /api/b2b/workspace/company/ownership-requests/ — handing the\ncompany over, or closing it, neither of which this endpoint ever does\nitself.\n\nOwner only, and on their own company only: an admin or a manager runs a\nworkspace, not the Company it belongs to, and the whole point of routing\nthis through `admin_auth` is that nobody inside the workspace — owner\nincluded — can make either thing happen by themselves. See the note on\n`Role.OWNER` in `access.py`.",
+    "operationId": "b2b_workspace_company_ownership-requests_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "This workspace's ownership/closure requests",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET/POST /api/b2b/workspace/company/ownership-requests/ — handing the\ncompany over, or closing it, neither of which this endpoint ever does\nitself.\n\nOwner only, and on their own company only: an admin or a manager runs a\nworkspace, not the Company it belongs to, and the whole point of routing\nthis through `admin_auth` is that nobody inside the workspace — owner\nincluded — can make either thing happen by themselves. See the note on\n`Role.OWNER` in `access.py`.",
+    "operationId": "b2b_workspace_company_ownership-requests_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/OwnershipRequest"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/OwnershipRequest"
+      }
+     }
+    },
+    "summary": "Ask to transfer or close the company",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -18622,7 +18785,8 @@
        "negotiation",
        "contract",
        "won",
-       "lost"
+       "lost",
+       "archived"
       ],
       "in": "formData",
       "name": "stage",
