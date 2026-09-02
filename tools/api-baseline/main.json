@@ -2797,7 +2797,8 @@
       "owner",
       "performer",
       "lider",
-      "employee"
+      "employee",
+      "guest"
      ],
      "title": "Role",
      "type": "string"
@@ -6275,6 +6276,20 @@
       "type": "integer"
      },
      "type": "array"
+    }
+   },
+   "type": "object"
+  },
+  "EmployeeRemove": {
+   "properties": {
+    "scope": {
+     "default": "workspace",
+     "enum": [
+      "workspace",
+      "company"
+     ],
+     "title": "Scope",
+     "type": "string"
     }
    },
    "type": "object"
@@ -12680,6 +12695,16 @@
    ],
    "type": "object"
   },
+  "WorkspaceDeleteRequest": {
+   "properties": {
+    "reason": {
+     "default": "",
+     "title": "Reason",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
   "WorkspaceFile": {
    "properties": {
     "author_id": {
@@ -16530,7 +16555,7 @@
   },
   "/b2b/workspace/archive/": {
    "get": {
-    "description": "GET /api/b2b/workspace/archive/ — every deleted task and deal, read only.\n\nA different door onto the same rows [WorkspaceTrashView] reads, open to\nthe whole company rather than gated on the authority to delete: the point\nis that nobody — owner, lead, or anyone else — can make a deal or a task\nvanish from what the company can see, only from the working list. There is\nno restore or purge here on purpose; those stay behind the delete\npermission on the trash screen, because undoing or finishing a removal is\na different authority from being able to see that it happened.",
+    "description": "GET /api/b2b/workspace/archive/ — \"История и архив\": every completed\nor deleted task, lead and quick sale, read only.\n\nA different door onto rows [WorkspaceTrashView] reads only the deleted\nhalf of, open to the whole company rather than gated on the authority to",
     "operationId": "b2b_workspace_archive_list",
     "parameters": [],
     "responses": {
@@ -16538,7 +16563,7 @@
       "description": ""
      }
     },
-    "summary": "Every deleted task and deal",
+    "summary": "Completed and deleted tasks, leads and quick sales",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -17545,6 +17570,79 @@
    },
    "parameters": []
   },
+  "/b2b/workspace/delete-requests/": {
+   "get": {
+    "description": "GET/POST /api/b2b/workspace/delete-requests/ — TZ §4: asking to delete\n*this one workspace*, as opposed to [WorkspaceOwnershipRequestView]'s\ncompany-wide close, which only WEEL's own desk can grant. A leader (or\nanybody `IsWorkspaceManager` lets through) may ask; only this workspace's\nown owner may grant it — see [WorkspaceDeleteRequestDecideView].",
+    "operationId": "b2b_workspace_delete-requests_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "This workspace's deletion requests",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET/POST /api/b2b/workspace/delete-requests/ — TZ §4: asking to delete\n*this one workspace*, as opposed to [WorkspaceOwnershipRequestView]'s\ncompany-wide close, which only WEEL's own desk can grant. A leader (or\nanybody `IsWorkspaceManager` lets through) may ask; only this workspace's\nown owner may grant it — see [WorkspaceDeleteRequestDecideView].",
+    "operationId": "b2b_workspace_delete-requests_create1",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/WorkspaceDeleteRequest"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/WorkspaceDeleteRequest"
+      }
+     }
+    },
+    "summary": "Ask to delete this workspace",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/delete-requests/{request_id}/{action}/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "request_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "action",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/delete-requests/<id>/<approve|reject>/\n\nOwner only, and only on this same workspace's own pending request — the\nTZ's \"Владелец получает запрос... принимает или отклоняет\". Approving\nmarks this workspace `is_active = FALSE`; the org above it and its other\nworkspaces are untouched.",
+    "operationId": "b2b_workspace_delete-requests_create2",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Decide a workspace deletion request",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/employee-of-month/": {
    "get": {
     "description": "GET/POST /api/b2b/workspace/employee-of-month/\n\nAnyone can see this month's pick; only the owner can make or change it.",
@@ -17588,10 +17686,10 @@
       }
      },
      "403": {
-      "description": "Owner only"
+      "description": "Owner or administrator only"
      }
     },
-    "summary": "Pick this month's employees of the month (owner only)",
+    "summary": "Pick this month's employees of the month (owner or administrator)",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -17665,6 +17763,42 @@
      }
     },
     "summary": "Set one employee's role and access",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/employees/{employee_id}/remove/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/employees/<id>/remove/ — end a member's\nstanding. Deactivates rather than deletes: their tasks, leads and history\nkeep the name that was on them.",
+    "operationId": "b2b_workspace_employees_remove_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/EmployeeRemove"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/EmployeeRemove"
+      }
+     }
+    },
+    "summary": "Remove a member",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -18415,13 +18549,13 @@
       "description": "Deleted"
      },
      "403": {
-      "description": "Only the owner or a manager may delete this lead"
+      "description": "Only the owner or an administrator may delete this lead"
      },
      "404": {
       "description": "Not found"
      }
     },
-    "summary": "Delete a lead (owner or manager)",
+    "summary": "Delete a lead (owner or administrator only)",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
