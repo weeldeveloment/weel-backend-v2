@@ -25,6 +25,7 @@ from apps.hotels.client import (
     get_client,
 )
 from apps.hotels.models import HotelBookingStatus
+from apps.hotels.permissions import CanCreateTrip
 from apps.hotels.raw.tables import (
     HOTELIOS_BED_TYPE_TABLE,
     HOTELIOS_COUNTRY_TABLE,
@@ -450,6 +451,12 @@ class HotelBookingListCreateView(HoteliosAPIView):
     POST holds the rooms; it does not send them to the hotel. That is the
     separate confirm step, which is what a completed payment triggers.
     """
+
+    def get_permissions(self):
+        permissions = super().get_permissions()
+        if self.request.method == "POST":
+            permissions.append(CanCreateTrip())
+        return permissions
 
     @swagger_auto_schema(responses={200: HotelBookingSerializer(many=True)})
     def get(self, request):

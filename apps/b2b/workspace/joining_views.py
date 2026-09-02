@@ -1145,6 +1145,13 @@ class WorkspaceJoinRequestDecideView(WorkspaceAPIView):
                     {"detail": _("This request has already been answered.")},
                     status=status.HTTP_409_CONFLICT,
                 )
+            arepo.record_audit(
+                request.user.company_id,
+                actor_employee_id=request.user.id,
+                action="join_request.declined",
+                target_type="join_request",
+                target_id=request_id,
+            )
             _queue_join_decision(request_id)
             return Response({"status": JoinStatus.DECLINED})
 

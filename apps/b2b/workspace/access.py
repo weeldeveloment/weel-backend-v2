@@ -335,9 +335,15 @@ DEFAULT_PERMISSIONS: dict[str, tuple[str, ...]] = {
     Role.OWNER: Permission.all(),
     Role.ADMIN: Permission.all(),
     Role.MANAGER: (
-        *_writes(Module.TASKS),
+        # Every task permission except deleting one — the TZ's rights matrix
+        # (§11) gives that to the owner and the administrator only, so it is
+        # left out here rather than granted and then hidden behind a second
+        # check. Everything else a manager runs the board with stays.
+        *(p for p in _writes(Module.TASKS) if p != Permission.TASK_DELETE),
         *_writes(Module.CHAT),
-        *_writes(Module.SALES),
+        # Same story for the sales board: deleting a lead is the owner's or
+        # the administrator's call, not the manager's.
+        *(p for p in _writes(Module.SALES) if p != Permission.DEAL_DELETE),
         *_writes(Module.CRM),
         *_writes(Module.CALENDAR),
         Permission.FILE_VIEW,
@@ -527,6 +533,8 @@ def capabilities_from(
     flags["can_view_attendance"] = True
     flags["can_manage_attendance"] = manager
     flags["can_manage_attendance_location"] = owner
-    flags["can_pick_employee_of_month"] = owner
+    # TZ §10: the owner or the administrator ("lider") — not the manager, who
+    # may only nominate if that feature is ever added, and never decides.
+    flags["can_pick_employee_of_month"] = role in Role.ADMINISTRATIVE
     flags["sees_all_company_data"] = manager
     return flags

@@ -29,6 +29,7 @@ from apps.b2b.models import LeadKind, LeadSource, LeadStage, LeadStatus
 from apps.b2b.repository import get_company, get_org
 from apps.b2b.mail import repository as mail_repo
 from apps.b2b.workspace import push_text
+from apps.b2b.workspace.access import Permission, Role
 from apps.b2b.workspace.secondment import Module
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import storage
@@ -1128,6 +1129,15 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
         if not task:
             return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
 
+        # TZ §8: once a task is done, only the owner or an administrator may
+        # still touch it — a manager who could edit it a minute ago cannot
+        # edit it a minute after it closed, and neither can the author.
+        if task.get("status") == "done" and Role.clean(request.user.role) not in Role.ADMINISTRATIVE:
+            return Response(
+                {"detail": _("Only the owner or an administrator may edit a completed task.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         can_edit = bool(request.user.capabilities["can_edit_task"])
         is_author = task["author_id"] == request.user.id
 
@@ -2208,6 +2218,7 @@ def _message_payload(
     quoted_attachment: dict | None = None,
     reactions: list[dict] | None = None,
     viewer_id: int | None = None,
+    names: dict[int, str] | None = None,
 ) -> dict:
     """One message as the app reads it.
 
@@ -2217,6 +2228,10 @@ def _message_payload(
     `attachment_url` does not.
     """
     data = ChatMessageSerializer(message).data
+    # Who wrote the original, by name. Null when the row is not a forward, and
+    # when the person's row is gone — the bubble then falls back to the plain
+    # "Yuborilgan xabar", which is the one case where naming nobody is right.
+    data["forwarded_from_name"] = (names or {}).get(message.get("forwarded_from_id"))
     data["attachment"] = (
         {
             "id": attachment["id"],
@@ -2236,6 +2251,15 @@ def _message_payload(
     data["reply_to"] = _quote_payload(replied_to, quoted_attachment)
     data["reactions"] = _reaction_payload(reactions, viewer_id or 0)
     return data
+
+
+def _forward_names(messages) -> dict[int, str]:
+    """The names a page of bubbles needs for its forward labels, in one query.
+
+    Empty when nothing on the page is a forward, which is the common case and
+    costs no query at all.
+    """
+    return repo.employee_names([m.get("forwarded_from_id") for m in messages])
 
 
 def _everyone_read_at(read_state: dict, participant_ids) -> str | None:
@@ -2298,6 +2322,9 @@ class WorkspaceMessageView(WorkspaceAPIView):
             [m["id"] for m in messages] + list(quoted)
         )
         reactions = repo.reactions_for_messages([m["id"] for m in messages])
+        pinned = repo.list_pinned_messages(thread_id)
+        # Both lists at once: a pinned message is usually on the page too.
+        forward_names = _forward_names(messages + pinned)
         # Opening a room is what marks it read, so it happens here rather than
         # costing the phone a second round trip. Only the newest page counts —
         # scrolling back through history must not clear newer messages. The
@@ -2336,6 +2363,7 @@ class WorkspaceMessageView(WorkspaceAPIView):
                     attachments.get(m.get("reply_to_id")),
                     reactions.get(m["id"]),
                     request.user.id,
+                    forward_names,
                 )
                 for m in messages
             ],
@@ -2348,8 +2376,8 @@ class WorkspaceMessageView(WorkspaceAPIView):
             # What is pinned in this room, whatever page of history is open.
             # A pin nobody can reach from the top of the room is not a pin.
             "pinned": [
-                _message_payload(m, viewer_id=request.user.id)
-                for m in repo.list_pinned_messages(thread_id)
+                _message_payload(m, viewer_id=request.user.id, names=forward_names)
+                for m in pinned
             ],
         })
 
@@ -2371,9 +2399,15 @@ class WorkspaceMessageView(WorkspaceAPIView):
         serializer = MessageWriteSerializer(
             data=request.data,
             # An attachment carries its own meaning, so a photo with no caption
-            # is a real message. Text stays required when there is nothing else
-            # in the envelope.
-            context={"allow_empty_text": upload is not None},
+            # is a real message — and so does a forward, whose text the server
+            # copies from the original after this runs. Passing a forward on
+            # without typing anything is the whole gesture, and requiring text
+            # here refused every one of them with "Message cannot be empty".
+            # Text stays required when there is nothing else in the envelope.
+            context={
+                "allow_empty_text": upload is not None
+                or bool(request.data.get("forward_message_id")),
+            },
         )
         serializer.is_valid(raise_exception=True)
 
@@ -2423,7 +2457,10 @@ class WorkspaceMessageView(WorkspaceAPIView):
             text = original["text"]
             # The person, not the message: the label has to keep saying who
             # wrote it after the original room is gone.
-            forwarded_from_id = original["sender_id"]
+            # A forward of a forward keeps pointing at whoever wrote the
+            # words, not at the colleague who passed them on — otherwise the
+            # label re-attributes the message at every hop.
+            forwarded_from_id = original.get("forwarded_from_id") or original["sender_id"]
 
         message = repo.send_message(
             thread_id,
@@ -2473,6 +2510,7 @@ class WorkspaceMessageView(WorkspaceAPIView):
             replied_to,
             quoted_attachment,
             viewer_id=request.user.id,
+            names=_forward_names([message]),
         )
         broadcast_message(thread_id, payload)
         return Response(payload, status=status.HTTP_201_CREATED)
@@ -2520,7 +2558,8 @@ class WorkspaceMessageDetailView(WorkspaceAPIView):
 
         attachment = repo.attachments_for_messages([message_id]).get(message_id)
         payload = _message_payload(
-            updated, attachment, viewer_id=request.user.id
+            updated, attachment, viewer_id=request.user.id,
+            names=_forward_names([updated]),
         )
         # Everyone in the room swaps the text in place rather than showing the
         # old one until the next refetch.
@@ -2604,7 +2643,9 @@ class WorkspaceMessagePinView(WorkspaceAPIView):
         if not updated:
             return Response({"detail": _("Message not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        payload = _message_payload(updated, viewer_id=request.user.id)
+        payload = _message_payload(
+            updated, viewer_id=request.user.id, names=_forward_names([updated])
+        )
         realtime.publish_thread(
             thread_id,
             realtime.EVENT_PINNED,
@@ -2647,7 +2688,8 @@ class WorkspaceMessageReactionView(WorkspaceAPIView):
         reactions = repo.reactions_for_messages([message_id]).get(message_id)
         attachment = repo.attachments_for_messages([message_id]).get(message_id)
         payload = _message_payload(
-            message, attachment, reactions=reactions, viewer_id=request.user.id
+            message, attachment, reactions=reactions, viewer_id=request.user.id,
+            names=_forward_names([message]),
         )
         # Broadcast without `mine`: whose reaction it is depends on who is
         # reading, and the room is one group. Each client recomputes its own
@@ -3159,10 +3201,10 @@ class WorkspaceLeadDetailView(WorkspaceAPIView):
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,
-        operation_summary="Delete a lead (owner or manager)",
+        operation_summary="Delete a lead (owner or administrator only)",
         responses={
             204: openapi.Response(description="Deleted"),
-            403: openapi.Response(description="Only the owner or a manager may delete this lead"),
+            403: openapi.Response(description="Only the owner or an administrator may delete this lead"),
             404: openapi.Response(description="Not found"),
         },
     )
@@ -3170,9 +3212,13 @@ class WorkspaceLeadDetailView(WorkspaceAPIView):
         lead = repo.get_lead(lead_id, request.user.company_id)
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
-        if not (_works_lead(lead, request.user) or request.user.is_manager):
+        # TZ §11: deleting a lead is the owner's or the administrator's call —
+        # not even the manager who posted it, and not the claimant working it.
+        # [_works_lead] answers a different question ("whose deal is this to
+        # work") and is deliberately not consulted here.
+        if not request.user.may(Permission.DEAL_DELETE):
             return Response(
-                {"detail": _("Only the owner or a manager may delete this lead.")},
+                {"detail": _("Only the owner or an administrator may delete this lead.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -4310,14 +4356,14 @@ class WorkspaceEmployeeOfMonthView(WorkspaceAPIView):
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,
-        operation_summary="Pick this month's employees of the month (owner only)",
+        operation_summary="Pick this month's employees of the month (owner or administrator)",
         request_body=EmployeeOfMonthSelectSerializer,
-        responses={200: EmployeeOfMonthListSerializer(), 403: openapi.Response(description="Owner only")},
+        responses={200: EmployeeOfMonthListSerializer(), 403: openapi.Response(description="Owner or administrator only")},
     )
     def post(self, request):
         if not request.user.capabilities["can_pick_employee_of_month"]:
             return Response(
-                {"detail": _("Only the owner can pick the employee of the month.")},
+                {"detail": _("Only the owner or an administrator can pick the employee of the month.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
 

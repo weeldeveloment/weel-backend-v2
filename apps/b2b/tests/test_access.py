@@ -33,7 +33,10 @@ from apps.b2b.workspace.access import (
 from apps.b2b.workspace.access_views import (
     WorkspaceAccessCatalogueView,
     WorkspaceAuditView,
+    WorkspaceDeleteRequestDecideView,
+    WorkspaceDeleteRequestView,
     WorkspaceEmployeeAccessView,
+    WorkspaceEmployeeRemoveView,
     WorkspaceRoleDetailView,
     WorkspaceRoleListView,
 )
@@ -99,6 +102,27 @@ def test_the_roles_the_roster_already_stores_still_resolve():
     # Anything unrecognised is the narrowest thing that is still a member.
     assert Role.clean("wizard") == Role.EMPLOYEE
     assert Role.clean(None) == Role.EMPLOYEE
+
+
+def test_writing_a_role_lands_in_the_vocabulary_the_roster_column_reads():
+    """`to_storage` is the only door back to `b2b_employee.role` — a write
+    through `Role.clean` alone would store `"admin"`/`"manager"` into a
+    column `views.py` and `secondment.py` still compare against
+    `"lider"`/`"performer"` directly, and those rows would stop matching
+    either vocabulary's checks."""
+    from apps.b2b.models import EmployeeRole
+    from apps.b2b.workspace.roles import to_storage
+
+    assert to_storage(Role.ADMIN) == EmployeeRole.LIDER
+    assert to_storage(Role.MANAGER) == EmployeeRole.PERFORMER
+    assert to_storage(Role.OWNER) == EmployeeRole.OWNER
+    assert to_storage(Role.EMPLOYEE) == EmployeeRole.EMPLOYEE
+    assert to_storage(Role.GUEST) == EmployeeRole.GUEST
+
+    # And the round trip: whatever is written is exactly what `Role.clean`
+    # already knows how to read back, for every one of the five roles.
+    for role in Role.CHOICES:
+        assert Role.clean(to_storage(role)) == role
 
 
 def test_the_apps_old_module_names_still_resolve():
@@ -638,10 +662,12 @@ LEGACY_FLAGS = {
         "sees_all_company_data",
     },
     # The roster calls this one `performer`; the app calls it "Manager".
+    # No `can_delete_task` — TZ §11 gives that to the owner and the
+    # administrator only.
     "performer": {
         "can_assign_task", "can_book_hotel", "can_chat", "can_comment_task",
         "can_create_event", "can_create_group_chat", "can_create_personal_event",
-        "can_create_task", "can_delete_task", "can_edit_any_event",
+        "can_create_task", "can_edit_any_event",
         "can_edit_task", "can_manage_attendance",
         # A deliberate widening, like `can_post_lead` below. The manager runs
         # the funnel every Meta lead lands in, and a source only the owner
@@ -683,6 +709,10 @@ def test_an_admin_gains_roster_administration_and_that_is_deliberate():
 
     assert admin["can_manage_team"] is True
     assert manager["can_manage_team"] is False
+    # TZ §10: picking the employee of the month is the owner's or the
+    # administrator's call, not the manager's.
+    assert admin["can_pick_employee_of_month"] is True
+    assert manager["can_pick_employee_of_month"] is False
     # Everything the manager could do, the admin still can.
     for flag, allowed in manager.items():
         if allowed:
@@ -737,3 +767,205 @@ def test_moving_a_task_along_is_not_editing_it():
 
     assert Permission.TASK_STATUS in employee
     assert Permission.TASK_EDIT not in employee
+
+
+# ─── Removing a member (TZ §11's two "delete a member" rows) ──────────────────
+
+def test_outranks_orders_the_five_roles():
+    from apps.b2b.workspace.access_repository import outranks
+
+    assert outranks(Role.OWNER, Role.ADMIN)
+    assert outranks(Role.ADMIN, Role.MANAGER)
+    assert outranks(Role.MANAGER, Role.EMPLOYEE)
+    assert outranks(Role.EMPLOYEE, Role.GUEST)
+    assert not outranks(Role.MANAGER, Role.MANAGER)
+    assert not outranks(Role.EMPLOYEE, Role.MANAGER)
+    # Legacy storage values resolve the same way, since rank reads through
+    # `Role.clean`.
+    assert outranks("lider", "performer")
+
+
+def test_the_owner_cannot_be_removed():
+    with patch(
+        "apps.b2b.workspace.access_views.repo.get_workspace_employee",
+        return_value=_employee(role=Role.OWNER),
+    ):
+        response = _call(
+            WorkspaceEmployeeRemoveView,
+            factory.post("/employees/5/remove/", {}, format="json"),
+            _user(Role.ADMIN),
+            employee_id=5,
+        )
+
+    assert response.status_code == 403
+
+
+def test_a_manager_cannot_remove_an_admin():
+    """Manager outranks nobody an admin does — the TZ's "only lower roles"."""
+    with patch(
+        "apps.b2b.workspace.access_views.repo.get_workspace_employee",
+        return_value=_employee(role=Role.ADMIN),
+    ), _granting(Permission.EMPLOYEE_REMOVE_WORKSPACE):
+        response = _call(
+            WorkspaceEmployeeRemoveView,
+            factory.post("/employees/5/remove/", {}, format="json"),
+            _user(Role.MANAGER),
+            employee_id=5,
+        )
+
+    assert response.status_code == 403
+
+
+def test_an_admin_may_remove_an_employee_from_the_workspace():
+    with patch(
+        "apps.b2b.workspace.access_views.repo.get_workspace_employee",
+        return_value=_employee(role=Role.EMPLOYEE),
+    ), _granting(Permission.EMPLOYEE_REMOVE_WORKSPACE), patch(
+        "apps.b2b.workspace.access_views.arepo.remove_employee"
+    ) as write:
+        response = _call(
+            WorkspaceEmployeeRemoveView,
+            factory.post("/employees/5/remove/", {}, format="json"),
+            _user(Role.ADMIN),
+            employee_id=5,
+        )
+
+    assert response.status_code == 204
+    write.assert_called_once()
+    assert write.call_args.kwargs["scope"] == "workspace"
+
+
+def test_removing_from_the_company_needs_the_wider_permission():
+    """Holding `EMPLOYEE_REMOVE_WORKSPACE` alone does not reach `scope=company`."""
+    with patch(
+        "apps.b2b.workspace.access_views.repo.get_workspace_employee",
+        return_value=_employee(role=Role.EMPLOYEE),
+    ), _granting(Permission.EMPLOYEE_REMOVE_WORKSPACE):
+        response = _call(
+            WorkspaceEmployeeRemoveView,
+            factory.post("/employees/5/remove/", {"scope": "company"}, format="json"),
+            _user(Role.ADMIN),
+            employee_id=5,
+        )
+
+    assert response.status_code == 403
+
+
+# ─── Deleting a workspace (TZ §4) ──────────────────────────────────────────────
+
+def test_only_a_manager_or_above_may_ask_to_delete_the_workspace():
+    response = _call(
+        WorkspaceDeleteRequestView,
+        factory.post("/delete-requests/", {}, format="json"),
+        _user(Role.EMPLOYEE),
+    )
+    assert response.status_code == 403
+
+
+def test_an_admin_may_ask_to_delete_the_workspace():
+    with patch(
+        "apps.b2b.workspace.access_views.arepo.request_workspace_deletion"
+    ) as write:
+        write.return_value = {"id": 1, "status": "pending"}
+        response = _call(
+            WorkspaceDeleteRequestView,
+            factory.post("/delete-requests/", {"reason": "no longer needed"}, format="json"),
+            _user(Role.ADMIN),
+        )
+
+    assert response.status_code == 201
+    write.assert_called_once()
+
+
+def test_only_the_owner_may_decide_a_workspace_deletion_request():
+    response = _call(
+        WorkspaceDeleteRequestDecideView,
+        factory.post("/delete-requests/1/approve/"),
+        _user(Role.ADMIN),
+        request_id=1,
+        action="approve",
+    )
+    assert response.status_code == 403
+
+
+def test_the_archive_shows_completed_and_deleted_separately():
+    """TZ §7: "История и архив" is two named states, not one merged list."""
+    from apps.b2b.workspace.access_views import WorkspaceArchiveView
+
+    with patch(
+        "apps.b2b.workspace.access_views.repo.list_tasks", return_value=[{"id": 1}]
+    ) as list_tasks, patch(
+        "apps.b2b.workspace.access_views.repo.list_leads", return_value=[{"id": 2}]
+    ) as list_leads, patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_tasks", return_value=[{"id": 3}]
+    ), patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_leads", return_value=[{"id": 4}]
+    ):
+        response = _call(
+            WorkspaceArchiveView, factory.get("/archive/"), _user(Role.EMPLOYEE)
+        )
+
+    assert response.status_code == 200
+    assert response.data["completed"]["tasks"] == [{"id": 1}]
+    assert response.data["completed"]["leads"] == [{"id": 2}]
+    assert response.data["deleted"]["tasks"] == [{"id": 3}]
+    assert response.data["deleted"]["leads"] == [{"id": 4}]
+    list_tasks.assert_called_once_with(COMPANY, status="done")
+    list_leads.assert_called_once()
+
+
+def test_a_manager_cannot_edit_a_completed_task():
+    """TZ §8: once a task is done, only the owner or an administrator may
+    still touch it, even somebody who could edit it a minute before it
+    closed."""
+    from apps.b2b.workspace.views import WorkspaceTaskDetailView
+
+    with patch(
+        "apps.b2b.workspace.views.repo.get_task",
+        return_value={"id": 9, "company_id": COMPANY, "author_id": 1, "status": "done", "assignee_ids": []},
+    ), _granting(*Permission.all()):
+        response = _call(
+            WorkspaceTaskDetailView,
+            factory.patch("/tasks/9/", {"title": "New title"}, format="json"),
+            _user(Role.MANAGER),
+            task_id=9,
+        )
+
+    assert response.status_code == 403
+
+
+def test_an_admin_may_edit_a_completed_task():
+    from apps.b2b.workspace.views import WorkspaceTaskDetailView
+
+    with patch(
+        "apps.b2b.workspace.views.repo.get_task",
+        return_value={"id": 9, "company_id": COMPANY, "author_id": 1, "status": "done", "assignee_ids": []},
+    ), patch(
+        "apps.b2b.workspace.views.repo.update_task",
+        return_value={"id": 9, "company_id": COMPANY, "author_id": 1, "status": "done", "assignee_ids": [], "title": "New title"},
+    ), _granting(*Permission.all()):
+        response = _call(
+            WorkspaceTaskDetailView,
+            factory.patch("/tasks/9/", {"title": "New title"}, format="json"),
+            _user(Role.ADMIN),
+            task_id=9,
+        )
+
+    assert response.status_code == 200
+
+
+def test_the_owner_approving_a_deletion_marks_the_workspace_deleted():
+    with patch(
+        "apps.b2b.workspace.access_views.arepo.decide_workspace_deletion"
+    ) as write:
+        write.return_value = {"id": 1, "status": "approved"}
+        response = _call(
+            WorkspaceDeleteRequestDecideView,
+            factory.post("/delete-requests/1/approve/"),
+            _user(Role.OWNER),
+            request_id=1,
+            action="approve",
+        )
+
+    assert response.status_code == 200
+    assert write.call_args.kwargs["approve"] is True

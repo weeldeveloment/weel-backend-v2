@@ -730,6 +730,15 @@ def delete_task(task_id: int, company_id: int, *, actor_id: int | None = None) -
             None, company_id, task_title=existing["title"],
             kind=TaskActivityKind.DELETED, author_id=actor_id,
         )
+        from apps.b2b.workspace.access_repository import record_audit
+
+        record_audit(
+            company_id,
+            actor_employee_id=actor_id,
+            action="task.deleted",
+            target_type="task",
+            target_id=task_id,
+        )
     return deleted
 
 
@@ -1534,6 +1543,26 @@ def message_visible_to(
     )
 
 
+def employee_names(employee_ids: Sequence[int]) -> dict[int, str]:
+    """Names for a handful of ids, in one query.
+
+    What a forward label is drawn from. The name travels with the message
+    rather than being looked up on the phone, because the roster the app
+    holds is the *current* one: somebody who has left, been hidden, or was
+    lent by another workspace is not on it, and a forward of their message
+    would then say "Yuborilgan xabar" and name nobody.
+    """
+    ids = list({int(i) for i in employee_ids if i})
+    if not ids:
+        return {}
+    rows = fetch_all(
+        f"SELECT id, full_name FROM {B2B_EMPLOYEE_TABLE} "
+        "WHERE id = __ANY_MARKER__(%s)",
+        [ids],
+    )
+    return {row["id"]: row["full_name"] or "" for row in rows}
+
+
 def messages_by_ids(message_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
     """The messages a page of history quotes, fetched in one query.
 
@@ -1950,7 +1979,7 @@ def delete_lead(lead_id: int, company_id: int, *, actor_id: int | None = None) -
     history rather than a shell. The TZ requires exactly this for leads and
     tasks; everything else in the schema still deletes outright.
     """
-    return bool(
+    deleted = bool(
         execute(
             f"UPDATE {B2B_WORKSPACE_LEAD_TABLE} "
             f"SET deleted_at = %s, deleted_by = %s, updated_at = %s "
@@ -1958,6 +1987,17 @@ def delete_lead(lead_id: int, company_id: int, *, actor_id: int | None = None) -
             [timezone.now(), actor_id, timezone.now(), lead_id, company_id],
         )
     )
+    if deleted:
+        from apps.b2b.workspace.access_repository import record_audit
+
+        record_audit(
+            company_id,
+            actor_employee_id=actor_id,
+            action="lead.deleted",
+            target_type="lead",
+            target_id=lead_id,
+        )
+    return deleted
 
 
 def list_deleted_tasks(company_id: int, *, limit: int = 100) -> list[dict[str, Any]]:

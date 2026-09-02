@@ -21,6 +21,32 @@ MANAGER_ROLES = frozenset({
 REQUEST_ROLES = frozenset({EmployeeRole.OWNER, EmployeeRole.LIDER})
 
 
+#: The inverse of `access.Role.ALIASES`. `Role.clean` reads either vocabulary
+#: in; this is the only place a role should be turned back into what
+#: `b2b_employee.role` has always stored, so a write from the newer TZ
+#: vocabulary (``admin``, ``manager``) lands as the legacy value
+#: (``lider``, ``performer``) that the rest of `apps/b2b` still compares the
+#: column against directly. Writing `Role.clean`'s output straight to the
+#: column — as opposed to going through this — is the bug this exists to
+#: rule out: it stores ``"admin"``/``"manager"`` into a column that
+#: `views.py` and `secondment.py` read as ``"lider"``/``"performer"``, so
+#: those rows silently stop matching either vocabulary's checks.
+_STORAGE_VALUES = {
+    "owner": EmployeeRole.OWNER,
+    "admin": EmployeeRole.LIDER,
+    "manager": EmployeeRole.PERFORMER,
+    "employee": EmployeeRole.EMPLOYEE,
+    "guest": EmployeeRole.GUEST,
+}
+
+
+def to_storage(role: str | None) -> str:
+    """The canonical role, translated back to what the roster column stores."""
+    from apps.b2b.workspace.access import Role
+
+    return _STORAGE_VALUES.get(Role.clean(role), EmployeeRole.EMPLOYEE)
+
+
 def is_manager(role: str | None) -> bool:
     """Whether somebody runs the workspace: the owner, an administrator
     ("lider"), or a manager ("performer").

@@ -70,14 +70,24 @@ class EmployeeRole:
       can do, plus asking another workspace for help — which commits this one
       to letting an outsider in and is deliberately not a manager's call.
     * ``EMPLOYEE``  — works what they are given.
+    * ``GUEST``     — the TZ's narrowest membership: nothing beyond chat
+      unless a module is granted by name. Distinct from a secondment
+      ("lent" guest, structurally a row with a membership), which stays
+      ``EMPLOYEE`` underneath — this is a permanent roster row somebody
+      deliberately set to Guest through the role editor.
+
+    See `apps.b2b.workspace.roles.to_storage` for the one place these five
+    values are translated from the TZ's ``access.Role`` vocabulary — every
+    write to this column must go through it, or the two vocabularies drift.
     """
 
     OWNER = "owner"
     PERFORMER = "performer"
     LIDER = "lider"
     EMPLOYEE = "employee"
+    GUEST = "guest"
 
-    CHOICES = [OWNER, PERFORMER, LIDER, EMPLOYEE]
+    CHOICES = [OWNER, PERFORMER, LIDER, EMPLOYEE, GUEST]
 
 
 class LeadStatus:

@@ -15,10 +15,11 @@ from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.b2b.models import LeadStatus
 from apps.b2b.workspace import access_repository as arepo
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace.access import Module, Permission, Role
-from apps.b2b.workspace.permissions import IsWorkspaceUser
+from apps.b2b.workspace.permissions import IsWorkspaceManager, IsWorkspaceUser
 from apps.b2b.workspace.views import WORKSPACE_TAG, WorkspaceAPIView
 
 
@@ -287,6 +288,68 @@ class WorkspaceEmployeeAccessView(WorkspaceAPIView):
         return employee
 
 
+class EmployeeRemoveSerializer(serializers.Serializer):
+    #: The TZ's two separate rights-matrix rows: ending somebody's standing
+    #: in this one workspace, or in every workspace under the org.
+    scope = serializers.ChoiceField(choices=["workspace", "company"], default="workspace")
+
+
+class WorkspaceEmployeeRemoveView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/employees/<id>/remove/ — end a member's
+    standing. Deactivates rather than deletes: their tasks, leads and history
+    keep the name that was on them.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Remove a member",
+        request_body=EmployeeRemoveSerializer,
+    )
+    def post(self, request, employee_id: int):
+        target = repo.get_workspace_employee(employee_id)
+        if not target or target["company_id"] != request.user.company_id:
+            return Response(
+                {"detail": _("Employee not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+        if Role.clean(target.get("role")) == Role.OWNER:
+            return Response(
+                {"detail": _("The owner cannot be removed.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = EmployeeRemoveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        scope = serializer.validated_data["scope"]
+
+        needed = (
+            Permission.EMPLOYEE_REMOVE_COMPANY
+            if scope == "company"
+            else Permission.EMPLOYEE_REMOVE_WORKSPACE
+        )
+        if not request.user.may(needed):
+            return Response(
+                {"detail": _("You may not remove this member.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        # "Only a lower role" — the TZ's own qualifier on this row. An owner's
+        # rank already outranks the whole roster, so this never narrows them.
+        if not arepo.outranks(request.user.role, target.get("role")):
+            return Response(
+                {"detail": _("You may only remove somebody ranked below you.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        arepo.remove_employee(
+            employee_id,
+            company_id=request.user.company_id,
+            scope=scope,
+            actor_employee_id=request.user.id,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class OwnershipRequestSerializer(serializers.Serializer):
     kind = serializers.ChoiceField(
         choices=[arepo.OwnershipRequestKind.TRANSFER, arepo.OwnershipRequestKind.CLOSE]
@@ -355,6 +418,85 @@ class WorkspaceOwnershipRequestView(WorkspaceAPIView):
             return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(created, status=status.HTTP_201_CREATED)
+
+
+class WorkspaceDeleteRequestSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class WorkspaceDeleteRequestView(WorkspaceAPIView):
+    """GET/POST /api/b2b/workspace/delete-requests/ — TZ §4: asking to delete
+    *this one workspace*, as opposed to [WorkspaceOwnershipRequestView]'s
+    company-wide close, which only WEEL's own desk can grant. A leader (or
+    anybody `IsWorkspaceManager` lets through) may ask; only this workspace's
+    own owner may grant it — see [WorkspaceDeleteRequestDecideView].
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser, IsWorkspaceManager]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG, operation_summary="This workspace's deletion requests"
+    )
+    def get(self, request):
+        return Response({
+            "results": arepo.list_workspace_delete_requests(request.user.company_id)
+        })
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Ask to delete this workspace",
+        request_body=WorkspaceDeleteRequestSerializer,
+    )
+    def post(self, request):
+        serializer = WorkspaceDeleteRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            created = arepo.request_workspace_deletion(
+                company_id=request.user.company_id,
+                requested_by=request.user.id,
+                reason=serializer.validated_data.get("reason", ""),
+            )
+        except arepo.OwnershipRequestError as error:
+            return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(created, status=status.HTTP_201_CREATED)
+
+
+class WorkspaceDeleteRequestDecideView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/delete-requests/<id>/<approve|reject>/
+
+    Owner only, and only on this same workspace's own pending request — the
+    TZ's "Владелец получает запрос... принимает или отклоняет". Approving
+    marks this workspace `is_active = FALSE`; the org above it and its other
+    workspaces are untouched.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG, operation_summary="Decide a workspace deletion request"
+    )
+    def post(self, request, request_id: int, action: str):
+        if Role.clean(request.user.role) != Role.OWNER:
+            return Response(
+                {"detail": _("Only the owner may decide this.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if action not in ("approve", "reject"):
+            return Response(
+                {"detail": _("Unknown action.")}, status=status.HTTP_400_BAD_REQUEST
+            )
+        updated = arepo.decide_workspace_deletion(
+            request_id,
+            company_id=request.user.company_id,
+            approve=action == "approve",
+            reviewer_employee_id=request.user.id,
+        )
+        if not updated:
+            return Response(
+                {"detail": _("This request has already been answered.")},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(updated)
 
 
 class WorkspaceAuditView(WorkspaceAPIView):
@@ -506,24 +648,42 @@ class WorkspacePurgeView(WorkspaceAPIView):
 
 
 class WorkspaceArchiveView(WorkspaceAPIView):
-    """GET /api/b2b/workspace/archive/ — every deleted task and deal, read only.
+    """GET /api/b2b/workspace/archive/ — "История и архив": every completed
+    or deleted task, lead and quick sale, read only.
 
-    A different door onto the same rows [WorkspaceTrashView] reads, open to
-    the whole company rather than gated on the authority to delete: the point
-    is that nobody — owner, lead, or anyone else — can make a deal or a task
-    vanish from what the company can see, only from the working list. There is
-    no restore or purge here on purpose; those stay behind the delete
-    permission on the trash screen, because undoing or finishing a removal is
-    a different authority from being able to see that it happened.
+    A different door onto rows [WorkspaceTrashView] reads only the deleted
+    half of, open to the whole company rather than gated on the authority to
+    delete: the point is that nobody — owner, lead, or anyone else — can make
+    a deal or a task vanish from what the company can see, only from the
+    working list. There is no restore or purge here on purpose; those stay
+    behind the delete permission on the trash screen, because undoing or
+    finishing a removal is a different authority from being able to see that
+    it happened.
+
+    The TZ names two states this section shows side by side rather than one:
+    finished work still on the board (``completed``) and work somebody took
+    off it (``deleted``) — different facts, so the response keeps them apart
+    rather than merging into one list a screen would have to re-split.
     """
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(
-        tags=WORKSPACE_TAG, operation_summary="Every deleted task and deal"
+        tags=WORKSPACE_TAG, operation_summary="Completed and deleted tasks, leads and quick sales"
     )
     def get(self, request):
+        company_id = request.user.company_id
         return Response({
-            "tasks": repo.list_deleted_tasks(request.user.company_id),
-            "leads": repo.list_deleted_leads(request.user.company_id),
+            "completed": {
+                "tasks": repo.list_tasks(company_id, status="done"),
+                "leads": repo.list_leads(company_id, status=LeadStatus.COMPLETED, kind=repo.LEAD_KIND_ANY),
+            },
+            "deleted": {
+                "tasks": repo.list_deleted_tasks(company_id),
+                "leads": repo.list_deleted_leads(company_id),
+            },
+            # Kept for callers still reading the pre-TZ shape — the same rows
+            # as `deleted` above, flat.
+            "tasks": repo.list_deleted_tasks(company_id),
+            "leads": repo.list_deleted_leads(company_id),
         })

@@ -1994,3 +1994,26 @@ class Command(BaseCommand):
             ON b2b_ownership_request (status, created_at DESC);
         """)
         self.stdout.write("  Created b2b_ownership_request")
+
+        # TZ §4 — deleting one workspace, decided by that workspace's own
+        # owner rather than routed to WEEL staff. Deliberately a separate
+        # table from `b2b_ownership_request` above: that one can end the
+        # whole Company and only WEEL's desk may grant it; this one never
+        # reaches past `company_id`.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_delete_request (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                requested_by BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                reason TEXT NOT NULL DEFAULT '',
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                decided_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS b2b_workspace_delete_request_pending_idx
+            ON b2b_workspace_delete_request (company_id) WHERE status = 'pending';
+        """)
+        self.stdout.write("  Created b2b_workspace_delete_request")

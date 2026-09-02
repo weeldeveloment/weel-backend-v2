@@ -239,6 +239,84 @@ def set_employee_access(
     )
 
 
+#: Outranks-who, for the TZ's "only a lower role" rows (removing a member,
+#: reassigning a role). Higher number outranks lower.
+ROLE_RANK: dict[str, int] = {
+    Role.OWNER: 4,
+    Role.ADMIN: 3,
+    Role.MANAGER: 2,
+    Role.EMPLOYEE: 1,
+    Role.GUEST: 0,
+}
+
+
+def outranks(actor_role: str, target_role: str) -> bool:
+    return ROLE_RANK.get(Role.clean(actor_role), 0) > ROLE_RANK.get(
+        Role.clean(target_role), 0
+    )
+
+
+def remove_employee(
+    employee_id: int,
+    *,
+    company_id: int,
+    scope: str,
+    actor_employee_id: int | None,
+) -> bool:
+    """Ends a member's standing rather than deleting the row — their tasks,
+    leads and history all still name somebody.
+
+    ``scope="workspace"`` ends only this row. ``scope="company"`` ends every
+    row the same phone number holds across every workspace under this one's
+    org — the TZ's separate "remove from the organisation" row in the rights
+    matrix, not just this one workspace.
+    """
+    target = fetch_one(
+        f"SELECT phone FROM {B2B_EMPLOYEE_TABLE} WHERE id = %s AND company_id = %s",
+        [employee_id, company_id],
+    )
+    if not target:
+        return False
+
+    now = timezone.now()
+    if scope == "company":
+        org = fetch_one(f"SELECT org_id FROM {B2B_COMPANY_TABLE} WHERE id = %s", [company_id])
+        org_id = org["org_id"] if org else None
+        if org_id:
+            execute(
+                f"""
+                UPDATE {B2B_EMPLOYEE_TABLE} SET is_active = FALSE, updated_at = %s
+                 WHERE phone = %s AND company_id IN (
+                     SELECT id FROM {B2B_COMPANY_TABLE} WHERE org_id = %s
+                 )
+                """,
+                [now, target["phone"], org_id],
+            )
+        else:
+            # No org above this workspace: "the company" and "this workspace"
+            # are the same thing, so the narrower update already covers it.
+            execute(
+                f"UPDATE {B2B_EMPLOYEE_TABLE} SET is_active = FALSE, updated_at = %s "
+                f"WHERE id = %s AND company_id = %s",
+                [now, employee_id, company_id],
+            )
+    else:
+        execute(
+            f"UPDATE {B2B_EMPLOYEE_TABLE} SET is_active = FALSE, updated_at = %s "
+            f"WHERE id = %s AND company_id = %s",
+            [now, employee_id, company_id],
+        )
+
+    record_audit(
+        company_id,
+        actor_employee_id=actor_employee_id,
+        action=f"employee.removed_from_{scope}",
+        target_type="employee",
+        target_id=employee_id,
+    )
+    return True
+
+
 def set_employee_role(
     employee_id: int,
     role: str,
@@ -246,9 +324,11 @@ def set_employee_role(
     company_id: int,
     actor_employee_id: int | None,
 ) -> None:
+    from apps.b2b.workspace.roles import to_storage
+
     execute(
         f"UPDATE {B2B_EMPLOYEE_TABLE} SET role = %s, updated_at = %s WHERE id = %s",
-        [Role.clean(role), timezone.now(), employee_id],
+        [to_storage(role), timezone.now(), employee_id],
     )
     record_audit(
         company_id,
@@ -256,6 +336,8 @@ def set_employee_role(
         action="employee.role_changed",
         target_type="employee",
         target_id=employee_id,
+        # The canonical name, not the storage value — this is what the role
+        # editor and the audit log's reader both speak.
         payload={"role": Role.clean(role)},
     )
 
@@ -528,18 +610,20 @@ def _execute_transfer(request_row: dict[str, Any]) -> None:
     silently downgrading an admin's decision to a no-op would be a worse
     surprise than a transfer that turns out to need re-requesting.
     """
+    from apps.b2b.workspace.roles import to_storage
+
     company_id = request_row["company_id"]
     now = timezone.now()
     execute(
         f"UPDATE {B2B_EMPLOYEE_TABLE} SET role = %s, updated_at = %s "
         f"WHERE id = %s AND company_id = %s AND is_active = TRUE",
-        [Role.MANAGER, now, request_row["requested_by"], company_id],
+        [to_storage(Role.MANAGER), now, request_row["requested_by"], company_id],
     )
     if request_row["target_employee_id"]:
         execute(
             f"UPDATE {B2B_EMPLOYEE_TABLE} SET role = %s, updated_at = %s "
             f"WHERE id = %s AND company_id = %s AND is_active = TRUE",
-            [Role.OWNER, now, request_row["target_employee_id"], company_id],
+            [to_storage(Role.OWNER), now, request_row["target_employee_id"], company_id],
         )
 
 
@@ -575,3 +659,107 @@ def _execute_close(request_row: dict[str, Any]) -> None:
             f"WHERE id = %s",
             [now, request_row["company_id"]],
         )
+
+
+# ─── Deleting one workspace (TZ §4) ────────────────────────────────────────────
+#
+# Deliberately not the same table or flow as the ownership request above.
+# That one hands the decision to WEEL staff because it can end the whole
+# Company; this one never leaves the workspace — a leader asks, this same
+# workspace's own owner decides, and approval touches only this workspace's
+# `b2b_company` row. The org above it, and any other workspace under that
+# org, is never reached from here.
+
+B2B_WORKSPACE_DELETE_REQUEST_TABLE = "b2b_workspace_delete_request"
+
+
+class WorkspaceDeleteStatus:
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+def request_workspace_deletion(
+    *, company_id: int, requested_by: int, reason: str = ""
+) -> dict[str, Any]:
+    existing = fetch_one(
+        f"SELECT id FROM {B2B_WORKSPACE_DELETE_REQUEST_TABLE} "
+        f"WHERE company_id = %s AND status = %s",
+        [company_id, WorkspaceDeleteStatus.PENDING],
+    )
+    if existing:
+        raise OwnershipRequestError(_("A deletion request is already pending."))
+
+    now = timezone.now()
+    row = fetch_one(
+        f"""
+        INSERT INTO {B2B_WORKSPACE_DELETE_REQUEST_TABLE}
+            (company_id, requested_by, reason, status, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [company_id, requested_by, reason, WorkspaceDeleteStatus.PENDING, now, now],
+    )
+    record_audit(
+        company_id,
+        actor_employee_id=requested_by,
+        action="workspace.delete_requested",
+        target_type="workspace",
+        target_id=company_id,
+    )
+    return row
+
+
+def list_workspace_delete_requests(company_id: int) -> list[dict[str, Any]]:
+    return fetch_all(
+        f"SELECT * FROM {B2B_WORKSPACE_DELETE_REQUEST_TABLE} "
+        f"WHERE company_id = %s ORDER BY created_at DESC",
+        [company_id],
+    )
+
+
+def decide_workspace_deletion(
+    request_id: int,
+    *,
+    company_id: int,
+    approve: bool,
+    reviewer_employee_id: int,
+) -> dict[str, Any] | None:
+    """Approve marks this workspace `is_active = FALSE` — nothing above it.
+    Reject just closes the request."""
+    row = fetch_one(
+        f"SELECT status FROM {B2B_WORKSPACE_DELETE_REQUEST_TABLE} "
+        f"WHERE id = %s AND company_id = %s",
+        [request_id, company_id],
+    )
+    if not row or row["status"] != WorkspaceDeleteStatus.PENDING:
+        return None
+
+    now = timezone.now()
+    if approve:
+        execute(
+            f"UPDATE {B2B_COMPANY_TABLE} SET is_active = FALSE, updated_at = %s WHERE id = %s",
+            [now, company_id],
+        )
+    updated = fetch_one(
+        f"""
+        UPDATE {B2B_WORKSPACE_DELETE_REQUEST_TABLE}
+           SET status = %s, decided_by = %s, updated_at = %s
+         WHERE id = %s
+        RETURNING *
+        """,
+        [
+            WorkspaceDeleteStatus.APPROVED if approve else WorkspaceDeleteStatus.REJECTED,
+            reviewer_employee_id,
+            now,
+            request_id,
+        ],
+    )
+    record_audit(
+        company_id,
+        actor_employee_id=reviewer_employee_id,
+        action=f"workspace.delete_{'approved' if approve else 'rejected'}",
+        target_type="workspace",
+        target_id=company_id,
+    )
+    return updated

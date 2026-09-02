@@ -151,19 +151,22 @@ def test_a_manager_deletes_a_lead():
     delete.assert_called_once_with(7, COMPANY_ID, actor_id=MANAGER_ID)
 
 
-def test_the_owner_deletes_their_own_lead():
+def test_the_claimant_cannot_delete_their_own_lead():
+    """TZ §11: deleting a lead is the owner's or the administrator's call —
+    working a deal, even claiming and closing it, is not the same right.
+    (`OWNER` here is an `employee`-role fixture despite its name — it is the
+    lead's claimant, not the workspace's actual owner; see `MANAGER`, which
+    despite *its* name is the `owner`-role fixture used above.)"""
     with (
         patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
-        patch("apps.b2b.workspace.views.repo.delete_lead", return_value=True) as delete,
+        patch("apps.b2b.workspace.views.repo.delete_lead") as delete,
     ):
         response = _call(
             WorkspaceLeadDetailView, factory.delete("/leads/7/"), OWNER, lead_id=7
         )
 
-    assert response.status_code == 204
-    # Who removed it is recorded now: a soft delete keeps the row, and a
-    # row that cannot say who deleted it cannot be judged before restoring.
-    delete.assert_called_once_with(7, COMPANY_ID, actor_id=OWNER_ID)
+    assert response.status_code == 403
+    delete.assert_not_called()
 
 
 def test_a_bystander_cannot_delete_somebody_elses_lead():
