@@ -1902,6 +1902,21 @@
    },
    "type": "object"
   },
+  "AttendanceCheckOut": {
+   "properties": {
+    "latitude": {
+     "title": "Latitude",
+     "type": "number",
+     "x-nullable": true
+    },
+    "longitude": {
+     "title": "Longitude",
+     "type": "number",
+     "x-nullable": true
+    }
+   },
+   "type": "object"
+  },
   "AttendanceDay": {
    "properties": {
     "absent": {
@@ -1918,6 +1933,18 @@
       "$ref": "#/definitions/AttendanceEntry"
      },
      "type": "array"
+    },
+    "my_checked_in_at": {
+     "format": "date-time",
+     "title": "My checked in at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "my_checked_out_at": {
+     "format": "date-time",
+     "title": "My checked out at",
+     "type": "string",
+     "x-nullable": true
     },
     "my_reason": {
      "minLength": 1,
@@ -1955,6 +1982,12 @@
     "checked_in_at": {
      "format": "date-time",
      "title": "Checked in at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "checked_out_at": {
+     "format": "date-time",
+     "title": "Checked out at",
      "type": "string",
      "x-nullable": true
     },
@@ -16662,6 +16695,38 @@
      }
     },
     "summary": "Check yourself in for today",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/attendance/check-out/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/attendance/check-out/ — \"Ketdim\".\n\nThe other end of the day from check-in. Needs no capability: it only ever\nwrites the caller's own row. The departure time is the server's, not the\nrequest's, for the same reason the arrival time is.\n\nUnlike check-in, the geofence is not enforced here — the whole point of\nchecking out is that the person is leaving, so being outside the radius is\nthe expected case. Coordinates, if the phone sends them, are stored for\naudit parity with the check-in pair.\n\nYou can only check out of a day you checked into: without an arrival on\nfile there is nothing to close, and the tap is refused rather than\ninventing a departure with no matching arrival.",
+    "operationId": "b2b_workspace_attendance_check-out_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AttendanceCheckOut"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AttendanceDay"
+      }
+     },
+     "400": {
+      "description": "Not checked in"
+     }
+    },
+    "summary": "Check yourself out for today",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
