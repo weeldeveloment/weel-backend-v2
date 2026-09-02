@@ -6,6 +6,8 @@ from django.core.management.base import BaseCommand
 from django.conf import settings
 
 from django.utils import timezone
+from users.models.logs import SmsPurpose
+from users.services import OTPRedisService
 
 from users.raw_repository import (
     create_partner,
@@ -95,7 +97,7 @@ class Command(BaseCommand):
             )
             self.stdout.write(
                 "Login: POST /api/user/partner/login/ → POST /api/user/partner/login/verify/ "
-                "(OTP bypass: 0000)"
+                f"(OTP bypass: {OTPRedisService.test_bypass_otp(SmsPurpose.PARTNER_LOGIN)})"
             )
         else:
             self.stdout.write(

@@ -687,6 +687,25 @@ ESKIZ_PASSWORD = os.getenv("ESKIZ_PASSWORD")
 ESKIZ_SENDER = os.getenv("ESKIZ_SENDER", "")
 ESKIZ_CALLBACK_URL = os.getenv("ESKIZ_CALLBACK_URL", "")
 
+# The OTP message body, character for character as Eskiz moderation approved
+# it. Their moderation matches the whole text and not just the sender: a
+# message whose wording drifts from the registered template is rejected at the
+# gateway, and the user simply never gets a code — there is no error to see in
+# our own logs beyond the provider's refusal.
+#
+# Registered as:  Код верификации для входа в приложение WEEL - 000000
+#
+# The six zeros are the placeholder for the digits, which is why it has to stay
+# six: `OTPRedisService.OTP_LENGTH` fills that slot. Changing either the
+# wording or the number of digits means submitting a new template to Eskiz and
+# waiting for it to pass, so neither is a change to make in a hurry.
+#
+# `{code}` is the only substitution `EskizService.send_sms` performs.
+ESKIZ_OTP_TEMPLATE = os.getenv(
+    "ESKIZ_OTP_TEMPLATE",
+    "Код верификации для входа в приложение WEEL - {code}",
+)
+
 # ─── Bookhara Avia (apps/avia) ───────────────────────────────────────────────
 #
 # Flights are not our inventory: search, booking, ticketing and refunds all

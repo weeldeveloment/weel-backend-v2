@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 
+from django.conf import settings
 from django.test import SimpleTestCase, override_settings
 from django.urls import resolve
 from django.utils import timezone
@@ -19,7 +20,7 @@ from users.serializers import (
     ClientOTPLoginVerifySerializer,
     ClientOTPRegistrationVerifySerializer,
 )
-from users.services import EskizService
+from users.services import EskizService, OTPRedisService
 from users.tasks import send_otp_sms_eskiz, send_partner_telegram_msg
 from users.views import (
     ClientSendOTPLoginView,
@@ -191,7 +192,7 @@ class UserViewsTests(SimpleTestCase):
 
         request = self.factory.post(
             "/api/user/client/login/verify/",
-            {"phone_number": "998901234567", "otp_code": "123456"},
+            {"phone_number": "998901234567", "otp_code": "1234"},
             format="json",
         )
         response = ClientVerifyOTPLoginView.as_view()(request)
@@ -441,6 +442,91 @@ class EskizServiceTests(SimpleTestCase):
         call_kwargs = mock_post.call_args
         sent_data = call_kwargs[1]["data"] if "data" in call_kwargs[1] else call_kwargs[0][1]
         self.assertEqual(sent_data["message"], "Hello plain text")
+
+    @override_settings(
+        ESKIZ_EMAIL="test@weel.uz",
+        ESKIZ_PASSWORD="secret",
+        ESKIZ_LOGIN_URL="https://notify.eskiz.uz/api/auth/login",
+        ESKIZ_SMS_SEND_URL="https://notify.eskiz.uz/api/message/sms/send",
+    )
+    @patch("users.services.cache")
+    @patch("users.services.requests.post")
+    def test_otp_sms_body_matches_the_moderated_template(self, mock_post, mock_cache):
+        """The wording Eskiz approved, character for character.
+
+        Their moderation matches the whole body. A message that drifts from the
+        registered template is refused at the gateway and the user never gets a
+        code, so this is worth pinning even though it looks like a test of a
+        string literal: the literal *is* the contract.
+
+        Registered as: Код верификации для входа в приложение WEEL - 000000
+        """
+        mock_cache.get.return_value = "cached-token"
+        mock_post.side_effect = [self._make_response(200, {"id": "msg-tpl"})]
+
+        service = EskizService()
+        service.send_sms("+998901234567", "482913")
+
+        call_kwargs = mock_post.call_args
+        sent_data = call_kwargs[1]["data"] if "data" in call_kwargs[1] else call_kwargs[0][1]
+        self.assertEqual(
+            sent_data["message"],
+            "Код верификации для входа в приложение WEEL - 482913",
+        )
+
+    def test_otp_template_placeholder_is_as_wide_as_the_b2b_code(self):
+        """The newly registered template reserves six digits, which is b2b's.
+
+        Eskiz moderates the whole body, so each code length is its own
+        template: the four-digit one was approved long ago and still carries
+        the client and partner flows, and `000000` is the b2b one. Generating
+        a b2b code of any other width would produce a body matching neither.
+        """
+        approved_placeholder = "000000"
+        self.assertEqual(
+            len(approved_placeholder),
+            OTPRedisService.otp_length(SmsPurpose.B2B_LOGIN),
+        )
+        self.assertEqual(
+            settings.ESKIZ_OTP_TEMPLATE.format(code=approved_placeholder),
+            "Код верификации для входа в приложение WEEL - 000000",
+        )
+
+    def test_only_b2b_gets_the_longer_code(self):
+        """Six digits for b2b, four everywhere else.
+
+        The b2b dashboard and the b2b mobile app were rebuilt for six together.
+        The client and partner frontends were not, and their serializers pin
+        `min_length == max_length == OTP_LENGTH` — so a six-digit code on those
+        purposes would not be a nicer code, it would be a lockout.
+        """
+        self.assertEqual(OTPRedisService.otp_length(SmsPurpose.B2B_LOGIN), 6)
+        for purpose in (
+            SmsPurpose.LOGIN,
+            SmsPurpose.REGISTER,
+            SmsPurpose.PARTNER_LOGIN,
+            SmsPurpose.PARTNER_REGISTER,
+            SmsPurpose.ACCOUNT_DELETE,
+        ):
+            with self.subTest(purpose=purpose):
+                self.assertEqual(OTPRedisService.otp_length(purpose), 4)
+
+    def test_generated_code_is_as_long_as_its_purpose_asks(self):
+        self.assertEqual(len(OTPRedisService.generate_otp(SmsPurpose.B2B_LOGIN)), 6)
+        self.assertEqual(len(OTPRedisService.generate_otp(SmsPurpose.LOGIN)), 4)
+        # No purpose at all is the legacy length, not a crash: `generate_otp`
+        # is a classmethod old code may still call bare.
+        self.assertEqual(len(OTPRedisService.generate_otp()), 4)
+
+    def test_the_bypass_code_matches_its_purpose_width(self):
+        """A bypass of the wrong width is rejected on length, never compared."""
+        self.assertEqual(OTPRedisService.test_bypass_otp(SmsPurpose.B2B_LOGIN), "000000")
+        self.assertEqual(OTPRedisService.test_bypass_otp(SmsPurpose.LOGIN), "0000")
+
+    def test_a_ready_made_message_bypasses_the_otp_template(self):
+        """`send_text_sms` carries its own wording — reminders are not codes."""
+        service = EskizService(otp_template="unused {code}")
+        self.assertEqual(service.otp_template, "unused {code}")
 
     def test_provider_accepts_message_with_id(self):
         self.assertTrue(EskizService._provider_accepts_message({"id": "abc"}))

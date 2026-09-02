@@ -5,6 +5,8 @@ from django.core.management.base import BaseCommand
 from django.conf import settings
 
 from users.raw_repository import create_client, get_active_user_by_phone
+from users.models.logs import SmsPurpose
+from users.services import OTPRedisService
 
 
 class Command(BaseCommand):
@@ -69,7 +71,7 @@ class Command(BaseCommand):
             )
             self.stdout.write(
                 "Login: POST /api/user/client/login/ → POST /api/user/client/login/verify/ "
-                "(OTP bypass: 0000)"
+                f"(OTP bypass: {OTPRedisService.test_bypass_otp(SmsPurpose.LOGIN)})"
             )
         else:
             self.stdout.write(

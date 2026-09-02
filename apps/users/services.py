@@ -29,6 +29,14 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_APP")
 # If legacy tables are missing in production, we fallback to norm storage.
 # Avoid spamming logs on every device registration attempt.
 
+#: Fallback for [ESKIZ_OTP_TEMPLATE][], repeated here so the service still has
+#: the approved wording if it is constructed against a settings module that
+#: predates the setting. Keep the two in step.
+#:
+#: [ESKIZ_OTP_TEMPLATE]: core/settings.py
+DEFAULT_OTP_TEMPLATE = "Код верификации для входа в приложение WEEL - {code}"
+
+
 class EskizService:
     ESKIZ_TOKEN_KEY = "eskiz_service_token"
     RESPONSE_LOG_MAX_LENGTH = 1000
@@ -39,6 +47,7 @@ class EskizService:
         password: Optional[str] = None,
         login_url: Optional[str] = None,
         send_sms_url: Optional[str] = None,
+        otp_template: Optional[str] = None,
     ):
         self.email = email or getattr(settings, "ESKIZ_EMAIL", "")
         self.password = password or getattr(settings, "ESKIZ_PASSWORD", "")
@@ -46,6 +55,9 @@ class EskizService:
         self.send_sms_url = send_sms_url or getattr(settings, "ESKIZ_SMS_SEND_URL", "")
         self.sender = getattr(settings, "ESKIZ_SENDER", "")
         self.callback_url = getattr(settings, "ESKIZ_CALLBACK_URL", "")
+        self.otp_template = otp_template or getattr(
+            settings, "ESKIZ_OTP_TEMPLATE", DEFAULT_OTP_TEMPLATE
+        )
 
         if not all([self.email, self.password, self.login_url, self.send_sms_url]):
             logger.warning("Eskiz service is not fully configured")
@@ -174,10 +186,11 @@ class EskizService:
         self, phone_number: str, code: str, message_template: Optional[str] = None
     ):
         token = self.get_token()
-        if message_template:
-            message = message_template.format(code=code)
-        else:
-            message = f"Код верификации для входа в приложение WEEL - {code}"
+        # `message_template` is the caller's override — `send_text_sms` passes a
+        # whole ready message through it. Everything that is actually an OTP
+        # falls through to the moderated template, which is the only wording
+        # Eskiz will deliver; see `ESKIZ_OTP_TEMPLATE` in settings.
+        message = (message_template or self.otp_template).format(code=code)
 
         # Eskiz odatda 998901234567 formatida qabul qiladi (+ siz)
         mobile_phone = (phone_number or "").replace("+", "").replace(" ", "").strip()
@@ -313,13 +326,28 @@ class OTPRedisService:
     OTP_EXPIRE = 600
     MAX_ATTEMPTS = 3
     # 4 digits is only 10k combinations. Raising it means changing the OTP
-    # inputs in all three frontends and the mobile app at the same time, so
-    # the length stays configurable and the brute-force surface is closed by
-    # the per-phone lockout below instead.
+    # inputs in every client that reads this purpose at the same time, so the
+    # length stays configurable and the brute-force surface is closed by the
+    # per-phone lockout below instead.
+    #
+    # This is the length for the older flows — the client app, the partner
+    # cabinet — whose serializers in `users/serializers.py` set both min and
+    # max from it. Those frontends still input four boxes; see OTP_LENGTHS.
     OTP_LENGTH = int((os.getenv("OTP_LENGTH") or "4").strip() or "4")
+
+    # Six for B2B, where the two clients (the b2b dashboard and the b2b mobile
+    # app) were rebuilt for it together. Six is not just more combinations:
+    # it is the length Android's SMS autofill and iOS's QuickType recognise
+    # with confidence, which is what lets the mobile app fill the code without
+    # anybody retyping it.
+    #
+    # Kept separate rather than raising OTP_LENGTH because the older clients
+    # have not moved, and a code longer than their inputs accept would lock
+    # every one of their users out.
+    B2B_OTP_LENGTH = int((os.getenv("B2B_OTP_LENGTH") or "6").strip() or "6")
+
     RESEND_COOLDOWN = 30
     REGISTRATION_DATA_EXPIRE = 600
-    TEST_BYPASS_OTP = "0000"
 
     # Failed guesses counted across resends. Without this a caller got a fresh
     # set of MAX_ATTEMPTS every 30 seconds, which is enough to walk the whole
@@ -328,11 +356,39 @@ class OTPRedisService:
     LOCKOUT_WINDOW = 3600
     LOCKOUT_DURATION = 3600
 
+    #: Purposes whose code is not OTP_LENGTH digits long. Anything absent
+    #: here gets OTP_LENGTH, which keeps adding a purpose from silently
+    #: changing an existing flow's code length.
+    OTP_LENGTHS = {
+        SmsPurpose.B2B_LOGIN: B2B_OTP_LENGTH,
+    }
+
     @classmethod
-    def generate_otp(cls):
+    def otp_length(cls, purpose: Optional[SmsPurpose] = None) -> int:
+        """How many digits the code for `purpose` has.
+
+        Every caller that generates, prints or bypasses a code should ask
+        this rather than reading a constant: the two lengths in play are the
+        whole reason the b2b apps can accept an SMS-autofilled six-digit code
+        while the client and partner apps keep their four boxes.
+        """
+        return cls.OTP_LENGTHS.get(purpose, cls.OTP_LENGTH)
+
+    @classmethod
+    def test_bypass_otp(cls, purpose: Optional[SmsPurpose] = None) -> str:
+        """The all-zeros code the test phones accept, at the right width.
+
+        Has to match `otp_length`, or the serializer rejects it on length
+        before `verify_otp` ever gets to compare it.
+        """
+        return "0" * cls.otp_length(purpose)
+
+    @classmethod
+    def generate_otp(cls, purpose: Optional[SmsPurpose] = None):
         # secrets, not random: the module-level Mersenne Twister is
         # predictable from a handful of observed outputs.
-        return "".join([str(secrets.randbelow(10)) for _ in range(cls.OTP_LENGTH)])
+        length = cls.otp_length(purpose)
+        return "".join([str(secrets.randbelow(10)) for _ in range(length)])
 
     @staticmethod
     def get_otp_key(phone_number: str, purpose: SmsPurpose):
@@ -348,7 +404,7 @@ class OTPRedisService:
 
     @classmethod
     def create_otp(cls, phone_number: str, purpose: SmsPurpose):
-        otp_code = cls.generate_otp()
+        otp_code = cls.generate_otp(purpose)
 
         otp_data = {
             "otp_code": otp_code,
@@ -369,7 +425,7 @@ class OTPRedisService:
 
     @classmethod
     def create_otp_with_data(cls, phone_number: str, purpose: SmsPurpose, data: dict):
-        otp_code = cls.generate_otp()
+        otp_code = cls.generate_otp(purpose)
         registration_key = cls.get_registration_key(phone_number, purpose)
 
         otp_data = {
@@ -498,7 +554,7 @@ class OTPRedisService:
     @classmethod
     def verify_otp(cls, phone_number: str, otp_code: str, purpose: SmsPurpose):
         if cls.is_test_phone_for_purpose(phone_number, purpose):
-            if otp_code == cls.TEST_BYPASS_OTP:
+            if otp_code == cls.test_bypass_otp(purpose):
                 return True, _("OTP verified successfully")
             return False, _("Invalid OTP")
 
