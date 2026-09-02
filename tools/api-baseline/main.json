@@ -12618,6 +12618,12 @@
      "type": "integer",
      "x-nullable": true
     },
+    "forwarded_from_name": {
+     "minLength": 1,
+     "title": "Forwarded from name",
+     "type": "string",
+     "x-nullable": true
+    },
     "id": {
      "title": "Id",
      "type": "integer"
