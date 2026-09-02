@@ -50,6 +50,7 @@ from apps.b2b.workspace.serializers import (
     WorkspaceFolderSerializer,
     WorkspaceFolderWriteSerializer,
     AttendanceCheckInSerializer,
+    AttendanceCheckOutSerializer,
     AttendanceDaySerializer,
     AttendanceLocationSerializer,
     AttendanceLocationUpdateSerializer,
@@ -4002,6 +4003,8 @@ def _attendance_payload(company_id: int, work_date, viewer_id: int) -> dict:
         "unmarked": sum(1 for r in rows if r["status"] is None),
         "my_status": (mine or {}).get("status"),
         "my_reason": (mine or {}).get("reason"),
+        "my_checked_in_at": (mine or {}).get("checked_in_at"),
+        "my_checked_out_at": (mine or {}).get("checked_out_at"),
         "entries": rows,
     }
 
@@ -4097,6 +4100,70 @@ class WorkspaceAttendanceCheckInView(WorkspaceAPIView):
             marked_by_id=None,
             check_in_latitude=latitude,
             check_in_longitude=longitude,
+        )
+        return Response(
+            AttendanceDaySerializer(
+                _attendance_payload(request.user.company_id, today, request.user.id)
+            ).data
+        )
+
+
+class WorkspaceAttendanceCheckOutView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/attendance/check-out/ — "Ketdim".
+
+    The other end of the day from check-in. Needs no capability: it only ever
+    writes the caller's own row. The departure time is the server's, not the
+    request's, for the same reason the arrival time is.
+
+    Unlike check-in, the geofence is not enforced here — the whole point of
+    checking out is that the person is leaving, so being outside the radius is
+    the expected case. Coordinates, if the phone sends them, are stored for
+    audit parity with the check-in pair.
+
+    You can only check out of a day you checked into: without an arrival on
+    file there is nothing to close, and the tap is refused rather than
+    inventing a departure with no matching arrival.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Check yourself out for today",
+        request_body=AttendanceCheckOutSerializer,
+        responses={200: AttendanceDaySerializer(), 400: "Not checked in"},
+    )
+    def post(self, request):
+        serializer = AttendanceCheckOutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        latitude = serializer.validated_data.get("latitude")
+        longitude = serializer.validated_data.get("longitude")
+
+        today = timezone.localdate()
+        existing = repo.attendance_row(request.user.id, today)
+        if not existing or existing.get("status") not in ("present", "late", "remote"):
+            return Response(
+                {
+                    "detail": _("Check in before you check out."),
+                    "code": "not_checked_in",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        repo.upsert_attendance(
+            company_id=request.user.company_id,
+            employee_id=request.user.id,
+            work_date=today,
+            status=existing["status"],
+            # Kept from the row — this is a check-out, not a re-check-in.
+            checked_in_at=existing.get("checked_in_at"),
+            # Only on the first check-out of the day. Tapping again must not
+            # push your departure later than when you actually left.
+            checked_out_at=existing.get("checked_out_at") or timezone.now(),
+            reason=existing.get("reason"),
+            marked_by_id=existing.get("marked_by_id"),
+            check_out_latitude=latitude,
+            check_out_longitude=longitude,
         )
         return Response(
             AttendanceDaySerializer(

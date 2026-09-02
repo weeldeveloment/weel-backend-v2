@@ -976,6 +976,8 @@ class AttendanceEntrySerializer(serializers.Serializer):
     # state, not the same as being marked absent.
     status = serializers.CharField(allow_null=True)
     checked_in_at = serializers.DateTimeField(allow_null=True, required=False)
+    # Set once the employee files "Ketdim"; null for a day still open.
+    checked_out_at = serializers.DateTimeField(allow_null=True, required=False)
     reason = serializers.CharField(allow_null=True, required=False)
     marked_by_id = serializers.IntegerField(allow_null=True, required=False)
 
@@ -989,6 +991,10 @@ class AttendanceDaySerializer(serializers.Serializer):
     # What the caller wrote when they reported themselves absent, so the app
     # can show it back instead of only knowing that they did.
     my_reason = serializers.CharField(allow_null=True, required=False)
+    # The caller's own two stamps for the day. `my_checked_out_at` is what tells
+    # the app whether to offer "Ketdim" or take the bar away entirely.
+    my_checked_in_at = serializers.DateTimeField(allow_null=True, required=False)
+    my_checked_out_at = serializers.DateTimeField(allow_null=True, required=False)
     entries = AttendanceEntrySerializer(many=True)
 
 
@@ -1006,6 +1012,19 @@ class AttendanceCheckInSerializer(serializers.Serializer):
     with. Coordinates are only required when the company has geofencing on —
     the view is what knows that, not this serializer, since the same "I'm
     here" tap has to work for both."""
+
+    latitude = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
+
+
+class AttendanceCheckOutSerializer(serializers.Serializer):
+    """An employee marking the end of their day — "Ketdim".
+
+    Coordinates are optional and never rejected on distance: the point of
+    checking out is that the person is leaving, so being outside the geofence
+    is the expected case, not a reason to refuse. They are stored, when sent,
+    for the same audit reason the check-in pair is.
+    """
 
     latitude = serializers.FloatField(required=False, allow_null=True)
     longitude = serializers.FloatField(required=False, allow_null=True)

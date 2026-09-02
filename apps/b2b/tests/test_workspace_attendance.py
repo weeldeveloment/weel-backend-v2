@@ -19,6 +19,7 @@ from apps.b2b.workspace.authentication import WorkspaceUser
 from apps.b2b.workspace.views import (
     WorkspaceAttendanceAbsenceView,
     WorkspaceAttendanceCheckInView,
+    WorkspaceAttendanceCheckOutView,
     WorkspaceAttendanceLocationView,
     WorkspaceAttendanceMarkView,
     WorkspaceAttendanceView,
@@ -255,6 +256,85 @@ class TestSelfAbsence:
         response, _ = self._post({"reason": "Kasal"})
         assert response.status_code == 200
         assert "my_reason" in response.data
+
+
+LEFT = datetime(2026, 8, 15, 18, 3, tzinfo=dt_timezone.utc)
+
+
+class TestCheckOut:
+    """"Ketdim" — the other end of the day.
+
+    Unlike check-in it carries no geofence: leaving the area is the point of
+    it. But it can only close a day that was opened — a departure with no
+    matching arrival is not a state the roll call has.
+    """
+
+    def _post(self, existing={"status": "present", "checked_in_at": ARRIVED}, body=None):
+        request = factory.post("/attendance/check-out/", body or {}, format="json")
+        force_authenticate(request, user=EMPLOYEE)
+        with patch("apps.b2b.workspace.views.repo") as repo:
+            repo.attendance_row.return_value = existing
+            repo.attendance_for_date.return_value = ROSTER
+            response = WorkspaceAttendanceCheckOutView.as_view()(request)
+            return response, repo
+
+    def test_checking_out_stamps_a_departure_time(self):
+        response, repo = self._post()
+        assert response.status_code == 200
+        assert repo.upsert_attendance.call_args.kwargs["checked_out_at"] is not None
+
+    def test_it_keeps_the_arrival_time(self):
+        # A check-out must not read as a fresh check-in.
+        _, repo = self._post()
+        assert repo.upsert_attendance.call_args.kwargs["checked_in_at"] == ARRIVED
+
+    def test_checking_out_twice_keeps_the_first_departure_time(self):
+        # Otherwise tapping again on the way past the door pushes "left at" later
+        # than when they actually went.
+        _, repo = self._post(
+            existing={"status": "present", "checked_in_at": ARRIVED, "checked_out_at": LEFT},
+        )
+        assert repo.upsert_attendance.call_args.kwargs["checked_out_at"] == LEFT
+
+    def test_you_cannot_check_out_of_a_day_you_never_checked_into(self):
+        response, repo = self._post(existing=None)
+        assert response.status_code == 400
+        assert response.data["code"] == "not_checked_in"
+        repo.upsert_attendance.assert_not_called()
+
+    def test_an_absent_day_cannot_be_checked_out_of(self):
+        response, repo = self._post(existing={"status": "absent", "reason": "Kasal"})
+        assert response.status_code == 400
+        repo.upsert_attendance.assert_not_called()
+
+    def test_a_late_arrival_can_still_check_out(self):
+        response, repo = self._post(
+            existing={"status": "late", "checked_in_at": ARRIVED},
+        )
+        assert response.status_code == 200
+        # The status it arrived with is kept, not flattened to "present".
+        assert repo.upsert_attendance.call_args.kwargs["status"] == "late"
+
+    def test_it_needs_no_capability(self):
+        response, _ = self._post()
+        assert response.status_code == 200
+
+    def test_coordinates_are_stored_when_the_phone_sends_them(self):
+        _, repo = self._post(body={"latitude": 41.31, "longitude": 69.24})
+        kwargs = repo.upsert_attendance.call_args.kwargs
+        assert kwargs["check_out_latitude"] == 41.31
+        assert kwargs["check_out_longitude"] == 69.24
+
+    def test_being_far_from_the_office_does_not_refuse_a_check_out(self):
+        # No geofence is consulted at all — the repo is never asked for one.
+        response, repo = self._post(body={"latitude": 42.0, "longitude": 70.0})
+        assert response.status_code == 200
+        repo.get_attendance_location.assert_not_called()
+
+    def test_the_day_comes_back_with_the_departure_on_it(self):
+        response, _ = self._post()
+        assert response.status_code == 200
+        assert "my_checked_out_at" in response.data
 
 
 class TestMarking:

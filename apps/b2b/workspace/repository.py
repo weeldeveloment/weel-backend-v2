@@ -3689,6 +3689,7 @@ def attendance_for_date(company_id: int, work_date) -> list[dict[str, Any]]:
             d.name          AS department_name,
             a.status,
             a.checked_in_at,
+            a.checked_out_at,
             a.reason,
             a.marked_by_id
         FROM {B2B_EMPLOYEE_TABLE} e
@@ -3709,10 +3710,13 @@ def upsert_attendance(
     work_date,
     status: str,
     checked_in_at=None,
+    checked_out_at=None,
     reason: str | None = None,
     marked_by_id: int | None = None,
     check_in_latitude: float | None = None,
     check_in_longitude: float | None = None,
+    check_out_latitude: float | None = None,
+    check_out_longitude: float | None = None,
 ) -> dict[str, Any] | None:
     """Records one employee's day.
 
@@ -3724,29 +3728,38 @@ def upsert_attendance(
     status from a manager's screen must not erase the time the employee
     actually arrived. The check-in coordinates follow the same rule: a
     manager's own mark carries none, and must not blank out where the
-    employee's own check-in happened.
+    employee's own check-in happened. `checked_out_at` and its coordinates are
+    the same again — a manager marking the day must not wipe a "Ketdim" the
+    employee filed.
     """
     now = timezone.now()
     return fetch_one(
         f"""
         INSERT INTO {B2B_ATTENDANCE_TABLE}
             (company_id, employee_id, work_date, status, checked_in_at,
-             reason, marked_by_id, check_in_latitude, check_in_longitude,
+             checked_out_at, reason, marked_by_id,
+             check_in_latitude, check_in_longitude,
+             check_out_latitude, check_out_longitude,
              created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (employee_id, work_date) DO UPDATE SET
-            status             = EXCLUDED.status,
-            checked_in_at      = COALESCE(EXCLUDED.checked_in_at, {B2B_ATTENDANCE_TABLE}.checked_in_at),
-            reason             = EXCLUDED.reason,
-            marked_by_id       = EXCLUDED.marked_by_id,
-            check_in_latitude  = COALESCE(EXCLUDED.check_in_latitude, {B2B_ATTENDANCE_TABLE}.check_in_latitude),
-            check_in_longitude = COALESCE(EXCLUDED.check_in_longitude, {B2B_ATTENDANCE_TABLE}.check_in_longitude),
-            updated_at         = EXCLUDED.updated_at
+            status              = EXCLUDED.status,
+            checked_in_at       = COALESCE(EXCLUDED.checked_in_at, {B2B_ATTENDANCE_TABLE}.checked_in_at),
+            checked_out_at      = COALESCE(EXCLUDED.checked_out_at, {B2B_ATTENDANCE_TABLE}.checked_out_at),
+            reason              = EXCLUDED.reason,
+            marked_by_id        = EXCLUDED.marked_by_id,
+            check_in_latitude   = COALESCE(EXCLUDED.check_in_latitude, {B2B_ATTENDANCE_TABLE}.check_in_latitude),
+            check_in_longitude  = COALESCE(EXCLUDED.check_in_longitude, {B2B_ATTENDANCE_TABLE}.check_in_longitude),
+            check_out_latitude  = COALESCE(EXCLUDED.check_out_latitude, {B2B_ATTENDANCE_TABLE}.check_out_latitude),
+            check_out_longitude = COALESCE(EXCLUDED.check_out_longitude, {B2B_ATTENDANCE_TABLE}.check_out_longitude),
+            updated_at          = EXCLUDED.updated_at
         RETURNING *
         """,
         [
             company_id, employee_id, work_date, status, checked_in_at,
-            reason, marked_by_id, check_in_latitude, check_in_longitude, now, now,
+            checked_out_at, reason, marked_by_id,
+            check_in_latitude, check_in_longitude,
+            check_out_latitude, check_out_longitude, now, now,
         ],
     )
 

@@ -1174,6 +1174,19 @@ class Command(BaseCommand):
         cursor.execute("""
             ALTER TABLE b2b_attendance ADD COLUMN IF NOT EXISTS check_in_longitude NUMERIC(9,6);
         """)
+        # "Ketdim" — the other end of the day. Null until the employee checks
+        # themselves out; the geofence is not enforced on it the way it is on
+        # check-in, since leaving the area is the normal way a day ends. The
+        # coordinates are kept for the same audit reason as the check-in pair.
+        cursor.execute("""
+            ALTER TABLE b2b_attendance ADD COLUMN IF NOT EXISTS checked_out_at TIMESTAMPTZ;
+        """)
+        cursor.execute("""
+            ALTER TABLE b2b_attendance ADD COLUMN IF NOT EXISTS check_out_latitude NUMERIC(9,6);
+        """)
+        cursor.execute("""
+            ALTER TABLE b2b_attendance ADD COLUMN IF NOT EXISTS check_out_longitude NUMERIC(9,6);
+        """)
         self.stdout.write("  Created b2b_attendance")
 
         # One row per company: the office point and radius a check-in is

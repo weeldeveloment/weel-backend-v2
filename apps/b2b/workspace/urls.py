@@ -45,6 +45,7 @@ from apps.b2b.workspace.views import (
     WorkspaceAppVersionView,
     WorkspaceAttendanceAbsenceView,
     WorkspaceAttendanceCheckInView,
+    WorkspaceAttendanceCheckOutView,
     WorkspaceAttendanceLocationView,
     WorkspaceAttendanceMarkView,
     WorkspaceAttendanceView,
@@ -276,6 +277,11 @@ urlpatterns = [
         "attendance/check-in/",
         WorkspaceAttendanceCheckInView.as_view(),
         name="ws-attendance-check-in",
+    ),
+    path(
+        "attendance/check-out/",
+        WorkspaceAttendanceCheckOutView.as_view(),
+        name="ws-attendance-check-out",
     ),
     path(
         "attendance/absence/",
