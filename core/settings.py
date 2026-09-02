@@ -696,9 +696,11 @@ ESKIZ_CALLBACK_URL = os.getenv("ESKIZ_CALLBACK_URL", "")
 # Registered as:  Код верификации для входа в приложение WEEL - 000000
 #
 # The six zeros are the placeholder for the digits, which is why it has to stay
-# six: `OTPRedisService.OTP_LENGTH` fills that slot. Changing either the
-# wording or the number of digits means submitting a new template to Eskiz and
-# waiting for it to pass, so neither is a change to make in a hurry.
+# six: `OTPRedisService.B2B_OTP_LENGTH` fills that slot. The older flows send
+# four and match a separate template, approved long before this one — both are
+# registered with Eskiz and both must stay that way. Changing either the
+# wording or the number of digits means submitting a new template and waiting
+# for it to pass, so neither is a change to make in a hurry.
 #
 # `{code}` is the only substitution `EskizService.send_sms` performs.
 ESKIZ_OTP_TEMPLATE = os.getenv(
