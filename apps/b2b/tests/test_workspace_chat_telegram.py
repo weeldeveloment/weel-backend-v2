@@ -59,6 +59,7 @@ def _in_thread(**extra):
         get_thread_for_member=lambda *a, **k: THREAD,
         get_message=lambda *a, **k: MESSAGE,
         attachments_for_messages=lambda *a, **k: {},
+        employee_names=lambda ids: {8: "Sardor"},
         **extra,
     )
 
@@ -135,6 +136,7 @@ class TestForwarding:
             message_visible_to=lambda *a, **k: {**MESSAGE, "sender_id": 8, "text": "asl matn"},
             send_message=_send,
             attachments_for_messages=lambda *a, **k: {},
+            employee_names=lambda ids: {8: "Sardor"},
         ), patch("apps.b2b.workspace.realtime.broadcast_message"):
             response = WorkspaceMessageView.as_view()(request, thread_id=3)
 
@@ -142,6 +144,75 @@ class TestForwarding:
         assert sent["text"] == "asl matn"
         # The label points at the person, so it survives the original room.
         assert sent["forwarded_from_id"] == 8
+
+    def test_the_label_carries_the_name_not_only_the_id(self):
+        # The phone cannot always look the id up: its roster holds who is on
+        # the team *today*, so a forward from somebody who has left, been
+        # hidden, or was lent by another workspace named nobody at all.
+        request = factory.post(
+            "/api/b2b/workspace/chats/3/messages/", {"forward_message_id": 100}
+        )
+        force_authenticate(request, user=AUTHOR)
+
+        with patch.multiple(
+            "apps.b2b.workspace.repository",
+            get_thread_for_member=lambda *a, **k: THREAD,
+            message_visible_to=lambda *a, **k: {**MESSAGE, "sender_id": 8, "text": "asl matn"},
+            send_message=lambda *a, **k: {**MESSAGE, "id": 101, "forwarded_from_id": 8},
+            attachments_for_messages=lambda *a, **k: {},
+            employee_names=lambda ids: {8: "Sardor"},
+        ), patch("apps.b2b.workspace.realtime.broadcast_message"):
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        assert response.status_code == 201
+        assert response.data["forwarded_from_id"] == 8
+        assert response.data["forwarded_from_name"] == "Sardor"
+
+    def test_forwarding_a_forward_keeps_the_original_author(self):
+        # Otherwise the message is re-attributed at every hop and ends up
+        # credited to whoever passed it on last.
+        request = factory.post(
+            "/api/b2b/workspace/chats/3/messages/", {"forward_message_id": 100}
+        )
+        force_authenticate(request, user=AUTHOR)
+
+        sent = {}
+
+        def _send(thread_id, sender_id, text, **kwargs):
+            sent.update(forwarded_from_id=kwargs.get("forwarded_from_id"))
+            return {**MESSAGE, "id": 101}
+
+        with patch.multiple(
+            "apps.b2b.workspace.repository",
+            get_thread_for_member=lambda *a, **k: THREAD,
+            # Sent on by 8, but written by 12.
+            message_visible_to=lambda *a, **k: {
+                **MESSAGE, "sender_id": 8, "forwarded_from_id": 12,
+            },
+            send_message=_send,
+            attachments_for_messages=lambda *a, **k: {},
+            employee_names=lambda ids: {12: "Sardor"},
+        ), patch("apps.b2b.workspace.realtime.broadcast_message"):
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        assert response.status_code == 201
+        assert sent["forwarded_from_id"] == 12
+
+    def test_an_ordinary_message_is_not_labelled_as_forwarded(self):
+        request = factory.post("/api/b2b/workspace/chats/3/messages/", {"text": "salom"})
+        force_authenticate(request, user=AUTHOR)
+
+        with patch.multiple(
+            "apps.b2b.workspace.repository",
+            get_thread_for_member=lambda *a, **k: THREAD,
+            send_message=lambda *a, **k: {**MESSAGE, "id": 102},
+            attachments_for_messages=lambda *a, **k: {},
+            employee_names=lambda ids: {},
+        ), patch("apps.b2b.workspace.realtime.broadcast_message"):
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        assert response.status_code == 201
+        assert response.data["forwarded_from_name"] is None
 
     def test_a_message_from_a_room_the_sender_is_not_in_is_refused(self):
         request = factory.post(
@@ -157,6 +228,10 @@ class TestForwarding:
             response = WorkspaceMessageView.as_view()(request, thread_id=3)
 
         assert response.status_code == 400
+        # Named, so this cannot go on passing for the wrong reason: a forward
+        # with no caption of its own used to be refused as an empty message
+        # before the room check was ever reached.
+        assert "forward_message_id" in response.data
 
 
 class TestPinning:

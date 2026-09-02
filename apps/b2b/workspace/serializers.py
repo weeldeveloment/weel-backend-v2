@@ -218,6 +218,12 @@ class ChatMessageSerializer(serializers.Serializer):
     # message: the label has to keep saying "Sardordan" after the original
     # room is gone.
     forwarded_from_id = serializers.IntegerField(allow_null=True, required=False)
+    # And their name, filled in by the view. Sent with the message rather than
+    # left to the client's roster: the roster is only the *current* one, so a
+    # forward from somebody who has since left the workspace, been hidden, or
+    # was lent by another one had nothing to draw a name from and the label
+    # said "Yuborilgan xabar" and named nobody.
+    forwarded_from_name = serializers.CharField(allow_null=True, required=False)
     pinned_at = serializers.DateTimeField(allow_null=True, required=False)
 
     class Meta:
