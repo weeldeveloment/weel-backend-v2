@@ -9039,6 +9039,201 @@
    },
    "type": "object"
   },
+  "Note": {
+   "properties": {
+    "author_id": {
+     "title": "Author id",
+     "type": "integer"
+    },
+    "body": {
+     "title": "Body",
+     "type": "string"
+    },
+    "can_edit": {
+     "title": "Can edit",
+     "type": "boolean"
+    },
+    "color": {
+     "enum": [
+      "green",
+      "violet",
+      "blue",
+      "orange",
+      "pink",
+      "red"
+     ],
+     "title": "Color",
+     "type": "string"
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_pinned": {
+     "title": "Is pinned",
+     "type": "boolean"
+    },
+    "is_shared": {
+     "title": "Is shared",
+     "type": "boolean"
+    },
+    "kind": {
+     "enum": [
+      "text",
+      "voice"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "title": {
+     "title": "Title",
+     "type": "string"
+    },
+    "updated_at": {
+     "format": "date-time",
+     "title": "Updated at",
+     "type": "string"
+    },
+    "voice": {
+     "$ref": "#/definitions/NoteVoice"
+    }
+   },
+   "required": [
+    "id",
+    "kind",
+    "title",
+    "body",
+    "color",
+    "is_pinned",
+    "is_shared",
+    "author_id",
+    "created_at",
+    "updated_at",
+    "can_edit"
+   ],
+   "type": "object"
+  },
+  "NotePatch": {
+   "properties": {
+    "body": {
+     "title": "Body",
+     "type": "string"
+    },
+    "color": {
+     "enum": [
+      "green",
+      "violet",
+      "blue",
+      "orange",
+      "pink",
+      "red"
+     ],
+     "title": "Color",
+     "type": "string"
+    },
+    "is_pinned": {
+     "title": "Is pinned",
+     "type": "boolean"
+    },
+    "is_shared": {
+     "title": "Is shared",
+     "type": "boolean"
+    },
+    "title": {
+     "title": "Title",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "NoteVoice": {
+   "properties": {
+    "content_type": {
+     "minLength": 1,
+     "title": "Content type",
+     "type": "string",
+     "x-nullable": true
+    },
+    "duration_ms": {
+     "title": "Duration ms",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "size": {
+     "title": "Size",
+     "type": "integer"
+    },
+    "url": {
+     "minLength": 1,
+     "title": "Url",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "size",
+    "url"
+   ],
+   "type": "object",
+   "x-nullable": true
+  },
+  "NoteWrite": {
+   "properties": {
+    "body": {
+     "default": "",
+     "title": "Body",
+     "type": "string"
+    },
+    "color": {
+     "default": "green",
+     "enum": [
+      "green",
+      "violet",
+      "blue",
+      "orange",
+      "pink",
+      "red"
+     ],
+     "title": "Color",
+     "type": "string"
+    },
+    "is_shared": {
+     "default": false,
+     "title": "Is shared",
+     "type": "boolean"
+    },
+    "kind": {
+     "default": "text",
+     "enum": [
+      "text",
+      "voice"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "title": {
+     "default": "",
+     "title": "Title",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
   "NotificationRead": {
    "properties": {
     "ids": {
@@ -19683,6 +19878,164 @@
      }
     },
     "summary": "Set your own username",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/notes/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/notes/ — the strip above the calendar.\nPOST /api/b2b/workspace/notes/ — a typed note, or the empty shell a\nrecording is then attached to.\n\nFiled under the calendar module because that is the only screen that shows",
+    "operationId": "b2b_workspace_notes_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/Note"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "List quick notes (own, plus what the workspace shared)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET  /api/b2b/workspace/notes/ — the strip above the calendar.\nPOST /api/b2b/workspace/notes/ — a typed note, or the empty shell a\nrecording is then attached to.\n\nFiled under the calendar module because that is the only screen that shows",
+    "operationId": "b2b_workspace_notes_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/NoteWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Note"
+      }
+     }
+    },
+    "summary": "Create a quick note",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/notes/{note_id}/": {
+   "delete": {
+    "description": "PATCH/DELETE /api/b2b/workspace/notes/<id>/ — the author's own note.\n\nThere is no GET: the strip loads every note the caller can see in one\nrequest and the detail screen is drawn from that, so a per-note fetch would\nonly be a second way for the same row to arrive.",
+    "operationId": "b2b_workspace_notes_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": "Deleted"
+     }
+    },
+    "summary": "Delete a note",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "note_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "PATCH/DELETE /api/b2b/workspace/notes/<id>/ — the author's own note.\n\nThere is no GET: the strip loads every note the caller can see in one\nrequest and the detail screen is drawn from that, so a per-note fetch would\nonly be a second way for the same row to arrive.",
+    "operationId": "b2b_workspace_notes_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/NotePatch"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Note"
+      }
+     }
+    },
+    "summary": "Edit a note — text, colour, pinned, shared",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/notes/{note_id}/voice/": {
+   "delete": {
+    "description": "POST/DELETE /api/b2b/workspace/notes/<id>/voice/ — the recording.\n\nIts own endpoint rather than a field on the create call, for the reason\n[WorkspaceTaskVoiceView] gives: a note is created as JSON and a clip is\nmultipart. The app posts the note, gets its id, and sends the recording\nstraight after.\n\nA note carries at most one clip, and posting a second replaces the first,\nbytes and all.",
+    "operationId": "b2b_workspace_notes_voice_delete",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Note"
+      }
+     }
+    },
+    "summary": "Remove a note's recording",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "note_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "consumes": [
+     "multipart/form-data"
+    ],
+    "description": "POST/DELETE /api/b2b/workspace/notes/<id>/voice/ — the recording.\n\nIts own endpoint rather than a field on the create call, for the reason\n[WorkspaceTaskVoiceView] gives: a note is created as JSON and a clip is\nmultipart. The app posts the note, gets its id, and sends the recording\nstraight after.\n\nA note carries at most one clip, and posting a second replaces the first,\nbytes and all.",
+    "operationId": "b2b_workspace_notes_voice_create",
+    "parameters": [
+     {
+      "in": "formData",
+      "name": "file",
+      "required": true,
+      "type": "file"
+     },
+     {
+      "in": "formData",
+      "name": "duration_ms",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Note"
+      }
+     }
+    },
+    "summary": "Attach a recording to a note",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
