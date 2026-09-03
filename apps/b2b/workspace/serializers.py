@@ -15,6 +15,8 @@ from apps.b2b.workspace.repository import (
     LEAD_QUALITIES,
     LEAD_SOURCES,
     LEAD_STAGES,
+    NOTE_COLORS,
+    NOTE_KINDS,
     PAYMENT_METHODS,
     TASK_PRIORITIES,
     TASK_STATUSES,
@@ -201,6 +203,51 @@ class CalendarEventSerializer(serializers.Serializer):
     author_id = serializers.IntegerField()
     participant_ids = serializers.ListField(child=serializers.IntegerField())
     can_edit = serializers.BooleanField()
+
+
+class NoteVoiceSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    size = serializers.IntegerField()
+    content_type = serializers.CharField(allow_null=True, required=False)
+    duration_ms = serializers.IntegerField(allow_null=True, required=False)
+    url = serializers.CharField()
+
+
+class NoteSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    kind = serializers.ChoiceField(choices=list(NOTE_KINDS))
+    title = serializers.CharField(allow_blank=True)
+    body = serializers.CharField(allow_blank=True)
+    color = serializers.ChoiceField(choices=list(NOTE_COLORS))
+    is_pinned = serializers.BooleanField()
+    is_shared = serializers.BooleanField()
+    author_id = serializers.IntegerField()
+    #: Present on a voice note, null on a typed one — the recording lives in
+    #: the shared file table, so what the app gets is a playable URL and never
+    #: the storage path behind it.
+    voice = NoteVoiceSerializer(allow_null=True, required=False)
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+    can_edit = serializers.BooleanField()
+
+
+class NoteWriteSerializer(serializers.Serializer):
+    # Both blank-able: a voice note is saved before its recording is uploaded
+    # and has neither, and the app names it afterwards.
+    title = serializers.CharField(required=False, allow_blank=True, default="")
+    body = serializers.CharField(required=False, allow_blank=True, default="")
+    kind = serializers.ChoiceField(choices=list(NOTE_KINDS), required=False, default="text")
+    color = serializers.ChoiceField(choices=list(NOTE_COLORS), required=False, default="green")
+    is_shared = serializers.BooleanField(required=False, default=False)
+
+
+class NotePatchSerializer(serializers.Serializer):
+    title = serializers.CharField(required=False, allow_blank=True)
+    body = serializers.CharField(required=False, allow_blank=True)
+    color = serializers.ChoiceField(choices=list(NOTE_COLORS), required=False)
+    is_pinned = serializers.BooleanField(required=False)
+    is_shared = serializers.BooleanField(required=False)
 
 
 class ChatMessageSerializer(serializers.Serializer):

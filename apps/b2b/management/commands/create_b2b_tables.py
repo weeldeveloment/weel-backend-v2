@@ -1019,6 +1019,44 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_workspace_folder")
 
+        # A quick note above the calendar: something typed, or something said
+        # into the microphone. Not a `b2b_calendar_event` with the times left
+        # blank — a note has no day at all, and every calendar query is a
+        # window over `starts_at`, so notes would either be invisible or would
+        # have to be excluded from each of them.
+        #
+        # `body` holds the typed text and is empty for a recording, whose bytes
+        # live in `b2b_workspace_file` like every other upload — see the
+        # `note_id` column added below.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_workspace_note (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                author_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                kind VARCHAR(10) NOT NULL DEFAULT 'text',
+                title TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                color VARCHAR(20) NOT NULL DEFAULT 'green',
+                is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+                is_shared BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # The strip reads one company's notes, pinned first, newest after —
+        # which is exactly this index, so the list never sorts in memory.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_note_company_idx "
+            "ON b2b_workspace_note (company_id, is_pinned DESC, updated_at DESC);"
+        )
+        # "Whose notes are these?" is the whole visibility rule: your own, plus
+        # anything a colleague shared with the workspace.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_note_author_idx "
+            "ON b2b_workspace_note (author_id);"
+        )
+        self.stdout.write("  Created b2b_workspace_note")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_workspace_file (
                 id BIGSERIAL PRIMARY KEY,
@@ -1073,6 +1111,17 @@ class Command(BaseCommand):
         cursor.execute(
             "ALTER TABLE b2b_workspace_file ADD COLUMN IF NOT EXISTS "
             "task_id BIGINT REFERENCES b2b_task(id) ON DELETE CASCADE;"
+        )
+        # The recording a voice note is. Same table as every other upload
+        # because the quota is one SUM over it, and CASCADE for the same reason
+        # a task's clip cascades: deleting the note has to give the bytes back.
+        cursor.execute(
+            "ALTER TABLE b2b_workspace_file ADD COLUMN IF NOT EXISTS "
+            "note_id BIGINT REFERENCES b2b_workspace_note(id) ON DELETE CASCADE;"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_workspace_file_note_idx "
+            "ON b2b_workspace_file (note_id) WHERE note_id IS NOT NULL;"
         )
         # A document filed with a move along the sales funnel — the signed
         # contract that made the deal "Yutdik", the offer that went out at

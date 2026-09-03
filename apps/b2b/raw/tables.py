@@ -52,6 +52,10 @@ B2B_INTEGRATION_PAGE_TABLE = "b2b_integration_page"
 # what makes the webhook safe to retry: Meta redelivers, and a delivery that
 # already has a row here is dropped instead of raising the same deal twice.
 B2B_INTEGRATION_EVENT_TABLE = "b2b_integration_event"
+# A quick note pinned above the calendar — typed or recorded. Its own table
+# rather than a flavour of `b2b_calendar_event`: a note has no time, and every
+# query the calendar makes is a window over `starts_at`.
+B2B_WORKSPACE_NOTE_TABLE = "b2b_workspace_note"
 B2B_WORKSPACE_FILE_TABLE = "b2b_workspace_file"
 B2B_WORKSPACE_FOLDER_TABLE = "b2b_workspace_folder"
 B2B_EMPLOYEE_OF_MONTH_TABLE = "b2b_employee_of_month"

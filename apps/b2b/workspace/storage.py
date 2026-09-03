@@ -115,7 +115,7 @@ def usage_by_kind(company_id: int) -> dict[str, dict[str, int]]:
     )
     breakdown = {
         kind: {"bytes": 0, "files": 0}
-        for kind in ("file", "chat", "voucher", "lead")
+        for kind in ("file", "chat", "voucher", "lead", "note")
     }
     for row in rows:
         breakdown[row["kind"]] = {

@@ -87,6 +87,9 @@ from apps.b2b.workspace.serializers import (
     MessageEditSerializer,
     MessageReactionSerializer,
     MessageWriteSerializer,
+    NotePatchSerializer,
+    NoteSerializer,
+    NoteWriteSerializer,
     StorageUsageSerializer,
     SupportMessageCreateSerializer,
     SupportMessageSerializer,
@@ -1705,6 +1708,241 @@ class WorkspaceEventDetailView(WorkspaceAPIView):
             )
         repo.delete_event(event_id, request.user.company_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─── Quick notes ──────────────────────────────────────────────────────────────
+
+
+def _note_voice_payload(voice: dict | None) -> dict | None:
+    """A note's recording as the app plays it.
+
+    Shaped rather than passed through for the same reason a task's clip is:
+    the row carries a storage path, which is an internal detail and not
+    something a phone can open.
+    """
+    if not voice:
+        return None
+    return {
+        "id": voice["id"],
+        "name": voice["name"],
+        "size": voice["size"],
+        "content_type": voice.get("content_type"),
+        "duration_ms": voice.get("duration_ms"),
+        "url": default_storage.url(voice["path"]),
+    }
+
+
+def _note_payload(note: dict, user) -> dict:
+    """A note plus whether this caller may change it.
+
+    Authorship, not role: a shared note is something a colleague let you read,
+    and a manager's edit rights over the board do not extend to rewriting
+    somebody else's note in place.
+    """
+    return {
+        **note,
+        "voice": _note_voice_payload(note.get("voice")),
+        "can_edit": note.get("author_id") == user.id,
+    }
+
+
+class WorkspaceNoteListCreateView(WorkspaceAPIView):
+    """GET  /api/b2b/workspace/notes/ — the strip above the calendar.
+    POST /api/b2b/workspace/notes/ — a typed note, or the empty shell a
+    recording is then attached to.
+
+    Filed under the calendar module because that is the only screen that shows
+    them: somebody without the Taqvim tab has nowhere to read a note, so an
+    endpoint they could still reach would be a gap in the same gate.
+    """
+
+    required_module = Module.CALENDAR
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="List quick notes (own, plus what the workspace shared)",
+        responses={200: NoteSerializer(many=True)},
+    )
+    def get(self, request):
+        notes = repo.list_notes(
+            request.user.company_id, employee_id=request.user.id
+        )
+        return Response([_note_payload(note, request.user) for note in notes])
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Create a quick note",
+        request_body=NoteWriteSerializer,
+        responses={201: NoteSerializer()},
+    )
+    def post(self, request):
+        serializer = NoteWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        note = repo.create_note(
+            company_id=request.user.company_id,
+            author_id=request.user.id,
+            kind=data["kind"],
+            title=data["title"].strip(),
+            body=data["body"].strip(),
+            color=data["color"],
+            is_shared=data["is_shared"],
+        )
+        if not note:
+            return Response(
+                {"detail": _("Could not create the note.")},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return Response(_note_payload(note, request.user), status=status.HTTP_201_CREATED)
+
+
+class WorkspaceNoteDetailView(WorkspaceAPIView):
+    """PATCH/DELETE /api/b2b/workspace/notes/<id>/ — the author's own note.
+
+    There is no GET: the strip loads every note the caller can see in one
+    request and the detail screen is drawn from that, so a per-note fetch would
+    only be a second way for the same row to arrive.
+    """
+
+    required_module = Module.CALENDAR
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    def _own_note(self, request, note_id: int) -> dict | None:
+        """The note, if this caller wrote it.
+
+        A shared note somebody else wrote gets a 404 rather than a 403: the
+        caller can read it, but confirming which ids are writable is not
+        something a refusal needs to tell them.
+        """
+        note = repo.get_note(note_id, request.user.company_id)
+        if not note or note["author_id"] != request.user.id:
+            return None
+        return note
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Edit a note — text, colour, pinned, shared",
+        request_body=NotePatchSerializer,
+        responses={200: NoteSerializer()},
+    )
+    def patch(self, request, note_id: int):
+        note = self._own_note(request, note_id)
+        if not note:
+            return Response({"detail": _("Note not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = NotePatchSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        fields = {
+            key: (value.strip() if isinstance(value, str) else value)
+            for key, value in serializer.validated_data.items()
+        }
+        updated = repo.update_note(note_id, request.user.company_id, **fields)
+        return Response(_note_payload(updated, request.user))
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Delete a note",
+        responses={204: openapi.Response(description="Deleted")},
+    )
+    def delete(self, request, note_id: int):
+        note = self._own_note(request, note_id)
+        if not note:
+            return Response({"detail": _("Note not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        removed = repo.delete_note(note_id, request.user.company_id)
+        # The file row cascades away with the note; the object it points at
+        # does not, so it is removed here or the company pays quota forever for
+        # bytes nothing can reach.
+        voice = (removed or {}).get("voice")
+        if voice:
+            default_storage.delete(voice["path"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkspaceNoteVoiceView(WorkspaceAPIView):
+    """POST/DELETE /api/b2b/workspace/notes/<id>/voice/ — the recording.
+
+    Its own endpoint rather than a field on the create call, for the reason
+    [WorkspaceTaskVoiceView] gives: a note is created as JSON and a clip is
+    multipart. The app posts the note, gets its id, and sends the recording
+    straight after.
+
+    A note carries at most one clip, and posting a second replaces the first,
+    bytes and all.
+    """
+
+    required_module = Module.CALENDAR
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Attach a recording to a note",
+        consumes=["multipart/form-data"],
+        manual_parameters=[
+            openapi.Parameter("file", openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
+            openapi.Parameter("duration_ms", openapi.IN_FORM, type=openapi.TYPE_INTEGER),
+        ],
+        responses={201: NoteSerializer()},
+    )
+    def post(self, request, note_id: int):
+        note = self._own_note(request, note_id)
+        if not note:
+            return Response({"detail": _("Note not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": _("No file provided.")}, status=status.HTTP_400_BAD_REQUEST)
+
+        self._discard_existing(note_id)
+
+        # `stored` rather than `_`: that name is gettext's in this module, and
+        # binding it here makes it a local for the whole method — so every
+        # `_("...")` above it raises instead of translating. The row itself is
+        # not needed, since the payload below re-reads the note with its clip.
+        stored, refusal = store_upload(
+            request=request,
+            upload=upload,
+            kind=repo.NOTE_VOICE_KIND,
+            note_id=note_id,
+            # From the recorder, which is the only thing that knows how long
+            # the clip runs — see the chat send for why the server does not
+            # work it out itself.
+            duration_ms=_int_or_none(request.data.get("duration_ms")),
+        )
+        if refusal:
+            return refusal
+
+        updated = repo.get_note(note_id, request.user.company_id)
+        return Response(_note_payload(updated, request.user), status=status.HTTP_201_CREATED)
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Remove a note's recording",
+        responses={200: NoteSerializer()},
+    )
+    def delete(self, request, note_id: int):
+        note = self._own_note(request, note_id)
+        if not note:
+            return Response({"detail": _("Note not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        self._discard_existing(note_id)
+        updated = repo.get_note(note_id, request.user.company_id)
+        return Response(_note_payload(updated, request.user))
+
+    def _own_note(self, request, note_id: int) -> dict | None:
+        note = repo.get_note(note_id, request.user.company_id)
+        if not note or note["author_id"] != request.user.id:
+            return None
+        return note
+
+    @staticmethod
+    def _discard_existing(note_id: int) -> None:
+        """Drops the clip a note already had, object and row together."""
+        previous = repo.delete_note_voice(note_id)
+        if previous:
+            default_storage.delete(previous["path"])
 
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -3658,7 +3896,8 @@ def _too_large_response(exc: storage.UploadTooLarge) -> Response:
 
 def store_upload(*, request, upload, kind: str, message_id: int | None = None,
                  trip_id: int | None = None, task_id: int | None = None,
-                 folder_id: int | None = None, duration_ms: int | None = None):
+                 folder_id: int | None = None, note_id: int | None = None,
+                 duration_ms: int | None = None):
     """Quota-check, write the object, and record the row that owns its bytes.
 
     The single door for everything the workspace stores. The check happens
@@ -3689,6 +3928,7 @@ def store_upload(*, request, upload, kind: str, message_id: int | None = None,
         trip_id=trip_id,
         task_id=task_id,
         folder_id=folder_id,
+        note_id=note_id,
         duration_ms=duration_ms,
     )
     if not file:

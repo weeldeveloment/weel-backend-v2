@@ -54,6 +54,7 @@ from apps.b2b.raw.tables import (
     B2B_WORKSPACE_CUSTOMER_TABLE,
     B2B_WORKSPACE_LEAD_ACTIVITY_TABLE,
     B2B_WORKSPACE_LEAD_ITEM_TABLE,
+    B2B_WORKSPACE_NOTE_TABLE,
 )
 
 # ─── Identity ─────────────────────────────────────────────────────────────────
@@ -1087,6 +1088,151 @@ def set_event_participants(event_id: int, employee_ids: Sequence[int]) -> None:
             f"VALUES (%s, %s, %s) ON CONFLICT (event_id, employee_id) DO NOTHING",
             [event_id, employee_id, timezone.now()],
         )
+
+
+# ─── Quick notes ──────────────────────────────────────────────────────────────
+#
+# The strip above the month card. A note is either typed or recorded, and the
+# recording is a `b2b_workspace_file` row like every other upload — see
+# [note_voice] for why it is not a column on the note itself.
+
+NOTE_KINDS = ("text", "voice")
+NOTE_COLORS = ("green", "violet", "blue", "orange", "pink", "red")
+
+#: What a note's clip is filed under in `b2b_workspace_file.kind`.
+NOTE_VOICE_KIND = "note"
+
+
+def _attach_note_voice(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fills in each voice note's clip, in one query rather than per row.
+
+    Text notes are left with `voice = None`. Done here rather than in the view
+    because every path that hands a note back needs it — the list, the create,
+    the patch — and a note whose recording is missing from one of them reads
+    as the upload having failed.
+    """
+    if not notes:
+        return notes
+    by_id = {note["id"]: note for note in notes}
+    for note in notes:
+        note["voice"] = None
+    for row in fetch_all(
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} "
+        f"WHERE note_id = __ANY_MARKER__(%s) AND kind = %s "
+        "ORDER BY created_at ASC, id ASC",
+        [list(by_id), NOTE_VOICE_KIND],
+    ):
+        by_id[row["note_id"]]["voice"] = row
+    return notes
+
+
+def list_notes(
+    company_id: int,
+    *,
+    employee_id: int,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """One employee's notes plus everything the workspace has shared.
+
+    Not scoped by ``visible_to`` the way events are: a note is private by
+    default whatever your role is. A manager who could read every note in the
+    company would make the feature unusable for the thing people actually reach
+    for it for, and sharing is one tap away for the notes that are not private.
+    """
+    return _attach_note_voice(fetch_all(
+        f"SELECT * FROM {B2B_WORKSPACE_NOTE_TABLE} "
+        "WHERE company_id = %s AND (author_id = %s OR is_shared) "
+        "ORDER BY is_pinned DESC, updated_at DESC, id DESC LIMIT %s",
+        [company_id, employee_id, limit],
+    ))
+
+
+def get_note(note_id: int, company_id: int) -> dict[str, Any] | None:
+    note = fetch_one(
+        f"SELECT * FROM {B2B_WORKSPACE_NOTE_TABLE} WHERE id = %s AND company_id = %s",
+        [note_id, company_id],
+    )
+    if not note:
+        return None
+    return _attach_note_voice([note])[0]
+
+
+def create_note(
+    *,
+    company_id: int,
+    author_id: int,
+    kind: str = "text",
+    title: str = "",
+    body: str = "",
+    color: str = "green",
+    is_shared: bool = False,
+) -> dict[str, Any] | None:
+    now = timezone.now()
+    note = fetch_one(
+        f"""
+        INSERT INTO {B2B_WORKSPACE_NOTE_TABLE}
+            (company_id, author_id, kind, title, body, color, is_pinned,
+             is_shared, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s)
+        RETURNING *
+        """,
+        [company_id, author_id, kind, title, body, color, is_shared, now, now],
+    )
+    if not note:
+        return None
+    return get_note(note["id"], company_id)
+
+
+def update_note(note_id: int, company_id: int, **fields: Any) -> dict[str, Any] | None:
+    if fields:
+        sets = ", ".join(f"{key} = %s" for key in fields)
+        execute(
+            f"UPDATE {B2B_WORKSPACE_NOTE_TABLE} SET {sets}, updated_at = %s "
+            "WHERE id = %s AND company_id = %s",
+            list(fields.values()) + [timezone.now(), note_id, company_id],
+        )
+    return get_note(note_id, company_id)
+
+
+def delete_note(note_id: int, company_id: int) -> dict[str, Any] | None:
+    """Removes a note and hands back what it was, clip included.
+
+    Returned rather than answering a bare bool so the caller can delete the
+    recording's object too: the row cascades away with the note, and once it is
+    gone nothing knows where the bytes were.
+    """
+    note = get_note(note_id, company_id)
+    if not note:
+        return None
+    execute(
+        f"DELETE FROM {B2B_WORKSPACE_NOTE_TABLE} WHERE id = %s AND company_id = %s",
+        [note_id, company_id],
+    )
+    return note
+
+
+def note_voice(note_id: int) -> dict[str, Any] | None:
+    """The clip a voice note carries, or None.
+
+    Filtered by kind for the same reason [task_voice] is: this table holds
+    every kind of upload, and only rows filed as a note's recording are one.
+    """
+    return fetch_one(
+        f"SELECT * FROM {B2B_WORKSPACE_FILE_TABLE} WHERE note_id = %s AND kind = %s "
+        "ORDER BY created_at DESC, id DESC",
+        [note_id, NOTE_VOICE_KIND],
+    )
+
+
+def delete_note_voice(note_id: int) -> dict[str, Any] | None:
+    """Drops the clip a note carries and hands back the row that owned it."""
+    existing = note_voice(note_id)
+    if existing:
+        execute(
+            f"DELETE FROM {B2B_WORKSPACE_FILE_TABLE} WHERE id = %s",
+            [existing["id"]],
+        )
+    return existing
 
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -2821,6 +2967,7 @@ def create_file(
     task_id: int | None = None,
     folder_id: int | None = None,
     lead_activity_id: int | None = None,
+    note_id: int | None = None,
     duration_ms: int | None = None,
 ) -> dict[str, Any] | None:
     """Records stored bytes.
@@ -2835,14 +2982,14 @@ def create_file(
         INSERT INTO {B2B_WORKSPACE_FILE_TABLE}
             (company_id, author_id, name, path, size, kind, content_type,
              message_id, trip_id, task_id, folder_id, lead_activity_id,
-             duration_ms, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             note_id, duration_ms, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         [
             company_id, author_id, name, path, size, kind, content_type,
             message_id, trip_id, task_id, folder_id, lead_activity_id,
-            duration_ms, timezone.now(),
+            note_id, duration_ms, timezone.now(),
         ],
     )
 

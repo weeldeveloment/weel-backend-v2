@@ -79,6 +79,9 @@ from apps.b2b.workspace.views import (
     WorkspaceMeView,
     WorkspaceMessageDetailView,
     WorkspaceMessageView,
+    WorkspaceNoteDetailView,
+    WorkspaceNoteListCreateView,
+    WorkspaceNoteVoiceView,
     WorkspaceStorageView,
     WorkspaceSupportView,
     WorkspaceSubtaskToggleView,
@@ -329,6 +332,12 @@ urlpatterns = [
 
     path("events/", WorkspaceEventListCreateView.as_view(), name="ws-events"),
     path("events/<int:event_id>/", WorkspaceEventDetailView.as_view(), name="ws-event-detail"),
+    # Named `ws-note*` so `WorkspaceAPIView.LIVE_SECTIONS` files them under the
+    # calendar: the strip sits on that screen, and a note added on one phone
+    # should appear on the other without a pull-to-refresh.
+    path("notes/", WorkspaceNoteListCreateView.as_view(), name="ws-notes"),
+    path("notes/<int:note_id>/", WorkspaceNoteDetailView.as_view(), name="ws-note-detail"),
+    path("notes/<int:note_id>/voice/", WorkspaceNoteVoiceView.as_view(), name="ws-note-voice"),
 
     path("chats/", WorkspaceThreadListCreateView.as_view(), name="ws-chats"),
     path("chats/<int:thread_id>/messages/", WorkspaceMessageView.as_view(), name="ws-chat-messages"),
