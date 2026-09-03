@@ -14,6 +14,7 @@ from typing import Any, Iterable, Sequence
 from django.utils import timezone
 
 from shared.raw.db import execute, fetch_all, fetch_one
+from apps.b2b.workspace.storage import photo_url as _photo_url
 
 from apps.b2b.models import (
     EmployeeRole,
@@ -846,10 +847,22 @@ def add_task_activity(
     )
 
 
+def _with_author_photo(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Resolves the ``author_photo`` an activity feed joins on.
+
+    The column holds a storage path, and a feed that ships it bare leaves the
+    phone building ``<host>/b2b/avatars/...`` — no ``/media/`` in it — so every
+    comment and every history line drew initials while the same person's face
+    loaded fine on the roster next to it. Rows are copied rather than mutated:
+    `fetch_all` hands back what the query returned and nothing here owns it.
+    """
+    return [{**row, "author_photo": _photo_url(row.get("author_photo"))} for row in rows]
+
+
 def list_task_activity(task_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
     """Newest first, with the author's name joined on so the feed does not
     need the roster to render."""
-    return fetch_all(
+    return _with_author_photo(fetch_all(
         f"""
         SELECT a.*,
                e.full_name AS author_name,
@@ -861,7 +874,7 @@ def list_task_activity(task_id: int, *, limit: int = 100) -> list[dict[str, Any]
         LIMIT %s
         """,
         [task_id, limit],
-    )
+    ))
 
 
 def list_company_task_activity(
@@ -888,7 +901,7 @@ def list_company_task_activity(
         params.append(actor_id)
     sql += " ORDER BY a.created_at DESC, a.id DESC LIMIT %s"
     params.append(limit)
-    return fetch_all(sql, params)
+    return _with_author_photo(fetch_all(sql, params))
 
 
 def employee_task_counters(company_id: int, employee_id: int) -> dict[str, int]:
@@ -2732,7 +2745,7 @@ def list_lead_activity(lead_id: int, *, limit: int = 100) -> list[dict[str, Any]
     the roster to render, and the document filed with the move where there is
     one — a row carries at most one, so this stays a single query rather than a
     second pass over the page."""
-    return fetch_all(
+    return _with_author_photo(fetch_all(
         f"""
         SELECT a.*,
                e.full_name AS author_name,
@@ -2750,7 +2763,7 @@ def list_lead_activity(lead_id: int, *, limit: int = 100) -> list[dict[str, Any]
         LIMIT %s
         """,
         [lead_id, limit],
-    )
+    ))
 
 
 def add_lead_activity(
@@ -3537,7 +3550,11 @@ def sales_report(
             {
                 "employee_id": int(row["employee_id"]),
                 "full_name": row["full_name"],
-                "photo": row["photo"],
+                # Through the resolver, like every other payload that
+                # carries this column: shipped bare, the phone builds
+                # `<host>/b2b/...` with no `/media/` in it and the leader
+                # board falls back to initials.
+                "photo": _photo_url(row["photo"]),
                 "won_count": int(row["won_count"] or 0),
                 "won_amount": _money(row["won_amount"]),
             }
@@ -3699,7 +3716,11 @@ def task_report(
             {
                 "employee_id": int(row["employee_id"]),
                 "full_name": row["full_name"],
-                "photo": row["photo"],
+                # Through the resolver, like every other payload that
+                # carries this column: shipped bare, the phone builds
+                # `<host>/b2b/...` with no `/media/` in it and the leader
+                # board falls back to initials.
+                "photo": _photo_url(row["photo"]),
                 "completed_count": int(row["completed_count"] or 0),
                 "on_time_rate": (
                     round(int(row["on_time_count"] or 0) / int(row["due_count"]), 4)
@@ -3833,6 +3854,7 @@ def attendance_for_date(company_id: int, work_date) -> list[dict[str, Any]]:
             e.id            AS employee_id,
             e.full_name,
             e.position,
+            e.photo,
             d.name          AS department_name,
             a.status,
             a.checked_in_at,

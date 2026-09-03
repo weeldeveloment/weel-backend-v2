@@ -772,6 +772,17 @@ class WorkspaceUsernameView(WorkspaceAPIView):
         )
 
 
+def _with_photo(rows: list[dict]) -> list[dict]:
+    """Resolves the `photo` column on rows a query hands back untouched.
+
+    The roster goes through `_with_presence`, which already does this. The
+    award and the monthly stats behind it do not, and shipped the bare storage
+    path — so the one screen in the app that is nothing but a face drew
+    initials. Rows are copied: what a query returned is not ours to edit.
+    """
+    return [{**row, "photo": _photo_url(row.get("photo"))} for row in rows]
+
+
 def _with_presence(members: list[dict]) -> list[dict]:
     """Stamps `is_online` and `last_seen_at` onto roster rows.
 
@@ -4245,7 +4256,9 @@ def _attendance_payload(company_id: int, work_date, viewer_id: int) -> dict:
         "my_reason": (mine or {}).get("reason"),
         "my_checked_in_at": (mine or {}).get("checked_in_at"),
         "my_checked_out_at": (mine or {}).get("checked_out_at"),
-        "entries": rows,
+        # The roster hands back the stored path; the row a client draws needs a
+        # URL, the same as every other place a face is listed.
+        "entries": [{**r, "photo": _photo_url(r.get("photo"))} for r in rows],
     }
 
 
@@ -4622,7 +4635,7 @@ class WorkspaceEmployeeMonthlyStatsView(WorkspaceAPIView):
     def get(self, request):
         year, month = _current_year_month()
         stats = repo.monthly_employee_stats(request.user.company_id, year, month)
-        return Response(EmployeeMonthlyStatSerializer(stats, many=True).data)
+        return Response(EmployeeMonthlyStatSerializer(_with_photo(stats), many=True).data)
 
 
 def _employees_of_month_payload(winners: list[dict]) -> dict:
@@ -4634,6 +4647,7 @@ def _employees_of_month_payload(winners: list[dict]) -> dict:
     lets them keep working, showing one name instead of failing to parse a
     list; `results` is the real answer and what the current app reads.
     """
+    winners = _with_photo(winners)
     first = winners[0]
     return {
         "results": EmployeeOfMonthSerializer(winners, many=True).data,

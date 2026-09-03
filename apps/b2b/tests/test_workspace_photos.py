@@ -103,3 +103,56 @@ class TestRoster:
             response = WorkspaceTeamView.as_view()(request)
 
         assert response.data[0]["photo"] is None
+
+
+class TestAlreadyResolvedPaths:
+    """The dashboard's "add employee" endpoint stores what
+    ``default_storage.url()`` returned rather than the path
+    ``default_storage.save()`` did. Every reader here resolves the column
+    again, and ``FileSystemStorage.url`` strips the leading slash before
+    joining — so ``/media/b2b/x.jpg`` came back as ``/media/media/b2b/x.jpg``,
+    which 404s. Everyone added from the web had initials in the app.
+    """
+
+    def test_a_root_relative_url_is_not_resolved_twice(self):
+        with patch("apps.b2b.workspace.storage.default_storage") as store:
+            assert (
+                storage.photo_url("/media/b2b/employees/photos/a.jpg")
+                == "/media/b2b/employees/photos/a.jpg"
+            )
+            assert not store.url.called
+
+    def test_a_bare_path_is_still_resolved(self):
+        # The discriminator is the leading slash, and a stored path never has
+        # one — that is what `save()` returns.
+        with patch("apps.b2b.workspace.storage.default_storage") as store:
+            store.url.return_value = "/media/b2b/employees/photos/a.jpg"
+            assert (
+                storage.photo_url("b2b/employees/photos/a.jpg")
+                == "/media/b2b/employees/photos/a.jpg"
+            )
+
+
+class TestActivityFeeds:
+    """A comment's author had a face on the roster and initials in the feed
+    beside it: `author_photo` was joined straight out of the column and
+    shipped bare, so the phone built `<host>/b2b/...` with no `/media/`.
+    """
+
+    def test_the_author_photo_is_resolved(self):
+        from apps.b2b.workspace import repository
+
+        with patch("apps.b2b.workspace.storage.default_storage") as store:
+            store.url.return_value = "https://cdn/media/aziz.jpg"
+            rows = repository._with_author_photo(
+                [{"id": 1, "author_name": "Aziz", "author_photo": "b2b/aziz.jpg"}]
+            )
+
+        assert rows[0]["author_photo"] == "https://cdn/media/aziz.jpg"
+        assert rows[0]["author_name"] == "Aziz"
+
+    def test_an_author_with_no_photo_survives(self):
+        from apps.b2b.workspace import repository
+
+        rows = repository._with_author_photo([{"id": 1, "author_photo": None}])
+        assert rows[0]["author_photo"] is None

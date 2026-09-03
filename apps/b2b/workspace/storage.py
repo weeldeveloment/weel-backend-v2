@@ -42,10 +42,21 @@ def photo_url(path: str | None) -> str | None:
 
     Anything already absolute is left alone: a row written before this existed,
     or an avatar that came from somewhere else entirely.
+
+    So is anything root-relative. ``B2BEmployeeListCreateView`` stores what
+    ``default_storage.url()`` gave it rather than the path
+    ``default_storage.save()`` returned, so every employee added from the web
+    dashboard carries ``/media/b2b/...`` in the column while every reader here
+    resolves it a second time — ``/media/media/b2b/...``, which 404s, which is
+    an app full of initials where the photos should be. A stored path is
+    always relative (that is what ``save()`` returns), so a leading slash is
+    proof the value has been resolved already and must be passed through.
     """
     if not path:
         return None
     if path.startswith("http://") or path.startswith("https://"):
+        return path
+    if path.startswith("/"):
         return path
     return default_storage.url(path)
 

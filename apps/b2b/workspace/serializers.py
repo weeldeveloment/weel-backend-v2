@@ -1018,6 +1018,8 @@ class AttendanceEntrySerializer(serializers.Serializer):
     employee_id = serializers.IntegerField()
     full_name = serializers.CharField()
     position = serializers.CharField(allow_null=True, required=False)
+    # Resolved to a URL by the view; null for anyone still on initials.
+    photo = serializers.CharField(allow_null=True, required=False)
     department_name = serializers.CharField(allow_null=True, required=False)
     # Null for somebody nobody has accounted for yet today — which is a third
     # state, not the same as being marked absent.
