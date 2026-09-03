@@ -58,6 +58,9 @@ class EskizService:
         self.otp_template = otp_template or getattr(
             settings, "ESKIZ_OTP_TEMPLATE", DEFAULT_OTP_TEMPLATE
         )
+        self.android_app_hashes = self._parse_app_hashes(
+            getattr(settings, "ESKIZ_ANDROID_APP_HASH", "")
+        )
 
         if not all([self.email, self.password, self.login_url, self.send_sms_url]):
             logger.warning("Eskiz service is not fully configured")
@@ -182,6 +185,39 @@ class EskizService:
             logger.error("Unexpected error getting Eskiz token: %s", str(e), exc_info=True)
             raise
 
+    @staticmethod
+    def _parse_app_hashes(raw: str) -> list[str]:
+        """The Android app signatures from [ESKIZ_ANDROID_APP_HASH][], split.
+
+        Comma-separated because the two b2b apps are signed separately and a
+        single moderated template has to serve both.
+
+        [ESKIZ_ANDROID_APP_HASH]: core/settings.py
+        """
+        return [part.strip() for part in (raw or "").split(",") if part.strip()]
+
+    def _with_app_hash(self, message: str) -> str:
+        """Appends the SMS Retriever signature line, when one is configured.
+
+        This suffix is the whole difference between the app filling the code in
+        silently and the user having to tap a consent sheet: Google's SMS
+        Retriever API hands a message to the app only if the text ends with an
+        11-character hash of that app's signing certificate, and it is the one
+        Android path that needs neither a permission nor a tap.
+
+        Empty by default, and it must stay empty until Eskiz has moderated a
+        template containing the hash — their moderation matches the whole body,
+        so a message that has grown a line the registered template does not have
+        is refused at the gateway and the user gets no code at all. Turn the
+        setting on in the same deploy the new template goes live, not before.
+
+        Skipped when the caller passed its own body: `send_text_sms` is not an
+        OTP and no app is listening for it.
+        """
+        if not self.android_app_hashes:
+            return message
+        return "{}\n{}".format(message, " ".join(self.android_app_hashes))
+
     def send_sms(
         self, phone_number: str, code: str, message_template: Optional[str] = None
     ):
@@ -191,6 +227,8 @@ class EskizService:
         # falls through to the moderated template, which is the only wording
         # Eskiz will deliver; see `ESKIZ_OTP_TEMPLATE` in settings.
         message = (message_template or self.otp_template).format(code=code)
+        if message_template is None:
+            message = self._with_app_hash(message)
 
         # Eskiz odatda 998901234567 formatida qabul qiladi (+ siz)
         mobile_phone = (phone_number or "").replace("+", "").replace(" ", "").strip()

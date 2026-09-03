@@ -708,6 +708,29 @@ ESKIZ_OTP_TEMPLATE = os.getenv(
     "Код верификации для входа в приложение WEEL - {code}",
 )
 
+# The Android SMS Retriever signature appended to the OTP body, or empty.
+#
+# Retriever is the only way an Android app reads the code with no permission
+# and no tap from the user, and the price of it is this suffix: Google hands
+# the message to the app only when the text ends with an 11-character hash of
+# the app's signing certificate. Without it the apps fall back to the SMS User
+# Consent API, which works on any wording but costs a tap on a system sheet.
+#
+# Comma-separated, because the hash is per signing certificate and the two b2b
+# Android apps are signed separately — both hashes go on the same last line,
+# and Retriever matches whichever belongs to the app that is listening. A
+# locally-signed debug build has a hash of its own that will never be in here;
+# `OtpBoxesState._startSmsListener` in weel-b2b-mobile-v2 logs it in debug so
+# it can be read off a device.
+#
+# Empty by default and it must stay empty until Eskiz has moderated a template
+# that already contains the line. Their moderation matches the whole body, so
+# a message carrying a line the registered template lacks is refused at the
+# gateway and the user gets no code at all — turn this on in the same deploy
+# as the new template, never ahead of it. iOS is unaffected either way: Apple
+# has no SMS-reading API, only the keyboard's one-tap suggestion.
+ESKIZ_ANDROID_APP_HASH = os.getenv("ESKIZ_ANDROID_APP_HASH", "")
+
 # ─── Bookhara Avia (apps/avia) ───────────────────────────────────────────────
 #
 # Flights are not our inventory: search, booking, ticketing and refunds all

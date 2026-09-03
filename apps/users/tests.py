@@ -542,3 +542,54 @@ class EskizServiceTests(SimpleTestCase):
 
     def test_provider_rejects_none(self):
         self.assertFalse(EskizService._provider_accepts_message(None))
+
+
+class EskizAppHashTests(SimpleTestCase):
+    """The SMS Retriever suffix that makes Android autofill tap-free."""
+
+    def _service(self):
+        return EskizService()
+
+    def test_absent_by_default(self):
+        # Off until Eskiz has moderated a template carrying the line; sending
+        # it early gets the message refused and the user no code at all.
+        with override_settings(ESKIZ_ANDROID_APP_HASH=""):
+            self.assertEqual(self._service()._with_app_hash("Код - 123456"), "Код - 123456")
+
+    @override_settings(ESKIZ_ANDROID_APP_HASH="FA+9qCX9VSu")
+    def test_appended_on_its_own_last_line(self):
+        # Retriever only matches a hash at the end of the body.
+        self.assertEqual(
+            self._service()._with_app_hash("Код - 123456"),
+            "Код - 123456\nFA+9qCX9VSu",
+        )
+
+    @override_settings(ESKIZ_ANDROID_APP_HASH=" FA+9qCX9VSu , 3W6vLmQ2xYz ")
+    def test_both_apps_share_one_line(self):
+        # One moderated template serves two separately signed b2b apps.
+        self.assertEqual(
+            self._service()._with_app_hash("Код - 123456"),
+            "Код - 123456\nFA+9qCX9VSu 3W6vLmQ2xYz",
+        )
+
+    @override_settings(
+        ESKIZ_ANDROID_APP_HASH="FA+9qCX9VSu",
+        ESKIZ_EMAIL="test@weel.uz",
+        ESKIZ_PASSWORD="secret",
+        ESKIZ_LOGIN_URL="https://notify.eskiz.uz/api/auth/login",
+        ESKIZ_SMS_SEND_URL="https://notify.eskiz.uz/api/message/sms/send",
+    )
+    @patch("users.services.cache")
+    @patch("users.services.requests.post")
+    def test_plain_text_sms_is_left_alone(self, mock_post, mock_cache):
+        # `send_text_sms` is not an OTP and no app is listening for it.
+        mock_cache.get.return_value = "cached-token"
+        mock_post.return_value = MagicMock(
+            status_code=200, ok=True, **{"json.return_value": {"status": "success"}}
+        )
+
+        self._service().send_text_sms("+998901234567", "Buyurtmangiz tayyor")
+
+        self.assertEqual(
+            mock_post.call_args.kwargs["data"]["message"], "Buyurtmangiz tayyor"
+        )
