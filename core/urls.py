@@ -316,9 +316,14 @@ if settings.ENABLE_SWAGGER_UI:
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
-# `django.conf.urls.static.static(...)` does not create URL patterns when DEBUG=False.
-# Serve local media files only when MinIO is not enabled.
-if settings.DEBUG and not settings.USE_MINIO:
+# Serve user-uploaded media from the filesystem whenever object storage is not
+# configured — not only under DEBUG. The deployed dev/staging boxes run with
+# DEBUG=0 and USE_MINIO=0, and there is no nginx in front of uvicorn to alias
+# /media/, so gating this on DEBUG meant every uploaded avatar and chat photo
+# 404'd there and the app fell back to initials everywhere. When USE_MINIO is
+# on, `default_storage.url()` returns an absolute object-storage URL and this
+# route is never hit.
+if not settings.USE_MINIO:
     urlpatterns += [
         re_path(
             rf"^{settings.MEDIA_URL.lstrip('/')}(?P<path>.*)$",

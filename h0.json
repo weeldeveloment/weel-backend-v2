@@ -1,0 +1,230 @@
+{
+ "hotel_id": 223,
+ "options": [
+  {
+   "option_ref_id": "223|255|2565|2026-09-20|18-00|2026-09-22|12-00|2|uz-uz|true|uzs",
+   "room_type_id": 255,
+   "room_type_name": "Standard Room (TWN)",
+   "rate_plan_id": 2565,
+   "occupancy": {
+    "adults": 2
+   },
+   "cancellation_policy": {
+    "cancellation_type": "nrf",
+    "deadline": "2026-08-29T12:23:11Z"
+   },
+   "included_meal_options": [
+    0
+   ],
+   "meal_plan": "BB",
+   "extra_bed_added": false,
+   "currency": "uzs",
+   "price": 623737.38,
+   "rooms_count": 5
+  },
+  {
+   "option_ref_id": "223|255|3156|2026-09-20|18-00|2026-09-22|12-00|2|uz-uz|true|uzs",
+   "room_type_id": 255,
+   "room_type_name": "Standard Room (TWN)",
+   "rate_plan_id": 3156,
+   "occupancy": {
+    "adults": 2
+   },
+   "cancellation_policy": {
+    "cancellation_type": "rf",
+    "free_cancellation_before_days": 2,
+    "deadline": "2026-09-18T09:00:00Z",
+    "cancellation_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    },
+    "no_show_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    }
+   },
+   "meal_plan": "RO",
+   "extra_bed_added": false,
+   "currency": "uzs",
+   "price": 1545098.04,
+   "rooms_count": 6
+  },
+  {
+   "option_ref_id": "223|255|3161|2026-09-20|18-00|2026-09-22|12-00|2|uz-uz|true|uzs",
+   "room_type_id": 255,
+   "room_type_name": "Standard Room (TWN)",
+   "rate_plan_id": 3161,
+   "occupancy": {
+    "adults": 2
+   },
+   "cancellation_policy": {
+    "cancellation_type": "rf",
+    "free_cancellation_before_days": 4,
+    "deadline": "2026-09-16T09:00:00Z",
+    "cancellation_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    },
+    "no_show_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    }
+   },
+   "included_meal_options": [
+    0
+   ],
+   "meal_plan": "BB",
+   "extra_bed_added": false,
+   "currency": "uzs",
+   "price": 955058.82,
+   "rooms_count": 8
+  },
+  {
+   "option_ref_id": "223|256|2565|2026-09-20|18-00|2026-09-22|12-00|2|uz-uz|true|uzs",
+   "room_type_id": 256,
+   "room_type_name": "Standard Room (DBL)",
+   "rate_plan_id": 2565,
+   "occupancy": {
+    "adults": 2
+   },
+   "cancellation_policy": {
+    "cancellation_type": "nrf",
+    "deadline": "2026-08-29T12:23:11Z"
+   },
+   "included_meal_options": [
+    0
+   ],
+   "meal_plan": "BB",
+   "extra_bed_added": false,
+   "currency": "uzs",
+   "price": 623737.38,
+   "rooms_count": 5
+  },
+  {
+   "option_ref_id": "223|256|3156|2026-09-20|18-00|2026-09-22|12-00|2|uz-uz|true|uzs",
+   "room_type_id": 256,
+   "room_type_name": "Standard Room (DBL)",
+   "rate_plan_id": 3156,
+   "occupancy": {
+    "adults": 2
+   },
+   "cancellation_policy": {
+    "cancellation_type": "rf",
+    "free_cancellation_before_days": 2,
+    "deadline": "2026-09-18T09:00:00Z",
+    "cancellation_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    },
+    "no_show_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    }
+   },
+   "meal_plan": "RO",
+   "extra_bed_added": false,
+   "currency": "uzs",
+   "price": 1545098.04,
+   "rooms_count": 3
+  },
+  {
+   "option_ref_id": "223|257|2565|2026-09-20|18-00|2026-09-22|12-00|2|uz-uz|true|uzs",
+   "room_type_id": 257,
+   "room_type_name": "Suite",
+   "rate_plan_id": 2565,
+   "occupancy": {
+    "adults": 2
+   },
+   "cancellation_policy": {
+    "cancellation_type": "nrf",
+    "deadline": "2026-08-29T12:23:11Z"
+   },
+   "included_meal_options": [
+    0
+   ],
+   "meal_plan": "BB",
+   "extra_bed_added": false,
+   "currency": "uzs",
+   "price": 748484.84,
+   "rooms_count": 3
+  },
+  {
+   "option_ref_id": "223|802|2565|2026-09-20|18-00|2026-09-22|12-00|2|uz-uz|true|uzs",
+   "room_type_id": 802,
+   "room_type_name": "Standard Room (TRPL)",
+   "rate_plan_id": 2565,
+   "occupancy": {
+    "adults": 2
+   },
+   "cancellation_policy": {
+    "cancellation_type": "nrf",
+    "deadline": "2026-08-29T12:23:11Z"
+   },
+   "included_meal_options": [
+    0
+   ],
+   "meal_plan": "BB",
+   "extra_bed_added": false,
+   "currency": "uzs",
+   "price": 823333.34,
+   "rooms_count": 5
+  },
+  {
+   "option_ref_id": "223|802|3156|2026-09-20|18-00|2026-09-22|12-00|2|uz-uz|true|uzs",
+   "room_type_id": 802,
+   "room_type_name": "Standard Room (TRPL)",
+   "rate_plan_id": 3156,
+   "occupancy": {
+    "adults": 2
+   },
+   "cancellation_policy": {
+    "cancellation_type": "rf",
+    "free_cancellation_before_days": 2,
+    "deadline": "2026-09-18T09:00:00Z",
+    "cancellation_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    },
+    "no_show_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    }
+   },
+   "meal_plan": "RO",
+   "extra_bed_added": false,
+   "currency": "uzs",
+   "price": 1931372.54,
+   "rooms_count": 4
+  },
+  {
+   "option_ref_id": "223|802|3161|2026-09-20|18-00|2026-09-22|12-00|2|uz-uz|true|uzs",
+   "room_type_id": 802,
+   "room_type_name": "Standard Room (TRPL)",
+   "rate_plan_id": 3161,
+   "occupancy": {
+    "adults": 2
+   },
+   "cancellation_policy": {
+    "cancellation_type": "rf",
+    "free_cancellation_before_days": 4,
+    "deadline": "2026-09-16T09:00:00Z",
+    "cancellation_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    },
+    "no_show_penalty": {
+     "type": "percent_first_night",
+     "amount": 100
+    }
+   },
+   "included_meal_options": [
+    0
+   ],
+   "meal_plan": "BB",
+   "extra_bed_added": false,
+   "currency": "uzs",
+   "price": 1171058.82,
+   "rooms_count": 3
+  }
+ ]
+}
