@@ -964,9 +964,21 @@ except ValueError:
             logging.exception("Failed to initialize the Firebase app")
 
 # The B2B project, under its own name so it sits alongside the default app
-# rather than replacing it. Entirely optional: an unset credential leaves
-# FIREBASE_B2B_APP as None and the B2B send paths fall back to the default app,
-# which is what every deployment did before this existed.
+# rather than replacing it.
+#
+# Not optional any more, whatever the name of the setting suggests. There is no
+# fallback behind it: a workspace FCM token was issued by the `weel-b2b`
+# project and only that project can address it, so `b2b_firebase_app()` raises
+# rather than handing the send loop a default app that cannot deliver one of
+# them. Leaving this unset does not degrade B2B push, it removes it.
+#
+# Which is why the "not configured" branch is loud. It used to log nothing at
+# all: the credential was absent, `FIREBASE_B2B_APP` stayed None, and the only
+# trace was a per-send exception buried in a worker log — so a deployment that
+# had never had a working push looked exactly like one whose APNs key was
+# wrong. The container is the case that matters: `certificates/` is in both
+# .gitignore and .dockerignore, so `FIREBASE_B2B_CREDENTIALS_FILE` names a path
+# that exists on a developer's machine and nowhere in the image.
 try:
     FIREBASE_B2B_APP = get_app(FIREBASE_B2B_APP_NAME)
 except ValueError:
@@ -980,7 +992,24 @@ except ValueError:
             "B2B Firebase credentials are present but could not be parsed"
         )
 
-    if _b2b_credential is not None:
+    if _b2b_credential is None:
+        logging.warning(
+            "B2B push is DISABLED: no B2B Firebase credentials were loaded, so "
+            "no workspace notification can be delivered on iOS or Android. "
+            "Set FIREBASE_B2B_CREDENTIALS_JSON to the weel-b2b service-account "
+            "JSON itself. FIREBASE_B2B_CREDENTIALS_FILE=%r %s, and certificates/ "
+            "is excluded from the Docker image, so a path is not enough in a "
+            "container.",
+            _firebase_b2b_credentials_file or None,
+            (
+                "was not set"
+                if not _firebase_b2b_credentials_file
+                else "does not exist"
+                if not os.path.exists(_firebase_b2b_credentials_file)
+                else "exists but was not usable"
+            ),
+        )
+    else:
         try:
             FIREBASE_B2B_APP = initialize_app(
                 _b2b_credential, name=FIREBASE_B2B_APP_NAME
