@@ -2011,6 +2011,12 @@
      "type": "integer",
      "x-nullable": true
     },
+    "photo": {
+     "minLength": 1,
+     "title": "Photo",
+     "type": "string",
+     "x-nullable": true
+    },
     "position": {
      "minLength": 1,
      "title": "Position",
