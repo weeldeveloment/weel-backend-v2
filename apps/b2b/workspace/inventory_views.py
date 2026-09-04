@@ -419,7 +419,7 @@ class DocumentItemSerializer(serializers.Serializer):
     lead_item_id = serializers.IntegerField(allow_null=True)
 
 
-class DocumentSerializer(serializers.Serializer):
+class InventoryDocumentSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     kind = serializers.ChoiceField(choices=DocumentKind.CHOICES)
     kind_label = serializers.CharField(required=False)
@@ -460,7 +460,7 @@ class DocumentSerializer(serializers.Serializer):
 
 
 class DocumentListSerializer(serializers.Serializer):
-    results = DocumentSerializer(many=True)
+    results = InventoryDocumentSerializer(many=True)
 
 
 class DocumentItemWriteSerializer(serializers.Serializer):
@@ -1057,7 +1057,7 @@ class WorkspaceDocumentListCreateView(_InventoryView):
         return Response({"results": rows})
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="File a stock document (and confirm it)",
-                         request_body=DocumentWriteSerializer, responses={201: DocumentSerializer()})
+                         request_body=DocumentWriteSerializer, responses={201: InventoryDocumentSerializer()})
     def post(self, request):
         serializer = DocumentWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -1082,7 +1082,7 @@ class WorkspaceDocumentListCreateView(_InventoryView):
 
 class WorkspaceDocumentDetailView(_InventoryView):
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="A stock document with its lines",
-                         responses={200: DocumentSerializer()})
+                         responses={200: InventoryDocumentSerializer()})
     def get(self, request, document_id: int):
         doc = documents.get_document(document_id, request.user.company_id)
         if not doc:
@@ -1093,7 +1093,7 @@ class WorkspaceDocumentDetailView(_InventoryView):
         return Response(doc)
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Edit a draft document",
-                         request_body=DocumentPatchSerializer, responses={200: DocumentSerializer()})
+                         request_body=DocumentPatchSerializer, responses={200: InventoryDocumentSerializer()})
     def patch(self, request, document_id: int):
         current = documents.get_document_raw(document_id, request.user.company_id)
         if not current:
@@ -1139,7 +1139,7 @@ class WorkspaceDocumentPreviewView(_InventoryView):
 
 
 class _DocumentActionView(_InventoryView):
-    action = ""
+    doc_action = ""
 
     def post(self, request, document_id: int):
         current = documents.get_document_raw(document_id, request.user.company_id)
@@ -1148,11 +1148,11 @@ class _DocumentActionView(_InventoryView):
         if refusal := _document_refusal(request, current["kind"]):
             return refusal
         try:
-            if self.action == "confirm":
+            if self.doc_action == "confirm":
                 doc = documents.confirm_document(document_id, request.user.company_id, actor_id=request.user.id)
-            elif self.action == "send":
+            elif self.doc_action == "send":
                 doc = documents.send_transfer(document_id, request.user.company_id, actor_id=request.user.id)
-            elif self.action == "receive":
+            elif self.doc_action == "receive":
                 doc = documents.receive_transfer(document_id, request.user.company_id, actor_id=request.user.id)
             else:
                 serializer = CancelSerializer(data=request.data)
@@ -1164,48 +1164,48 @@ class _DocumentActionView(_InventoryView):
         except InventoryError as exc:
             return _refusal(exc)
         payload = {"number": doc.get("number"), "status": doc.get("status")}
-        if self.action == "cancel":
+        if self.doc_action == "cancel":
             payload["reason"] = request.data.get("reason")
         record_audit(
             request.user.company_id, actor_employee_id=request.user.id,
-            action=f"inventory.{current['kind']}.{self.action}", target_type="stock_document",
+            action=f"inventory.{current['kind']}.{self.doc_action}", target_type="stock_document",
             target_id=document_id, payload=payload,
         )
         return Response(doc)
 
 
 class WorkspaceDocumentConfirmView(_DocumentActionView):
-    action = "confirm"
+    doc_action = "confirm"
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Confirm a document — apply it to the ledger",
-                         responses={200: DocumentSerializer(), 409: openapi.Response(description="Insufficient stock, with `shortages`")})
+                         responses={200: InventoryDocumentSerializer(), 409: openapi.Response(description="Insufficient stock, with `shortages`")})
     def post(self, request, document_id: int):
         return super().post(request, document_id)
 
 
 class WorkspaceDocumentSendView(_DocumentActionView):
-    action = "send"
+    doc_action = "send"
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Send a transfer (stock leaves the source)",
-                         responses={200: DocumentSerializer()})
+                         responses={200: InventoryDocumentSerializer()})
     def post(self, request, document_id: int):
         return super().post(request, document_id)
 
 
 class WorkspaceDocumentReceiveView(_DocumentActionView):
-    action = "receive"
+    doc_action = "receive"
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Receive a sent transfer",
-                         responses={200: DocumentSerializer()})
+                         responses={200: InventoryDocumentSerializer()})
     def post(self, request, document_id: int):
         return super().post(request, document_id)
 
 
 class WorkspaceDocumentCancelView(_DocumentActionView):
-    action = "cancel"
+    doc_action = "cancel"
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Cancel (storno) a document, with a reason",
-                         request_body=CancelSerializer, responses={200: DocumentSerializer()})
+                         request_body=CancelSerializer, responses={200: InventoryDocumentSerializer()})
     def post(self, request, document_id: int):
         return super().post(request, document_id)
 
@@ -1264,7 +1264,7 @@ class WorkspaceMovementListCreateView(_InventoryView):
         return Response({"results": _hide_costs(rows, request)})
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Book a one-line stock operation",
-                         request_body=MovementWriteSerializer, responses={201: DocumentSerializer()})
+                         request_body=MovementWriteSerializer, responses={201: InventoryDocumentSerializer()})
     def post(self, request):
         serializer = MovementWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
