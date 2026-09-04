@@ -68,7 +68,9 @@ def _mask_token(token: str | None) -> str:
 B2B_ANDROID_CHANNEL = "weel_workspace"
 
 
-def _android_config(channel_id: str | None) -> messaging.AndroidConfig:
+def _android_config(
+    channel_id: str | None, badge: int | None = None
+) -> messaging.AndroidConfig:
     """Delivery hints for the Android half of a push.
 
     `high` priority is what wakes a dozing device to deliver immediately;
@@ -79,12 +81,19 @@ def _android_config(channel_id: str | None) -> messaging.AndroidConfig:
     The channel is only named when the receiving app is known to have created
     it — see [B2B_ANDROID_CHANNEL]. Left out, Android uses whatever the app's
     manifest declares as its default.
+
+    `badge` is the number the launcher may show on the app icon. Android has
+    no icon badge of its own: launchers that draw one (Samsung, Pixel, MIUI)
+    count the app's notifications in the shade, and `notification_count` is
+    what a launcher that shows a number reads instead of counting to one per
+    notification. Only sent when a badge is known — see `send_to_tokens`.
     """
     notification = (
         messaging.AndroidNotification(
             channel_id=channel_id,
             sound="default",
             default_vibrate_timings=True,
+            notification_count=badge,
         )
         if channel_id
         else None
@@ -92,7 +101,9 @@ def _android_config(channel_id: str | None) -> messaging.AndroidConfig:
     return messaging.AndroidConfig(priority="high", notification=notification)
 
 
-def _apns_config(title: str, body: str) -> messaging.APNSConfig:
+def _apns_config(
+    title: str, body: str, badge: int | None = None
+) -> messaging.APNSConfig:
     """The APNs half of a push, which FCM does not fill in on its own.
 
     Without it iOS receives an alert with no `sound` key, and an alert with no
@@ -105,17 +116,41 @@ def _apns_config(title: str, body: str) -> messaging.APNSConfig:
     repeated in the payload because an `aps` dictionary given explicitly
     replaces the one FCM would otherwise have written, rather than merging
     into it.
+
+    `badge` is the number iOS puts on the app icon. It is absolute, not
+    additive — the phone shows exactly what the last push said — so the
+    sender has to know the recipient's whole unread count, not just that one
+    more thing arrived. `None` leaves the icon as it is.
     """
     return messaging.APNSConfig(
         headers={"apns-priority": "10"},
         payload=messaging.APNSPayload(
             aps=messaging.Aps(
                 alert=messaging.ApsAlert(title=title, body=body),
+                badge=badge,
                 sound="default",
                 mutable_content=True,
             ),
         ),
     )
+
+
+def _badges_for(tokens: list[str], badge_for) -> dict[str, int] | None:
+    """The icon-badge number for each token, or None to send without any.
+
+    Never fatal: a badge is decoration on a push that already has a reason
+    to exist, and a counter that could not be read must not cost the message.
+    """
+    if badge_for is None:
+        return None
+    try:
+        badges = badge_for(tokens) or {}
+    except Exception:
+        logger.exception("Push badge counts could not be read; sending without badges.")
+        return None
+    return {
+        token: int(count) for token, count in badges.items() if count is not None
+    }
 
 
 class FCMService:
@@ -143,6 +178,7 @@ class FCMService:
         app=None,
         deactivate_invalid=None,
         android_channel_id=None,
+        badge_for=None,
     ):
         """Send one message to many tokens.
 
@@ -165,6 +201,15 @@ class FCMService:
         consumer and partner send behaves exactly as it always has; B2B callers
         pass their own so a dead workspace token is actually cleared instead of
         being retried on every message forever.
+
+        `badge_for` turns the token list into `{token: unread count}` — the
+        number each phone should show on the app icon after this push. With
+        it, every token gets a message of its own, because iOS badges are
+        absolute and two people rarely have the same count; without it the
+        whole list goes as one multicast, as before. The B2B senders pass
+        `repository.unread_badges_for_tokens`, which counts the feed rows they
+        have just written — so the badge is exactly "how many notifications
+        have arrived since you last opened the app".
         """
         normalized_data = data or {}
         if not tokens:
@@ -183,18 +228,37 @@ class FCMService:
             [_mask_token(token) for token in tokens],
         )
 
-        message = messaging.MulticastMessage(
-            notification=messaging.Notification(
-                title=title,
-                body=body,
-            ),
-            data=normalized_data,
-            android=_android_config(android_channel_id),
-            apns=_apns_config(title, body),
-            tokens=tokens,
-        )
+        badges = _badges_for(tokens, badge_for)
         try:
-            response = messaging.send_each_for_multicast(message, app=app)
+            if badges is None:
+                message = messaging.MulticastMessage(
+                    notification=messaging.Notification(
+                        title=title,
+                        body=body,
+                    ),
+                    data=normalized_data,
+                    android=_android_config(android_channel_id),
+                    apns=_apns_config(title, body),
+                    tokens=tokens,
+                )
+                response = messaging.send_each_for_multicast(message, app=app)
+            else:
+                messages = [
+                    messaging.Message(
+                        notification=messaging.Notification(
+                            title=title,
+                            body=body,
+                        ),
+                        data=normalized_data,
+                        android=_android_config(
+                            android_channel_id, badge=badges.get(token)
+                        ),
+                        apns=_apns_config(title, body, badge=badges.get(token)),
+                        token=token,
+                    )
+                    for token in tokens
+                ]
+                response = messaging.send_each(messages, app=app)
         except Exception:
             logger.exception(
                 "FCM send failed before per-token response. title=%s tokens_total=%s data_keys=%s",

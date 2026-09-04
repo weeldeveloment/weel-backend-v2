@@ -240,20 +240,36 @@ def set_employee_access(
 
 
 #: Outranks-who, for the TZ's "only a lower role" rows (removing a member,
-#: reassigning a role). Higher number outranks lower.
-ROLE_RANK: dict[str, int] = {
-    Role.OWNER: 4,
-    Role.ADMIN: 3,
-    Role.MANAGER: 2,
-    Role.EMPLOYEE: 1,
-    Role.GUEST: 0,
-}
+#: reassigning a role). One table, on `Role`, so the join-request decision,
+#: the employee editor and the role editor all compare the same numbers.
+ROLE_RANK: dict[str, int] = Role.RANK
 
 
 def outranks(actor_role: str, target_role: str) -> bool:
-    return ROLE_RANK.get(Role.clean(actor_role), 0) > ROLE_RANK.get(
-        Role.clean(target_role), 0
-    )
+    return Role.outranks(actor_role, target_role)
+
+
+def grant_exceeds(
+    actor, *, modules=None, permissions=None
+) -> tuple[list[str], list[str]]:
+    """What in this grant the actor does not hold themselves.
+
+    TZ v2 §12: "a user may not grant another user rights above their own".
+    Answered for one grant — a module list, a permission list, or both —
+    against the actor's own resolved access; the owner holds the company and
+    is never narrowed by this. Two lists back rather than a bool so the
+    refusal can name what was over the line.
+    """
+    if Role.clean(actor.role) == Role.OWNER:
+        return [], []
+    own_modules, own_permissions = actor.access
+    extra_modules = [
+        m for m in Module.clean(modules) if m not in set(own_modules)
+    ] if modules is not None else []
+    extra_permissions = [
+        p for p in Permission.clean(permissions) if p not in set(own_permissions)
+    ] if permissions is not None else []
+    return extra_modules, extra_permissions
 
 
 def remove_employee(

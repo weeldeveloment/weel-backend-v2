@@ -113,6 +113,16 @@ EVENT_REQUEST = "request"
 EVENT_ACCESS = "access"
 EVENT_FILE = "file"
 EVENT_TEAM = "team"
+# Stock or the catalogue changed — the sales screens that print a
+# quantity reload. See `inventory_views.py`.
+EVENT_INVENTORY = "inventory"
+
+# A live call changing state — to each participant's employee group. Carries
+# `action` (ringing / accepted / declined / missed / ended) and the call
+# payload, because the phone has to *draw* the incoming screen from it: a
+# bare "something changed" would cost a round trip in the one place a
+# second matters. See `calls.py`.
+EVENT_CALL = "call"
 
 
 # ─── Chat, kept as named calls ────────────────────────────────────────────────

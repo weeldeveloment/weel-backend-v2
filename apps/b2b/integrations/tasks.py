@@ -79,6 +79,7 @@ def notify_meta_lead(lead_id: int, company_id: int, body: str) -> int:
             app=b2b_firebase_app(),
             android_channel_id=B2B_ANDROID_CHANNEL,
             deactivate_invalid=repo.clear_employee_fcm_tokens,
+            badge_for=repo.unread_badges_for_tokens,
         )
     except Exception:  # noqa: BLE001
         logger.exception("Failed to push the Meta lead %s", lead_id)

@@ -6,3 +6,4 @@
 *.local.yml
 *.rendered.yml
 secrets/
+.backend-env.local

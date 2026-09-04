@@ -16,6 +16,52 @@ from apps.b2b.workspace.access_views import (
     WorkspaceRoleListView,
     WorkspaceTrashView,
 )
+from apps.b2b.workspace.analyst_views import (
+    AnalystDiscussView,
+    AnalystReportListView,
+    AnalystReportView,
+    AnalystSeenView,
+    AnalystView,
+)
+from apps.b2b.workspace.assistant import AssistantMessagesView, AssistantView
+from apps.b2b.workspace.inventory_views import (
+    WorkspaceCategoryDetailView,
+    WorkspaceCategoryListCreateView,
+    WorkspaceDocumentCancelView,
+    WorkspaceDocumentConfirmView,
+    WorkspaceDocumentDetailView,
+    WorkspaceDocumentListCreateView,
+    WorkspaceDocumentPreviewView,
+    WorkspaceDocumentReceiveView,
+    WorkspaceDocumentSendView,
+    WorkspaceGenerateCodeView,
+    WorkspaceInventoryExportView,
+    WorkspaceInventoryImportCommitView,
+    WorkspaceInventoryImportPreviewView,
+    WorkspaceInventorySettingsView,
+    WorkspaceInventorySummaryView,
+    WorkspaceMovementListCreateView,
+    WorkspacePendingSalesView,
+    WorkspaceProductDetailView,
+    WorkspaceProductListCreateView,
+    WorkspaceProductMovementsView,
+    WorkspaceProductPhotoView,
+    WorkspaceProductPriceHistoryView,
+    WorkspaceSupplierDetailView,
+    WorkspaceSupplierListCreateView,
+    WorkspaceWarehouseDetailView,
+    WorkspaceWarehouseListCreateView,
+)
+from apps.b2b.workspace.calls_views import (
+    WorkspaceCallAcceptView,
+    WorkspaceCallDeclineView,
+    WorkspaceCallDetailView,
+    WorkspaceCallEndView,
+    WorkspaceCallHistoryView,
+    WorkspaceCallIncomingView,
+    WorkspaceCallListCreateView,
+    WorkspaceCallTokenView,
+)
 from apps.b2b.workspace.joining_views import (
     AccountDeletionPreviewView,
     AccountDeviceTokenView,
@@ -339,7 +385,34 @@ urlpatterns = [
     path("notes/<int:note_id>/", WorkspaceNoteDetailView.as_view(), name="ws-note-detail"),
     path("notes/<int:note_id>/voice/", WorkspaceNoteVoiceView.as_view(), name="ws-note-voice"),
 
+    # Jonli video/audio qo'ng'iroq (Jitsi) — TZ §7. The fixed paths come
+    # before `<int:call_id>` so "history" and "incoming" are not read as ids.
+    path("calls/", WorkspaceCallListCreateView.as_view(), name="ws-calls"),
+    path("calls/history/", WorkspaceCallHistoryView.as_view(), name="ws-calls-history"),
+    path("calls/incoming/", WorkspaceCallIncomingView.as_view(), name="ws-calls-incoming"),
+    path("calls/<int:call_id>/", WorkspaceCallDetailView.as_view(), name="ws-call"),
+    path("calls/<int:call_id>/accept/", WorkspaceCallAcceptView.as_view(), name="ws-call-accept"),
+    path("calls/<int:call_id>/decline/", WorkspaceCallDeclineView.as_view(), name="ws-call-decline"),
+    path("calls/<int:call_id>/end/", WorkspaceCallEndView.as_view(), name="ws-call-end"),
+    path("calls/<int:call_id>/token/", WorkspaceCallTokenView.as_view(), name="ws-call-token"),
+
     path("chats/", WorkspaceThreadListCreateView.as_view(), name="ws-chats"),
+    # The AI assistant's row under "Saqlangan xabarlar" — every employee's
+    # own chat with whichever of Claude / ChatGPT the workspace connected.
+    # See `assistant.py`. Not a thread: it lives in the AI tables.
+    path("assistant/", AssistantView.as_view(), name="ws-assistant"),
+    path("assistant/messages/", AssistantMessagesView.as_view(), name="ws-assistant-messages"),
+    # Weel AI — the built-in analyst at the top right of the chat list. See
+    # `analyst.py`. Managers only; `CanReadAnalyst` says why.
+    path("analyst/", AnalystView.as_view(), name="ws-analyst"),
+    path("analyst/seen/", AnalystSeenView.as_view(), name="ws-analyst-seen"),
+    path("analyst/reports/", AnalystReportListView.as_view(), name="ws-analyst-reports"),
+    path("analyst/reports/<int:report_id>/", AnalystReportView.as_view(), name="ws-analyst-report"),
+    path(
+        "analyst/reports/<int:report_id>/discuss/",
+        AnalystDiscussView.as_view(),
+        name="ws-analyst-report-discuss",
+    ),
     path("chats/<int:thread_id>/messages/", WorkspaceMessageView.as_view(), name="ws-chat-messages"),
     path(
         "chats/<int:thread_id>/messages/<int:message_id>/",
@@ -397,6 +470,115 @@ urlpatterns = [
         name="ws-lead-item-detail",
     ),
     path("leads/<int:lead_id>/tasks/", WorkspaceLeadTasksView.as_view(), name="ws-lead-tasks"),
+
+    # Stock and catalogue behind the board — see `inventory_views.py`. Every
+    # name starts with `ws-inventory` so one LIVE_SECTIONS entry covers them.
+    path(
+        "inventory/warehouses/",
+        WorkspaceWarehouseListCreateView.as_view(),
+        name="ws-inventory-warehouses",
+    ),
+    path(
+        "inventory/warehouses/<int:warehouse_id>/",
+        WorkspaceWarehouseDetailView.as_view(),
+        name="ws-inventory-warehouse-detail",
+    ),
+    path(
+        "inventory/categories/",
+        WorkspaceCategoryListCreateView.as_view(),
+        name="ws-inventory-categories",
+    ),
+    path(
+        "inventory/categories/<int:category_id>/",
+        WorkspaceCategoryDetailView.as_view(),
+        name="ws-inventory-category-detail",
+    ),
+    path(
+        "inventory/products/",
+        WorkspaceProductListCreateView.as_view(),
+        name="ws-inventory-products",
+    ),
+    path(
+        "inventory/products/<int:product_id>/",
+        WorkspaceProductDetailView.as_view(),
+        name="ws-inventory-product-detail",
+    ),
+    path(
+        "inventory/products/<int:product_id>/movements/",
+        WorkspaceProductMovementsView.as_view(),
+        name="ws-inventory-product-movements",
+    ),
+    path(
+        "inventory/movements/",
+        WorkspaceMovementListCreateView.as_view(),
+        name="ws-inventory-movements",
+    ),
+    path(
+        "inventory/summary/",
+        WorkspaceInventorySummaryView.as_view(),
+        name="ws-inventory-summary",
+    ),
+    path("inventory/settings/", WorkspaceInventorySettingsView.as_view(), name="ws-inventory-settings"),
+    path("inventory/generate/", WorkspaceGenerateCodeView.as_view(), name="ws-inventory-generate"),
+    path("inventory/suppliers/", WorkspaceSupplierListCreateView.as_view(), name="ws-inventory-suppliers"),
+    path(
+        "inventory/suppliers/<int:supplier_id>/",
+        WorkspaceSupplierDetailView.as_view(),
+        name="ws-inventory-supplier-detail",
+    ),
+    path(
+        "inventory/products/<int:product_id>/photo/",
+        WorkspaceProductPhotoView.as_view(),
+        name="ws-inventory-product-photo",
+    ),
+    path(
+        "inventory/products/<int:product_id>/prices/",
+        WorkspaceProductPriceHistoryView.as_view(),
+        name="ws-inventory-product-prices",
+    ),
+    path("inventory/documents/", WorkspaceDocumentListCreateView.as_view(), name="ws-inventory-documents"),
+    path("inventory/documents/pending/", WorkspacePendingSalesView.as_view(), name="ws-inventory-documents-pending"),
+    path(
+        "inventory/documents/<int:document_id>/",
+        WorkspaceDocumentDetailView.as_view(),
+        name="ws-inventory-document-detail",
+    ),
+    path(
+        "inventory/documents/<int:document_id>/preview/",
+        WorkspaceDocumentPreviewView.as_view(),
+        name="ws-inventory-document-preview",
+    ),
+    path(
+        "inventory/documents/<int:document_id>/confirm/",
+        WorkspaceDocumentConfirmView.as_view(),
+        name="ws-inventory-document-confirm",
+    ),
+    path(
+        "inventory/documents/<int:document_id>/send/",
+        WorkspaceDocumentSendView.as_view(),
+        name="ws-inventory-document-send",
+    ),
+    path(
+        "inventory/documents/<int:document_id>/receive/",
+        WorkspaceDocumentReceiveView.as_view(),
+        name="ws-inventory-document-receive",
+    ),
+    path(
+        "inventory/documents/<int:document_id>/cancel/",
+        WorkspaceDocumentCancelView.as_view(),
+        name="ws-inventory-document-cancel",
+    ),
+    path("inventory/export/", WorkspaceInventoryExportView.as_view(), name="ws-inventory-export"),
+    path(
+        "inventory/import/preview/",
+        WorkspaceInventoryImportPreviewView.as_view(),
+        name="ws-inventory-import-preview",
+    ),
+    path(
+        "inventory/import/commit/",
+        WorkspaceInventoryImportCommitView.as_view(),
+        name="ws-inventory-import-commit",
+    ),
 
     path("folders/", WorkspaceFolderListCreateView.as_view(), name="ws-folders"),
     path(

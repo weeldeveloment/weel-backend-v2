@@ -35,6 +35,106 @@ def _fake_send_response(*, success: bool, code: str | None = None):
 
 
 class FCMServiceTests(SimpleTestCase):
+
+    @patch("notification.service.messaging.send_each")
+    @patch("notification.service.messaging.send_each_for_multicast")
+    def test_send_to_tokens_badges_each_phone_with_its_own_count(
+        self, mock_multicast, mock_send_each
+    ):
+        """With `badge_for`, every token gets a message carrying its own
+        unread count on both platforms — iOS badges are absolute, so one
+        multicast number would be wrong for everyone but one person."""
+        mock_send_each.return_value = SimpleNamespace(
+            responses=[_fake_send_response(success=True)] * 2,
+            success_count=2,
+            failure_count=0,
+        )
+
+        FCMService.send_to_tokens(
+            tokens=["tok-a", "tok-b"],
+            title="Title",
+            body="Body",
+            android_channel_id="weel_workspace",
+            badge_for=lambda tokens: {"tok-a": 3, "tok-b": 1},
+        )
+
+        mock_multicast.assert_not_called()
+        messages = mock_send_each.call_args.args[0]
+        by_token = {m.token: m for m in messages}
+        self.assertEqual(set(by_token), {"tok-a", "tok-b"})
+        self.assertEqual(by_token["tok-a"].apns.payload.aps.badge, 3)
+        self.assertEqual(by_token["tok-b"].apns.payload.aps.badge, 1)
+        self.assertEqual(by_token["tok-a"].android.notification.notification_count, 3)
+        self.assertEqual(by_token["tok-b"].android.notification.notification_count, 1)
+        # The rest of the payload is the same message it always was.
+        self.assertEqual(by_token["tok-a"].notification.title, "Title")
+        self.assertEqual(by_token["tok-a"].apns.payload.aps.sound, "default")
+
+    @patch("notification.service.messaging.send_each")
+    @patch("notification.service.messaging.send_each_for_multicast")
+    def test_a_token_with_no_count_is_sent_without_a_badge(
+        self, mock_multicast, mock_send_each
+    ):
+        mock_send_each.return_value = SimpleNamespace(
+            responses=[_fake_send_response(success=True)],
+            success_count=1,
+            failure_count=0,
+        )
+
+        FCMService.send_to_tokens(
+            tokens=["tok-a"],
+            title="Title",
+            body="Body",
+            badge_for=lambda tokens: {},
+        )
+
+        (message,) = mock_send_each.call_args.args[0]
+        self.assertIsNone(message.apns.payload.aps.badge)
+
+    @patch("notification.service.logger")
+    @patch("notification.service.messaging.send_each")
+    @patch("notification.service.messaging.send_each_for_multicast")
+    def test_a_badge_lookup_that_fails_does_not_cost_the_push(
+        self, mock_multicast, mock_send_each, _mock_logger
+    ):
+        """A badge is decoration; the message goes out as a plain multicast
+        when the count cannot be read."""
+        mock_multicast.return_value = SimpleNamespace(
+            responses=[_fake_send_response(success=True)],
+            success_count=1,
+            failure_count=0,
+        )
+
+        def explode(tokens):
+            raise RuntimeError("db down")
+
+        FCMService.send_to_tokens(
+            tokens=["tok-a"], title="Title", body="Body", badge_for=explode
+        )
+
+        mock_send_each.assert_not_called()
+        mock_multicast.assert_called_once()
+
+    @patch("notification.service.FCMService._deactivate_invalid_tokens")
+    @patch("notification.service.messaging.send_each")
+    def test_badged_sends_still_clear_dead_tokens(self, mock_send_each, mock_deactivate):
+        mock_send_each.return_value = SimpleNamespace(
+            responses=[
+                _fake_send_response(success=True),
+                _fake_send_response(success=False, code="unregistered"),
+            ],
+            success_count=1,
+            failure_count=1,
+        )
+
+        FCMService.send_to_tokens(
+            tokens=["tok-a", "tok-dead"],
+            title="Title",
+            body="Body",
+            badge_for=lambda tokens: {t: 1 for t in tokens},
+        )
+
+        mock_deactivate.assert_called_once_with(["tok-dead"])
     @patch("notification.service.logger")
     def test_send_to_tokens_returns_none_for_empty_tokens(self, _mock_logger):
         result = FCMService.send_to_tokens(tokens=[], title="T", body="B")

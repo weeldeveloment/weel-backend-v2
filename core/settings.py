@@ -886,11 +886,65 @@ B2B_INTEGRATIONS_SECRET_KEY = (
     os.getenv("B2B_INTEGRATIONS_SECRET_KEY") or ""
 ).strip()
 
+# Claude / ChatGPT. Nothing to configure server-side: each workspace brings
+# its own API key, stored under the same Fernet key as the Meta tokens. These
+# only bound what one request may do — see apps/b2b/integrations/ai.py.
+B2B_AI_MAX_IMPORT_MB = int(os.getenv("B2B_AI_MAX_IMPORT_MB") or "200")
+B2B_AI_REQUEST_TIMEOUT = int(os.getenv("B2B_AI_REQUEST_TIMEOUT") or "120")
+B2B_AI_MAX_OUTPUT_TOKENS = int(os.getenv("B2B_AI_MAX_OUTPUT_TOKENS") or "4096")
+# How many earlier turns are sent along with a new message. A long imported
+# chat is not resent whole: the vendor bills by token and a 400-turn history
+# would cost more than the answer is worth.
+B2B_AI_HISTORY_TURNS = int(os.getenv("B2B_AI_HISTORY_TURNS") or "40")
+
+# Weel AI — the built-in analyst that reads the whole company and writes the
+# daily / weekly / monthly / yearly report (apps/b2b/workspace/analyst.py).
+# Runs on the deployment's own key so it works for every workspace without
+# them pasting one; a workspace with no such key here falls back to whichever
+# of Claude / ChatGPT it connected itself. Provider is "claude" or "chatgpt".
+B2B_ANALYST_PROVIDER = (os.getenv("B2B_ANALYST_PROVIDER") or "claude").strip().lower()
+B2B_ANALYST_API_KEY = (os.getenv("B2B_ANALYST_API_KEY") or "").strip()
+B2B_ANALYST_MODEL = (os.getenv("B2B_ANALYST_MODEL") or "").strip()
+B2B_ANALYST_MAX_OUTPUT_TOKENS = int(os.getenv("B2B_ANALYST_MAX_OUTPUT_TOKENS") or "12000")
+# The reports go out at this hour, Asia/Tashkent — the start of the working
+# day, so the owner reads yesterday before today has happened.
+B2B_ANALYST_HOUR = int(os.getenv("B2B_ANALYST_HOUR") or "8")
+B2B_ANALYST_ENABLED = env_bool("B2B_ANALYST_ENABLED", True)
+
 # DEBUG=True da Celery tasklari sinxron ishlaydi — worker ishlamasa ham OTP SMS yuboriladi
 CELERY_TASK_ALWAYS_EAGER = DEBUG
 
 # Jwt Token Issuer
 JWT_ISSUER = (os.getenv("JWT_ISSUER") or "weel-backend").strip() or "weel-backend"
+
+# ─── Jonli video/audio qo'ng'iroq — Jitsi Meet (self-hosted) ─────────────────
+#
+# The app never talks to Jitsi with a password: every join carries a JWT this
+# backend signs, naming one room and one person, and Prosody on the Jitsi
+# host refuses anything else (`ENABLE_AUTH=1 AUTH_TYPE=jwt` in the compose
+# file under `jitsi/`). `JITSI_APP_ID` / `JITSI_APP_SECRET` must therefore be
+# the same pair as `JWT_APP_ID` / `JWT_APP_SECRET` on that host.
+#
+# Leave `JITSI_SERVER_URL` or the secret empty and every call endpoint answers
+# 503 rather than handing out tokens nothing will accept — see
+# `apps/b2b/workspace/calls.py`.
+JITSI_SERVER_URL = (os.getenv("JITSI_SERVER_URL") or "").strip().rstrip("/")
+JITSI_APP_ID = (os.getenv("JITSI_APP_ID") or "weel").strip() or "weel"
+JITSI_APP_SECRET = (os.getenv("JITSI_APP_SECRET") or "").strip()
+# The `sub` claim Prosody checks the token against. "*" is Jitsi's own
+# wildcard and is right for a single-tenant host; set it to the XMPP domain
+# (`XMPP_DOMAIN` on the Jitsi side) if that host ever serves more than Weel.
+JITSI_JWT_SUB = (os.getenv("JITSI_JWT_SUB") or "*").strip() or "*"
+# How long a join token lives. Two hours covers any consultation and is short
+# enough that a leaked link stops working the same afternoon.
+JITSI_TOKEN_TTL_SECONDS = int((os.getenv("JITSI_TOKEN_TTL_SECONDS") or "7200").strip() or "7200")
+# The browser link sent to a lead who is not in Weel. Shorter on purpose: it
+# goes out by SMS, which is the least private channel the product has.
+JITSI_GUEST_LINK_TTL_SECONDS = int(
+    (os.getenv("JITSI_GUEST_LINK_TTL_SECONDS") or "1800").strip() or "1800"
+)
+# How long a call rings before it is written down as missed (TZ §4.1.2).
+CALL_RING_TIMEOUT_SECONDS = int((os.getenv("CALL_RING_TIMEOUT_SECONDS") or "30").strip() or "30")
 
 # Test user - OTP so'ralmaydi (development va production)
 TEST_USER_PHONE_NUMBER = (os.getenv("TEST_USER_PHONE_NUMBER") or "").strip() or None

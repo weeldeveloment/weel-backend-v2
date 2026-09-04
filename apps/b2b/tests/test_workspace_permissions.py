@@ -74,9 +74,12 @@ def _task(**overrides):
 
 # ─── Capability map ───────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("role, can_create", [("owner", True), ("performer", True), ("employee", False)])
-def test_only_managers_may_create_tasks(role, can_create):
+@pytest.mark.parametrize("role, can_create", [("owner", True), ("performer", True), ("employee", True), ("guest", False)])
+def test_anybody_with_the_task_list_may_create_a_task(role, can_create):
+    """TZ v2 §6: creating a record is open to whoever can open the module.
+    The default guest cannot open it, so the flag stays off for them."""
     assert capabilities_for(role)["can_create_task"] is can_create
+
 
 
 def test_an_employee_still_owns_their_own_work():
@@ -88,17 +91,34 @@ def test_an_employee_still_owns_their_own_work():
     assert caps["sees_all_company_data"] is False
 
 
-def test_only_the_owner_manages_the_roster():
+def test_management_manages_the_roster():
+    """TZ v2 §11: the manager too, for the employees and guests of their own
+    workspace; a plain employee not at all."""
     assert capabilities_for("owner")["can_manage_team"] is True
-    assert capabilities_for("performer")["can_manage_team"] is False
+    assert capabilities_for("performer")["can_manage_team"] is True
+    assert capabilities_for("employee")["can_manage_team"] is False
+
 
 
 # ─── Tasks ────────────────────────────────────────────────────────────────────
 
-def test_employee_cannot_create_a_task():
+def test_a_guest_without_the_task_list_cannot_create_a_task():
+    """The create endpoint stays closed to whoever cannot open the module —
+    which is what the default guest is (TZ v2 §6, read together with §12)."""
+    request = factory.post("/tasks/", {"title": "Yangi vazifa"}, format="json")
+    response = _call(WorkspaceTaskListCreateView, request, _user("guest", 77))
+    assert response.status_code == 403
+
+
+@patch("apps.b2b.workspace.views.repo.employee_ids_in_company", return_value={EMPLOYEE_ID})
+@patch("apps.b2b.workspace.views.repo.create_task")
+def test_an_employee_creates_a_task(create_task, _ids):
+    """TZ v2 §6 / §11 "Создавать записи: Сотрудник — Да"."""
+    create_task.return_value = _task(author_id=EMPLOYEE_ID)
     request = factory.post("/tasks/", {"title": "Yangi vazifa"}, format="json")
     response = _call(WorkspaceTaskListCreateView, request, EMPLOYEE)
-    assert response.status_code == 403
+    assert response.status_code == 201, response.data
+
 
 
 @patch("apps.b2b.workspace.views.repo.employee_ids_in_company", return_value={EMPLOYEE_ID})
@@ -311,3 +331,40 @@ def test_a_chat_with_only_yourself_is_rejected():
     request = factory.post("/chats/", {"member_ids": [EMPLOYEE_ID]}, format="json")
     response = _call(WorkspaceThreadListCreateView, request, EMPLOYEE)
     assert response.status_code == 400
+
+
+# ─── TZ v2 §8: a finished task is the owner's or the administrator's ─────────
+
+@patch("apps.b2b.workspace.views.repo.update_task")
+@patch("apps.b2b.workspace.views.repo.get_task")
+def test_the_assignee_cannot_reopen_a_finished_task(get_task, update_task):
+    get_task.return_value = _task(assignee_ids=[EMPLOYEE_ID], status="done")
+    request = factory.post("/tasks/10/status/", {"status": "in_progress"}, format="json")
+    response = _call(WorkspaceTaskStatusView, request, EMPLOYEE, task_id=10)
+    assert response.status_code == 403
+    update_task.assert_not_called()
+
+    # Nor a manager who could have moved it a minute before it closed.
+    response = _call(WorkspaceTaskStatusView, request, _user("performer", 88), task_id=10)
+    assert response.status_code == 403
+    update_task.assert_not_called()
+
+    # The owner may.
+    update_task.return_value = _task(assignee_ids=[EMPLOYEE_ID], status="in_progress")
+    response = _call(WorkspaceTaskStatusView, request, OWNER, task_id=10)
+    assert response.status_code == 200
+    update_task.assert_called_once()
+
+
+@patch("apps.b2b.workspace.views.repo.list_task_activity", return_value=[])
+@patch("apps.b2b.workspace.views.repo.get_task")
+def test_a_finished_task_draws_no_buttons_below_the_administrator(get_task, _activity):
+    get_task.return_value = _task(assignee_ids=[EMPLOYEE_ID], status="done")
+    response = _call(WorkspaceTaskDetailView, factory.get("/tasks/10/"), EMPLOYEE, task_id=10)
+    assert response.status_code == 200
+    assert response.data["can_change_status"] is False
+    assert response.data["can_edit"] is False
+
+    response = _call(WorkspaceTaskDetailView, factory.get("/tasks/10/"), OWNER, task_id=10)
+    assert response.data["can_change_status"] is True
+    assert response.data["can_edit"] is True

@@ -121,6 +121,14 @@ _VERB_LABELS = {
     "change_permissions": "Huquqlarni o’zgartirish",
     "remove_from_workspace": "Ish joyidan chiqarish",
     "remove_from_company": "Kompaniyadan chiqarish",
+    "create_workspace": "Ish muhiti yaratish",
+    "stock_view": "Ombor: katalog va qoldiqni ko’rish",
+    "stock_manage": "Ombor: kirim, transfer, inventarizatsiya",
+    "stock_write_off": "Ombor: hisobdan chiqarish",
+    "stock_reprice": "Ombor: qayta baholash",
+    "stock_free_price": "Ombor: erkin narx bilan sotish",
+    "stock_view_cost": "Ombor: xarid narxini ko’rish",
+    "stock_import": "Ombor: import va eksport",
 }
 
 
@@ -180,9 +188,25 @@ class WorkspaceRoleDetailView(WorkspaceAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # TZ v2 §12: nobody hands out more than they hold. An administrator
+        # edits the roles below them and may only put into a role what they
+        # themselves have; the owner is exempt on both counts.
+        if not Role.outranks(request.user.role, code):
+            return Response(
+                {"detail": _("You may only configure roles below your own.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = RoleAccessSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        refused = _refuse_grant_above_own(
+            request.user,
+            modules=serializer.validated_data["modules"],
+            permissions=serializer.validated_data["permissions"],
+        )
+        if refused:
+            return refused
         saved = arepo.set_role_access(
+
             request.user.company_id,
             code,
             modules=serializer.validated_data["modules"],
@@ -248,7 +272,20 @@ class WorkspaceEmployeeAccessView(WorkspaceAPIView):
                     {"detail": _("The owner's role cannot be changed here.")},
                     status=status.HTTP_403_FORBIDDEN,
                 )
+            # TZ v2 §11: an administrator assigns "below the administrator's
+            # level", a manager assigns "employee/guest" — the same rule seen
+            # from two rows. Both the person being changed and the role they
+            # are given must sit below the actor.
+            refused = _refuse_unless_outranked(request.user, employee)
+            if refused:
+                return refused
+            if not Role.assignable(request.user.role, data["role"]):
+                return Response(
+                    {"detail": _("You may only assign roles below your own.")},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             arepo.set_employee_role(
+
                 employee_id,
                 data["role"],
                 company_id=request.user.company_id,
@@ -267,7 +304,21 @@ class WorkspaceEmployeeAccessView(WorkspaceAPIView):
                     {"detail": _("You may not change access.")},
                     status=status.HTTP_403_FORBIDDEN,
                 )
+            # The role may have just been lowered above; what counts is the
+            # standing the person has now, not what the row said on load.
+            current = dict(employee, role=data.get("role", employee.get("role")))
+            refused = _refuse_unless_outranked(request.user, current)
+            if refused:
+                return refused
+            refused = _refuse_grant_above_own(
+                request.user,
+                modules=data.get("modules") if "modules" in data else None,
+                permissions=data.get("permissions") if "permissions" in data else None,
+            )
+            if refused:
+                return refused
             arepo.set_employee_access(
+
                 employee_id,
                 modules=data.get("modules") if "modules" in data else arepo.KEEP,
                 permissions=(
@@ -288,7 +339,43 @@ class WorkspaceEmployeeAccessView(WorkspaceAPIView):
         return employee
 
 
+def _refuse_unless_outranked(actor, target: dict):
+    """403 unless the actor sits strictly above the person they are editing.
+
+    Editing yourself is included in the refusal: a manager who could widen
+    their own modules would be granting themselves access, which is the one
+    thing §12 rules out. The owner outranks the whole roster and is never
+    stopped here; an owner's row is refused earlier, by name.
+    """
+    if Role.clean(actor.role) == Role.OWNER:
+        return None
+    if not Role.outranks(actor.role, target.get("role")):
+        return Response(
+            {"detail": _("You may only change members ranked below you.")},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+def _refuse_grant_above_own(actor, *, modules=None, permissions=None):
+    """403 naming what in the grant the actor does not hold themselves."""
+    extra_modules, extra_permissions = arepo.grant_exceeds(
+        actor, modules=modules, permissions=permissions
+    )
+    if extra_modules or extra_permissions:
+        return Response(
+            {
+                "detail": _("You cannot grant access you do not hold yourself."),
+                "modules": extra_modules,
+                "permissions": extra_permissions,
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
 class EmployeeRemoveSerializer(serializers.Serializer):
+
     #: The TZ's two separate rights-matrix rows: ending somebody's standing
     #: in this one workspace, or in every workspace under the org.
     scope = serializers.ChoiceField(choices=["workspace", "company"], default="workspace")
@@ -672,18 +759,61 @@ class WorkspaceArchiveView(WorkspaceAPIView):
         tags=WORKSPACE_TAG, operation_summary="Completed and deleted tasks, leads and quick sales"
     )
     def get(self, request):
-        company_id = request.user.company_id
+        user = request.user
+        company_id = user.company_id
+        # TZ v2 §11: the owner and the administrator see all of it; everybody
+        # else "within their permitted access" — the module has to be open to
+        # them, and below the manager it is their own records only, the same
+        # slice the working lists show them. Each half is answered on its
+        # own, so somebody with the task list and not the sales board sees
+        # the finished tasks and no leads.
+        sees_all = bool(user.capabilities["sees_all_company_data"])
+        show_tasks = user.opens(Module.TASKS) and user.may(Permission.TASK_VIEW)
+        show_leads = user.opens(Module.SALES) and user.may(Permission.DEAL_VIEW)
+
+        def _mine_task(task: dict) -> bool:
+            return sees_all or task.get("author_id") == user.id or user.id in (
+                task.get("assignee_ids") or []
+            )
+
+        def _mine_lead(lead: dict) -> bool:
+            return sees_all or user.id in (
+                lead.get("claimed_by_id"), lead.get("created_by_id"), lead.get("author_id")
+            )
+
+        completed_tasks = (
+            [t for t in repo.list_tasks(company_id, status="done") if _mine_task(t)]
+            if show_tasks else []
+        )
+        completed_leads = (
+            [
+                lead
+                for lead in repo.list_leads(
+                    company_id, status=LeadStatus.COMPLETED, kind=repo.LEAD_KIND_ANY
+                )
+                if _mine_lead(lead)
+            ]
+            if show_leads else []
+        )
+        deleted_tasks = (
+            [t for t in repo.list_deleted_tasks(company_id) if _mine_task(t)]
+            if show_tasks else []
+        )
+        deleted_leads = (
+            [lead for lead in repo.list_deleted_leads(company_id) if _mine_lead(lead)]
+            if show_leads else []
+        )
         return Response({
-            "completed": {
-                "tasks": repo.list_tasks(company_id, status="done"),
-                "leads": repo.list_leads(company_id, status=LeadStatus.COMPLETED, kind=repo.LEAD_KIND_ANY),
-            },
-            "deleted": {
-                "tasks": repo.list_deleted_tasks(company_id),
-                "leads": repo.list_deleted_leads(company_id),
-            },
+            "completed": {"tasks": completed_tasks, "leads": completed_leads},
+            "deleted": {"tasks": deleted_tasks, "leads": deleted_leads},
+            # What the viewer may do from here. Restoring takes the authority
+            # to delete (§11), and it is `WorkspaceRestoreView` that enforces
+            # it; the flags only tell the screen whether to draw the button.
+            "can_restore_tasks": user.may(Permission.TASK_DELETE),
+            "can_restore_leads": user.may(Permission.DEAL_DELETE),
             # Kept for callers still reading the pre-TZ shape — the same rows
             # as `deleted` above, flat.
-            "tasks": repo.list_deleted_tasks(company_id),
-            "leads": repo.list_deleted_leads(company_id),
+            "tasks": deleted_tasks,
+            "leads": deleted_leads,
         })
+

@@ -88,3 +88,72 @@ def join_declined_body(company_name: str, reason: str | None = None) -> str:
     text = f"«{company_name}» jamoasi so’rovingizni rad etdi."
     reason = (reason or "").strip()
     return f"{text} Sabab: {reason}" if reason else text
+
+
+# ─── Jonli qo'ng'iroq ─────────────────────────────────────────────────────────
+
+# Somebody is ringing. The body names them and says whether it is video.
+CALL_INCOMING_TITLE = "Kiruvchi qo’ng’iroq"
+# They rang and nobody picked up.
+CALL_MISSED_TITLE = "Javobsiz qo’ng’iroq"
+
+_CALL_KIND = {"video": "Video qo’ng’iroq", "audio": "Audio qo’ng’iroq"}
+
+
+def call_kind_label(call_type: str) -> str:
+    return _CALL_KIND.get(call_type, _CALL_KIND["video"])
+
+
+def call_incoming_body(caller_name: str, call_type: str) -> str:
+    return f"{caller_name} · {call_kind_label(call_type)}"
+
+
+def call_missed_body(caller_name: str, call_type: str) -> str:
+    return f"{caller_name} · {call_kind_label(call_type)}"
+
+
+def format_call_duration(seconds: int) -> str:
+    """4:12, or 1:04:12 past the hour — what the chat line and the lead
+    card print after a finished call."""
+    seconds = max(0, int(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def call_log_label(call_type: str, status: str, seconds: int) -> str:
+    """The human line of a call's chat message — TZ §4.1.4."""
+    kind = call_kind_label(call_type)
+    if status == "ended":
+        return f"{kind} · {format_call_duration(seconds)}"
+    if status == "declined":
+        return f"{kind} · rad etildi"
+    if status in ("missed", "cancelled"):
+        return CALL_MISSED_TITLE
+    if status == "failed":
+        return f"{kind} · ulanmadi"
+    return kind
+
+
+def call_guest_sms(company_name: str, link: str) -> str:
+    """The SMS a lead who is not in Weel receives. Short: an SMS is priced by
+    the 70 characters, and a link is most of one already."""
+    who = company_name.strip() or "Weel"
+    return f"{who} sizni video suhbatga taklif qilmoqda. Havola: {link}"
+
+
+# Weel AI — the built-in analyst's report is ready. One title per period,
+# because "Hisobot tayyor" alone does not say whether it is yesterday or the
+# year, and the owner opens the two with different amounts of time in hand.
+ANALYST_TITLES = {
+    "day": "Weel AI: kunlik tahlil",
+    "week": "Weel AI: haftalik tahlil",
+    "month": "Weel AI: oylik tahlil",
+    "year": "Weel AI: yillik tahlil",
+}
+
+
+def analyst_title(period: str) -> str:
+    return ANALYST_TITLES.get(period, "Weel AI: tahlil")

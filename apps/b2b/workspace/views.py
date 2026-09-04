@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -32,6 +33,7 @@ from apps.b2b.workspace import push_text
 from apps.b2b.workspace.access import Permission, Role
 from apps.b2b.workspace.secondment import Module
 from apps.b2b.workspace import repository as repo
+from apps.b2b.workspace import inventory_repository as inventory
 from apps.b2b.workspace import storage
 from apps.b2b.workspace import presence
 from apps.b2b.workspace import realtime
@@ -180,6 +182,7 @@ class WorkspaceAPIView(APIView):
         ("ws-lead", realtime.EVENT_LEAD),
         ("ws-crm", realtime.EVENT_LEAD),
         ("ws-customers", realtime.EVENT_LEAD),
+        ("ws-inventory", realtime.EVENT_INVENTORY),
         ("ws-attendance", realtime.EVENT_ATTENDANCE),
         ("ws-join-request", realtime.EVENT_JOIN_REQUEST),
         ("ws-invite", realtime.EVENT_JOIN_REQUEST),
@@ -933,26 +936,41 @@ def _task_file_payload(file: dict) -> dict:
     }
 
 
+def _is_completed_task(task: dict) -> bool:
+    return task.get("status") == "done"
+
+
+def _may_touch_completed(user) -> bool:
+    """TZ v2 §8: once a lead, a task or a quick sale is finished, only the
+    owner or the administrator may still change it. A manager, an employee
+    and a guest read it in "History and archive" and leave it alone."""
+    return Role.clean(user.role) in Role.ADMINISTRATIVE
+
+
 def _task_payload(task: dict, user) -> dict:
     """Adds the per-task permission flags the app uses to decide which buttons
     to render — the same rules the write endpoints enforce."""
     caps = user.capabilities
     is_assignee = user.id in (task.get("assignee_ids") or [])
     is_author = task.get("author_id") == user.id
+    # A finished task closes to everybody below the administrator — reopening
+    # it, retitling it, handing it on. See [_may_touch_completed].
+    frozen = _is_completed_task(task) and not _may_touch_completed(user)
 
     return {
         **task,
         "voice": _task_voice_payload(task.get("voice")),
         "files": [_task_file_payload(f) for f in (task.get("files") or [])],
-        "can_edit": bool(caps["can_edit_task"]),
+        "can_edit": bool(caps["can_edit_task"]) and not frozen,
         "can_delete": bool(caps["can_delete_task"]),
         # An employee moves only their own work along the board.
-        "can_change_status": bool(caps["can_edit_task"] or is_assignee or is_author),
+        "can_change_status": bool(caps["can_edit_task"] or is_assignee or is_author) and not frozen,
         # Handing the task to somebody else. Wider than can_edit: the person
         # who raised it may reassign it — the colleague they gave it to is out
         # sick and it has to move — without the manager-wide edit right.
-        "can_reassign": bool(caps["can_edit_task"] or is_author),
+        "can_reassign": bool(caps["can_edit_task"] or is_author) and not frozen,
     }
+
 
 
 class WorkspaceTaskListCreateView(WorkspaceAPIView):
@@ -1147,8 +1165,9 @@ class WorkspaceTaskDetailView(WorkspaceAPIView):
         # TZ §8: once a task is done, only the owner or an administrator may
         # still touch it — a manager who could edit it a minute ago cannot
         # edit it a minute after it closed, and neither can the author.
-        if task.get("status") == "done" and Role.clean(request.user.role) not in Role.ADMINISTRATIVE:
+        if _is_completed_task(task) and not _may_touch_completed(request.user):
             return Response(
+
                 {"detail": _("Only the owner or an administrator may edit a completed task.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -1246,6 +1265,13 @@ class WorkspaceTaskStatusView(WorkspaceAPIView):
         if not task:
             return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
 
+        # Reopening a finished task is editing a completed record (TZ §8):
+        # the assignee who closed it does not get to open it again.
+        if _is_completed_task(task) and not _may_touch_completed(request.user):
+            return Response(
+                {"detail": _("Only the owner or an administrator may change a completed task.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         allowed = (
             request.user.capabilities["can_edit_task"]
             or task["author_id"] == request.user.id
@@ -1258,6 +1284,7 @@ class WorkspaceTaskStatusView(WorkspaceAPIView):
             )
 
         serializer = TaskStatusSerializer(data=request.data)
+
         serializer.is_valid(raise_exception=True)
         new_status = serializer.validated_data["status"]
 
@@ -1288,7 +1315,13 @@ class WorkspaceSubtaskToggleView(WorkspaceAPIView):
         if not task:
             return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
 
+        if _is_completed_task(task) and not _may_touch_completed(request.user):
+            return Response(
+                {"detail": _("Only the owner or an administrator may change a completed task.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         allowed = (
+
             request.user.capabilities["can_edit_task"]
             or task["author_id"] == request.user.id
             or request.user.id in (task.get("assignee_ids") or [])
@@ -1980,6 +2013,9 @@ def _thread_payload(thread: dict) -> dict:
     last_id = thread.get("last_message_id")
     return {
         "id": thread["id"],
+        # 'chat' or 'saved' — see `repository.THREAD_KIND_SAVED`. Defaulted
+        # for a row read by a query that did not select it.
+        "kind": thread.get("kind") or repo.THREAD_KIND_CHAT,
         "group_name": thread.get("group_name"),
         "photo": _thread_photo_url(thread),
         "participant_ids": thread.get("participant_ids") or [],
@@ -2005,6 +2041,10 @@ class WorkspaceThreadListCreateView(WorkspaceAPIView):
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="List chat threads",
                          responses={200: ChatThreadSerializer(many=True)})
     def get(self, request):
+        # Everyone has a "Saqlangan xabarlar" room from the first time they
+        # open the list — made here rather than at hiring, so an employee row
+        # that predates the feature gets one too.
+        repo.ensure_saved_thread(request.user.company_id, request.user.id)
         threads = repo.list_threads(request.user.company_id, request.user.id)
         return Response({
             "results": [_thread_payload(thread) for thread in threads],
@@ -2995,6 +3035,90 @@ class WorkspaceThreadReadView(WorkspaceAPIView):
 
 # ─── Leads ────────────────────────────────────────────────────────────────────
 
+def _stock_refusal(lead: dict | None) -> Response | None:
+    """The 409 a sale gets when the shelf cannot cover it.
+
+    Asked *before* the lead is closed, so a deal the warehouse cannot ship
+    stays open with the shortage printed on it — TZ §10. With backorders on
+    the check passes and the short lines wait as a pending sale instead.
+    """
+    if not lead or not lead.get("id"):
+        return None
+    try:
+        lines = inventory.lead_lines_to_book(int(lead["id"]))
+        if not lines:
+            return None
+        settings = inventory.get_settings(int(lead["company_id"]))
+        if settings.get("allow_backorder"):
+            return None
+        fallback = inventory.default_warehouse(int(lead["company_id"]))
+        shortages = inventory.shortages_for_lines(
+            int(lead["company_id"]), lines, default_warehouse_id=fallback["id"] if fallback else None
+        )
+    except Exception:  # noqa: BLE001 - a broken catalogue must not block the funnel
+        logger.exception("Could not check stock for lead %s.", lead.get("id"))
+        return None
+    if not shortages:
+        return None
+    return Response(
+        {"detail": _("Not enough stock for this sale."), "code": "insufficient_stock", "shortages": shortages},
+        status=status.HTTP_409_CONFLICT,
+    )
+
+
+def _book_sale(lead: dict | None, user) -> None:
+    """A won deal comes off the shelf.
+
+    Best-effort on purpose: the lead is already won by the time this runs
+    (and [_stock_refusal] has already said the shelf can cover it), so a
+    catalogue problem — a product archived since the line was written, a
+    warehouse closed — must not turn a closed deal into a 500. The ledger
+    is idempotent per line, so calling this twice is safe.
+    """
+    if not lead:
+        return
+    try:
+        inventory.record_sale_for_lead(lead, author_id=getattr(user, "id", None))
+    except Exception:  # noqa: BLE001 - the deal itself is closed
+        logger.exception("Could not book lead %s to stock.", lead.get("id"))
+
+
+def _free_price_refusal(request, items) -> Response | None:
+    """A line priced away from the card needs the product's "Erkin narx"
+    switch and the seller's right to use it — TZ §9. Only quick sales carry
+    a price the customer actually paid, so only they are asked."""
+    from apps.b2b.workspace.inventory_views import may as _may
+    from apps.b2b.workspace.access import Permission
+
+    for item in items or ():
+        product_id = item.get("product_id")
+        if not product_id:
+            continue
+        product = inventory.get_product_raw(int(product_id), request.user.company_id)
+        if not product:
+            return Response({"detail": _("Product not found.")}, status=status.HTTP_404_NOT_FOUND)
+        qty = Decimal(str(item.get("qty") or 1))
+        amount = item.get("amount")
+        if amount is None or qty <= 0:
+            continue
+        expected = (Decimal(str(product.get("sale_price") or 0)) * qty).quantize(Decimal("0.01"))
+        if Decimal(str(amount)).quantize(Decimal("0.01")) == expected:
+            continue
+        if not product.get("allow_free_price"):
+            return Response(
+                {"detail": _("This product is sold at its list price only."), "code": "free_price_off",
+                 "product_id": product_id},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not _may(request.user, Permission.STOCK_FREE_PRICE):
+            return Response(
+                {"detail": _("Your role does not allow changing the price."), "code": "free_price_denied",
+                 "product_id": product_id},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+    return None
+
+
 def _works_lead(lead: dict, user) -> bool:
     """Whether this person is the one working the deal.
 
@@ -3009,6 +3133,23 @@ def _works_lead(lead: dict, user) -> bool:
     """
     claimed_by = lead.get("claimed_by_id")
     return claimed_by is not None and claimed_by == user.id
+
+
+def _may_edit_lead(lead: dict, user, *, or_manager: bool = False) -> bool:
+    """Whether this person may change the deal's data right now.
+
+    Two rules, and the record's status decides which one applies. While the
+    deal is open it is the claimant's — see [_works_lead] — with `or_manager`
+    widening that to management for the fields a manager sets over the
+    claimant's head (the deadline, the quality mark). Once it is completed —
+    a won lead, a lost one, or a quick sale, which is born completed — TZ v2
+    §8 closes it to everybody but the owner and the administrator, the
+    claimant included.
+    """
+    if lead.get("status") == LeadStatus.COMPLETED:
+        return _may_touch_completed(user)
+    return _works_lead(lead, user) or (or_manager and user.is_manager)
+
 
 
 def _lead_activity_payload(row: dict) -> dict:
@@ -3057,7 +3198,10 @@ def _lead_payload(lead: dict, user) -> dict:
         # Everything the detail screen writes — the stage, the notes, the line
         # items, the tasks raised off the deal — is the claimant's alone. One
         # flag rather than four, because the rule behind them is one rule.
-        "can_work": is_owner,
+        # Once the deal is completed the rule changes to TZ §8's: the owner
+        # and the administrator, nobody else — see [_may_edit_lead].
+        "can_work": _may_edit_lead(lead, user),
+
         # Moving a lead along the funnel is the claimant's job, and a manager
         # does not do it over their head. Nobody moves a closed lead.
         "can_change_stage": (
@@ -3285,6 +3429,36 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
                 {"detail": _("Customer not found.")}, status=status.HTTP_404_NOT_FOUND
             )
 
+        idempotency_key = (data.get("idempotency_key") or "").strip() or None
+        if is_quick_sale:
+            if refusal := _free_price_refusal(request, data.get("items")):
+                return refusal
+            # The shelf is asked before anything is written: a sale the
+            # warehouse cannot ship is not recorded and then regretted.
+            try:
+                settings = inventory.get_settings(request.user.company_id)
+                if not settings.get("allow_backorder"):
+                    fallback = inventory.default_warehouse(request.user.company_id)
+                    shortages = inventory.shortages_for_lines(
+                        request.user.company_id, list(data.get("items") or ()),
+                        default_warehouse_id=fallback["id"] if fallback else None,
+                    )
+                    if shortages:
+                        return Response(
+                            {"detail": _("Not enough stock for this sale."), "code": "insufficient_stock",
+                             "shortages": shortages},
+                            status=status.HTTP_409_CONFLICT,
+                        )
+            except Exception:  # noqa: BLE001 - a broken catalogue must not block the sale
+                logger.exception("Could not check stock for a quick sale.")
+            if idempotency_key:
+                existing = repo.find_lead_by_external_id(
+                    request.user.company_id, source=data.get("source") or LeadSource.MANUAL,
+                    external_id=idempotency_key,
+                )
+                if existing:
+                    return Response(_lead_payload(existing, request.user))
+
         lead = repo.create_lead(
             company_id=request.user.company_id,
             author_id=request.user.id,
@@ -3305,7 +3479,17 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
             claim_for_author=claim_for_author,
             kind=kind,
             payment_method=data.get("payment_method"),
+            external_id=idempotency_key if is_quick_sale else None,
         )
+        if lead is None and idempotency_key:
+            existing = repo.find_lead_by_external_id(
+                request.user.company_id, source=data.get("source") or LeadSource.MANUAL,
+                external_id=idempotency_key,
+            )
+            if existing:
+                return Response(_lead_payload(existing, request.user))
+        if lead is None:
+            return Response({"detail": _("Could not create the lead.")}, status=status.HTTP_409_CONFLICT)
 
         # Only a lead left on the board is news to the rest of the company —
         # one its author already holds is not up for grabs, and telling
@@ -3359,10 +3543,13 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
                     app=b2b_firebase_app(),
                     android_channel_id=B2B_ANDROID_CHANNEL,
                     deactivate_invalid=repo.clear_employee_fcm_tokens,
+                    badge_for=repo.unread_badges_for_tokens,
                 )
             except Exception:
                 logger.exception("Failed to push new-lead notification for lead %s.", lead["id"])
 
+        if is_quick_sale:
+            _book_sale(lead, request.user)
         return Response(_lead_payload(lead, request.user), status=status.HTTP_201_CREATED)
 
 
@@ -3404,11 +3591,14 @@ class WorkspaceLeadCompleteView(WorkspaceAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if refusal := _stock_refusal(lead):
+            return refusal
         updated = repo.complete_lead(lead_id, request.user.company_id, request.user.id)
         if not updated:
             return Response(
                 {"detail": _("Lead is not in progress.")}, status=status.HTTP_409_CONFLICT
             )
+        _book_sale(updated, request.user)
         return Response(_lead_payload(updated, request.user))
 
 
@@ -3535,6 +3725,9 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
         if lead.get("stage") == stage:
             return Response(_lead_payload(lead, request.user))
 
+        if stage == LeadStage.WON and (refusal := _stock_refusal(lead)):
+            return refusal
+
         file = None
         if upload := request.FILES.get("file"):
             file, refusal = store_upload(request=request, upload=upload, kind="lead")
@@ -3550,6 +3743,8 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
             note=serializer.validated_data.get("note"),
             attachment_file_id=file["id"] if file else None,
         )
+        if stage == LeadStage.WON:
+            _book_sale(updated, request.user)
         return Response(_lead_payload(updated or lead, request.user))
 
 
@@ -3580,18 +3775,14 @@ class WorkspaceLeadDueDateView(WorkspaceAPIView):
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        if not (_works_lead(lead, request.user) or request.user.is_manager):
+        if not _may_edit_lead(lead, request.user, or_manager=True):
             return Response(
                 {"detail": _("Only the employee working this lead can set its deadline.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        if lead.get("status") == LeadStatus.COMPLETED:
-            return Response(
-                {"detail": _("This lead is already closed.")},
-                status=status.HTTP_409_CONFLICT,
-            )
 
         serializer = LeadDueDateWriteSerializer(data=request.data)
+
         serializer.is_valid(raise_exception=True)
         updated = repo.set_lead_due_date(
             lead_id,
@@ -3633,9 +3824,10 @@ class WorkspaceLeadQualityView(WorkspaceAPIView):
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        if not (_works_lead(lead, request.user) or request.user.is_manager):
+        if not _may_edit_lead(lead, request.user, or_manager=True):
             return Response(
                 {"detail": _("Only the employee working this lead can rate it.")},
+
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -3718,9 +3910,10 @@ class WorkspaceLeadCommentView(WorkspaceAPIView):
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
 
-        if not _works_lead(lead, request.user):
+        if not _may_edit_lead(lead, request.user):
             return Response(
                 {"detail": _("Only the employee who claimed this lead can comment.")},
+
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -3752,9 +3945,10 @@ class WorkspaceLeadItemsView(WorkspaceAPIView):
             return None, Response(
                 {"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND
             )
-        if not _works_lead(lead, request.user):
+        if not _may_edit_lead(lead, request.user):
             return None, Response(
                 {"detail": _("Only the employee who claimed this lead can edit it.")},
+
                 status=status.HTTP_403_FORBIDDEN,
             )
         return lead, None
@@ -3778,6 +3972,9 @@ class WorkspaceLeadItemsView(WorkspaceAPIView):
             name=data["name"],
             unit=data.get("unit") or "",
             amount=data.get("amount") or 0,
+            product_id=data.get("product_id"),
+            qty=data.get("qty") or 1,
+            warehouse_id=data.get("warehouse_id"),
         )
         return Response(item, status=status.HTTP_201_CREATED)
 
@@ -3809,12 +4006,13 @@ class WorkspaceLeadItemDetailView(WorkspaceAPIView):
         lead = repo.get_lead(lead_id, request.user.company_id)
         if not lead:
             return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
-        if not _works_lead(lead, request.user):
+        if not _may_edit_lead(lead, request.user):
             return Response(
                 {"detail": _("Only the employee who claimed this lead can edit it.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
         if not repo.delete_lead_item(lead_id, item_id):
+
             return Response({"detail": _("Item not found.")}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -4809,11 +5007,10 @@ class WorkspaceAppVersionView(APIView):
     signing in. Hence ``authentication_classes = []`` — an expired token must
     not turn the gate into a 401, because a locked-out user cannot refresh it.
 
-    Two verdicts, not one. ``update_required`` blocks the app; it is what the
-    store rollout of a breaking change turns on. ``update_available`` is a
-    dismissible nudge — same information, no lock — and the app shows it once
-    per version so a user who said "keyinroq" is not asked again on the next
-    launch.
+    One verdict: the installed version is below the store's, or it is not.
+    Any bump at all blocks — there is no dismissible "you could update" in
+    between. ``update_available`` is still sent, always equal to
+    ``update_required``, for builds in the field that read it.
     """
 
     permission_classes = [AllowAny]
@@ -4857,14 +5054,13 @@ class WorkspaceAppVersionView(APIView):
             })
 
         latest = release["latest_version"]
-        minimum = release["min_version"]
+        behind = _is_older(current, latest)
         return Response({
             "platform": platform,
             "current_version": current,
             "latest_version": latest,
-            "min_version": minimum,
-            "update_required": _is_older(current, minimum),
-            "update_available": _is_older(current, latest),
+            "update_required": behind,
+            "update_available": behind,
             "store_url": release["store_url"],
             "release_notes": settings.B2B_APP_RELEASE_NOTES,
         })

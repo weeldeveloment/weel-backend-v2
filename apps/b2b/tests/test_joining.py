@@ -1075,16 +1075,28 @@ def _employee() -> WorkspaceUser:
     })
 
 
-def test_a_manager_may_answer_somebody_knocking_at_the_door():
-    """Wider than `EMPLOYEE_INVITE` on purpose.
-
-    That permission is what separates an administrator from a manager, and it
-    gates asking *another* workspace to lend somebody — a commitment about who
-    is allowed in. Answering someone who has already asked to join is the
-    day-to-day of running a workspace, and a request only the owner can answer
-    sits unanswered for as long as the owner is away.
-    """
+def test_a_manager_answers_the_door_only_when_permitted():
+    """TZ v2 §11 "Принимать заявки на вступление: Руководитель — в своей
+    рабочей среде, при разрешении". Off by default; the role editor handing
+    a manager `employees.invite` turns it on — the same permission as
+    inviting, which the matrix answers identically on every row."""
     with patch(
+        "apps.b2b.workspace.joining_views.jrepo.get_join_request",
+        return_value={"id": 3, "company_id": COMPANY, "account_id": 9},
+    ):
+        response = _call(
+            WorkspaceJoinRequestDecideView,
+            factory.post(
+                "/join-requests/3/accept/", {"role": "employee"}, format="json"
+            ),
+            _manager(),
+            request_id=3,
+            action="accept",
+        )
+    assert response.status_code == 403
+
+    with _granting(Permission.EMPLOYEE_INVITE), patch(
+
         "apps.b2b.workspace.joining_views.jrepo.get_join_request",
         return_value={"id": 3, "company_id": COMPANY, "account_id": 9},
     ), patch(
@@ -1130,3 +1142,202 @@ def test_a_plain_employee_cannot_even_see_who_is_asking():
         WorkspaceJoinRequestListView, factory.get("/join-requests/"), _employee()
     )
     assert response.status_code == 403
+
+
+# ─── TZ v2 §5.2: accepting as asked, and only downwards ──────────────────────
+
+def _accepting(user, body, ask=None):
+    with patch(
+        "apps.b2b.workspace.joining_views.jrepo.get_join_request",
+        return_value=ask or {
+            "id": 3,
+            "company_id": COMPANY,
+            "account_id": 1,
+            "wanted_modules": ["tasks", "chat"],
+        },
+    ), patch(
+        "apps.b2b.workspace.joining_views.jrepo.close_join_request", return_value=1
+    ) as close, patch(
+        "apps.b2b.workspace.joining_views.accounts.get_account",
+        return_value={"id": 1, "phone": "+998905554433"},
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.create_membership",
+        return_value={"id": 42},
+    ) as join, patch(
+        "apps.b2b.workspace.joining_views.arepo.record_audit"
+    ), patch("apps.b2b.workspace.joining_views._queue_join_decision"):
+        response = _call(
+            WorkspaceJoinRequestDecideView,
+            factory.post("/join-requests/3/accept/", body, format="json"),
+            user,
+            request_id=3,
+            action="accept",
+        )
+    return response, close, join
+
+
+def test_accepting_as_asked_grants_what_was_asked():
+    """§5.2's first answer: "принять запрос без изменений". Sending no module
+    list is that answer, and the modules on the request are what is granted."""
+    response, close, join = _accepting(_admin(), {"role": "employee"})
+
+    assert response.status_code == 200
+    assert close.call_args.kwargs["granted_modules"] == ["tasks", "chat"]
+    assert join.call_args.kwargs["modules"] == ["tasks", "chat"]
+
+
+def test_an_explicit_null_means_by_role_not_as_asked():
+    response, close, join = _accepting(_admin(), {"role": "employee", "modules": None})
+
+    assert response.status_code == 200
+    assert close.call_args.kwargs["granted_modules"] is None
+    assert join.call_args.kwargs["modules"] is None
+
+
+@pytest.mark.parametrize(
+    "user, role, allowed",
+    [
+        (_admin, "manager", True),
+        (_admin, "admin", False),
+        (_manager, "employee", True),
+        (_manager, "guest", True),
+        (_manager, "manager", False),
+    ],
+)
+def test_the_assigned_role_may_not_reach_the_acceptors(user, role, allowed):
+    """§5.2: "назначаемая роль не может превышать уровень роли пользователя,
+    который принимает заявку" — read, as §11's role rows read it, as strictly
+    below."""
+    with _granting(Permission.EMPLOYEE_INVITE):
+        response, close, _ = _accepting(user(), {"role": role})
+
+    assert (response.status_code == 200) is allowed, response.data
+    assert close.called is allowed
+
+
+def test_the_acceptor_cannot_open_a_module_they_do_not_hold():
+    with patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([Module.CHAT, Module.EMPLOYEES], [Permission.EMPLOYEE_INVITE]),
+    ):
+        response, close, _ = _accepting(
+            _manager(), {"role": "employee", "modules": ["chat", "sales"]}
+        )
+
+    assert response.status_code == 403
+    assert response.data["modules"] == ["sales"]
+    close.assert_not_called()
+
+
+# ─── TZ v2 §11: opening a workspace inside a company ─────────────────────────
+
+def _opening(account, org_id=7):
+    from apps.b2b.workspace.joining_views import AccountWorkspacesView
+
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.org_ids_for_account",
+        return_value=[org_id],
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.create_workspace", return_value=None
+    ) as create:
+
+        response = _call(
+            AccountWorkspacesView,
+            factory.post(
+                "/account/workspaces/", {"name": "Marketing", "org_id": org_id}, format="json"
+            ),
+            account,
+        )
+    return response, create
+
+
+def _seat(role, employee_id=11, org_id=7, is_guest=False):
+    return {"employee_id": employee_id, "role": role, "org_id": org_id,
+            "company_id": 3, "is_guest": is_guest}
+
+
+@pytest.mark.parametrize(
+    "role, permission_access, allowed",
+    [
+        ("owner", None, True),
+        ("admin", None, True),
+        ("manager", None, False),
+        ("manager", [Permission.WORKSPACE_CREATE, Permission.EMPLOYEE_VIEW], True),
+        ("employee", None, False),
+        ("guest", [Permission.WORKSPACE_CREATE], False),
+    ],
+)
+def test_who_may_open_a_workspace_in_the_company(role, permission_access, allowed):
+    account = _account(first_name="Nodir", last_name="Qodirov")
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.list_memberships",
+        return_value=[_seat(role)],
+    ), patch(
+        "apps.b2b.workspace.joining_views.repo.get_workspace_employee",
+        return_value={"id": 11, "company_id": 3, "role": role,
+                      "module_access": None, "permission_access": permission_access},
+    ):
+        response, create = _opening(account)
+
+    if allowed:
+        # Past the gate; the stubbed repository answers nothing, which the
+        # view reports as 400 rather than 403.
+        assert response.status_code == 400, response.data
+        create.assert_called_once()
+    else:
+        assert response.status_code == 403, response.data
+        create.assert_not_called()
+
+
+def test_a_seat_in_another_company_does_not_open_this_one():
+    account = _account(first_name="Nodir", last_name="Qodirov")
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.list_memberships",
+        return_value=[_seat("owner", org_id=99)],
+    ):
+        response, create = _opening(account, org_id=7)
+
+    assert response.status_code == 403
+    create.assert_not_called()
+
+
+# ─── TZ v2 §2/§3: the company's owner is on every one of its workspaces ──────
+
+def _creating_in_org(creator, owners):
+    """Run `accounts.create_workspace` for an existing org with the database
+    stubbed: the company row insert answers a dict, memberships are recorded
+    rather than written."""
+    from apps.b2b.workspace import accounts as accts
+
+    made = []
+
+    def _membership(*, account, company_id, role, **_):
+        made.append((account["id"], role))
+        return {"id": 100 + account["id"], "company_id": company_id, "role": role}
+
+    with patch.object(accts, "org_owner_accounts", return_value=owners), patch.object(
+        accts, "fetch_one", return_value={"id": 77, "name": "Marketing", "org_id": 7}
+    ), patch.object(accts, "free_workspace_slug", return_value="marketing"), patch.object(
+        accts, "create_membership", side_effect=_membership
+    ):
+        created = accts.create_workspace(account=creator, name="Marketing", org_id=7)
+    return created, made
+
+
+def test_an_owner_opening_another_workspace_owns_it_too():
+    owner = {"id": 1, "phone": "+998900000001"}
+    created, made = _creating_in_org(owner, owners=[owner])
+
+    assert created["role"] == Role.OWNER
+    assert made == [(1, Role.OWNER)]
+
+
+def test_a_workspace_an_admin_opens_still_has_the_owner_on_it():
+    """Otherwise nobody in it could ever approve its deletion (§4) or stand
+    above its admin — a room with no owner is one the company cannot close."""
+    admin = {"id": 2, "phone": "+998900000002"}
+    owner = {"id": 1, "phone": "+998900000001"}
+    created, made = _creating_in_org(admin, owners=[owner])
+
+    assert created["role"] == Role.ADMIN
+    assert made == [(2, Role.ADMIN), (1, Role.OWNER)]

@@ -69,9 +69,37 @@ class Role:
     #: way in so stored rows keep resolving; never written.
     ALIASES = {"performer": MANAGER, "lider": ADMIN, "ghost": GUEST}
 
+    #: Who outranks whom. TZ v2 §5.2 and §12 state one rule for every act
+    #: that hands somebody standing — accepting a join request, changing a
+    #: role, editing what a role may do: nobody hands out more than they
+    #: hold. The matrix (§11) spells the same rule out row by row — an admin
+    #: assigns "below the admin's level", a manager assigns "employee/guest"
+    #: — and this is the number those rows compare.
+    RANK = {OWNER: 4, ADMIN: 3, MANAGER: 2, EMPLOYEE: 1, GUEST: 0}
+
+    @classmethod
+    def rank(cls, role: str | None) -> int:
+        return cls.RANK[cls.clean(role)]
+
+    @classmethod
+    def outranks(cls, actor: str | None, target: str | None) -> bool:
+        """Strictly above: an admin does not outrank an admin."""
+        return cls.rank(actor) > cls.rank(target)
+
+    @classmethod
+    def assignable(cls, actor: str | None, role: str | None) -> bool:
+        """Whether somebody holding `actor` may hand out `role`.
+
+        Strictly below their own — an admin makes managers, employees and
+        guests, never another admin — and nobody makes an owner: that is a
+        transfer of the company, which only WEEL's own desk performs (§2).
+        """
+        return cls.clean(role) != cls.OWNER and cls.outranks(actor, role)
+
     @classmethod
     def clean(cls, role: str | None) -> str:
         """The canonical role behind whatever is stored."""
+
         name = (role or "").strip().lower()
         name = cls.ALIASES.get(name, name)
         return name if name in cls.CHOICES else cls.EMPLOYEE
@@ -182,6 +210,20 @@ class Permission:
     DEAL_STAGE = "sales.change_stage"
     DEAL_EXPORT = "sales.export"
     DEAL_MANAGE_PIPELINE = "sales.manage_pipeline"
+    #: The stock room behind the board — the "Ombor" the sales screen opens.
+    #: Inside the sales module rather than a module of its own because the
+    #: TZ puts it there: a button beside CRM on the sales page, not a tab in
+    #: the navigation. The verbs follow the TZ's four roles: viewing the
+    #: catalogue and the sellable balance; running receipts, transfers and
+    #: counts; writing stock off; repricing; selling at a free price; seeing
+    #: what things cost; and importing or exporting the catalogue.
+    STOCK_VIEW = "sales.stock_view"
+    STOCK_MANAGE = "sales.stock_manage"
+    STOCK_WRITE_OFF = "sales.stock_write_off"
+    STOCK_REPRICE = "sales.stock_reprice"
+    STOCK_FREE_PRICE = "sales.stock_free_price"
+    STOCK_VIEW_COST = "sales.stock_view_cost"
+    STOCK_IMPORT = "sales.stock_import"
 
     # -- CRM (clients) ----------------------------------------------------
     CLIENT_VIEW = "crm.view"
@@ -226,6 +268,11 @@ class Permission:
     EMPLOYEE_CHANGE_PERMISSIONS = "employees.change_permissions"
     EMPLOYEE_REMOVE_WORKSPACE = "employees.remove_from_workspace"
     EMPLOYEE_REMOVE_COMPANY = "employees.remove_from_company"
+    #: Opening a new workspace under this company. TZ v2 §11: the owner and
+    #: the administrator may; a manager or an employee only if handed this;
+    #: a guest never, whatever they were handed — see `Role.assignable`.
+    WORKSPACE_CREATE = "employees.create_workspace"
+
 
     # -- Reports ----------------------------------------------------------
     REPORT_VIEW = "reports.view"
@@ -245,6 +292,8 @@ class Permission:
         Module.SALES: (
             DEAL_VIEW, DEAL_CREATE, DEAL_EDIT, DEAL_DELETE,
             DEAL_ASSIGN, DEAL_STAGE, DEAL_EXPORT, DEAL_MANAGE_PIPELINE,
+            STOCK_VIEW, STOCK_MANAGE, STOCK_WRITE_OFF, STOCK_REPRICE,
+            STOCK_FREE_PRICE, STOCK_VIEW_COST, STOCK_IMPORT,
         ),
         Module.CRM: (
             CLIENT_VIEW, CLIENT_CREATE, CLIENT_EDIT, CLIENT_DELETE, CLIENT_EXPORT,
@@ -262,7 +311,9 @@ class Permission:
             EMPLOYEE_VIEW, EMPLOYEE_INVITE, EMPLOYEE_CHANGE_ROLE,
             EMPLOYEE_CHANGE_MODULES, EMPLOYEE_CHANGE_PERMISSIONS,
             EMPLOYEE_REMOVE_WORKSPACE, EMPLOYEE_REMOVE_COMPANY,
+            WORKSPACE_CREATE,
         ),
+
         Module.REPORTS: (REPORT_VIEW, REPORT_EXPORT),
     }
 
@@ -342,8 +393,13 @@ DEFAULT_PERMISSIONS: dict[str, tuple[str, ...]] = {
         *(p for p in _writes(Module.TASKS) if p != Permission.TASK_DELETE),
         *_writes(Module.CHAT),
         # Same story for the sales board: deleting a lead is the owner's or
-        # the administrator's call, not the manager's.
-        *(p for p in _writes(Module.SALES) if p != Permission.DEAL_DELETE),
+        # the administrator's call, not the manager's. In the stock room the
+        # TZ draws the same line twice more: writing stock off and repricing
+        # are the owner's and the administrator's, and a warehouse manager
+        # gets them only when handed them.
+        *(p for p in _writes(Module.SALES) if p not in (
+            Permission.DEAL_DELETE, Permission.STOCK_WRITE_OFF, Permission.STOCK_REPRICE,
+        )),
         *_writes(Module.CRM),
         *_writes(Module.CALENDAR),
         Permission.FILE_VIEW,
@@ -353,15 +409,28 @@ DEFAULT_PERMISSIONS: dict[str, tuple[str, ...]] = {
         Permission.TRIP_VIEW,
         Permission.TRIP_CREATE,
         Permission.REPORT_VIEW,
-        # Sees the roster; changing it is administration.
         Permission.EMPLOYEE_VIEW,
+        # TZ v2 §11: a manager runs the people in their own workspace — sets
+        # an employee or a guest's role (never higher: `Role.assignable`),
+        # narrows or widens their modules within the manager's own, and
+        # shows somebody the door of this workspace. Not the company's door,
+        # not inviting outsiders, and not answering join requests: those
+        # rows say "при разрешении", so they stay off until the role editor
+        # hands them over.
+        Permission.EMPLOYEE_CHANGE_ROLE,
+        Permission.EMPLOYEE_CHANGE_MODULES,
+        Permission.EMPLOYEE_REMOVE_WORKSPACE,
     ),
     Role.EMPLOYEE: (
         Permission.TASK_VIEW,
-        # Their own work: they may move a task they were given along and talk
-        # about it, but not create, reassign or delete one.
+        # TZ v2 §6: creating a record — a task, a lead, a quick sale — is
+        # open to anybody who can open the module. Creating one is not the
+        # right to edit or delete it afterwards: an employee moves their own
+        # task along and talks about it, but does not reassign or delete it.
+        Permission.TASK_CREATE,
         Permission.TASK_STATUS,
         Permission.TASK_COMMENT,
+
         Permission.CHAT_VIEW,
         Permission.CHAT_CREATE,
         Permission.CHAT_SEND,
@@ -374,18 +443,49 @@ DEFAULT_PERMISSIONS: dict[str, tuple[str, ...]] = {
         # sales side's.
         Permission.DEAL_VIEW,
         Permission.DEAL_CREATE,
+        # The sales manager of the TZ: sees the catalogue and what can be
+        # sold, picks products into a quick sale. Not the purchase prices,
+        # and not a free price — both are handed over, never assumed.
+        Permission.STOCK_VIEW,
         Permission.FILE_VIEW,
         Permission.FILE_UPLOAD,
         Permission.FILE_DOWNLOAD,
         Permission.TRIP_VIEW,
         Permission.EMPLOYEE_VIEW,
     ),
+    # A guest's default *modules* are chat and nothing else, and [resolve]
+    # drops every permission below whose module is closed — so on the day
+    # they arrive this list is exactly three chat permissions. It is longer
+    # than that on purpose: TZ v2 §6 says anybody with access to a module
+    # may create its records, "including a Guest", so a guest lent the sales
+    # board or the task list starts raising leads and tasks on it the moment
+    # the module is opened, with no second grant to remember. Reading and
+    # creating, and their own work: never editing, deleting, assigning or
+    # administering anything.
     Role.GUEST: (
+        Permission.TASK_VIEW,
+        Permission.TASK_CREATE,
+        Permission.TASK_STATUS,
+        Permission.TASK_COMMENT,
         Permission.CHAT_VIEW,
         Permission.CHAT_SEND,
         Permission.CHAT_DELETE_OWN,
+        Permission.DEAL_VIEW,
+        Permission.DEAL_CREATE,
+        Permission.STOCK_VIEW,
+        Permission.CLIENT_VIEW,
+        Permission.CLIENT_CREATE,
+        Permission.EVENT_VIEW,
+        Permission.EVENT_CREATE_OWN,
+        Permission.FILE_VIEW,
+        Permission.FILE_UPLOAD,
+        Permission.FILE_DOWNLOAD,
+        Permission.TRIP_VIEW,
+        Permission.EMPLOYEE_VIEW,
+        Permission.REPORT_VIEW,
     ),
 }
+
 
 
 def default_access(role: str) -> tuple[list[str], list[str]]:
@@ -537,4 +637,16 @@ def capabilities_from(
     # may only nominate if that feature is ever added, and never decides.
     flags["can_pick_employee_of_month"] = role in Role.ADMINISTRATIVE
     flags["sees_all_company_data"] = manager
+    # TZ v2 §11 "Создавать рабочую среду": the owner and the administrator
+    # unconditionally, a manager or an employee by permission, a guest never.
+    flags["can_create_workspace"] = may_create_workspace(role, permissions)
     return flags
+
+
+def may_create_workspace(role: str | None, permissions) -> bool:
+    """TZ v2 §11's "create a workspace" row, for one roster row."""
+    role = Role.clean(role)
+    if role == Role.GUEST:
+        return False
+    return role in Role.ADMINISTRATIVE or Permission.WORKSPACE_CREATE in set(permissions)
+

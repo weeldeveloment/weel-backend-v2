@@ -264,10 +264,24 @@ class IntegrationProvider:
     """
 
     META = "meta"
+    #: The two AI assistants a workspace can plug in with its own API key.
+    #: Neither vendor offers a way for a third party to read a consumer
+    #: account's chat history, so "connecting" is the key, and the history
+    #: comes in from the vendor's own data export — see
+    #: `apps/b2b/integrations/ai_import.py`.
+    CLAUDE = "claude"
+    CHATGPT = "chatgpt"
 
-    CHOICES = [META]
+    CHOICES = [META, CLAUDE, CHATGPT]
 
-    LABELS = {META: "Meta (Facebook / Instagram)"}
+    #: The providers that share the AI screens and endpoints.
+    AI = (CLAUDE, CHATGPT)
+
+    LABELS = {
+        META: "Meta (Facebook / Instagram)",
+        CLAUDE: "Claude AI",
+        CHATGPT: "ChatGPT",
+    }
 
 
 class IntegrationStatus:

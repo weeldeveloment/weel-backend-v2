@@ -66,6 +66,8 @@ def _push(recipients, *, title: str, body: str, data: dict[str, str]) -> None:
             app=b2b_firebase_app(),
             android_channel_id=B2B_ANDROID_CHANNEL,
             deactivate_invalid=repo.clear_employee_fcm_tokens,
+            # The feed rows were written just above, so this counts them.
+            badge_for=repo.unread_badges_for_tokens,
         )
     except Exception:  # noqa: BLE001 - the row is already in the feed
         logger.exception("Push failed for %s", data)
@@ -450,3 +452,155 @@ def notify_join_request_decided(request_id: int) -> int:
         },
     )
     return 1
+
+
+# ─── Jonli qo'ng'iroq ─────────────────────────────────────────────────────────
+#
+# Everything a call does that reaches another system — FCM, Eskiz, the ring
+# timeout — runs here, off the request: the phone that placed the call is
+# waiting for its token, and none of these may hold it up or fail it.
+
+#: The Android channel incoming-call pushes are posted to. Its own channel,
+#: created by the app alongside `weel_workspace`, so a person can give calls
+#: a louder sound than a chat message — or the other way round — from the
+#: system's notification settings.
+CALLS_ANDROID_CHANNEL = "weel_calls"
+
+
+def _push_call(tokens: list[str], *, title: str, body: str, data: dict[str, str]) -> None:
+    if not tokens:
+        return
+    try:
+        from apps.notification.service import FCMService, b2b_firebase_app
+
+        FCMService.send_to_tokens(
+            tokens=tokens,
+            title=title,
+            body=body,
+            data=data,
+            app=b2b_firebase_app(),
+            android_channel_id=CALLS_ANDROID_CHANNEL,
+            deactivate_invalid=repo.clear_employee_fcm_tokens,
+            badge_for=repo.unread_badges_for_tokens,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Call push failed for %s", data)
+
+
+@app.task(name="b2b.workspace.notify_incoming_call")
+def notify_incoming_call(
+    call_id: int,
+    company_id: int,
+    fcm_token: str,
+    caller_name: str,
+    call_type: str,
+    thread_id: int | None = None,
+) -> int:
+    """"Kiruvchi qo'ng'iroq" to the phone being rung.
+
+    No feed row: a ring is not something to read later — if it is not
+    answered, [notify_missed_call] writes the row that is.
+    """
+    from apps.b2b.workspace import calls_repository as calls_repo
+
+    # Checked again here rather than trusted: the worker may be seconds
+    # behind, and a call the caller has already given up on must not make a
+    # phone ring for nothing.
+    call = calls_repo.get_call(call_id, company_id)
+    if not call or call["status"] != calls_repo.CallStatus.RINGING:
+        return 0
+    data = {
+        "type": "call",
+        "action": "ringing",
+        "call_id": str(call_id),
+        "call_type": call_type,
+        "caller_name": caller_name,
+        "caller_id": str(call["initiator_id"]),
+    }
+    if thread_id:
+        data["thread_id"] = str(thread_id)
+    _push_call(
+        [fcm_token],
+        title=push_text.CALL_INCOMING_TITLE,
+        body=push_text.call_incoming_body(caller_name, call_type),
+        data=data,
+    )
+    return 1
+
+
+@app.task(name="b2b.workspace.notify_missed_call")
+def notify_missed_call(
+    call_id: int,
+    company_id: int,
+    employee_id: int,
+    caller_name: str,
+    call_type: str,
+    thread_id: int | None = None,
+) -> int:
+    """"Javobsiz qo'ng'iroq" — a feed row and a push that opens the chat, so
+    the person finds the missed-call line the thread now carries."""
+    employee = repo.get_workspace_employee(employee_id)
+    if not employee:
+        return 0
+    title = push_text.CALL_MISSED_TITLE
+    body = push_text.call_missed_body(caller_name, call_type)
+    create_notification(
+        company_id=employee["company_id"],
+        employee_id=employee["id"],
+        kind="chat" if thread_id else "call",
+        title=title,
+        body=body,
+        payload={"call_id": call_id, "thread_id": thread_id},
+    )
+    data = {"type": "call", "action": "missed", "call_id": str(call_id), "call_type": call_type}
+    if thread_id:
+        data["thread_id"] = str(thread_id)
+    _push(
+        [{"employee_id": employee["id"], "company_id": employee["company_id"], "fcm_token": employee.get("fcm_token")}],
+        title=title,
+        body=body,
+        data=data,
+    )
+    return 1
+
+
+@app.task(name="b2b.workspace.send_call_guest_link")
+def send_call_guest_link(call_id: int, company_id: int, phone: str, link: str) -> bool:
+    """The browser link to a lead or customer who is not in Weel, by SMS."""
+    from apps.b2b.repository import get_company
+    from apps.b2b.workspace import calls_repository as calls_repo
+
+    try:
+        from apps.users.services import EskizService
+
+        company = get_company(company_id) or {}
+        EskizService().send_text_sms(
+            phone, push_text.call_guest_sms(company.get("name") or "", link)
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Guest link SMS failed for call %s", call_id)
+        return False
+    calls_repo.mark_guest_link_sent(call_id)
+    return True
+
+
+@app.task(name="b2b.workspace.expire_call")
+def expire_call(call_id: int, company_id: int) -> bool:
+    """The per-call ring timeout, queued with a countdown when the call is
+    placed. A no-op if the call was answered or hung up in the meantime."""
+    from apps.b2b.workspace import calls
+    from apps.b2b.workspace import calls_repository as calls_repo
+
+    call = calls_repo.get_call(call_id, company_id)
+    if not call:
+        return False
+    return calls.settle(call) is not call
+
+
+@app.task(name="b2b.workspace.expire_ringing_calls")
+def expire_ringing_calls() -> int:
+    """Every minute: whatever the countdown tasks missed — a worker that was
+    restarted, a queue that was down."""
+    from apps.b2b.workspace import calls
+
+    return calls.expire_stale()

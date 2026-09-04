@@ -988,6 +988,156 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_integration_event")
 
+        # ─── AI assistants (Claude / ChatGPT) ────────────────────────────
+        #
+        # The connection itself is a `b2b_integration` row like Meta's — the
+        # API key lives in `access_token_enc`. What the assistant knows is
+        # below: the projects the person made at the vendor, their chats, and
+        # every turn in them, brought in from the vendor's data export and
+        # added to by chats started in the app. `external_id` is the vendor's
+        # own id, which is what lets the same export be imported twice
+        # without doubling everything.
+        for statement in (
+            "ALTER TABLE b2b_integration ADD COLUMN IF NOT EXISTS "
+            "ai_model VARCHAR(120);",
+            "ALTER TABLE b2b_integration ADD COLUMN IF NOT EXISTS "
+            "ai_models JSONB;",
+            "ALTER TABLE b2b_integration ADD COLUMN IF NOT EXISTS "
+            "last_import_at TIMESTAMPTZ;",
+        ):
+            cursor.execute(statement)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_ai_project (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                provider VARCHAR(30) NOT NULL,
+                external_id VARCHAR(160),
+                name VARCHAR(300) NOT NULL,
+                description TEXT,
+                instructions TEXT,
+                created_by_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                external_created_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_ai_project_external_idx "
+            "ON b2b_ai_project (company_id, provider, external_id) "
+            "WHERE external_id IS NOT NULL;"
+        )
+        self.stdout.write("  Created b2b_ai_project")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_ai_conversation (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                provider VARCHAR(30) NOT NULL,
+                external_id VARCHAR(160),
+                project_id BIGINT REFERENCES b2b_ai_project(id) ON DELETE SET NULL,
+                title VARCHAR(300) NOT NULL DEFAULT '',
+                model VARCHAR(120),
+                -- 'import' came from the vendor's export; 'app' was started here.
+                source VARCHAR(20) NOT NULL DEFAULT 'import',
+                created_by_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                last_message_at TIMESTAMPTZ,
+                external_created_at TIMESTAMPTZ,
+                external_updated_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_ai_conversation_external_idx "
+            "ON b2b_ai_conversation (company_id, provider, external_id) "
+            "WHERE external_id IS NOT NULL;"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_ai_conversation_recent_idx "
+            "ON b2b_ai_conversation (company_id, provider, last_message_at DESC);"
+        )
+        self.stdout.write("  Created b2b_ai_conversation")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_ai_message (
+                id BIGSERIAL PRIMARY KEY,
+                conversation_id BIGINT NOT NULL
+                    REFERENCES b2b_ai_conversation(id) ON DELETE CASCADE,
+                external_id VARCHAR(160),
+                role VARCHAR(20) NOT NULL,
+                text TEXT NOT NULL DEFAULT '',
+                position INTEGER NOT NULL DEFAULT 0,
+                sent_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_ai_message_order_idx "
+            "ON b2b_ai_message (conversation_id, position);"
+        )
+        self.stdout.write("  Created b2b_ai_message")
+
+        # What a thread *is*. 'chat' is a direct or group room; 'saved' is
+        # the one-member "Saqlangan xabarlar" room every employee gets, the
+        # way Telegram gives everyone a Saved Messages chat. Kept on the
+        # thread rather than inferred from a member count of one: a group
+        # everybody else left also has one member, and it is not a notebook.
+        cursor.execute(
+            "ALTER TABLE b2b_chat_thread ADD COLUMN IF NOT EXISTS "
+            "kind VARCHAR(20) NOT NULL DEFAULT 'chat';"
+        )
+        # One saved room per person — `ensure_saved_thread` upserts against it.
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_chat_thread_saved_idx "
+            "ON b2b_chat_thread (company_id, created_by) WHERE kind = 'saved';"
+        )
+
+        # Weel AI: the built-in analyst's reports over the company. One row
+        # per (company, period, window start) — a rerun for the same window
+        # replaces the text rather than stacking a second report beside it.
+        # Written in both of the app's languages at once, because the reader's
+        # language is only known when they open it — see `analyst.py`.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_ai_report (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                period VARCHAR(10) NOT NULL,
+                period_start DATE NOT NULL,
+                period_end DATE NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'ready',
+                provider VARCHAR(30),
+                model VARCHAR(120),
+                score SMALLINT,
+                headline_uz VARCHAR(300) NOT NULL DEFAULT '',
+                headline_ru VARCHAR(300) NOT NULL DEFAULT '',
+                text_uz TEXT NOT NULL DEFAULT '',
+                text_ru TEXT NOT NULL DEFAULT '',
+                data JSONB,
+                error TEXT,
+                requested_by_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_ai_report_window_idx "
+            "ON b2b_ai_report (company_id, period, period_start);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_ai_report_recent_idx "
+            "ON b2b_ai_report (company_id, created_at DESC);"
+        )
+        # The dot on the Weel AI button: reports made after this stamp are
+        # the ones this person has not looked at.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_ai_report_seen (
+                employee_id BIGINT PRIMARY KEY REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        self.stdout.write("  Created b2b_ai_report")
+
         cursor.execute(
             "ALTER TABLE b2b_workspace_lead "
             "DROP CONSTRAINT IF EXISTS b2b_workspace_lead_integration_fk;"
@@ -2079,3 +2229,423 @@ class Command(BaseCommand):
             ON b2b_workspace_delete_request (company_id) WHERE status = 'pending';
         """)
         self.stdout.write("  Created b2b_workspace_delete_request")
+
+        # Jonli qo'ng'iroq (Jitsi Meet) — TZ "Weel B2B Jitsi" §6. One row per
+        # call, whichever module it was started from. `room_name` is the Jitsi
+        # room, a UUID nobody can guess; the JWT the app joins with names it,
+        # so a token for one call opens nothing else.
+        #
+        # `target_employee_id` is the colleague being rung (chat). A call to a
+        # lead or a customer has no employee on the other end: they join from
+        # a browser through a one-off link, and the row points at the card
+        # instead so the card can list its own calls.
+        #
+        # Statuses: ringing → accepted → ended, or ringing → declined /
+        # missed (nobody answered inside the ring window) / cancelled (the
+        # caller hung up first) / failed. `duration_seconds` is only ever set
+        # on `ended`, counted from `answered_at`.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_call (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                room_name VARCHAR(80) NOT NULL UNIQUE,
+                type VARCHAR(8) NOT NULL,
+                source_module VARCHAR(8) NOT NULL,
+                initiator_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                target_employee_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                target_lead_id BIGINT REFERENCES b2b_workspace_lead(id) ON DELETE SET NULL,
+                target_customer_id BIGINT REFERENCES b2b_workspace_customer(id) ON DELETE SET NULL,
+                thread_id BIGINT REFERENCES b2b_chat_thread(id) ON DELETE SET NULL,
+                status VARCHAR(10) NOT NULL DEFAULT 'ringing',
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                answered_at TIMESTAMPTZ,
+                ended_at TIMESTAMPTZ,
+                duration_seconds INTEGER,
+                ended_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                guest_link_sent_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # "Is anybody ringing me right now" — asked on every app resume, so it
+        # has to be an index probe and not a scan of the company's calls.
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS b2b_call_live_idx
+            ON b2b_call (target_employee_id, initiator_id, started_at DESC)
+            WHERE status IN ('ringing', 'accepted');
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS b2b_call_thread_idx
+            ON b2b_call (thread_id, id DESC) WHERE thread_id IS NOT NULL;
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS b2b_call_lead_idx
+            ON b2b_call (target_lead_id, id DESC) WHERE target_lead_id IS NOT NULL;
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS b2b_call_customer_idx
+            ON b2b_call (target_customer_id, id DESC) WHERE target_customer_id IS NOT NULL;
+        """)
+        self.stdout.write("  Created b2b_call")
+
+        # ─── Stock and catalogue (`/api/b2b/workspace/inventory/`) ─────────
+        #
+        # The sales board sells things; until now it only knew their names.
+        # These tables are the Billz-style layer under it: what the company
+        # sells, where it keeps it, how much of it is there, and the ledger
+        # every quantity is derived from. `b2b_stock.quantity` is a cache of
+        # `SUM(b2b_stock_movement)` per (product, warehouse), kept in step by
+        # `inventory_repository.apply_movement` and nothing else — so a
+        # number on the stock screen can always be explained by rows on the
+        # movements screen.
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_warehouse (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                name VARCHAR(200) NOT NULL,
+                address TEXT,
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_warehouse_company_idx "
+            "ON b2b_warehouse (company_id, is_active, id);"
+        )
+        # One default per company: it is where a won lead's stock comes out
+        # of when the line never said which warehouse.
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_warehouse_default_idx "
+            "ON b2b_warehouse (company_id) WHERE is_default;"
+        )
+        self.stdout.write("  Created b2b_warehouse")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_product_category (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                parent_id BIGINT REFERENCES b2b_product_category(id) ON DELETE SET NULL,
+                name VARCHAR(200) NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_product_category_company_idx "
+            "ON b2b_product_category (company_id, position, id);"
+        )
+        self.stdout.write("  Created b2b_product_category")
+
+        # `purchase_price` is what the company paid, `sale_price` what it
+        # asks; the gap between them, multiplied through the sales ledger,
+        # is the profit the turnover screen prints. `min_stock` is the
+        # reorder line — zero means "never warn".
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_product (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                category_id BIGINT REFERENCES b2b_product_category(id) ON DELETE SET NULL,
+                name VARCHAR(300) NOT NULL,
+                sku VARCHAR(100),
+                barcode VARCHAR(100),
+                unit VARCHAR(30) NOT NULL DEFAULT 'dona',
+                purchase_price NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                sale_price NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                min_stock NUMERIC(12, 3) NOT NULL DEFAULT 0,
+                description TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_product_company_idx "
+            "ON b2b_product (company_id, is_active, name);"
+        )
+        # An article and a barcode identify a product inside one company and
+        # nowhere wider — two shops may well both sell "A-001". Partial, so a
+        # product without either is not the one product allowed to lack it.
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_product_sku_idx "
+            "ON b2b_product (company_id, sku) WHERE sku IS NOT NULL AND sku <> '';"
+        )
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_product_barcode_idx "
+            "ON b2b_product (company_id, barcode) "
+            "WHERE barcode IS NOT NULL AND barcode <> '';"
+        )
+        self.stdout.write("  Created b2b_product")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_stock (
+                id BIGSERIAL PRIMARY KEY,
+                product_id BIGINT NOT NULL REFERENCES b2b_product(id) ON DELETE CASCADE,
+                warehouse_id BIGINT NOT NULL REFERENCES b2b_warehouse(id) ON DELETE CASCADE,
+                quantity NUMERIC(12, 3) NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (product_id, warehouse_id)
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_stock_warehouse_idx "
+            "ON b2b_stock (warehouse_id, product_id);"
+        )
+        self.stdout.write("  Created b2b_stock")
+
+        # The ledger. `quantity` is always the amount that moved, positive —
+        # `kind` says which way. A transfer is one row with both warehouses on
+        # it. `unit_cost` is the price the movement happened at (what was
+        # paid on a receipt, what was charged on a sale); `cost_price` is the
+        # product's purchase price at that moment, frozen here so the profit
+        # on a sale does not change when the purchase price is edited later.
+        # `lead_item_id` is what makes a won lead's deduction idempotent:
+        # the same line is never sold out of stock twice.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_stock_movement (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                product_id BIGINT NOT NULL REFERENCES b2b_product(id) ON DELETE CASCADE,
+                warehouse_id BIGINT NOT NULL REFERENCES b2b_warehouse(id) ON DELETE CASCADE,
+                to_warehouse_id BIGINT REFERENCES b2b_warehouse(id) ON DELETE SET NULL,
+                kind VARCHAR(20) NOT NULL,
+                quantity NUMERIC(12, 3) NOT NULL,
+                unit_cost NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                cost_price NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                note TEXT,
+                lead_id BIGINT REFERENCES b2b_workspace_lead(id) ON DELETE SET NULL,
+                lead_item_id BIGINT REFERENCES b2b_workspace_lead_item(id) ON DELETE SET NULL,
+                author_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_stock_movement_company_idx "
+            "ON b2b_stock_movement (company_id, created_at DESC, id DESC);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_stock_movement_product_idx "
+            "ON b2b_stock_movement (product_id, created_at DESC);"
+        )
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_stock_movement_lead_item_idx "
+            "ON b2b_stock_movement (lead_item_id) WHERE lead_item_id IS NOT NULL;"
+        )
+        self.stdout.write("  Created b2b_stock_movement")
+
+        # A lead's line can now point at a catalogue product, carry a
+        # quantity, and say which warehouse it ships from. All nullable: a
+        # line typed by hand ("Konsultatsiya, 3 oy") is still a line, and it
+        # simply never touches stock.
+        for statement in (
+            "ALTER TABLE b2b_workspace_lead_item ADD COLUMN IF NOT EXISTS "
+            "product_id BIGINT REFERENCES b2b_product(id) ON DELETE SET NULL;",
+            "ALTER TABLE b2b_workspace_lead_item ADD COLUMN IF NOT EXISTS "
+            "qty NUMERIC(12, 3) NOT NULL DEFAULT 1;",
+            "ALTER TABLE b2b_workspace_lead_item ADD COLUMN IF NOT EXISTS "
+            "warehouse_id BIGINT REFERENCES b2b_warehouse(id) ON DELETE SET NULL;",
+        ):
+            cursor.execute(statement)
+        self.stdout.write("  Linked b2b_workspace_lead_item to the catalogue")
+
+        # ─── The stock room, second pass (TZ "Ombor moduli") ───────────────
+        #
+        # Suppliers, documents and everything the product card gained: a
+        # kind (goods / service / bundle), a brand, a supplier, a markup and
+        # a wholesale price, the free-price switch, variants, attributes, a
+        # photo. Every quantity still ends up in `b2b_stock_movement`; what
+        # is new is the document the movement answers to.
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_supplier (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                name VARCHAR(300) NOT NULL,
+                kind VARCHAR(20) NOT NULL DEFAULT 'company',
+                phone VARCHAR(40),
+                email VARCHAR(254),
+                requisites TEXT,
+                note TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_supplier_company_idx "
+            "ON b2b_supplier (company_id, is_active, name);"
+        )
+        self.stdout.write("  Created b2b_supplier")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_inventory_settings (
+                company_id BIGINT PRIMARY KEY REFERENCES b2b_company(id) ON DELETE CASCADE,
+                allow_backorder BOOLEAN NOT NULL DEFAULT FALSE,
+                base_currency VARCHAR(3) NOT NULL DEFAULT 'UZS',
+                sku_prefix VARCHAR(10) NOT NULL DEFAULT 'P',
+                next_sku INTEGER NOT NULL DEFAULT 1,
+                write_off_alert NUMERIC(14, 2) NOT NULL DEFAULT 500000,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        self.stdout.write("  Created b2b_inventory_settings")
+
+        for statement in (
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'product';",
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS brand VARCHAR(200);",
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS supplier_id BIGINT REFERENCES b2b_supplier(id) ON DELETE SET NULL;",
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS markup_percent NUMERIC(7, 2);",
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS wholesale_price NUMERIC(14, 2) NOT NULL DEFAULT 0;",
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS allow_free_price BOOLEAN NOT NULL DEFAULT FALSE;",
+            # A variant is a product of its own — its own SKU, its own stock
+            # — that knows which card it hangs under.
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS parent_id BIGINT REFERENCES b2b_product(id) ON DELETE SET NULL;",
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS variant_label VARCHAR(200);",
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS attributes JSONB;",
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS photo VARCHAR(500);",
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS currency VARCHAR(3) NOT NULL DEFAULT 'UZS';",
+        ):
+            cursor.execute(statement)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_product_parent_idx "
+            "ON b2b_product (parent_id) WHERE parent_id IS NOT NULL;"
+        )
+        self.stdout.write("  Extended b2b_product")
+
+        # What a bundle is made of. Selling one takes these off the shelf in
+        # these amounts; the bundle row itself never holds stock.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_product_component (
+                id BIGSERIAL PRIMARY KEY,
+                bundle_id BIGINT NOT NULL REFERENCES b2b_product(id) ON DELETE CASCADE,
+                component_id BIGINT NOT NULL REFERENCES b2b_product(id) ON DELETE CASCADE,
+                quantity NUMERIC(12, 3) NOT NULL DEFAULT 1,
+                UNIQUE (bundle_id, component_id)
+            );
+        """)
+        self.stdout.write("  Created b2b_product_component")
+
+        # Every price change, with who and when. The TZ asks for it, and a
+        # margin computed against a price nobody remembers setting is a
+        # number nobody can defend.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_price_history (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                product_id BIGINT NOT NULL REFERENCES b2b_product(id) ON DELETE CASCADE,
+                field VARCHAR(30) NOT NULL,
+                old_price NUMERIC(14, 2),
+                new_price NUMERIC(14, 2),
+                author_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                document_id BIGINT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_price_history_product_idx "
+            "ON b2b_price_history (product_id, created_at DESC);"
+        )
+        self.stdout.write("  Created b2b_price_history")
+
+        # A document: the operation as a person filed it. `status` is where
+        # it stands — a draft moves nothing; confirming it writes the
+        # movements; cancelling a confirmed one writes their reverse and
+        # points at them through `reversal_of`. A transfer has one more
+        # step: sent, then received. `idempotency_key` is the client's own
+        # id for the submission, so a double-tap lands one document.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_stock_document (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                kind VARCHAR(20) NOT NULL,
+                number VARCHAR(40),
+                status VARCHAR(20) NOT NULL DEFAULT 'draft',
+                warehouse_id BIGINT REFERENCES b2b_warehouse(id) ON DELETE SET NULL,
+                to_warehouse_id BIGINT REFERENCES b2b_warehouse(id) ON DELETE SET NULL,
+                supplier_id BIGINT REFERENCES b2b_supplier(id) ON DELETE SET NULL,
+                customer_id BIGINT REFERENCES b2b_workspace_customer(id) ON DELETE SET NULL,
+                lead_id BIGINT REFERENCES b2b_workspace_lead(id) ON DELETE SET NULL,
+                currency VARCHAR(3) NOT NULL DEFAULT 'UZS',
+                extra_costs NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                reason VARCHAR(30),
+                note TEXT,
+                doc_date DATE,
+                external_number VARCHAR(100),
+                file_id BIGINT,
+                idempotency_key VARCHAR(80),
+                reversal_of BIGINT REFERENCES b2b_stock_document(id) ON DELETE SET NULL,
+                cancel_reason TEXT,
+                author_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                confirmed_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                confirmed_at TIMESTAMPTZ,
+                sent_at TIMESTAMPTZ,
+                received_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                received_at TIMESTAMPTZ,
+                cancelled_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                cancelled_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_stock_document_company_idx "
+            "ON b2b_stock_document (company_id, kind, status, created_at DESC);"
+        )
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_stock_document_idempotency_idx "
+            "ON b2b_stock_document (company_id, idempotency_key) WHERE idempotency_key IS NOT NULL;"
+        )
+        self.stdout.write("  Created b2b_stock_document")
+
+        # A document's lines. `quantity` is what the line asks to move;
+        # `system_quantity`/`counted_quantity` are a count's two columns;
+        # `old_price`/`new_price` (and the wholesale pair) are a repricing's.
+        # `lead_item_id` ties a sale line to the lead line it came from, and
+        # the unique index on it is what stops a won lead selling the same
+        # line twice.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_stock_document_item (
+                id BIGSERIAL PRIMARY KEY,
+                document_id BIGINT NOT NULL REFERENCES b2b_stock_document(id) ON DELETE CASCADE,
+                product_id BIGINT NOT NULL REFERENCES b2b_product(id) ON DELETE CASCADE,
+                quantity NUMERIC(12, 3) NOT NULL DEFAULT 0,
+                system_quantity NUMERIC(12, 3),
+                counted_quantity NUMERIC(12, 3),
+                unit_cost NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                old_price NUMERIC(14, 2),
+                new_price NUMERIC(14, 2),
+                old_wholesale NUMERIC(14, 2),
+                new_wholesale NUMERIC(14, 2),
+                position INTEGER NOT NULL DEFAULT 0,
+                lead_item_id BIGINT REFERENCES b2b_workspace_lead_item(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_stock_document_item_doc_idx "
+            "ON b2b_stock_document_item (document_id, position, id);"
+        )
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_stock_document_item_lead_item_idx "
+            "ON b2b_stock_document_item (lead_item_id) WHERE lead_item_id IS NOT NULL;"
+        )
+        self.stdout.write("  Created b2b_stock_document_item")
+
+        for statement in (
+            "ALTER TABLE b2b_stock_movement ADD COLUMN IF NOT EXISTS "
+            "document_id BIGINT REFERENCES b2b_stock_document(id) ON DELETE SET NULL;",
+            "ALTER TABLE b2b_stock_movement ADD COLUMN IF NOT EXISTS currency VARCHAR(3) NOT NULL DEFAULT 'UZS';",
+            "ALTER TABLE b2b_stock_movement ADD COLUMN IF NOT EXISTS "
+            "customer_id BIGINT REFERENCES b2b_workspace_customer(id) ON DELETE SET NULL;",
+            "ALTER TABLE b2b_stock_movement ADD COLUMN IF NOT EXISTS "
+            "reversal_of BIGINT REFERENCES b2b_stock_movement(id) ON DELETE SET NULL;",
+        ):
+            cursor.execute(statement)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_stock_movement_document_idx "
+            "ON b2b_stock_movement (document_id) WHERE document_id IS NOT NULL;"
+        )
+        self.stdout.write("  Linked b2b_stock_movement to documents")

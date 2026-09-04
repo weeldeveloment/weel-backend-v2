@@ -362,6 +362,11 @@ class LeadItemSerializer(serializers.Serializer):
     unit = serializers.CharField(allow_blank=True)
     amount = serializers.DecimalField(max_digits=14, decimal_places=2)
     position = serializers.IntegerField()
+    #: Set when the line is a catalogue product rather than typed text —
+    #: then `qty` of it leaves `warehouse_id` when the deal is won.
+    product_id = serializers.IntegerField(allow_null=True, required=False)
+    qty = serializers.DecimalField(max_digits=12, decimal_places=3, required=False)
+    warehouse_id = serializers.IntegerField(allow_null=True, required=False)
 
 
 class EmployeeStatsSerializer(serializers.Serializer):
@@ -459,6 +464,9 @@ class WorkspaceFolderWriteSerializer(serializers.Serializer):
 
 class ChatThreadSerializer(serializers.Serializer):
     id = serializers.IntegerField()
+    #: 'chat' for a direct or group room, 'saved' for the reader's own
+    #: one-member "Saqlangan xabarlar" room, always listed first.
+    kind = serializers.CharField(required=False)
     group_name = serializers.CharField(allow_null=True, required=False)
     #: The group's picture, already resolved to a URL. Null for a direct chat,
     #: which is drawn with the other person's own avatar.
@@ -591,9 +599,15 @@ class TaskWriteSerializer(serializers.Serializer):
 class LeadItemWriteSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=300)
     unit = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    #: The whole line, not the unit price — `qty` units for `amount` in total.
     amount = serializers.DecimalField(
         max_digits=14, decimal_places=2, min_value=0, required=False
     )
+    product_id = serializers.IntegerField(required=False, allow_null=True)
+    qty = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=0, required=False, allow_null=True
+    )
+    warehouse_id = serializers.IntegerField(required=False, allow_null=True)
 
 
 class LeadWriteSerializer(serializers.Serializer):
@@ -660,6 +674,13 @@ class LeadWriteSerializer(serializers.Serializer):
     #: Required on a quick sale and refused on a lead — see `validate`.
     payment_method = serializers.ChoiceField(
         choices=PAYMENT_METHODS, required=False, allow_null=True
+    )
+    #: The client's own id for this submission. A double tap on "Savdoni
+    #: yozish" sends it twice; the second lands on the first row instead of
+    #: selling the same goods again. Stored as the lead's `external_id`,
+    #: which is unique per company and source.
+    idempotency_key = serializers.CharField(
+        max_length=80, required=False, allow_blank=True, allow_null=True
     )
 
     def validate_contact_phone(self, value: str) -> str:

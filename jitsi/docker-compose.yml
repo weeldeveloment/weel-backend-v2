@@ -1,0 +1,190 @@
+# Weel B2B — Jitsi Meet (self-hosted), Dokploy'da ALOHIDA "Compose" ilova.
+#
+# TZ "Jonli video/audio qo'ng'iroq" §5.4 / 10-bosqich 1. Rasmiy
+# jitsi/docker-jitsi-meet tarkibidagi to'rt xizmat:
+#
+#   web     — Jitsi Meet UI. Ilova unga SDK orqali ulanadi; brauzer sahifasi
+#             faqat CRM'dagi tashqi mijoz (SMS havolasi) uchun kerak.
+#   prosody — XMPP signal serveri. JWT shu yerda tekshiriladi.
+#   jicofo  — konferensiya fokusi (kim qaysi xonada).
+#   jvb     — Jitsi Videobridge: media oqimi. Faqat shu xizmat UDP port ochadi.
+#
+# Dokploy'da: Compose Type = "Docker Compose". `web` Traefik orqali
+# ${PUBLIC_URL} domenida chiqadi (Let's Encrypt sertifikatini Traefik beradi,
+# shuning uchun bu yerda ENABLE_LETSENCRYPT o'chirilgan). JVB uchun host'da
+# ${JVB_PORT}/udp ochiq bo'lishi SHART — bu Traefik'dan o'tmaydi.
+#
+# Konfiguratsiya .env dan olinadi — qarang .env.example. Backend (`core/
+# settings.py`) JITSI_APP_ID / JITSI_APP_SECRET sifatida AYNAN shu
+# JWT_APP_ID / JWT_APP_SECRET juftligini ishlatishi kerak, aks holda ilova
+# olgan token Prosody'da rad etiladi.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  web:
+    image: jitsi/web:${JITSI_IMAGE_VERSION:-stable-10184}
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - ${CONFIG:-./data}/web:/config:Z
+      - ${CONFIG:-./data}/transcripts:/usr/share/jitsi-meet/transcripts:Z
+    environment:
+      - ENABLE_AUTH=1
+      - ENABLE_GUESTS=0
+      - AUTH_TYPE=jwt
+      - ENABLE_LETSENCRYPT=0
+      - ENABLE_HTTP_REDIRECT=0
+      - DISABLE_HTTPS=1
+      - PUBLIC_URL=https://${PUBLIC_URL}
+      - TZ=${TZ:-Asia/Tashkent}
+      - XMPP_DOMAIN=${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_AUTH_DOMAIN=auth.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_BOSH_URL_BASE=http://xmpp.${XMPP_DOMAIN:-meet.jitsi}:5280
+      - XMPP_GUEST_DOMAIN=guest.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_MUC_DOMAIN=muc.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_RECORDER_DOMAIN=recorder.${XMPP_DOMAIN:-meet.jitsi}
+      - JVB_TCP_HARVESTER_DISABLED=true
+      # Mobil tarmoq uchun — TZ §9 "tarmoq sifati past bo'lsa": past
+      # o'lchamlardan boshlab, kanal yaxshilansa oshiradi.
+      - RESOLUTION=480
+      - RESOLUTION_MIN=180
+      - RESOLUTION_WIDTH=640
+      - RESOLUTION_WIDTH_MIN=320
+      - ENABLE_SIMULCAST=true
+      - ENABLE_P2P=true
+      - ENABLE_PREJOIN_PAGE=true
+      - ENABLE_WELCOME_PAGE=0
+      - ENABLE_CLOSE_PAGE=0
+      - ENABLE_RECORDING=0
+      - ENABLE_TRANSCRIPTIONS=0
+      - ENABLE_LOBBY=0
+      - ENABLE_BREAKOUT_ROOMS=0
+      - DISABLE_DEEP_LINKING=true
+      - DEFAULT_LANGUAGE=ru
+      # Tashqi mijozning brauzeri va NAT ortidagi telefonlar uchun TURN —
+      # bo'sh qoldirilsa faqat STUN (Google) ishlatiladi.
+      - TURN_HOST=${TURN_HOST:-}
+      - TURN_PORT=${TURN_PORT:-443}
+      - TURNS_HOST=${TURNS_HOST:-}
+      - TURNS_PORT=${TURNS_PORT:-443}
+      - TURN_TRANSPORT=${TURN_TRANSPORT:-tcp}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.jitsi-web.rule=Host(`${PUBLIC_URL}`)
+      - traefik.http.routers.jitsi-web.entrypoints=websecure
+      - traefik.http.routers.jitsi-web.tls.certresolver=letsencrypt
+      - traefik.http.services.jitsi-web.loadbalancer.server.port=80
+    networks:
+      meet.jitsi:
+      dokploy-network:
+    depends_on:
+      - prosody
+
+  prosody:
+    image: jitsi/prosody:${JITSI_IMAGE_VERSION:-stable-10184}
+    restart: unless-stopped
+    logging: *default-logging
+    expose:
+      - "5222"
+      - "5347"
+      - "5280"
+    volumes:
+      - ${CONFIG:-./data}/prosody/config:/config:Z
+      - ${CONFIG:-./data}/prosody/prosody-plugins-custom:/prosody-plugins-custom:Z
+    environment:
+      - ENABLE_AUTH=1
+      - ENABLE_GUESTS=0
+      - AUTH_TYPE=jwt
+      # JWT — backend imzolaydi, Prosody tekshiradi. JWT_ALLOW_EMPTY=0:
+      # tokensiz ulanish taqiqlanadi (TZ §8).
+      - JWT_APP_ID=${JWT_APP_ID}
+      - JWT_APP_SECRET=${JWT_APP_SECRET}
+      - JWT_ALLOW_EMPTY=0
+      - JWT_ACCEPTED_ISSUERS=${JWT_APP_ID}
+      - JWT_ACCEPTED_AUDIENCES=jitsi
+      - ENABLE_LOBBY=0
+      - ENABLE_RECORDING=0
+      - PUBLIC_URL=https://${PUBLIC_URL}
+      - TZ=${TZ:-Asia/Tashkent}
+      - XMPP_DOMAIN=${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_AUTH_DOMAIN=auth.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_GUEST_DOMAIN=guest.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_MUC_DOMAIN=muc.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_RECORDER_DOMAIN=recorder.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_MUC_MODULES=
+      - JICOFO_AUTH_PASSWORD=${JICOFO_AUTH_PASSWORD}
+      - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD}
+      - TURN_CREDENTIALS=${TURN_CREDENTIALS:-}
+      - TURN_HOST=${TURN_HOST:-}
+      - TURN_PORT=${TURN_PORT:-443}
+      - TURNS_HOST=${TURNS_HOST:-}
+      - TURNS_PORT=${TURNS_PORT:-443}
+      - TURN_TRANSPORT=${TURN_TRANSPORT:-tcp}
+    networks:
+      meet.jitsi:
+        aliases:
+          - xmpp.${XMPP_DOMAIN:-meet.jitsi}
+
+  jicofo:
+    image: jitsi/jicofo:${JITSI_IMAGE_VERSION:-stable-10184}
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - ${CONFIG:-./data}/jicofo:/config:Z
+    environment:
+      - ENABLE_AUTH=1
+      - AUTH_TYPE=jwt
+      - ENABLE_RECORDING=0
+      - JICOFO_AUTH_PASSWORD=${JICOFO_AUTH_PASSWORD}
+      - JICOFO_ENABLE_HEALTH_CHECKS=true
+      - TZ=${TZ:-Asia/Tashkent}
+      - XMPP_DOMAIN=${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_AUTH_DOMAIN=auth.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_MUC_DOMAIN=muc.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_SERVER=xmpp.${XMPP_DOMAIN:-meet.jitsi}
+      # 1-1 qo'ng'iroq: ikki kishi bo'lsa media to'g'ridan-to'g'ri (P2P),
+      # uchinchisi kirsa JVB orqali. Shu bosqichda faqat 1-1, lekin
+      # sozlama keyingi bosqichga ham tayyor.
+      - ENABLE_P2P=true
+    depends_on:
+      - prosody
+    networks:
+      meet.jitsi:
+
+  jvb:
+    image: jitsi/jvb:${JITSI_IMAGE_VERSION:-stable-10184}
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "${JVB_PORT:-10000}:${JVB_PORT:-10000}/udp"
+    volumes:
+      - ${CONFIG:-./data}/jvb:/config:Z
+    environment:
+      - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD}
+      - JVB_PORT=${JVB_PORT:-10000}
+      # Serverning TASHQI IP manzili — NAT ortida bo'lsa shart, aks holda
+      # telefonlar bridge'ni topa olmaydi (audio/video "ulanmoqda"da qoladi).
+      - JVB_ADVERTISE_IPS=${JVB_ADVERTISE_IPS}
+      - JVB_STUN_SERVERS=${JVB_STUN_SERVERS:-meet-jit-si-turnrelay.jitsi.net:443}
+      - JVB_TCP_HARVESTER_DISABLED=true
+      - TZ=${TZ:-Asia/Tashkent}
+      - XMPP_AUTH_DOMAIN=auth.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.${XMPP_DOMAIN:-meet.jitsi}
+      - XMPP_SERVER=xmpp.${XMPP_DOMAIN:-meet.jitsi}
+    depends_on:
+      - prosody
+    networks:
+      meet.jitsi:
+
+networks:
+  meet.jitsi:
+  # Traefik va backend bilan bitta tarmoq — monitoring stack'idagi kabi.
+  dokploy-network:
+    external: true

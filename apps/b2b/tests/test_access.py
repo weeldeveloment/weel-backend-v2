@@ -225,18 +225,65 @@ def test_an_employee_cannot_administer_the_roster():
 
 
 def test_a_guest_starts_with_conversation_and_nothing_else():
+    """The default guest opens chat and nothing else, and what they *resolve*
+    to is three chat permissions — the catalogue lists more, but every one
+    of them belongs to a module a guest has not been given."""
     modules, permissions = default_access(Role.GUEST)
-
     assert modules == [Module.CHAT]
-    assert all(p.startswith("chat.") for p in permissions)
+
+    modules, permissions = resolve(role=Role.GUEST)
+    assert modules == [Module.CHAT]
+    assert permissions and all(p.startswith("chat.") for p in permissions)
+
+
+def test_a_guest_lent_a_module_may_create_its_records():
+    """TZ v2 §6: creating a record is open to anybody who can open the
+    module, "including a Guest". Opening the sales board or the task list to
+    a guest is the whole grant — no second one for the create button."""
+    modules, permissions = resolve(
+        role=Role.GUEST, module_override=[Module.CHAT, Module.SALES, Module.TASKS]
+    )
+
+    assert modules == [Module.TASKS, Module.CHAT, Module.SALES]
+    assert Permission.DEAL_CREATE in permissions
+    assert Permission.TASK_CREATE in permissions
+    # Their own work and no more: nothing is edited, deleted or handed out.
+    assert Permission.DEAL_EDIT not in permissions
+    assert Permission.DEAL_DELETE not in permissions
+    assert Permission.TASK_DELETE not in permissions
+    assert Permission.TASK_ASSIGN not in permissions
+
+
+def test_an_employee_creates_records_but_does_not_run_them():
+    """TZ v2 §6 and §11 "Создавать записи: Да" for the employee — a task, a
+    lead, a quick sale. Editing, assigning and deleting stay above them."""
+    _, permissions = resolve(role=Role.EMPLOYEE)
+
+    assert Permission.TASK_CREATE in permissions
+    assert Permission.DEAL_CREATE in permissions
+    for above in (
+        Permission.TASK_EDIT, Permission.TASK_ASSIGN, Permission.TASK_DELETE,
+        Permission.DEAL_EDIT, Permission.DEAL_ASSIGN, Permission.DEAL_DELETE,
+    ):
+        assert above not in permissions, above
+
 
 
 def test_no_role_defaults_to_a_permission_outside_its_own_modules():
-    """Otherwise the defaults would ship a grant that silently does nothing."""
+    """Otherwise the defaults would ship a grant that silently does nothing.
+
+    The guest is the one exception, and on purpose: their default modules
+    are chat alone, but TZ v2 §6 wants a guest who *is* lent a module to
+    create its records — so the catalogue lists what a guest may do in a
+    module they are given, and [resolve] drops it until they are.
+    """
     for role in Role.CHOICES:
+        if role == Role.GUEST:
+            continue
         modules, permissions = default_access(role)
         for permission in permissions:
             assert Permission.module_of(permission) in modules, (role, permission)
+
 
 
 # ─── The role editor ──────────────────────────────────────────────────────────
@@ -660,7 +707,11 @@ LEGACY_FLAGS = {
         "can_request_help", "can_update_task_status", "can_use_mail",
         "can_view_attendance", "can_view_hotels", "can_view_team",
         "sees_all_company_data",
+        # TZ v2 §11 "Создавать рабочую среду": the owner and the
+        # administrator, unconditionally.
+        "can_create_workspace",
     },
+
     # The roster calls this one `performer`; the app calls it "Manager".
     # No `can_delete_task` — TZ §11 gives that to the owner and the
     # administrator only.
@@ -673,21 +724,31 @@ LEGACY_FLAGS = {
         # the funnel every Meta lead lands in, and a source only the owner
         # could reconnect is one that stays broken until they are asked.
         "can_manage_integrations",
+        # TZ v2 §11: a manager sets an employee's or a guest's role in their
+        # own workspace, so the roster screen opens to them. What they may
+        # set it *to* is bounded by `Role.assignable`, not by this flag.
+        "can_manage_team",
         "can_post_lead",
         "can_update_task_status", "can_use_mail", "can_view_attendance",
         "can_view_hotels", "can_view_team", "sees_all_company_data",
     },
+
     # `can_post_lead` is a deliberate widening, not a drift: raising a lead is
     # now everybody's job — anybody who meets a customer can bring one in, and
     # a lead nobody was allowed to write down is a lead the company never had.
     # What happens to the deal afterwards is still the sales side's, which is
     # why no other `sales.*` flag appears here.
+    # `can_create_task` joined `can_post_lead` under TZ v2 §6: creating a
+    # record is open to anybody who can open the module. Running the board —
+    # editing, assigning, deleting — is still not.
     "employee": {
         "can_chat", "can_comment_task", "can_create_personal_event",
+        "can_create_task",
         "can_post_lead", "can_update_task_status", "can_use_mail",
         "can_view_attendance", "can_view_hotels", "can_view_team",
     },
 }
+
 
 
 @pytest.mark.parametrize("role", sorted(LEGACY_FLAGS))
@@ -708,8 +769,11 @@ def test_an_admin_gains_roster_administration_and_that_is_deliberate():
     manager = capabilities_for("performer")
 
     assert admin["can_manage_team"] is True
-    assert manager["can_manage_team"] is False
+    # The manager has it too now (TZ v2 §11: "employee/guest in their own
+    # workspace"); what tells the two apart is `Role.assignable`.
+    assert manager["can_manage_team"] is True
     # TZ §10: picking the employee of the month is the owner's or the
+
     # administrator's call, not the manager's.
     assert admin["can_pick_employee_of_month"] is True
     assert manager["can_pick_employee_of_month"] is False
@@ -736,9 +800,12 @@ def test_every_flag_the_app_reads_is_still_answered():
         # is a company-level commitment with no module to hang off.
         "can_manage_integrations",
         "sees_all_company_data",
+        # Role-and-permission derived — see `access.may_create_workspace`.
+        "can_create_workspace",
     }
 
     assert produced == expected
+
 
 
 def test_narrowing_a_role_narrows_the_flags_it_produces():
@@ -902,7 +969,7 @@ def test_the_archive_shows_completed_and_deleted_separately():
         "apps.b2b.workspace.access_views.repo.list_deleted_leads", return_value=[{"id": 4}]
     ):
         response = _call(
-            WorkspaceArchiveView, factory.get("/archive/"), _user(Role.EMPLOYEE)
+            WorkspaceArchiveView, factory.get("/archive/"), _user(Role.OWNER)
         )
 
     assert response.status_code == 200
@@ -910,8 +977,72 @@ def test_the_archive_shows_completed_and_deleted_separately():
     assert response.data["completed"]["leads"] == [{"id": 2}]
     assert response.data["deleted"]["tasks"] == [{"id": 3}]
     assert response.data["deleted"]["leads"] == [{"id": 4}]
+    assert response.data["can_restore_tasks"] is True
     list_tasks.assert_called_once_with(COMPANY, status="done")
     list_leads.assert_called_once()
+
+
+def test_the_archive_shows_an_employee_their_own_slice():
+    """TZ v2 §11: below the manager, "History and archive" is read "within
+    permitted access" — the modules open to them, and their own records."""
+    from apps.b2b.workspace.access_views import WorkspaceArchiveView
+
+    me, other = 1, 2
+    with patch(
+        "apps.b2b.workspace.access_views.repo.list_tasks",
+        return_value=[
+            {"id": 1, "author_id": other, "assignee_ids": [me]},
+            {"id": 5, "author_id": other, "assignee_ids": [other]},
+        ],
+    ), patch(
+        "apps.b2b.workspace.access_views.repo.list_leads",
+        return_value=[{"id": 2, "claimed_by_id": me}, {"id": 6, "claimed_by_id": other}],
+    ), patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_tasks",
+        return_value=[{"id": 3, "author_id": me, "assignee_ids": []}],
+    ), patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_leads",
+        return_value=[{"id": 4, "claimed_by_id": other, "author_id": other}],
+    ):
+        response = _call(
+            WorkspaceArchiveView, factory.get("/archive/"), _user(Role.EMPLOYEE, me)
+        )
+
+    assert response.status_code == 200
+    assert [t["id"] for t in response.data["completed"]["tasks"]] == [1]
+    assert [l["id"] for l in response.data["completed"]["leads"]] == [2]
+    assert [t["id"] for t in response.data["deleted"]["tasks"]] == [3]
+    assert response.data["deleted"]["leads"] == []
+    # Seeing a deleted record is not the right to bring it back (§11).
+    assert response.data["can_restore_tasks"] is False
+    assert response.data["can_restore_leads"] is False
+
+
+def test_the_archive_hides_a_module_that_is_closed_to_the_viewer():
+    from apps.b2b.workspace.access_views import WorkspaceArchiveView
+
+    with patch(
+        "apps.b2b.workspace.access_views.repo.list_tasks", return_value=[{"id": 1}]
+    ), patch(
+        "apps.b2b.workspace.access_views.repo.list_leads", return_value=[{"id": 2}]
+    ) as list_leads, patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_tasks", return_value=[]
+    ), patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_leads", return_value=[]
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([Module.TASKS], [Permission.TASK_VIEW, Permission.DEAL_VIEW]),
+    ):
+
+        response = _call(
+            WorkspaceArchiveView, factory.get("/archive/"), _user(Role.ADMIN)
+        )
+
+    assert response.status_code == 200
+    assert response.data["completed"]["tasks"] == [{"id": 1}]
+    assert response.data["completed"]["leads"] == []
+    list_leads.assert_not_called()
+
 
 
 def test_a_manager_cannot_edit_a_completed_task():
@@ -969,3 +1100,197 @@ def test_the_owner_approving_a_deletion_marks_the_workspace_deleted():
 
     assert response.status_code == 200
     assert write.call_args.kwargs["approve"] is True
+
+
+# ─── TZ v2 §5.2, §11, §12: nobody hands out more than they hold ───────────────
+
+def _editing(target_role, actor_role, body, actor_access=None):
+    """PUT the employee editor as `actor_role` against a `target_role` row."""
+    access = actor_access or (Module.CHOICES, list(Permission.all()))
+    with patch(
+        "apps.b2b.workspace.access_views.repo.get_workspace_employee",
+        return_value=_employee(role=target_role),
+    ), patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=access,
+    ), patch(
+        "apps.b2b.workspace.access_views.arepo.set_employee_role"
+    ) as set_role, patch(
+        "apps.b2b.workspace.access_views.arepo.set_employee_access"
+    ) as set_access:
+        response = _call(
+            WorkspaceEmployeeAccessView,
+            factory.put("/employees/5/access/", body, format="json"),
+            _user(actor_role),
+            employee_id=5,
+        )
+    return response, set_role, set_access
+
+
+@pytest.mark.parametrize(
+    "actor, target, new_role, allowed",
+    [
+        # The owner assigns anything but ownership itself.
+        (Role.OWNER, Role.MANAGER, Role.ADMIN, True),
+        (Role.OWNER, Role.EMPLOYEE, Role.OWNER, False),
+        # An administrator: "below the administrator's level".
+        (Role.ADMIN, Role.EMPLOYEE, Role.MANAGER, True),
+        (Role.ADMIN, Role.EMPLOYEE, Role.ADMIN, False),
+        (Role.ADMIN, Role.ADMIN, Role.EMPLOYEE, False),
+        # A manager: "employee/guest in their own workspace".
+        (Role.MANAGER, Role.EMPLOYEE, Role.GUEST, True),
+        (Role.MANAGER, Role.GUEST, Role.EMPLOYEE, True),
+        (Role.MANAGER, Role.EMPLOYEE, Role.MANAGER, False),
+        (Role.MANAGER, Role.MANAGER, Role.EMPLOYEE, False),
+    ],
+)
+def test_a_role_is_assigned_only_downwards(actor, target, new_role, allowed):
+    response, set_role, _ = _editing(target, actor, {"role": new_role})
+
+    assert (response.status_code == 200) is allowed, response.data
+    assert set_role.called is allowed
+
+
+def test_access_is_granted_only_within_ones_own():
+    """§12: an administrator narrowed to the task list cannot open the sales
+    board to somebody else — and the refusal names what was over the line."""
+    narrowed = ([Module.TASKS], [Permission.TASK_VIEW, Permission.EMPLOYEE_CHANGE_MODULES,
+                                  Permission.EMPLOYEE_CHANGE_PERMISSIONS])
+    # `resolve` would have dropped the employees.* permissions for a closed
+    # module; the editor is what is under test here, so they are handed in
+    # already resolved.
+    narrowed = ([Module.TASKS, Module.EMPLOYEES], narrowed[1])
+
+    response, _, set_access = _editing(
+        Role.EMPLOYEE, Role.ADMIN, {"modules": ["tasks", "sales"]}, actor_access=narrowed
+    )
+    assert response.status_code == 403
+    assert response.data["modules"] == ["sales"]
+    set_access.assert_not_called()
+
+    response, _, set_access = _editing(
+        Role.EMPLOYEE, Role.ADMIN,
+        {"permissions": [Permission.TASK_VIEW, Permission.TASK_DELETE]},
+        actor_access=narrowed,
+    )
+    assert response.status_code == 403
+    assert response.data["permissions"] == [Permission.TASK_DELETE]
+    set_access.assert_not_called()
+
+    # Within what they hold, it goes through.
+    response, _, set_access = _editing(
+        Role.EMPLOYEE, Role.ADMIN, {"modules": ["tasks"]}, actor_access=narrowed
+    )
+    assert response.status_code == 200
+    set_access.assert_called_once()
+
+
+def test_the_owner_is_never_narrowed_by_their_own_access():
+    """The owner holds the company; §12's rule is about everybody else."""
+    response, _, set_access = _editing(
+        Role.ADMIN, Role.OWNER, {"modules": Module.CHOICES},
+        actor_access=(
+            [Module.TASKS, Module.EMPLOYEES],
+            [Permission.TASK_VIEW, Permission.EMPLOYEE_CHANGE_MODULES],
+        ),
+    )
+
+    assert response.status_code == 200
+    set_access.assert_called_once()
+
+
+def test_access_is_edited_only_downwards():
+    """A manager may not widen a manager — themselves included."""
+    response, _, set_access = _editing(Role.MANAGER, Role.MANAGER, {"modules": ["tasks"]})
+    assert response.status_code == 403
+    set_access.assert_not_called()
+
+
+def test_the_role_editor_reaches_only_the_roles_below_you():
+    """An administrator configures managers, employees and guests. Editing
+    the administrator role itself would let one administrator narrow — or
+    widen — every other."""
+    with patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=(Module.CHOICES, list(Permission.all())),
+    ), patch("apps.b2b.workspace.access_views.arepo.set_role_access") as write:
+        refused = _call(
+            WorkspaceRoleDetailView,
+            factory.put(
+                "/access/roles/admin/", {"modules": ["chat"], "permissions": []}, format="json"
+            ),
+            _user(Role.ADMIN),
+            code=Role.ADMIN,
+        )
+        write.return_value = {"modules": ["chat"], "permissions": []}
+        allowed = _call(
+            WorkspaceRoleDetailView,
+            factory.put(
+                "/access/roles/manager/", {"modules": ["chat"], "permissions": []}, format="json"
+            ),
+            _user(Role.ADMIN),
+            code=Role.MANAGER,
+        )
+
+    assert refused.status_code == 403
+    assert allowed.status_code == 200
+    write.assert_called_once()
+
+
+def test_the_role_editor_grants_only_what_the_editor_holds():
+    with patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=(
+            [Module.TASKS, Module.EMPLOYEES],
+            [Permission.TASK_VIEW, Permission.EMPLOYEE_CHANGE_PERMISSIONS],
+        ),
+    ), patch("apps.b2b.workspace.access_views.arepo.set_role_access") as write:
+        response = _call(
+            WorkspaceRoleDetailView,
+            factory.put(
+                "/access/roles/employee/",
+                {"modules": ["tasks", "sales"], "permissions": [Permission.DEAL_CREATE]},
+                format="json",
+            ),
+            _user(Role.ADMIN),
+            code=Role.EMPLOYEE,
+        )
+
+    assert response.status_code == 403
+    assert response.data["modules"] == ["sales"]
+    assert response.data["permissions"] == [Permission.DEAL_CREATE]
+    write.assert_not_called()
+
+
+def test_the_rank_table_reads_as_the_tz_writes_it():
+    assert Role.outranks(Role.OWNER, Role.ADMIN)
+    assert Role.outranks(Role.ADMIN, Role.MANAGER)
+    assert Role.outranks(Role.MANAGER, Role.EMPLOYEE)
+    assert Role.outranks(Role.EMPLOYEE, Role.GUEST)
+    assert not Role.outranks(Role.ADMIN, Role.ADMIN)
+    # The roster's older spellings rank the same.
+    assert Role.outranks("lider", "performer")
+    assert Role.assignable(Role.OWNER, Role.ADMIN)
+    assert not Role.assignable(Role.OWNER, Role.OWNER)
+    assert not Role.assignable(Role.ADMIN, Role.ADMIN)
+
+
+# ─── TZ v2 §11: creating a workspace ─────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "role, permissions, allowed",
+    [
+        (Role.OWNER, [], True),
+        (Role.ADMIN, [], True),
+        (Role.MANAGER, [], False),
+        (Role.MANAGER, [Permission.WORKSPACE_CREATE], True),
+        (Role.EMPLOYEE, [], False),
+        (Role.EMPLOYEE, [Permission.WORKSPACE_CREATE], True),
+        # "Гость — Нет", whatever they were handed.
+        (Role.GUEST, [Permission.WORKSPACE_CREATE], False),
+    ],
+)
+def test_who_may_open_a_workspace(role, permissions, allowed):
+    from apps.b2b.workspace.access import may_create_workspace
+
+    assert may_create_workspace(role, permissions) is allowed

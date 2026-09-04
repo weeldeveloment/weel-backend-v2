@@ -33,7 +33,7 @@ from apps.b2b.workspace.authentication import (
     WorkspaceAccount,
 )
 from apps.b2b.workspace.joining_repository import JoinStatus
-from apps.b2b.workspace.permissions import IsWorkspaceManager, IsWorkspaceUser
+from apps.b2b.workspace.permissions import IsWorkspaceUser
 from apps.b2b.workspace.tokens import create_workspace_tokens
 from apps.b2b.workspace.views import WORKSPACE_TAG, WorkspaceAPIView
 
@@ -281,7 +281,30 @@ class WorkspaceCreateSerializer(serializers.Serializer):
         return value.strip()
 
 
+def _may_create_workspace_in(account_id: int, org_id: int) -> bool:
+    """Whether any seat this account holds in the org lets it open a workspace.
+
+    Any seat, not the first: somebody who is a guest in one of the company's
+    rooms and an administrator in another opens workspaces as the
+    administrator. Each seat is resolved through the workspace's own role
+    configuration, so a manager the role editor handed the permission counts.
+    """
+    from apps.b2b.workspace.access import may_create_workspace
+
+    for seat in accounts.list_memberships(account_id):
+        if seat.get("org_id") != org_id or seat.get("is_guest"):
+            continue
+        employee = repo.get_workspace_employee(seat["employee_id"])
+        if not employee:
+            continue
+        _modules, permissions = arepo.access_for_employee(employee)
+        if may_create_workspace(employee.get("role"), permissions):
+            return True
+    return False
+
+
 class AccountWorkspacesView(AccountAPIView):
+
     """GET  /api/b2b/workspace/account/workspaces/ — where this account works.
     POST /api/b2b/workspace/account/workspaces/ — open a new one."""
 
@@ -317,6 +340,16 @@ class AccountWorkspacesView(AccountAPIView):
                 {"org_id": [_("You do not belong to that company.")]},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        if org_id is not None and not _may_create_workspace_in(request.user.id, org_id):
+            # TZ v2 §11: the owner and an administrator may open a workspace;
+            # a manager or an employee only when handed
+            # `employees.create_workspace`; a guest never. A brand-new company
+            # (no org yet) is not gated — there is nobody to ask.
+            return Response(
+                {"detail": _("Your role in this company does not allow creating a workspace.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
 
         created = accounts.create_workspace(
             account=request.user._data,
@@ -1072,16 +1105,18 @@ class JoinDecisionSerializer(serializers.Serializer):
 class WorkspaceJoinRequestListView(WorkspaceAPIView):
     """GET /api/b2b/workspace/join-requests/ — who is asking to be let in.
 
-    Whoever runs the workspace: the owner, an administrator, or a manager.
-    Deliberately wider than `EMPLOYEE_INVITE`, which is what separates an
-    administrator from a manager and gates *asking another workspace to lend
-    somebody* — a commitment about who is allowed in that is not this. Somebody
-    knocking at the door is the day-to-day of running a workspace, and a
-    request only the owner can answer sits unanswered for as long as the owner
-    is away.
+    Gated on `EMPLOYEE_INVITE`, the permission to let somebody in. TZ v2 §11
+    gives "invite members" and "accept join requests" the same answer on
+    every row — the owner and the administrator, a manager only "in their own
+    workspace, when permitted", nobody below — so they are one permission
+    rather than two that would have to be kept in step. The same permission
+    picks who is told when a request arrives, see
+    `access_repository.list_employee_invite_recipients`.
     """
 
-    permission_classes = [IsAuthenticated, IsWorkspaceUser, IsWorkspaceManager]
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+    required_permission = Permission.EMPLOYEE_INVITE
+
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Join requests")
     def get(self, request):
@@ -1114,9 +1149,15 @@ class WorkspaceJoinRequestDecideView(WorkspaceAPIView):
     Same audience as the list — see [WorkspaceJoinRequestListView]. What
     standing the person is let in with is chosen per request; changing a role
     afterwards is a different act and still needs `EMPLOYEE_CHANGE_ROLE`.
+
+    TZ v2 §5.2 names the three answers — accept as asked, decline, or change
+    the modules and then accept — and two rules on accepting: a role is
+    always assigned, and it may not exceed the acceptor's own.
     """
 
-    permission_classes = [IsAuthenticated, IsWorkspaceUser, IsWorkspaceManager]
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+    required_permission = Permission.EMPLOYEE_INVITE
+
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,
@@ -1155,12 +1196,35 @@ class WorkspaceJoinRequestDecideView(WorkspaceAPIView):
             _queue_join_decision(request_id)
             return Response({"status": JoinStatus.DECLINED})
 
-        # The workspace decides the standing, not the asker. What they asked
-        # for is only a request — `wanted_modules` is never read here.
+        # The workspace decides the standing, not the asker: a request is a
+        # request. "Accept as asked" (§5.2) is the acceptor sending no module
+        # list, and then what was asked for is what is granted — the acceptor
+        # saw it on the request and chose not to change it. A list they do
+        # send replaces it.
         role = data.get("role") or Role.EMPLOYEE
-        modules = data.get("modules")
+        modules = data["modules"] if "modules" in data else ask.get("wanted_modules")
+
+        # §5.2: "the assigned role may not exceed the level of the user who
+        # accepts the request", and §12: no grant above one's own. An
+        # administrator lets in managers and below, a manager (when permitted
+        # to answer at all) employees and guests.
+        if not Role.assignable(request.user.role, role):
+            return Response(
+                {"detail": _("You may only assign roles below your own.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        extra_modules, _extra = arepo.grant_exceeds(request.user, modules=modules)
+        if extra_modules:
+            return Response(
+                {
+                    "detail": _("You cannot grant access you do not hold yourself."),
+                    "modules": extra_modules,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         if not jrepo.close_join_request(
+
             request_id,
             status=JoinStatus.ACCEPTED,
             decided_by=request.user.id,

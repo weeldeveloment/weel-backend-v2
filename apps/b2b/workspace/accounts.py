@@ -505,7 +505,29 @@ def org_workspaces_for_joining(
     )
 
 
+def org_owner_accounts(org_id: int | None) -> list[dict[str, Any]]:
+    """The accounts that own this company: whoever holds an active owner seat
+    in any of its workspaces. Read off the roster rather than
+    ``b2b_org.owner_user_id`` — that column names a dashboard ``b2b_user``,
+    which is a different identity from the account the app signs in with,
+    and is NULL for every company opened from the app."""
+    if org_id is None:
+        return []
+    return fetch_all(
+        f"""
+        SELECT DISTINCT a.*
+          FROM {B2B_EMPLOYEE_TABLE} e
+          JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
+          JOIN {B2B_ACCOUNT_TABLE} a ON a.id = e.account_id
+         WHERE c.org_id = %s AND e.is_active = TRUE AND e.role = 'owner'
+         ORDER BY a.id
+        """,
+        [org_id],
+    )
+
+
 def org_ids_for_account(account_id: int) -> list[int]:
+
     """The organisations this account already belongs to, through any roster
     row it holds."""
     rows = fetch_all(
@@ -736,13 +758,24 @@ def create_workspace(
     """Open a new workspace, with this account on its roster.
 
     The TZ splits this in two and so does the standing it grants. Creating a
-    workspace makes you its **admin** (§5) — you run that one workspace and
+    workspace makes you its **admin** (§3) — you run that one workspace and
     nothing else. But somebody who belongs to no organisation yet is also
-    creating the **company** that holds it (§4), and the creator of a company
-    is its owner. So the first workspace somebody opens makes them an owner,
-    and every one after that makes them an admin.
+    creating the **company** that holds it, and the creator of a company is
+    its owner.
+
+    Two things follow from the owner holding the *company* rather than one
+    room in it (TZ v2 §2, §11 "Владелец — все"):
+
+    * an owner who opens another workspace is its owner, not demoted to its
+      admin — §3's "the creator becomes the leader" is for people who are
+      not already above that;
+    * a workspace an admin opens still has the company's owner on it. Every
+      owner-only act in a workspace — approving its deletion (§4), deciding
+      what the admin role may do — needs an owner *in* it, and a room with
+      nobody above the admin would be one nobody could ever close.
     """
     from apps.b2b.workspace.access import Role
+
 
     now = timezone.now()
     name = (name or "").strip()
@@ -777,10 +810,16 @@ def create_workspace(
         workspace_description = None
         workspace_icon = "chart"
     else:
-        role = Role.ADMIN
+        owners = org_owner_accounts(org_id)
+        role = (
+            Role.OWNER
+            if any(o["id"] == account["id"] for o in owners)
+            else Role.ADMIN
+        )
         workspace_name = name
         workspace_description = (description or "").strip() or None
         workspace_icon = icon
+
 
     company = fetch_one(
         f"""
@@ -810,6 +849,13 @@ def create_workspace(
     employee = create_membership(
         account=account, company_id=company["id"], role=role
     )
+    if not is_new_company:
+        for owner in owners:
+            if owner["id"] != account["id"]:
+                create_membership(
+                    account=owner, company_id=company["id"], role=Role.OWNER
+                )
     if org is None and org_id is not None:
+
         org = fetch_one("SELECT * FROM b2b_org WHERE id = %s", [org_id])
     return {"company": company, "employee": employee, "role": role, "org": org}

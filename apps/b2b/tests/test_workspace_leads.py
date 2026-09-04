@@ -472,8 +472,9 @@ def test_a_deadline_needs_a_date():
     assert response.status_code == 400
 
 
-def test_a_closed_lead_takes_no_deadline():
-    """A clock nothing can run down."""
+def test_a_closed_lead_is_the_administrators_to_edit():
+    """TZ v2 §8: once a lead is completed, only the owner or the administrator
+    may still change it — not the employee who worked it, not a manager."""
     closed = _lead(status=LeadStatus.COMPLETED, stage=LeadStage.WON)
     with patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed):
         response = _call(
@@ -486,8 +487,37 @@ def test_a_closed_lead_takes_no_deadline():
             OWNER,
             lead_id=7,
         )
+    assert response.status_code == 403
 
-    assert response.status_code == 409
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed):
+        response = _call(
+            WorkspaceLeadDueDateView,
+            factory.post(
+                "/leads/7/due-date/",
+                {"due_date": "2026-09-15T00:00:00Z"},
+                format="json",
+            ),
+            _user("performer", 8),
+            lead_id=7,
+        )
+    assert response.status_code == 403
+
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed), patch(
+        "apps.b2b.workspace.views.repo.set_lead_due_date", return_value=closed
+    ) as set_due:
+        response = _call(
+            WorkspaceLeadDueDateView,
+            factory.post(
+                "/leads/7/due-date/",
+                {"due_date": "2026-09-15T00:00:00Z"},
+                format="json",
+            ),
+            MANAGER,  # the company owner
+            lead_id=7,
+        )
+    assert response.status_code == 200
+    set_due.assert_called_once()
+
 
 
 def test_an_unknown_stage_is_refused():
@@ -998,13 +1028,24 @@ def test_a_bare_post_does_not_clear_the_mark():
 
 
 def test_a_closed_lead_can_still_be_marked():
-    """Unlike the deadline, deliberately.
-
-    "That enquiry was never real" is a judgement usually made about a deal that
-    has already been lost. Refusing it on a closed lead would put the mark out
-    of reach on exactly the leads it exists for.
+    """"That enquiry was never real" is a judgement usually made about a deal
+    that has already been lost, so the mark stays reachable on a closed lead
+    — by the owner or the administrator, who under TZ v2 §8 are the only ones
+    a completed record is still open to.
     """
     closed = _lead(status=LeadStatus.COMPLETED, stage=LeadStage.LOST)
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed):
+        refused = _call(
+            WorkspaceLeadQualityView,
+            factory.post(
+                "/leads/7/quality/", {"quality": LeadQuality.BAD}, format="json"
+            ),
+            OWNER,  # the claimant, a plain employee
+            lead_id=7,
+        )
+    assert refused.status_code == 403
+
+
     with (
         patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed),
         patch(
@@ -1017,7 +1058,7 @@ def test_a_closed_lead_can_still_be_marked():
             factory.post(
                 "/leads/7/quality/", {"quality": LeadQuality.BAD}, format="json"
             ),
-            OWNER,
+            MANAGER,  # the company owner
             lead_id=7,
         )
 
@@ -1211,3 +1252,48 @@ def test_the_board_asks_for_leads_and_the_quick_sale_list_for_sales():
     sql, params = fetched.call_args.args
     assert "kind = %s" not in sql
     assert params == [COMPANY_ID]
+
+
+# ─── TZ v2 §8: a completed lead is the owner's or the administrator's ────────
+
+def test_a_completed_lead_takes_no_comment_from_its_claimant():
+    closed = _lead(status=LeadStatus.COMPLETED, stage=LeadStage.WON)
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed):
+        response = _call(
+            WorkspaceLeadCommentView,
+            factory.post("/leads/7/comments/", {"text": "Yana bir gap"}, format="json"),
+            OWNER,  # the claimant
+            lead_id=7,
+        )
+    assert response.status_code == 403
+
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed),
+        patch(
+            "apps.b2b.workspace.views.repo.add_lead_comment",
+            return_value={"id": 1, "kind": "comment", "text": "Yana bir gap"},
+        ) as add,
+    ):
+        response = _call(
+            WorkspaceLeadCommentView,
+            factory.post("/leads/7/comments/", {"text": "Yana bir gap"}, format="json"),
+            MANAGER,  # the company owner
+            lead_id=7,
+        )
+    assert response.status_code in (200, 201), response.data
+    add.assert_called_once()
+
+
+def test_a_completed_lead_tells_the_claimant_it_is_closed_to_them():
+    closed = _lead(status=LeadStatus.COMPLETED, stage=LeadStage.WON)
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=closed),
+        patch("apps.b2b.workspace.views.repo.list_lead_tasks", return_value=[]),
+        patch("apps.b2b.workspace.views.repo.list_lead_items", return_value=[]),
+        patch("apps.b2b.workspace.views.repo.list_lead_activity", return_value=[]),
+    ):
+        mine = _call(WorkspaceLeadDetailView, factory.get("/leads/7/"), OWNER, lead_id=7)
+        boss = _call(WorkspaceLeadDetailView, factory.get("/leads/7/"), MANAGER, lead_id=7)
+
+    assert mine.data["can_work"] is False
+    assert boss.data["can_work"] is True

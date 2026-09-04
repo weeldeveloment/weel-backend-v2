@@ -139,6 +139,7 @@ def meta_payload(company_id: int, request=None) -> dict:
         "token_expires_at": (integration or {}).get("token_expires_at"),
         "setup": _setup_payload(request, creds) if request is not None else None,
         "pages": [_page_payload(page) for page in pages],
+        "ai": None,
     }
 
 
@@ -159,8 +160,14 @@ class IntegrationListView(IntegrationsAPIView):
         responses={200: IntegrationListSerializer()},
     )
     def get(self, request):
+        from apps.b2b.integrations.ai_views import ai_payload
+
+        company_id = request.user.company_id
         return Response({
-            "results": [meta_payload(request.user.company_id, request)],
+            "results": [
+                meta_payload(company_id, request),
+                *[ai_payload(company_id, provider) for provider in IntegrationProvider.AI],
+            ],
             "can_manage": True,
         })
 

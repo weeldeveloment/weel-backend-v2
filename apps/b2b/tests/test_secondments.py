@@ -423,8 +423,13 @@ def test_a_grant_cannot_hand_out_what_the_role_never_had():
     granted = capabilities_for(EmployeeRole.EMPLOYEE, [Module.SALES, Module.TASKS])
 
     # Being lent the sales board and the task list does not promote anybody:
-    # an employee still cannot raise a task for somebody else.
-    assert granted["can_create_task"] is False
+    # an employee may raise a task (TZ v2 §6) but still cannot edit, assign
+    # or delete one.
+    assert granted["can_create_task"] is True
+    assert granted["can_edit_task"] is False
+    assert granted["can_assign_task"] is False
+    assert granted["can_delete_task"] is False
+
     # Raising a lead is not a promotion either — it is what an employee may do
     # anywhere, and the grant neither adds it nor takes it away.
     assert granted["can_post_lead"] is True

@@ -43,6 +43,7 @@ from apps.b2b.raw.tables import (
     B2B_SUPPORT_MESSAGE_TABLE,
     B2B_EMPLOYEE_OF_MONTH_TABLE,
     B2B_EMPLOYEE_TABLE,
+    B2B_NOTIFICATION_TABLE,
     B2B_TASK_ACTIVITY_TABLE,
     B2B_TASK_ASSIGNEE_TABLE,
     B2B_TASK_COMMENT_TABLE,
@@ -197,6 +198,35 @@ def clear_employee_fcm_tokens(tokens: list[str]) -> None:
         f"WHERE fcm_token = __ANY_MARKER__(%s)",
         [timezone.now(), list(tokens)],
     )
+
+
+def unread_badges_for_tokens(tokens: list[str]) -> dict[str, int]:
+    """How many unread feed rows the owner of each of these phones has.
+
+    Handed to `FCMService.send_to_tokens` as `badge_for` by every workspace
+    sender, and read *after* the sender has written its own feed rows, so the
+    number already includes the push it is riding on. That is the number the
+    app icon shows — iOS draws exactly what the payload says, and a launcher
+    on Android that shows a count reads the same figure — and it is cleared by
+    `POST /notifications/read/`, which the app calls whenever it comes to the
+    foreground.
+
+    Counted from `b2b_notification` rather than kept as a counter of its own
+    because the feed is already the record of what each employee has and has
+    not seen; a second number would only ever drift from it.
+    """
+    if not tokens:
+        return {}
+    rows = fetch_all(
+        f"SELECT e.fcm_token AS token, COUNT(n.id) AS unread "
+        f"FROM {B2B_EMPLOYEE_TABLE} e "
+        f"LEFT JOIN {B2B_NOTIFICATION_TABLE} n "
+        f"ON n.employee_id = e.id AND n.is_read = FALSE "
+        f"WHERE e.fcm_token = __ANY_MARKER__(%s) "
+        f"GROUP BY e.fcm_token",
+        [list(tokens)],
+    )
+    return {row["token"]: int(row["unread"] or 0) for row in rows}
 
 
 def list_task_assignee_recipients(
@@ -1258,6 +1288,7 @@ def list_threads(company_id: int, employee_id: int) -> list[dict[str, Any]]:
         f"""
         SELECT
             t.id,
+            t.kind,
             t.group_name,
             t.photo,
             t.created_by,
@@ -1286,9 +1317,14 @@ def list_threads(company_id: int, employee_id: int) -> list[dict[str, Any]]:
             LIMIT 1
         ) last_msg ON TRUE
         WHERE t.company_id = %s
-        ORDER BY m.is_pinned DESC, COALESCE(t.last_message_at, t.created_at) DESC
+        -- The saved room is the first row whatever else is going on, the way
+        -- Telegram keeps Saved Messages at the top: it is the one thread the
+        -- reader can rely on finding without scrolling.
+        ORDER BY (t.kind = %s) DESC,
+                 m.is_pinned DESC,
+                 COALESCE(t.last_message_at, t.created_at) DESC
         """,
-        [employee_id, employee_id, company_id],
+        [employee_id, employee_id, company_id, THREAD_KIND_SAVED],
     )
     return _attach_thread_members(threads, employee_id)
 
@@ -1347,6 +1383,42 @@ def get_thread_for_member(thread_id: int, company_id: int, employee_id: int) -> 
     return _attach_thread_members([thread], employee_id)[0]
 
 
+#: What a `b2b_chat_thread` row is — see the column's note in
+#: `create_b2b_tables`. Only these two so far; an assistant chat is not a
+#: thread at all (it lives in `b2b_ai_conversation`, see `assistant.py`).
+THREAD_KIND_CHAT = "chat"
+THREAD_KIND_SAVED = "saved"
+
+
+def ensure_saved_thread(company_id: int, employee_id: int) -> dict[str, Any]:
+    """The employee's own "Saqlangan xabarlar" room, made on first ask.
+
+    A one-member thread with the person as its only member. Idempotent — the
+    partial unique index on (company_id, created_by) WHERE kind = 'saved' is
+    what makes two concurrent first opens of the chat list come out with one
+    room rather than two.
+    """
+    now = timezone.now()
+    thread = fetch_one(
+        f"""
+        INSERT INTO {B2B_CHAT_THREAD_TABLE}
+            (company_id, kind, group_name, created_by, created_at, updated_at)
+        VALUES (%s, %s, NULL, %s, %s, %s)
+        ON CONFLICT (company_id, created_by) WHERE kind = 'saved'
+        DO UPDATE SET updated_at = {B2B_CHAT_THREAD_TABLE}.updated_at
+        RETURNING *
+        """,
+        [company_id, THREAD_KIND_SAVED, employee_id, now, now],
+    )
+    execute(
+        f"INSERT INTO {B2B_CHAT_MEMBER_TABLE} "
+        f"(thread_id, employee_id, role, created_at, updated_at) "
+        f"VALUES (%s, %s, 'member', %s, %s) ON CONFLICT (thread_id, employee_id) DO NOTHING",
+        [thread["id"], employee_id, now, now],
+    )
+    return thread
+
+
 def find_direct_thread(company_id: int, a: int, b: int) -> dict[str, Any] | None:
     """The existing one-to-one thread between two people, if any.
 
@@ -1358,14 +1430,14 @@ def find_direct_thread(company_id: int, a: int, b: int) -> dict[str, Any] | None
         SELECT t.*
         FROM {B2B_CHAT_THREAD_TABLE} t
         JOIN {B2B_CHAT_MEMBER_TABLE} m ON m.thread_id = t.id
-        WHERE t.company_id = %s AND t.group_name IS NULL
+        WHERE t.company_id = %s AND t.group_name IS NULL AND t.kind = %s
         GROUP BY t.id
         HAVING COUNT(*) = 2
            AND BOOL_OR(m.employee_id = %s)
            AND BOOL_OR(m.employee_id = %s)
         LIMIT 1
         """,
-        [company_id, a, b],
+        [company_id, THREAD_KIND_CHAT, a, b],
     )
 
 
@@ -1379,9 +1451,9 @@ def create_thread(
     now = timezone.now()
     thread = fetch_one(
         f"INSERT INTO {B2B_CHAT_THREAD_TABLE} "
-        f"(company_id, group_name, created_by, created_at, updated_at) "
-        f"VALUES (%s, %s, %s, %s, %s) RETURNING *",
-        [company_id, group_name, created_by, now, now],
+        f"(company_id, kind, group_name, created_by, created_at, updated_at) "
+        f"VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
+        [company_id, THREAD_KIND_CHAT, group_name, created_by, now, now],
     )
     if not thread:
         return None
@@ -2675,20 +2747,32 @@ def replace_lead_items(lead_id: int, items: Sequence[dict[str, Any]]) -> None:
         execute(
             f"""
             INSERT INTO {B2B_WORKSPACE_LEAD_ITEM_TABLE}
-                (lead_id, name, unit, amount, position, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
+                (lead_id, name, unit, amount, position, created_at,
+                 product_id, qty, warehouse_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
                 lead_id, name, (item.get("unit") or "").strip(),
                 item.get("amount") or 0, position, timezone.now(),
+                item.get("product_id"), item.get("qty") or 1, item.get("warehouse_id"),
             ],
         )
     recalc_lead_amount(lead_id)
 
 
 def add_lead_item(
-    lead_id: int, *, name: str, unit: str = "", amount=0
+    lead_id: int,
+    *,
+    name: str,
+    unit: str = "",
+    amount=0,
+    product_id: int | None = None,
+    qty=1,
+    warehouse_id: int | None = None,
 ) -> dict[str, Any] | None:
+    """One priced line. ``product_id``/``qty``/``warehouse_id`` are set when
+    the line was picked off the catalogue — that is what lets the won lead
+    come off the shelf (see ``inventory_repository.record_sale_for_lead``)."""
     row = fetch_one(
         f"SELECT COALESCE(MAX(position), -1) + 1 AS next FROM "
         f"{B2B_WORKSPACE_LEAD_ITEM_TABLE} WHERE lead_id = %s",
@@ -2697,11 +2781,15 @@ def add_lead_item(
     item = fetch_one(
         f"""
         INSERT INTO {B2B_WORKSPACE_LEAD_ITEM_TABLE}
-            (lead_id, name, unit, amount, position, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+            (lead_id, name, unit, amount, position, created_at,
+             product_id, qty, warehouse_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [lead_id, name, unit, amount, int((row or {}).get("next") or 0), timezone.now()],
+        [
+            lead_id, name, unit, amount, int((row or {}).get("next") or 0), timezone.now(),
+            product_id, qty or 1, warehouse_id,
+        ],
     )
     recalc_lead_amount(lead_id)
     return item

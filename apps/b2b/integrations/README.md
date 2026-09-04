@@ -196,3 +196,55 @@ causes:
 `POST /integrations/meta/sync/` pulls each form's recent submissions and
 raises anything the board is missing — the catch-up for deliveries that never
 came. It also runs every ten minutes on its own.
+
+---
+
+# Claude AI / ChatGPT
+
+A workspace plugs in its own Claude or ChatGPT account. Two things make up
+the connection, and they are deliberately separate:
+
+* **The API key.** Neither Anthropic nor OpenAI lets a third-party app sign
+  a person into their *consumer* account (claude.ai / chatgpt.com) and read
+  the chats there — there is no OAuth for it and no endpoint that lists
+  them. What both offer is the developer API, unlocked by a key the person
+  makes in their own console (`console.anthropic.com` /
+  `platform.openai.com`). That key is what `POST /integrations/<provider>/`
+  takes. It is checked against the vendor (`GET /models`), stored Fernet-
+  encrypted in `b2b_integration.access_token_enc` like a Meta token, and
+  never returned. New chats from the app are answered with it.
+* **The data export.** The old chats and projects come in from the export
+  both vendors let a person download from their account settings (Claude:
+  *Settings → Privacy → Export data*; ChatGPT: *Settings → Data controls →
+  Export data*). The ZIP is uploaded to `POST /integrations/<provider>/import/`,
+  read by `ai_import.py`, and stored in `b2b_ai_project` /
+  `b2b_ai_conversation` / `b2b_ai_message`. Re-importing the same export is
+  idempotent on the vendor's ids. Importing works before a key is pasted.
+
+`<provider>` is `claude` or `chatgpt`; one set of views (`ai_views.py`)
+serves both, and `ai.py` is the only module that knows the two wire formats.
+
+## Endpoints
+
+```
+GET/POST/PATCH/DELETE  /api/b2b/workspace/integrations/<provider>/
+POST                   /api/b2b/workspace/integrations/<provider>/import/        multipart `file`
+GET                    /api/b2b/workspace/integrations/<provider>/projects/
+GET/POST               /api/b2b/workspace/integrations/<provider>/conversations/  ?project=&q=&limit=&offset=
+GET/DELETE             /api/b2b/workspace/integrations/<provider>/conversations/<id>/
+POST                   /api/b2b/workspace/integrations/<provider>/conversations/<id>/messages/
+```
+
+Same permissions as Meta (`CanManageIntegrations`). The list endpoint
+answers three rows now — Meta, Claude, ChatGPT.
+
+## Settings
+
+Nothing is required server-side beyond the Fernet key
+(`B2B_INTEGRATIONS_SECRET_KEY` or `B2B_MAIL_SECRET_KEY`). Optional bounds:
+`B2B_AI_MAX_IMPORT_MB` (200), `B2B_AI_REQUEST_TIMEOUT` (120 s),
+`B2B_AI_MAX_OUTPUT_TOKENS` (4096), `B2B_AI_HISTORY_TURNS` (40 — how many
+earlier turns are sent with a new message).
+
+Run `python manage.py create_b2b_tables` after deploying: it adds the three
+tables and the `ai_model` / `ai_models` / `last_import_at` columns.

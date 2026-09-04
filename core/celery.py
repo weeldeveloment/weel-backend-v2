@@ -25,6 +25,8 @@ TASK_MODULES = [
     # Meta lead ads. Same reason as the line above — a sub-package of
     # `apps.b2b`, which autodiscovery never reaches on its own.
     "apps.b2b.integrations.tasks",
+    # Weel AI's nightly reports — see apps/b2b/workspace/analyst_tasks.py.
+    "apps.b2b.workspace.analyst_tasks",
     "stories.tasks",
     "notification.tasks",
     "payment.tasks",
@@ -79,6 +81,12 @@ app.conf.update(
 )
 
 app.conf.beat_schedule = {
+    # Rings that outlived their window — the safety net behind the per-call
+    # countdown task; see `apps/b2b/workspace/calls.py::expire_stale`.
+    "expire_ringing_calls": {
+        "task": "b2b.workspace.expire_ringing_calls",
+        "schedule": 60.0,
+    },
     "persist_story_views": {
         "task": "stories.tasks.persist_story_views",
         "schedule": crontab(minute="*/10"),  # every 10 minutes
@@ -174,6 +182,15 @@ app.conf.beat_schedule = {
     "b2b_workspace_expire_secondments": {
         "task": "b2b.workspace.expire_secondments",
         "schedule": crontab(minute=5),
+    },
+    # Weel AI: every workspace's daily report, plus the weekly on Monday,
+    # the monthly on the 1st and the yearly on 1 January — the pass works
+    # out which are due. Fixed at the start of the working day so the
+    # owner reads yesterday before today happens. A no-op without a key,
+    # ours or the workspace's own.
+    "b2b_workspace_analyst_reports": {
+        "task": "b2b.workspace.analyst_reports",
+        "schedule": crontab(hour=settings.B2B_ANALYST_HOUR, minute=0),
     },
 }
 
