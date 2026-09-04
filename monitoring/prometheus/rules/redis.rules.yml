@@ -1,0 +1,62 @@
+groups:
+  - name: weel-redis
+    rules:
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels: { severity: critical, service: redis }
+        annotations:
+          summary: "Redis javob bermayapti"
+          description: "Cache, Celery broker va Channels (WebSocket) layer ta'sirlanadi."
+          dashboard: weel-redis
+
+      - alert: RedisHighMemory
+        expr: |
+          redis_memory_max_bytes > 0
+          and (redis_memory_used_bytes / redis_memory_max_bytes) > 0.85
+        for: 5m
+        labels: { severity: warning, service: redis }
+        annotations:
+          summary: "Redis xotira limitning {{ $value | humanizePercentage }} i"
+          description: "maxmemory-policy va eviction'ni tekshiring; broker ma'lumoti yo'qolishi mumkin."
+          dashboard: weel-redis
+
+      - alert: RedisEvictingKeys
+        expr: increase(redis_evicted_keys_total[10m]) > 0
+        for: 1m
+        labels: { severity: warning, service: redis }
+        annotations:
+          summary: "Redis 10 daqiqada {{ $value | printf \"%.0f\" }} kalitni evict qildi"
+          description: "Xotira yetmayapti — cache/broker ma'lumot yo'qotmoqda."
+          dashboard: weel-redis
+
+      - alert: RedisBrokerBacklog
+        expr: max(redis_key_size{key=~"celery.*"}) > 1000
+        for: 10m
+        labels: { severity: warning, service: redis }
+        annotations:
+          summary: "Celery broker navbati (Redis list) {{ $value }} ta"
+          description: "Worker'lar navbatni bo'shata olmayapti — CeleryQueueBacklog bilan bir sabab."
+          dashboard: weel-celery
+
+      - alert: RedisRejectedConnections
+        expr: increase(redis_rejected_connections_total[5m]) > 0
+        for: 1m
+        labels: { severity: warning, service: redis }
+        annotations:
+          summary: "Redis ulanishlarni rad etmoqda (maxclients)"
+          description: "Ulanish leak yoki maxclients kichik."
+          dashboard: weel-redis
+
+      - alert: RedisLowHitRate
+        expr: |
+          sum(rate(redis_keyspace_hits_total[15m]))
+          / clamp_min(sum(rate(redis_keyspace_hits_total[15m])) + sum(rate(redis_keyspace_misses_total[15m])), 1)
+          < 0.5
+          and sum(rate(redis_keyspace_hits_total[15m])) + sum(rate(redis_keyspace_misses_total[15m])) > 5
+        for: 30m
+        labels: { severity: info, service: redis }
+        annotations:
+          summary: "Redis cache hit rate {{ $value | humanizePercentage }} (< 50%)"
+          description: "Cache samarasiz — TTL yoki kalit strategiyasi."
+          dashboard: weel-redis

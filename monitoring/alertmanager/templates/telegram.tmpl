@@ -1,0 +1,14 @@
+{{ define "telegram.weel" -}}
+{{ if eq .Status "firing" }}🔴 <b>FIRING</b>{{ else }}✅ <b>RESOLVED</b>{{ end }} · <b>{{ .CommonLabels.alertname }}</b>{{ if .CommonLabels.service }} · {{ .CommonLabels.service }}{{ end }}
+{{ range .Alerts -}}
+▸ <b>{{ .Labels.severity | toUpper }}</b> — {{ .Annotations.summary }}
+{{- if .Annotations.description }}
+   {{ .Annotations.description }}{{ end }}
+{{- if .Labels.instance }}
+   <code>{{ .Labels.instance }}</code>{{ end }}
+{{- if .Labels.name }}
+   <code>{{ .Labels.name }}</code>{{ end }}
+   ⏱ {{ .StartsAt.Format "02.01 15:04" }} (UTC)
+{{ end -}}
+📊 <a href="https://__GRAFANA_DOMAIN__/d/weel-overview">Platform Overview</a>{{ if .CommonAnnotations.dashboard }} · <a href="https://__GRAFANA_DOMAIN__/d/{{ .CommonAnnotations.dashboard }}">{{ .CommonAnnotations.dashboard }}</a>{{ end }} · <a href="https://__GRAFANA_DOMAIN__/alerting/list">Alertlar</a>
+{{- end }}

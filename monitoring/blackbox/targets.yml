@@ -1,0 +1,20 @@
+# Tashqi HTTP probalar (file_sd — Prometheus 1 daqiqada qayta o'qiydi, restart shart emas).
+# Domenlarni tekshiring/to'g'rilang. `app` label Grafana'da filtr uchun.
+- labels: { app: backend, kind: api }
+  targets:
+    - https://dev.weel.uz/health/
+- labels: { app: weel-b2b, kind: frontend }
+  targets:
+    - https://business.weel.uz/
+- labels: { app: weel-admin, kind: frontend }
+  targets:
+    - https://admin.weel.uz/
+- labels: { app: weel.uz, kind: frontend }
+  targets:
+    - https://partners.weel.uz/
+- labels: { app: dashboard_weel_uz, kind: frontend }
+  targets:
+    - https://weel.uz/
+- labels: { app: grafana, kind: monitoring }
+  targets:
+    - https://grafana.weel.uz/api/health

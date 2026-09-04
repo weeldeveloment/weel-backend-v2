@@ -164,6 +164,9 @@ CORS_ALLOW_HEADERS = [
     "telegram-init-data",
     "telegram-web-app-data",
     "ngrok-skip-browser-warning",
+    # Browser log shipper (src/lib/observability.ts in every web app) ->
+    # POST /api/frontend/ with this anti-flood token.
+    "x-frontend-log-token",
 ]
 
 GLOBAL_APPS = [
@@ -201,6 +204,7 @@ if USE_MINIO and HAS_DJANGO_STORAGES:
 INSTALLED_APPS = GLOBAL_APPS + LOCAL_APPS + THIRD_PART_APPS
 
 MIDDLEWARE = [
+    "core.middleware.metrics_guard.MetricsGuardMiddleware",
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -410,19 +414,18 @@ SIMPLE_JWT = {
 # --- WEEL B2B mobile releases ------------------------------------------------
 #
 # What `GET /api/b2b/workspace/app-version/` answers with. The app asks on
-# every launch and on every resume, and blocks itself when the installed
-# version is below `min_version` — so this is the switch that forces a store
-# update, and it lives in the environment rather than in code precisely so
-# raising it does not need another release of the thing being forced.
+# every launch and on every resume, and blocks itself whenever the installed
+# version is below `latest_version` — any bump, however small. There is no
+# soft "you could update" verdict: a release that is out is the release
+# everyone is on. This lives in the environment rather than in code precisely
+# so raising it does not need another release of the thing being forced.
 #
-# `latest_version` is the newest build actually live in the store: the app
-# offers it as a dismissible prompt. `min_version` is the oldest one still
-# allowed to run; leave it equal to the floor you actually support, because
-# everyone below it is locked out of the app until they update.
+# Raise `latest_version` only once the build is actually live in the store
+# for everyone — before that, every phone would be sent to a listing that has
+# nothing new to install.
 B2B_APP_RELEASES = {
     "android": {
         "latest_version": (os.getenv("B2B_ANDROID_LATEST_VERSION") or "1.1.0").strip(),
-        "min_version": (os.getenv("B2B_ANDROID_MIN_VERSION") or "1.0.0").strip(),
         "store_url": (
             os.getenv("B2B_ANDROID_STORE_URL")
             or "https://play.google.com/store/apps/details?id=uz.weel.weel_b2b_v2"
@@ -430,7 +433,6 @@ B2B_APP_RELEASES = {
     },
     "ios": {
         "latest_version": (os.getenv("B2B_IOS_LATEST_VERSION") or "1.1.0").strip(),
-        "min_version": (os.getenv("B2B_IOS_MIN_VERSION") or "1.0.0").strip(),
         # Filled in once App Store Connect issues the numeric id — until then
         # the app falls back to its own store link.
         "store_url": (os.getenv("B2B_IOS_STORE_URL") or "").strip(),
@@ -452,6 +454,10 @@ SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS = int(
     (os.getenv("SWAGGER_BASIC_AUTH_LOCKOUT_SECONDS") or "900").strip() or "900"
 )
 PROMETHEUS_ENABLED = env_bool("PROMETHEUS_ENABLED", default=True)
+# When set, core.middleware.metrics_guard restricts /metrics to callers that send
+# `Authorization: Bearer <this>` or originate from a private/loopback address.
+# Leave empty to keep /metrics open (local dev, or when Traefik already blocks it).
+PROMETHEUS_METRICS_TOKEN = (os.getenv("PROMETHEUS_METRICS_TOKEN") or "").strip()
 SWAGGER_SETTINGS = {
     "DEFAULT_INFO": "core.urls.schema_info",
     # Do not require Django session login for docs; everything is viewable anonymously.
@@ -1099,6 +1105,18 @@ REQUEST_LOGGING_SENSITIVE_HEADERS = [
     "X-Frontend-Log-Token",
 ]
 
+# Where a log line goes. In production every line is ONE JSON object on stdout
+# (Alloy -> Loki parses it; see monitoring/alloy/config.alloy) plus the rotating
+# file. The human-readable console format is for local development only —
+# previously both handlers were attached at once, so every line reached Docker
+# twice (plain text on stderr, JSON on stdout) and loggers that were not listed
+# below (apps.*, celery, ...) fell through to the root logger, which only had
+# the plain handler, so their errors never parsed as JSON in Loki.
+_STDOUT_LOG_HANDLER = "console" if DEBUG else "stdout_json"
+_APP_LOG_HANDLERS = [_STDOUT_LOG_HANDLER, "file"]
+_FRONTEND_LOG_HANDLERS = [_STDOUT_LOG_HANDLER, "file_frontend"]
+_ROOT_LOG_HANDLERS = [_STDOUT_LOG_HANDLER]
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -1150,47 +1168,47 @@ LOGGING = {
         },
     },
     "root": {
-        "handlers": ["console"],
+        "handlers": _ROOT_LOG_HANDLERS,
         "level": "INFO",
     },
     "loggers": {
         "django": {
-            "handlers": ["console", "stdout_json", "file"],
+            "handlers": _APP_LOG_HANDLERS,
             "level": "WARNING",
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["console", "stdout_json", "file"],
+            "handlers": _APP_LOG_HANDLERS,
             "level": "INFO",
             "propagate": False,
         },
         "django.server": {
-            "handlers": ["console", "stdout_json", "file"],
+            "handlers": _APP_LOG_HANDLERS,
             "level": "INFO",
             "propagate": False,
         },
         "core": {
-            "handlers": ["console", "stdout_json", "file"],
+            "handlers": _APP_LOG_HANDLERS,
             "level": "DEBUG",
             "propagate": False,
         },
         "core.request_tracing": {
-            "handlers": ["console", "stdout_json", "file"],
+            "handlers": _APP_LOG_HANDLERS,
             "level": "INFO",
             "propagate": False,
         },
         "users": {
-            "handlers": ["console", "stdout_json", "file"],
+            "handlers": _APP_LOG_HANDLERS,
             "level": "INFO",
             "propagate": False,
         },
         "frontend": {
-            "handlers": ["console", "stdout_json", "file_frontend"],
+            "handlers": _FRONTEND_LOG_HANDLERS,
             "level": "INFO",
             "propagate": False,
         },
         "..sanatorium": {
-            "handlers": ["console", "stdout_json", "file"],
+            "handlers": _APP_LOG_HANDLERS,
             "level": "INFO",
             "propagate": False,
         },

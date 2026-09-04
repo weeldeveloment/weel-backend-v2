@@ -1,0 +1,9 @@
+{
+  "//": "Nusxa: /home/abbbose/projects/weel/.mcp.json (gitignore'da). <MCP_PATH_SECRET> ni monitoring env'dagi qiymat bilan almashtiring. Faqat o'qish tool'lari; Docker kerak emas.",
+  "mcpServers": {
+    "weel-grafana": {
+      "type": "http",
+      "url": "https://mcp.weel.uz/<MCP_PATH_SECRET>/mcp"
+    }
+  }
+}

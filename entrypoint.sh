@@ -12,6 +12,15 @@ set -e
 #   beat   — Celery beat only
 WEEL_ROLE="${WEEL_ROLE:-all}"
 
+# django-prometheus with `uvicorn --workers N`: each worker process keeps its
+# own counters, so a scrape of /metrics would answer from whichever worker took
+# the request and the graphs would jump around. prometheus_client aggregates
+# across processes when this directory is set; it must be empty at start or
+# counters from the previous run are added in.
+export PROMETHEUS_MULTIPROC_DIR="${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus_multiproc}"
+rm -rf "$PROMETHEUS_MULTIPROC_DIR"
+mkdir -p "$PROMETHEUS_MULTIPROC_DIR"
+
 run_web() {
   exec uvicorn core.asgi:application \
     --host 0.0.0.0 --port 8000 \

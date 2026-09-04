@@ -112,7 +112,8 @@ postman/
 
 scripts/
 
-monitoring/
+# monitoring/ is committed: the cloud monitoring routine reads RUNBOOK.md from git.
+# Its own .gitignore keeps .env / tokens out.
 
 .cursor/
 

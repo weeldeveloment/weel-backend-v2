@@ -1,0 +1,53 @@
+groups:
+  - name: weel-containers
+    rules:
+      - alert: ContainerRestartLoop
+        expr: changes(container_start_time_seconds{name!=""}[15m]) > 3
+        for: 5m
+        labels: { severity: critical, service: containers }
+        annotations:
+          summary: "{{ $labels.name }} 15 daqiqada 3+ marta qayta ishga tushdi"
+          description: "Crashloop. Loki: {container=~\"{{ $labels.name }}.*\"} oxirgi qatorlar va exit code."
+          dashboard: weel-containers
+
+      - alert: ContainerHighMemory
+        expr: |
+          container_memory_working_set_bytes{name!=""}
+          / clamp_min(container_spec_memory_limit_bytes{name!=""}, 1) > 0.9
+          and container_spec_memory_limit_bytes{name!=""} > 0
+          and container_spec_memory_limit_bytes{name!=""} < 1e15
+        for: 10m
+        labels: { severity: warning, service: containers }
+        annotations:
+          summary: "{{ $labels.name }} xotira limitining {{ $value | humanizePercentage }} ida"
+          description: "OOM kill xavfi — limitni oshiring yoki memory leak."
+          dashboard: weel-containers
+
+      - alert: ContainerHighCPUThrottling
+        expr: |
+          rate(container_cpu_cfs_throttled_periods_total{name!=""}[5m])
+          / clamp_min(rate(container_cpu_cfs_periods_total{name!=""}[5m]), 1) > 0.5
+        for: 15m
+        labels: { severity: info, service: containers }
+        annotations:
+          summary: "{{ $labels.name }} CPU throttling {{ $value | humanizePercentage }}"
+          description: "CPU limiti past — javob vaqti sekinlashadi."
+          dashboard: weel-containers
+
+      - alert: ContainerOOMKilled
+        expr: increase(container_oom_events_total{name!=""}[10m]) > 0
+        for: 1m
+        labels: { severity: critical, service: containers }
+        annotations:
+          summary: "{{ $labels.name }} OOM-killed ({{ $value | printf \"%.0f\" }} marta, 10 daqiqa)"
+          description: "Xotira limiti yetmadi. So'nggi restart va Loki'dagi oxirgi qatorlarni ko'ring."
+          dashboard: weel-containers
+
+      - alert: BackendContainerMissing
+        expr: absent(container_last_seen{name=~".*weel[-_]?backend.*"})
+        for: 5m
+        labels: { severity: critical, service: containers }
+        annotations:
+          summary: "cAdvisor backend konteynerini 5 daqiqadan beri ko'rmayapti"
+          description: "Konteyner umuman yo'q (deploy yiqilgan?) yoki nomi o'zgargan (BACKEND_CONTAINER_REGEX)."
+          dashboard: weel-containers

@@ -1,0 +1,85 @@
+groups:
+  - name: weel-backend
+    rules:
+      - alert: BackendDown
+        expr: up{job="weel-backend"} == 0
+        for: 2m
+        labels: { severity: critical, service: weel-backend }
+        annotations:
+          summary: "Backend /metrics 2 daqiqadan beri javob bermayapti"
+          description: "Prometheus backend konteyneriga ulana olmayapti — konteyner o'chgan, qotgan yoki tarmoqdan chiqib ketgan."
+          dashboard: weel-backend
+
+      - alert: BackendProbeDown
+        expr: probe_success{app="backend"} == 0
+        for: 2m
+        labels: { severity: critical, service: weel-backend }
+        annotations:
+          summary: "Tashqi API probasi ({{ $labels.instance }}) 2 daqiqadan beri muvaffaqiyatsiz"
+          description: "Foydalanuvchilar API'ga kira olmayapti. Traefik/TLS/DNS yoki backend o'zi."
+          dashboard: weel-uptime
+
+      - alert: BackendHigh5xxRate
+        expr: |
+          sum(rate(django_http_responses_total_by_status_total{status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(django_http_responses_total_by_status_total[5m])), 0.1)
+          > 0.05
+          and sum(rate(django_http_responses_total_by_status_total[5m])) > 0.2
+        for: 5m
+        labels: { severity: critical, service: weel-backend }
+        annotations:
+          summary: "5xx ulushi {{ $value | humanizePercentage }} (5 daqiqa, > 5%)"
+          description: "Backend so'rovlarning katta qismiga xato qaytarmoqda. Loki'da levelname=ERROR va oxirgi deployni tekshiring."
+          dashboard: weel-backend
+
+      - alert: BackendElevated5xx
+        expr: sum(rate(django_http_responses_total_by_status_total{status=~"5.."}[5m])) * 300 > 20
+        for: 5m
+        labels: { severity: warning, service: weel-backend }
+        annotations:
+          summary: "5 daqiqada {{ $value | printf \"%.0f\" }} ta 5xx javob"
+          description: "Umumiy ulush kichik bo'lsa ham xatolar bor — qaysi view ekanini Backend dashboardidan ko'ring."
+          dashboard: weel-backend
+
+      - alert: BackendHighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(django_http_requests_latency_seconds_by_view_method_bucket{view!~"prometheus.*|<unnamed view>"}[5m])) by (le)
+          ) > 1.5
+        for: 10m
+        labels: { severity: warning, service: weel-backend }
+        annotations:
+          summary: "p95 latency {{ $value | humanizeDuration }} (10 daqiqa, > 1.5s)"
+          description: "DB, tashqi API (Hotelios/Bookhara/Eskiz) yoki host yuki. Tempo'da duration > 1s trace'larni ko'ring."
+          dashboard: weel-backend
+
+      - alert: BackendTrafficDrop
+        expr: |
+          sum(rate(django_http_requests_total_by_view_transport_method_total[10m]))
+          < 0.2 * sum(rate(django_http_requests_total_by_view_transport_method_total[10m] offset 1h))
+          and sum(rate(django_http_requests_total_by_view_transport_method_total[10m] offset 1h)) > 1
+        for: 10m
+        labels: { severity: warning, service: weel-backend }
+        annotations:
+          summary: "So'rovlar oqimi 1 soat oldingiga nisbatan 80%+ tushdi"
+          description: "Ingress/DNS/TLS muammosi yoki frontend build buzilgan bo'lishi mumkin. Uptime dashboardni tekshiring."
+          dashboard: weel-overview
+
+      - alert: BackendMigrationsUnapplied
+        expr: max(django_migrations_unapplied_total) > 0
+        for: 10m
+        labels: { severity: warning, service: weel-backend }
+        annotations:
+          summary: "{{ $value }} ta Django migratsiya qo'llanilmagan"
+          description: "entrypoint.sh migrate qilmagan yoki kod DB'dan oldinda. 'column does not exist' xatolari kutiladi."
+          dashboard: weel-backend
+
+      - alert: BackendDbErrors
+        expr: sum(rate(django_db_errors_total[5m])) * 300 > 5
+        for: 5m
+        labels: { severity: warning, service: weel-backend }
+        annotations:
+          summary: "5 daqiqada {{ $value | printf \"%.0f\" }} ta DB xatosi (django_db_errors_total)"
+          description: "Ulanish uzilishi, timeout yoki noto'g'ri so'rov. Loki: {service=\"weel-backend\"} |= \"OperationalError\"."
+          dashboard: weel-postgres

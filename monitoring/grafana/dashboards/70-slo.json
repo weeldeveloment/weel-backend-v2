@@ -1,0 +1,914 @@
+{
+ "uid": "weel-slo",
+ "title": "Weel — SLO",
+ "description": "",
+ "tags": [
+  "weel",
+  "slo"
+ ],
+ "timezone": "browser",
+ "editable": true,
+ "graphTooltip": 1,
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "5m",
+ "time": {
+  "from": "now-7d",
+  "to": "now"
+ },
+ "timepicker": {
+  "refresh_intervals": [
+   "10s",
+   "30s",
+   "1m",
+   "5m",
+   "15m",
+   "1h"
+  ]
+ },
+ "templating": {
+  "list": [
+   {
+    "type": "custom",
+    "name": "window",
+    "label": "Oyna",
+    "query": "30d,7d,24h,1h",
+    "options": [
+     {
+      "text": "30d",
+      "value": "30d",
+      "selected": true
+     },
+     {
+      "text": "7d",
+      "value": "7d",
+      "selected": false
+     },
+     {
+      "text": "24h",
+      "value": "24h",
+      "selected": false
+     },
+     {
+      "text": "1h",
+      "value": "1h",
+      "selected": false
+     }
+    ],
+    "current": {
+     "text": "30d",
+     "value": "30d"
+    },
+    "multi": false,
+    "includeAll": false,
+    "hide": 0
+   }
+  ]
+ },
+ "links": [
+  {
+   "title": "Weel dashboardlari",
+   "type": "dashboards",
+   "tags": [
+    "weel"
+   ],
+   "asDropdown": true,
+   "includeVars": false,
+   "keepTime": true,
+   "icon": "external link"
+  }
+ ],
+ "annotations": {
+  "list": [
+   {
+    "builtIn": 1,
+    "datasource": {
+     "type": "grafana",
+     "uid": "-- Grafana --"
+    },
+    "enable": true,
+    "hide": true,
+    "iconColor": "rgba(0, 211, 255, 1)",
+    "name": "Annotations & Alerts",
+    "type": "dashboard"
+   },
+   {
+    "name": "Alertlar (Prometheus)",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "prometheus"
+    },
+    "enable": true,
+    "iconColor": "red",
+    "expr": "ALERTS{alertstate=\"firing\", severity=~\"critical|warning\"}",
+    "titleFormat": "{{alertname}}",
+    "textFormat": "{{service}} {{severity}}",
+    "step": "1m"
+   },
+   {
+    "name": "Backend deploy (restart)",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "prometheus"
+    },
+    "enable": true,
+    "iconColor": "blue",
+    "expr": "changes(container_start_time_seconds{name=~\".*weel[-_]?backend.*\"}[2m]) > 0",
+    "titleFormat": "backend restart",
+    "textFormat": "{{name}}",
+    "step": "1m"
+   }
+  ]
+ },
+ "panels": [
+  {
+   "type": "text",
+   "title": "SLO ta'rifi",
+   "options": {
+    "mode": "markdown",
+    "content": "**Availability SLO: 99.5%** — 5xx bo'lmagan javoblar ulushi (`$window` oynasida).\n\n**Latency SLO: 95%** so'rovlar **≤ 1s** (view latency histogrammasi).\n\n**Uptime SLO: 99.5%** — tashqi proba (`https://dev.weel.uz/health/`).\n\nError budget = ruxsat etilgan xato ulushi (0.5%). Burn rate = hozirgi xato sur'ati / budget sur'ati; 1h burn > 14 yoki 6h burn > 6 — budget bir necha kunda tugaydi."
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 8
+   },
+   "id": 195
+  },
+  {
+   "type": "stat",
+   "title": "Availability ($window)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "1 - sum(increase(django_http_responses_total_by_status_total{status=~\"5..\"}[$window])) / clamp_min(sum(increase(django_http_responses_total_by_status_total[$window])), 1)",
+     "legendFormat": "__auto",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 0.99
+       },
+       {
+        "color": "green",
+        "value": 0.995
+       }
+      ]
+     },
+     "unit": "percentunit",
+     "decimals": 3
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "auto",
+    "textMode": "value",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "auto",
+    "wideLayout": true
+   },
+   "gridPos": {
+    "x": 6,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "id": 196
+  },
+  {
+   "type": "stat",
+   "title": "Latency SLO: ≤1s ulushi ($window)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(increase(django_http_requests_latency_seconds_by_view_method_bucket{le=\"1.0\"}[$window])) / clamp_min(sum(increase(django_http_requests_latency_seconds_by_view_method_count[$window])), 1)",
+     "legendFormat": "__auto",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 0.9
+       },
+       {
+        "color": "green",
+        "value": 0.95
+       }
+      ]
+     },
+     "unit": "percentunit",
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "auto",
+    "textMode": "value",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "auto",
+    "wideLayout": true
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "id": 197
+  },
+  {
+   "type": "stat",
+   "title": "Uptime — tashqi proba ($window)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "avg_over_time(probe_success{app=\"backend\"}[$window])",
+     "legendFormat": "__auto",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 0.99
+       },
+       {
+        "color": "green",
+        "value": 0.995
+       }
+      ]
+     },
+     "unit": "percentunit",
+     "decimals": 3
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "auto",
+    "textMode": "value",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "auto",
+    "wideLayout": true
+   },
+   "gridPos": {
+    "x": 18,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "id": 198
+  },
+  {
+   "type": "gauge",
+   "title": "Error budget qoldig'i ($window)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "100 * clamp_min(1 - (1 - (1 - sum(increase(django_http_responses_total_by_status_total{status=~\"5..\"}[$window])) / clamp_min(sum(increase(django_http_responses_total_by_status_total[$window])), 1))) / (1 - 0.995), 0)",
+     "legendFormat": "__auto",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "min": 0,
+     "max": 100,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 25
+       },
+       {
+        "color": "green",
+        "value": 50
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "showThresholdLabels": false,
+    "showThresholdMarkers": true
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 6,
+    "h": 4
+   },
+   "id": 199
+  },
+  {
+   "type": "stat",
+   "title": "Burn rate 1h",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(1 - (1 - sum(increase(django_http_responses_total_by_status_total{status=~\"5..\"}[1h])) / clamp_min(sum(increase(django_http_responses_total_by_status_total[1h])), 1))) / (1 - 0.995)",
+     "legendFormat": "__auto",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 2
+       },
+       {
+        "color": "red",
+        "value": 14
+       }
+      ]
+     },
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "auto",
+    "textMode": "value",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "auto",
+    "wideLayout": true
+   },
+   "gridPos": {
+    "x": 6,
+    "y": 8,
+    "w": 6,
+    "h": 4
+   },
+   "id": 200
+  },
+  {
+   "type": "stat",
+   "title": "Burn rate 6h",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(1 - (1 - sum(increase(django_http_responses_total_by_status_total{status=~\"5..\"}[6h])) / clamp_min(sum(increase(django_http_responses_total_by_status_total[6h])), 1))) / (1 - 0.995)",
+     "legendFormat": "__auto",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 1
+       },
+       {
+        "color": "red",
+        "value": 6
+       }
+      ]
+     },
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "auto",
+    "textMode": "value",
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "auto",
+    "wideLayout": true
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 8,
+    "w": 6,
+    "h": 4
+   },
+   "id": 201
+  },
+  {
+   "type": "stat",
+   "title": "5xx soni ($window)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(increase(django_http_responses_total_by_status_total{status=~\"5..\"}[$window]))",
+     "legendFormat": "__auto",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "auto",
+    "textMode": "value",
+    "colorMode": "none",
+    "graphMode": "none",
+    "justifyMode": "auto",
+    "wideLayout": true
+   },
+   "gridPos": {
+    "x": 18,
+    "y": 8,
+    "w": 6,
+    "h": 4
+   },
+   "id": 202
+  },
+  {
+   "type": "timeseries",
+   "title": "Availability (1h oynali, vaqt bo'yicha)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "1 - sum(rate(django_http_responses_total_by_status_total{status=~\"5..\"}[1h])) / clamp_min(sum(rate(django_http_responses_total_by_status_total[1h])), 0.001)",
+     "legendFormat": "availability 1h",
+     "range": true
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "0.995",
+     "legendFormat": "SLO",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     },
+     "unit": "percentunit",
+     "min": 0.98,
+     "max": 1
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "SLO"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "red"
+        }
+       },
+       {
+        "id": "custom.lineStyle",
+        "value": {
+         "fill": "dash",
+         "dash": [
+          10,
+          10
+         ]
+        }
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": []
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "id": 203
+  },
+  {
+   "type": "timeseries",
+   "title": "Burn rate (1h / 6h)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(sum(rate(django_http_responses_total_by_status_total{status=~\"5..\"}[1h])) / clamp_min(sum(rate(django_http_responses_total_by_status_total[1h])), 0.001)) / (1 - 0.995)",
+     "legendFormat": "1h",
+     "range": true
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(sum(rate(django_http_responses_total_by_status_total{status=~\"5..\"}[6h])) / clamp_min(sum(rate(django_http_responses_total_by_status_total[6h])), 0.001)) / (1 - 0.995)",
+     "legendFormat": "6h",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "transparent",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 6
+       },
+       {
+        "color": "red",
+        "value": 14
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": []
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "id": 204
+  },
+  {
+   "type": "timeseries",
+   "title": "Latency: ≤1s ulushi (1h oynali)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(rate(django_http_requests_latency_seconds_by_view_method_bucket{le=\"1.0\"}[1h])) / clamp_min(sum(rate(django_http_requests_latency_seconds_by_view_method_count[1h])), 0.001)",
+     "legendFormat": "≤1s",
+     "range": true
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "0.95",
+     "legendFormat": "SLO",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     },
+     "unit": "percentunit",
+     "min": 0.8,
+     "max": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": []
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "id": 205
+  },
+  {
+   "type": "timeseries",
+   "title": "Tashqi uptime (1h oynali)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "avg_over_time(probe_success{app=\"backend\"}[1h])",
+     "legendFormat": "API",
+     "range": true
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "avg_over_time(probe_success{kind=\"frontend\"}[1h])",
+     "legendFormat": "{{app}}",
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     },
+     "unit": "percentunit",
+     "min": 0.95,
+     "max": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": []
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "id": 206
+  }
+ ]
+}

@@ -64,6 +64,15 @@ app.conf.update(
     result_serializer="json",
     task_always_eager=TASK_ALWAYS_EAGER,
     timezone="Asia/Tashkent",
+    # Task events feed the celery-exporter in monitoring/ (task rate, failures,
+    # runtime, queue length in Grafana). Without them the exporter sees nothing
+    # and every Celery alert fires "no workers". The cost is one small message
+    # per task state change on the broker.
+    worker_send_task_events=True,
+    task_send_sent_event=True,
+    # Keep Django's LOGGING (JSON to stdout) inside the worker as well instead
+    # of Celery replacing the root handlers with its own plain-text one.
+    worker_hijack_root_logger=False,
     # task_default_queue='normal',
     # task_default_exchange='normal',
     # task_default_routing_key='normal',

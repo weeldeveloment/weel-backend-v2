@@ -1,0 +1,64 @@
+groups:
+  - name: weel-celery
+    rules:
+      - alert: CeleryNoWorkers
+        expr: sum(celery_worker_up) == 0 or absent(celery_worker_up)
+        for: 3m
+        labels: { severity: critical, service: celery }
+        annotations:
+          summary: "Hech qanday Celery worker online emas (3 daqiqa)"
+          description: "SMS, kurs yangilash, eslatmalar, avia/hotel status polling to'xtagan. WEEL_ROLE=all bo'lsa web konteyner bilan birga yiqilgan."
+          dashboard: weel-celery
+
+      - alert: CeleryTaskFailureRate
+        expr: |
+          sum(rate(celery_task_failed_total[15m]))
+          /
+          clamp_min(sum(rate(celery_task_received_total[15m])), 0.01)
+          > 0.05
+          and sum(increase(celery_task_failed_total[15m])) > 3
+        for: 10m
+        labels: { severity: warning, service: celery }
+        annotations:
+          summary: "Celery task failure ulushi {{ $value | humanizePercentage }} (> 5%)"
+          description: "celery_task_failed_total ni name/exception bo'yicha ko'ring; Loki'da name=~\"celery.*\" logger."
+          dashboard: weel-celery
+
+      - alert: CeleryTaskFailing
+        expr: sum by (name, exception) (increase(celery_task_failed_total[30m])) > 10
+        for: 5m
+        labels: { severity: warning, service: celery }
+        annotations:
+          summary: "{{ $labels.name }} 30 daqiqada 10+ marta yiqildi ({{ $labels.exception }})"
+          description: "Bitta task qayta-qayta xato bermoqda — tashqi API yoki ma'lumot muammosi."
+          dashboard: weel-celery
+
+      - alert: CeleryQueueBacklog
+        expr: sum(celery_queue_length) > 500
+        for: 10m
+        labels: { severity: warning, service: celery }
+        annotations:
+          summary: "Celery navbatida {{ $value }} ta ish 10 daqiqadan beri turibdi"
+          description: "Worker yetishmayapti yoki ishlar sekin. CELERY_CONCURRENCY ni oshirish yoki qotgan taskni topish kerak."
+          dashboard: weel-celery
+
+      - alert: CeleryTaskRuntimeHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(celery_task_runtime_bucket[15m])) by (le, name)
+          ) > 120
+        for: 15m
+        labels: { severity: info, service: celery }
+        annotations:
+          summary: "{{ $labels.name }} p95 ishlash vaqti {{ $value | humanizeDuration }} (> 2 daqiqa)"
+          description: "Uzoq task worker'ni band qilib turibdi; boshqa ishlar kechikadi."
+          dashboard: weel-celery
+
+      - alert: CeleryBeatSilent
+        expr: sum(increase(celery_task_received_total{name=~"stories.tasks.persist_story_views|activities.expire_stale_pending_bookings|b2b.workspace.send_event_reminders|b2b.mail.sync_all_accounts"}[30m])) == 0
+        for: 5m
+        labels: { severity: warning, service: celery }
+        annotations:
+          summary: "Celery beat 30 daqiqadan beri rejalashtirilgan taskni yubormagan"
+          description: "Har 1-10 daqiqada ishlaydigan beat tasklar kelmayapti — beat jarayoni o'lgan (RUN_CELERY_BEAT?) yoki broker uzilgan."
+          dashboard: weel-celery

@@ -1,0 +1,77 @@
+# SHABLON — __TELEGRAM_BOT_TOKEN__, __TELEGRAM_CHAT_ID__, __GRAFANA_DOMAIN__ ni
+# entrypoint.sh env'dan qo'yadi. Real qiymat bu faylga yozilmaydi.
+#
+# Oqim: Prometheus rules + Loki ruler  ->  Alertmanager  ->  Telegram
+#                                                        \->  alert-relay -> Claude Routine
+global:
+  resolve_timeout: 5m
+
+templates:
+  - /alertmanager/templates/*.tmpl
+
+route:
+  receiver: telegram
+  group_by: ['alertname', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # critical: tez Telegram + Claude tahlili
+    - matchers: [severity="critical"]
+      receiver: telegram-and-claude
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 1h
+    # warning: Telegram + Claude (relay o'zi 15 daqiqada 1 martadan oshirmaydi)
+    - matchers: [severity="warning"]
+      receiver: telegram-and-claude
+      repeat_interval: 4h
+    # info: faqat Telegram, kamdan-kam takror
+    - matchers: [severity="info"]
+      receiver: telegram
+      repeat_interval: 24h
+
+inhibit_rules:
+  # Backend butunlay yotgan bo'lsa — uning 5xx/latency/trafik simptomlari jim.
+  - source_matchers: [alertname="BackendDown"]
+    target_matchers: [service="weel-backend"]
+  - source_matchers: [alertname="BackendDown"]
+    target_matchers: [alertname=~"CeleryNoWorkers|CeleryQueueBacklog|BackendLogErrorSpike|BackendNoLogs"]
+  # Postgres/Redis yotgan bo'lsa — backend/celery/log alertlari sabab emas, oqibat.
+  - source_matchers: [alertname="PostgresDown"]
+    target_matchers: [service=~"weel-backend|celery|logs"]
+  - source_matchers: [alertname="RedisDown"]
+    target_matchers: [service=~"weel-backend|celery|logs"]
+  # Tashqi endpoint yotgan bo'lsa "sekin" degan ogohlantirish kerak emas.
+  - source_matchers: [alertname="EndpointDown"]
+    target_matchers: [alertname="EndpointSlow"]
+    equal: [instance]
+  # Host RAM to'lgan bo'lsa konteyner OOM alertlari takror.
+  - source_matchers: [alertname="HostHighMemory"]
+    target_matchers: [alertname="ContainerHighMemory"]
+  # Disk 24 soatda to'ladi (critical) — 85% ogohlantirishi ortiqcha.
+  - source_matchers: [alertname="HostDiskWillFillIn24h"]
+    target_matchers: [alertname="HostDiskFillingUp"]
+    equal: [mountpoint]
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: '__TELEGRAM_BOT_TOKEN__'
+        chat_id: __TELEGRAM_CHAT_ID__
+        parse_mode: HTML
+        message: '{{ template "telegram.weel" . }}'
+        send_resolved: true
+        disable_notifications: false
+
+  - name: telegram-and-claude
+    telegram_configs:
+      - bot_token: '__TELEGRAM_BOT_TOKEN__'
+        chat_id: __TELEGRAM_CHAT_ID__
+        parse_mode: HTML
+        message: '{{ template "telegram.weel" . }}'
+        send_resolved: true
+    webhook_configs:
+      - url: http://alert-relay:8080/alertmanager
+        send_resolved: false
+        max_alerts: 10

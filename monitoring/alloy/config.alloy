@@ -1,0 +1,210 @@
+// Grafana Alloy — barcha Docker konteynerlarining stdout/stderr'ini Loki'ga.
+//
+// Label'lar (har qatorda):
+//   container        — konteyner nomi (swarm suffiks olib tashlangan)
+//   service          — weel-backend | weel-b2b | boshqalar uchun compose service / swarm service nomi
+//   level            — backend JSON'dan (info/warning/error/...) yoki celery/uvicorn qatoridan
+//   logger           — backend: python logger nomi (core.request_tracing, frontend, celery.worker ...)
+//   app              — brauzer loglari: qaysi web ilova (weel-admin, dashboard_weel_uz, weel.uz, weel-b2b)
+// Structured metadata: trace_id, span_id, pathname, lineno, stream.
+
+logging {
+  level  = "warn"
+  format = "logfmt"
+}
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // "/name" -> "name"
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  // swarm: "app-x1y2.1.abcdef..." -> "app-x1y2"
+  rule {
+    source_labels = ["container"]
+    regex         = "([^.]+)\\.\\d+\\.[a-z0-9]+"
+    target_label  = "container"
+    replacement   = "$1"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_swarm_service_name"]
+    regex         = "(.+)"
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+  // Weel backend / b2b: nomi qanday bo'lmasin barqaror `service` label.
+  rule {
+    source_labels = ["container"]
+    regex         = coalesce(sys.env("BACKEND_CONTAINER_REGEX"), ".*weel[-_]?backend.*")
+    target_label  = "service"
+    replacement   = "weel-backend"
+  }
+  rule {
+    source_labels = ["container"]
+    regex         = coalesce(sys.env("B2B_CONTAINER_REGEX"), ".*weel[-_]?b2b.*")
+    target_label  = "service"
+    replacement   = "weel-b2b"
+  }
+  // Monitoring stack'ning o'z loglari: shovqinni kamaytirish uchun alohida label.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = ".*monitoring.*"
+    target_label  = "tier"
+    replacement   = "monitoring"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.containers.output
+  relabel_rules = discovery.relabel.containers.rules
+  refresh_interval = "5s"
+  forward_to    = [loki.process.weel.receiver]
+}
+
+loki.process "weel" {
+  forward_to = [loki.write.loki.receiver]
+
+  // Birinchi ishga tushganda Alloy konteynerlarning butun log tarixini o'qiydi;
+  // Loki 7 kundan eski qatorni baribir rad etadi (reject_old_samples_max_age).
+  stage.drop {
+    older_than          = "168h"
+    drop_counter_reason = "too_old"
+  }
+
+  // ── Weel backend ──
+  stage.match {
+    selector = "{service=\"weel-backend\"}"
+
+    // 1) JSON qatorlar (core.middleware.logging.UnicodeJsonFormatter):
+    //    asctime name levelname message pathname lineno [trace_id span_id app url user_id ...]
+    stage.match {
+      selector = "{service=\"weel-backend\"} |~ \"^\\\\s*\\\\{\""
+      stage.json {
+        expressions = {
+          level_raw = "levelname",
+          logger    = "name",
+          trace_id  = "trace_id",
+          span_id   = "span_id",
+          pathname  = "pathname",
+          lineno    = "lineno",
+          app       = "app",
+          ts        = "asctime",
+        }
+      }
+      stage.template {
+        source   = "level"
+        template = "{{ ToLower .level_raw }}"
+      }
+      stage.labels {
+        values = { level = "", logger = "", app = "" }
+      }
+      stage.structured_metadata {
+        values = { trace_id = "", span_id = "", pathname = "", lineno = "" }
+      }
+    }
+
+    // 2) Celery formatidagi qatorlar: "[2026-09-04 12:00:00,000: ERROR/MainProcess] ..."
+    stage.match {
+      selector = "{service=\"weel-backend\"} |~ \"^\\\\[\\\\d{4}-\\\\d{2}-\\\\d{2} [0-9:,]+: [A-Z]+/\""
+      stage.regex {
+        expression = "^\\[(?P<ts>[^:]+:[^:]+:[^:]+): (?P<level_raw>[A-Z]+)/(?P<process>[^\\]]+)\\] (?P<msg>.*)$"
+      }
+      stage.template {
+        source   = "level"
+        template = "{{ ToLower .level_raw }}"
+      }
+      stage.template {
+        source   = "logger"
+        template = "celery"
+      }
+      stage.labels {
+        values = { level = "", logger = "" }
+      }
+    }
+
+    // 3) uvicorn qatorlari: "INFO:     172.18.0.1:1234 - \"GET /health/ HTTP/1.1\" 200"
+    stage.match {
+      selector = "{service=\"weel-backend\"} |~ \"^(INFO|WARNING|ERROR|CRITICAL|DEBUG):\\\\s\""
+      stage.regex {
+        expression = "^(?P<level_raw>[A-Z]+):\\s+(?P<msg>.*)$"
+      }
+      stage.template {
+        source   = "level"
+        template = "{{ ToLower .level_raw }}"
+      }
+      stage.template {
+        source   = "logger"
+        template = "uvicorn"
+      }
+      stage.labels {
+        values = { level = "", logger = "" }
+      }
+    }
+
+    // 4) Python traceback qatorlari (ko'p qatorli) — level=error
+    stage.match {
+      selector = "{service=\"weel-backend\"} |~ \"^Traceback \\\\(most recent call last\\\\)\""
+      stage.static_labels {
+        values = { level = "error" }
+      }
+    }
+  }
+
+  // ── weel-b2b (server.mjs): "[client-log] {json}" ──
+  stage.match {
+    selector = "{service=\"weel-b2b\"} |~ \"^\\\\[client-log\\\\] \""
+    stage.regex {
+      expression = "^\\[client-log\\] (?P<payload>\\{.*\\})$"
+    }
+    stage.json {
+      source      = "payload"
+      expressions = { level_raw = "level", app = "app", scope = "scope" }
+    }
+    stage.template {
+      source   = "level"
+      template = "{{ if .level_raw }}{{ ToLower .level_raw }}{{ else }}info{{ end }}"
+    }
+    stage.template {
+      source   = "app"
+      template = "{{ if .app }}{{ .app }}{{ else }}weel-b2b{{ end }}"
+    }
+    stage.labels {
+      values = { level = "", app = "" }
+    }
+  }
+
+  // Har qanday konteyner: aniq level topilmagan bo'lsa ham `level` label
+  // bo'lishi uchun Loki'ning o'zi detected_level qo'yadi (discover_log_levels).
+
+  // Cardinality himoyasi: faqat ruxsat etilgan label'lar qoladi.
+  stage.label_keep {
+    values = ["container", "service", "compose_project", "tier", "level", "logger", "app"]
+  }
+}
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+    batch_wait = "1s"
+    batch_size = "1MiB"
+  }
+  external_labels = {
+    host = "dokploy",
+  }
+}

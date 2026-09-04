@@ -42,4 +42,10 @@ RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser
 
+# Dokploy/Swarm restarts the task when this fails, and cAdvisor exposes the
+# health state, so a hung uvicorn is noticed instead of answering nothing.
+# start-period covers migrations + create_*_tables at boot.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+  CMD curl -fsS http://localhost:8000/health/ || exit 1
+
 CMD ["/entrypoint.sh"]

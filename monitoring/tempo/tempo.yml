@@ -1,0 +1,75 @@
+# Tempo 2.x, single-binary, local storage. Trace'lar 14 kun.
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+stream_over_http_enabled: true   # Grafana TraceQL streaming
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 336h          # 14 kun
+
+querier:
+  max_concurrent_queries: 10
+
+query_frontend:
+  search:
+    duration_slo: 5s
+  trace_by_id:
+    duration_slo: 5s
+
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+    collection_interval: 15s
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+  traces_storage:
+    path: /var/tempo/generator/traces
+  processor:
+    service_graphs:
+      dimensions: [http.method]
+      enable_client_server_prefix: true
+    span_metrics:
+      dimensions: [http.method, http.status_code, http.route, db.system]
+      enable_target_info: true
+      histogram_buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+    pool:
+      max_workers: 50
+      queue_depth: 5000
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [service-graphs, span-metrics]
+    ingestion:
+      rate_limit_bytes: 20000000
+      burst_size_bytes: 30000000
+      max_traces_per_user: 20000
+
+usage_report:
+  reporting_enabled: false

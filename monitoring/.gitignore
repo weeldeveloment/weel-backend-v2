@@ -1,0 +1,8 @@
+# Real sirlar hech qachon commit qilinmaydi.
+.env
+.env.*
+!.env.example
+.mcp.json
+*.local.yml
+*.rendered.yml
+secrets/

@@ -1,0 +1,82 @@
+groups:
+  - name: monitoring-self
+    rules:
+      - alert: MonitoringTargetDown
+        expr: up{job!~"weel-backend|blackbox-http"} == 0
+        for: 5m
+        labels: { severity: warning, service: monitoring }
+        annotations:
+          summary: "Monitoring komponenti {{ $labels.job }} 5 daqiqadan beri down"
+          description: "Stack'ning bir qismi ishlamayapti — ko'r nuqta. docker compose ps / logs."
+
+      - alert: PrometheusRuleEvalFailing
+        expr: increase(prometheus_rule_evaluation_failures_total[10m]) > 0
+        for: 5m
+        labels: { severity: warning, service: monitoring }
+        annotations:
+          summary: "Prometheus alert qoidalarini hisoblay olmayapti"
+          description: "Rule fayl sintaksisi yoki metrika nomi. promtool check rules."
+
+      - alert: PrometheusTSDBNearRetentionSize
+        expr: prometheus_tsdb_storage_blocks_bytes > 0.9 * 8e9
+        for: 30m
+        labels: { severity: info, service: monitoring }
+        annotations:
+          summary: "Prometheus TSDB hajm limitiga yaqin"
+          description: "PROM_RETENTION_SIZE ni oshiring yoki retention'ni kamaytiring."
+
+      - alert: AlertmanagerNotificationFailing
+        expr: increase(alertmanager_notifications_failed_total[10m]) > 0
+        for: 5m
+        labels: { severity: critical, service: monitoring }
+        annotations:
+          summary: "Alertmanager {{ $labels.integration }} ga xabar yubora olmayapti"
+          description: "Telegram token/chat id yoki relay. Alertlar jimgina yo'qolmoqda!"
+
+      - alert: AlertRelayFailing
+        expr: increase(relay_fire_failed_total[30m]) > 0
+        for: 5m
+        labels: { severity: warning, service: monitoring }
+        annotations:
+          summary: "alert-relay Claude Routine'ni uyg'ota olmayapti"
+          description: "ROUTINE_FIRE_URL/TOKEN yoki beta header. docker compose logs alert-relay."
+
+      - alert: LokiIngestErrors
+        expr: sum(increase(loki_request_duration_seconds_count{route=~"loki_api_v1_push|/loki/api/v1/push", status_code=~"5.."}[10m])) > 0
+        for: 10m
+        labels: { severity: warning, service: monitoring }
+        annotations:
+          summary: "Loki log qabul qilishda 5xx qaytarmoqda"
+          description: "Loglar yo'qolmoqda — Loki disk/limits."
+
+      - alert: LokiDiscardedLines
+        expr: sum(increase(loki_discarded_samples_total[10m])) > 100
+        for: 10m
+        labels: { severity: warning, service: monitoring }
+        annotations:
+          summary: "Loki 10 daqiqada {{ $value | printf \"%.0f\" }} log qatorini rad etdi ({{ $labels.reason }})"
+          description: "rate limit / eski timestamp / label cardinality. loki.yml limits_config."
+
+      - alert: AlloyNotShipping
+        expr: sum(rate(loki_write_sent_entries_total[10m])) == 0 or absent(loki_write_sent_entries_total)
+        for: 15m
+        labels: { severity: warning, service: monitoring }
+        annotations:
+          summary: "Alloy 15 daqiqadan beri Loki'ga birorta log yubormadi"
+          description: "docker.sock ulanmagan yoki Loki qabul qilmayapti."
+
+      - alert: TempoNoTraces
+        expr: sum(rate(tempo_distributor_spans_received_total[15m])) == 0 and sum(rate(django_http_requests_total_by_view_transport_method_total[15m])) > 0.5
+        for: 30m
+        labels: { severity: info, service: monitoring }
+        annotations:
+          summary: "Backend trafik bor, lekin Tempo'ga 30 daqiqadan beri span kelmayapti"
+          description: "Backend'da OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318 o'rnatilganini tekshiring."
+
+      - alert: BackendScrapeSlow
+        expr: scrape_duration_seconds{job="weel-backend"} > 5
+        for: 10m
+        labels: { severity: info, service: monitoring }
+        annotations:
+          summary: "/metrics javobi {{ $value | printf \"%.1f\" }}s"
+          description: "Backend event-loop band yoki multiproc dir juda katta."

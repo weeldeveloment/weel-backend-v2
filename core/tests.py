@@ -53,3 +53,54 @@ class CacheMiddlewareTests(SimpleTestCase):
             payload["results"][0]["services"],
             [str(service_guid)],
         )
+
+
+class MetricsGuardMiddlewareTests(SimpleTestCase):
+    """core.middleware.metrics_guard — /metrics is internal-only once a token is set."""
+
+    def _get(self, path="/metrics", token="secret-token", **meta):
+        from django.test import override_settings
+
+        from core.middleware.metrics_guard import MetricsGuardMiddleware
+
+        with override_settings(PROMETHEUS_METRICS_TOKEN=token):
+            middleware = MetricsGuardMiddleware(lambda request: HttpResponse("ok"))
+        request = RequestFactory().get(path, **meta)
+        return middleware(request)
+
+    def test_open_when_no_token_configured(self):
+        response = self._get(token="", REMOTE_ADDR="8.8.8.8")
+        self.assertEqual(response.status_code, 200)
+
+    def test_public_caller_gets_404(self):
+        response = self._get(REMOTE_ADDR="8.8.8.8")
+        self.assertEqual(response.status_code, 404)
+
+    def test_private_scraper_allowed(self):
+        response = self._get(REMOTE_ADDR="172.18.0.7")
+        self.assertEqual(response.status_code, 200)
+
+    def test_bearer_token_allowed_from_anywhere(self):
+        response = self._get(
+            REMOTE_ADDR="8.8.8.8", HTTP_AUTHORIZATION="Bearer secret-token"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_wrong_bearer_token_rejected(self):
+        response = self._get(
+            REMOTE_ADDR="8.8.8.8", HTTP_AUTHORIZATION="Bearer nope"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_spoofed_forwarded_for_does_not_bypass(self):
+        # Traefik appends the real client last; a client-supplied private IP
+        # at the front of the list must not count.
+        response = self._get(
+            REMOTE_ADDR="172.18.0.2",
+            HTTP_X_FORWARDED_FOR="10.0.0.1, 8.8.8.8",
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_other_paths_untouched(self):
+        response = self._get(path="/health/", REMOTE_ADDR="8.8.8.8")
+        self.assertEqual(response.status_code, 200)

@@ -1,0 +1,74 @@
+groups:
+  - name: weel-postgres
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels: { severity: critical, service: postgres }
+        annotations:
+          summary: "PostgreSQL javob bermayapti"
+          description: "postgres-exporter DB ga ulana olmayapti. Butun platforma ta'sirlanadi. (Exporter DB_* env'i noto'g'ri bo'lsa ham shu alert chiqadi.)"
+          dashboard: weel-postgres
+
+      - alert: PostgresConnectionsHigh
+        expr: |
+          sum(pg_stat_activity_count) by (server)
+          /
+          on(server) group_left max(pg_settings_max_connections) by (server)
+          > 0.8
+        for: 5m
+        labels: { severity: warning, service: postgres }
+        annotations:
+          summary: "DB ulanishlari max_connections ning {{ $value | humanizePercentage }} i"
+          description: "Connection leak (idle in transaction) yoki uvicorn/celery replikalari × pool hajmi katta."
+          dashboard: weel-postgres
+
+      - alert: PostgresIdleInTransaction
+        expr: sum(pg_stat_activity_count{state="idle in transaction"}) > 10
+        for: 10m
+        labels: { severity: warning, service: postgres }
+        annotations:
+          summary: "{{ $value }} ta ulanish 'idle in transaction' holatida 10 daqiqadan beri"
+          description: "Ochiq tranzaksiyalar lock ushlab turadi va vacuum'ga xalaqit beradi."
+          dashboard: weel-postgres
+
+      - alert: PostgresLongRunningTransaction
+        expr: max(pg_stat_activity_max_tx_duration{state="active"}) > 300
+        for: 5m
+        labels: { severity: warning, service: postgres }
+        annotations:
+          summary: "5 daqiqadan uzoq tranzaksiya bor ({{ $value | humanizeDuration }})"
+          description: "Sekin so'rov yoki qotgan migratsiya. pg_stat_activity ni ko'ring."
+          dashboard: weel-postgres
+
+      - alert: PostgresDeadlocks
+        expr: increase(pg_stat_database_deadlocks{datname!~"template.*|postgres"}[10m]) > 0
+        for: 1m
+        labels: { severity: warning, service: postgres }
+        annotations:
+          summary: "{{ $labels.datname }} da {{ $value | printf \"%.0f\" }} deadlock (10 daqiqa)"
+          description: "Bir vaqtda qaysi endpoint ishlaganini Tempo/Loki'dan toping."
+          dashboard: weel-postgres
+
+      - alert: PostgresLowCacheHitRatio
+        expr: |
+          sum(rate(pg_stat_database_blks_hit{datname!~"template.*"}[10m]))
+          /
+          clamp_min(sum(rate(pg_stat_database_blks_hit{datname!~"template.*"}[10m]))
+                  + sum(rate(pg_stat_database_blks_read{datname!~"template.*"}[10m])), 1)
+          < 0.95
+        for: 30m
+        labels: { severity: info, service: postgres }
+        annotations:
+          summary: "DB cache hit ratio {{ $value | humanizePercentage }} (< 95%, 30 daqiqa)"
+          description: "Indeks yetishmasligi yoki shared_buffers kichik."
+          dashboard: weel-postgres
+
+      - alert: PostgresNoCommits
+        expr: sum(rate(pg_stat_database_xact_commit{datname!~"template.*|postgres"}[5m])) == 0
+        for: 15m
+        labels: { severity: warning, service: postgres }
+        annotations:
+          summary: "15 daqiqadan beri DB'da commit yo'q"
+          description: "Backend DB'ga yoza olmayapti yoki trafik butunlay to'xtagan (beat tasklar ham yozadi)."
+          dashboard: weel-postgres

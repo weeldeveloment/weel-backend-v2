@@ -1,0 +1,103 @@
+# Loki ruler (LogQL) alertlari. Tenant "fake" = auth_enabled:false dagi default.
+# Prometheus rule fayllari bilan bir xil sintaksis, faqat expr LogQL.
+groups:
+  - name: weel-logs
+    interval: 1m
+    rules:
+      - alert: BackendLogErrorSpike
+        expr: |
+          sum(count_over_time({service="weel-backend", level=~"error|critical"}[5m])) > 30
+        for: 5m
+        labels: { severity: warning, service: logs }
+        annotations:
+          summary: "Backend 5 daqiqada {{ $value | printf \"%.0f\" }} ta ERROR log yozdi"
+          description: "Loki: {service=\"weel-backend\", level=\"error\"} — logger va xabar bo'yicha guruhlang."
+          dashboard: weel-logs
+
+      - alert: BackendLogErrorStorm
+        expr: |
+          sum(count_over_time({service="weel-backend", level=~"error|critical"}[5m])) > 300
+        for: 2m
+        labels: { severity: critical, service: logs }
+        annotations:
+          summary: "Backend ERROR log bo'roni: 5 daqiqada {{ $value | printf \"%.0f\" }} ta"
+          description: "Deyarli har so'rov xato — deploy yoki tashqi xizmat (DB/Redis/Hotelios)."
+          dashboard: weel-logs
+
+      - alert: BackendNoLogs
+        expr: |
+          sum(count_over_time({service="weel-backend"}[15m])) == 0
+        for: 15m
+        labels: { severity: warning, service: logs }
+        annotations:
+          summary: "Backend 15 daqiqadan beri birorta log yozmadi"
+          description: "Konteyner qotgan yoki Alloy uni ko'rmayapti (BACKEND_CONTAINER_REGEX)."
+          dashboard: weel-logs
+
+      - alert: BackendTracebackBurst
+        expr: |
+          sum(count_over_time({service="weel-backend"} |= "Traceback (most recent call last)" [10m])) > 10
+        for: 5m
+        labels: { severity: warning, service: logs }
+        annotations:
+          summary: "10 daqiqada {{ $value | printf \"%.0f\" }} ta Python traceback"
+          description: "Ushlanmagan exception'lar. Tempo {status=error} bilan solishtiring."
+          dashboard: weel-logs
+
+      - alert: CeleryTaskErrorsInLogs
+        expr: |
+          sum(count_over_time({service="weel-backend", logger=~"celery.*"} |~ "(?i)task .* raised|ERROR/" [10m])) > 10
+        for: 5m
+        labels: { severity: warning, service: logs }
+        annotations:
+          summary: "Celery loglarida 10 daqiqada {{ $value | printf \"%.0f\" }} ta task xatosi"
+          description: "Qaysi task ekanini Celery dashboardidan ko'ring."
+          dashboard: weel-celery
+
+      - alert: FrontendErrorSpike
+        expr: |
+          sum by (app) (count_over_time({service="weel-backend", logger="frontend", level="error"}[10m])) > 50
+        for: 5m
+        labels: { severity: warning, service: logs }
+        annotations:
+          summary: "{{ $labels.app }} brauzer xatolari: 10 daqiqada {{ $value | printf \"%.0f\" }} ta"
+          description: "Frontend build/API kontrakti buzilgan bo'lishi mumkin. Frontend dashboard."
+          dashboard: weel-frontend
+
+      - alert: B2BFrontendErrorSpike
+        expr: |
+          sum(count_over_time({service="weel-b2b", level="error"}[10m])) > 50
+        for: 5m
+        labels: { severity: warning, service: logs }
+        annotations:
+          summary: "weel-b2b brauzer xatolari: 10 daqiqada {{ $value | printf \"%.0f\" }} ta"
+          description: "business.weel.uz foydalanuvchilarida JS xatolar ko'paydi."
+          dashboard: weel-frontend
+
+      - alert: OOMKilledInLogs
+        expr: |
+          sum(count_over_time({service=~"weel-backend|weel-b2b"} |~ "(?i)(MemoryError|Killed process|out of memory)" [10m])) > 0
+        for: 1m
+        labels: { severity: critical, service: logs }
+        annotations:
+          summary: "Loglarda xotira tugashi belgisi"
+          description: "MemoryError / OOM. Containers dashboardida xotira grafigini ko'ring."
+          dashboard: weel-containers
+
+      - alert: DbConnectionErrorsInLogs
+        expr: |
+          sum(count_over_time({service="weel-backend"} |~ "(?i)(OperationalError|could not connect to server|connection refused|too many connections)" [5m])) > 5
+        for: 3m
+        labels: { severity: critical, service: logs }
+        annotations:
+          summary: "Backend DB/Redis ga ulana olmayapti (5 daqiqada {{ $value | printf \"%.0f\" }} ta)"
+          description: "Postgres/Redis yotgan yoki ulanish limiti. Postgres dashboard."
+          dashboard: weel-postgres
+
+  - name: weel-logs-recording
+    interval: 1m
+    rules:
+      # Loglardan metrikalar (Prometheus'ga remote_write emas — Loki o'z ichida,
+      # Grafana'da Loki datasource orqali so'raladi).
+      - record: weel:log_lines:rate5m
+        expr: sum by (service, level) (rate({service=~"weel-backend|weel-b2b"}[5m]))
