@@ -506,6 +506,335 @@
    ],
    "type": "object"
   },
+  "AiConnect": {
+   "properties": {
+    "api_key": {
+     "maxLength": 400,
+     "minLength": 1,
+     "title": "Api key",
+     "type": "string"
+    }
+   },
+   "required": [
+    "api_key"
+   ],
+   "type": "object"
+  },
+  "AiConversation": {
+   "properties": {
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "last_message_at": {
+     "format": "date-time",
+     "title": "Last message at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "message_count": {
+     "title": "Message count",
+     "type": "integer"
+    },
+    "model": {
+     "minLength": 1,
+     "title": "Model",
+     "type": "string",
+     "x-nullable": true
+    },
+    "project_id": {
+     "title": "Project id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "project_name": {
+     "minLength": 1,
+     "title": "Project name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "source": {
+     "minLength": 1,
+     "title": "Source",
+     "type": "string"
+    },
+    "title": {
+     "minLength": 1,
+     "title": "Title",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "title",
+    "project_id",
+    "project_name",
+    "model",
+    "source",
+    "message_count",
+    "last_message_at",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "AiConversationDetail": {
+   "properties": {
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "last_message_at": {
+     "format": "date-time",
+     "title": "Last message at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "message_count": {
+     "title": "Message count",
+     "type": "integer"
+    },
+    "messages": {
+     "items": {
+      "$ref": "#/definitions/AiMessage"
+     },
+     "type": "array"
+    },
+    "model": {
+     "minLength": 1,
+     "title": "Model",
+     "type": "string",
+     "x-nullable": true
+    },
+    "project_id": {
+     "title": "Project id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "project_name": {
+     "minLength": 1,
+     "title": "Project name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "source": {
+     "minLength": 1,
+     "title": "Source",
+     "type": "string"
+    },
+    "title": {
+     "minLength": 1,
+     "title": "Title",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "title",
+    "project_id",
+    "project_name",
+    "model",
+    "source",
+    "message_count",
+    "last_message_at",
+    "created_at",
+    "messages"
+   ],
+   "type": "object"
+  },
+  "AiConversationList": {
+   "properties": {
+    "count": {
+     "title": "Count",
+     "type": "integer"
+    },
+    "results": {
+     "items": {
+      "$ref": "#/definitions/AiConversation"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results",
+    "count"
+   ],
+   "type": "object"
+  },
+  "AiImportResult": {
+   "properties": {
+    "chats_created": {
+     "title": "Chats created",
+     "type": "integer"
+    },
+    "chats_updated": {
+     "title": "Chats updated",
+     "type": "integer"
+    },
+    "integration": {
+     "$ref": "#/definitions/Integration"
+    },
+    "messages": {
+     "title": "Messages",
+     "type": "integer"
+    },
+    "projects": {
+     "title": "Projects",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "projects",
+    "chats_created",
+    "chats_updated",
+    "messages",
+    "integration"
+   ],
+   "type": "object"
+  },
+  "AiMessage": {
+   "properties": {
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "role": {
+     "minLength": 1,
+     "title": "Role",
+     "type": "string"
+    },
+    "sent_at": {
+     "format": "date-time",
+     "title": "Sent at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "text": {
+     "minLength": 1,
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "role",
+    "text",
+    "sent_at"
+   ],
+   "type": "object"
+  },
+  "AiModel": {
+   "properties": {
+    "model": {
+     "maxLength": 120,
+     "minLength": 1,
+     "title": "Model",
+     "type": "string"
+    }
+   },
+   "required": [
+    "model"
+   ],
+   "type": "object"
+  },
+  "AiNewConversation": {
+   "properties": {
+    "project_id": {
+     "title": "Project id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "title": {
+     "maxLength": 300,
+     "title": "Title",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "AiProject": {
+   "properties": {
+    "chat_count": {
+     "title": "Chat count",
+     "type": "integer"
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "description": {
+     "minLength": 1,
+     "title": "Description",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "instructions": {
+     "minLength": 1,
+     "title": "Instructions",
+     "type": "string",
+     "x-nullable": true
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "description",
+    "instructions",
+    "chat_count",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "AiProjectList": {
+   "properties": {
+    "results": {
+     "items": {
+      "$ref": "#/definitions/AiProject"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results"
+   ],
+   "type": "object"
+  },
+  "AiSend": {
+   "properties": {
+    "text": {
+     "maxLength": 100000,
+     "minLength": 1,
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "type": "object"
+  },
   "ApartmentAdminList": {
    "properties": {
     "apartment_number": {
@@ -3592,6 +3921,248 @@
    "type": "object",
    "x-nullable": true
   },
+  "Call": {
+   "properties": {
+    "answered_at": {
+     "format": "date-time",
+     "title": "Answered at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "customer_id": {
+     "title": "Customer id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "duration_seconds": {
+     "title": "Duration seconds",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "ended_at": {
+     "format": "date-time",
+     "title": "Ended at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "guest_link": {
+     "minLength": 1,
+     "title": "Guest link",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "lead_id": {
+     "title": "Lead id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "ring_timeout_seconds": {
+     "title": "Ring timeout seconds",
+     "type": "integer"
+    },
+    "room_name": {
+     "minLength": 1,
+     "title": "Room name",
+     "type": "string"
+    },
+    "server_url": {
+     "minLength": 1,
+     "title": "Server url",
+     "type": "string"
+    },
+    "source_module": {
+     "minLength": 1,
+     "title": "Source module",
+     "type": "string"
+    },
+    "started_at": {
+     "format": "date-time",
+     "title": "Started at",
+     "type": "string"
+    },
+    "status": {
+     "minLength": 1,
+     "title": "Status",
+     "type": "string"
+    },
+    "thread_id": {
+     "title": "Thread id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "token": {
+     "minLength": 1,
+     "title": "Token",
+     "type": "string",
+     "x-nullable": true
+    },
+    "token_expires_at": {
+     "format": "date-time",
+     "title": "Token expires at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "type": {
+     "minLength": 1,
+     "title": "Type",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "room_name",
+    "type",
+    "source_module",
+    "status",
+    "thread_id",
+    "lead_id",
+    "customer_id",
+    "started_at",
+    "answered_at",
+    "ended_at",
+    "duration_seconds",
+    "server_url",
+    "ring_timeout_seconds",
+    "token",
+    "token_expires_at",
+    "guest_link"
+   ],
+   "type": "object"
+  },
+  "CallCreate": {
+   "properties": {
+    "customer_id": {
+     "title": "Customer id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "lead_id": {
+     "title": "Lead id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "source_module": {
+     "default": "chat",
+     "enum": [
+      "chat",
+      "crm",
+      "sales"
+     ],
+     "title": "Source module",
+     "type": "string"
+    },
+    "target_employee_id": {
+     "title": "Target employee id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "thread_id": {
+     "title": "Thread id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "type": {
+     "default": "video",
+     "enum": [
+      "audio",
+      "video"
+     ],
+     "title": "Type",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "Cancel": {
+   "properties": {
+    "reason": {
+     "maxLength": 1000,
+     "minLength": 1,
+     "title": "Reason",
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "type": "object"
+  },
+  "Category": {
+   "properties": {
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "parent_id": {
+     "title": "Parent id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "position": {
+     "title": "Position",
+     "type": "integer"
+    },
+    "product_count": {
+     "title": "Product count",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "parent_id",
+    "position"
+   ],
+   "type": "object"
+  },
+  "CategoryPatch": {
+   "properties": {
+    "name": {
+     "maxLength": 200,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "parent_id": {
+     "title": "Parent id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "position": {
+     "title": "Position",
+     "type": "integer"
+    }
+   },
+   "type": "object"
+  },
+  "CategoryWrite": {
+   "properties": {
+    "name": {
+     "maxLength": 200,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "parent_id": {
+     "title": "Parent id",
+     "type": "integer",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "type": "object"
+  },
   "ChatGroup": {
    "properties": {
     "can_manage": {
@@ -3828,6 +4399,11 @@
      "title": "Is pinned",
      "type": "boolean"
     },
+    "kind": {
+     "minLength": 1,
+     "title": "Kind",
+     "type": "string"
+    },
     "last_message": {
      "$ref": "#/definitions/WorkspaceChatMessage"
     },
@@ -4044,6 +4620,58 @@
    },
    "required": [
     "phone_number"
+   ],
+   "type": "object"
+  },
+  "Component": {
+   "properties": {
+    "component_id": {
+     "title": "Component id",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    },
+    "sku": {
+     "minLength": 1,
+     "title": "Sku",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unit": {
+     "minLength": 1,
+     "title": "Unit",
+     "type": "string"
+    }
+   },
+   "required": [
+    "component_id",
+    "quantity"
+   ],
+   "type": "object"
+  },
+  "ComponentWrite": {
+   "properties": {
+    "component_id": {
+     "title": "Component id",
+     "type": "integer"
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    }
+   },
+   "required": [
+    "component_id",
+    "quantity"
    ],
    "type": "object"
   },
@@ -5624,6 +6252,31 @@
    ],
    "type": "object"
   },
+  "DailyPoint": {
+   "properties": {
+    "day": {
+     "format": "date",
+     "title": "Day",
+     "type": "string"
+    },
+    "purchases": {
+     "format": "decimal",
+     "title": "Purchases",
+     "type": "string"
+    },
+    "revenue": {
+     "format": "decimal",
+     "title": "Revenue",
+     "type": "string"
+    }
+   },
+   "required": [
+    "day",
+    "revenue",
+    "purchases"
+   ],
+   "type": "object"
+  },
   "DashboardSummary": {
    "properties": {
     "active_employees": {
@@ -5747,6 +6400,16 @@
     "arrival_airport",
     "date"
    ],
+   "type": "object"
+  },
+  "Discuss": {
+   "properties": {
+    "question": {
+     "maxLength": 4000,
+     "title": "Question",
+     "type": "string"
+    }
+   },
    "type": "object"
   },
   "DistrictList": {
@@ -5893,6 +6556,265 @@
     "created_at",
     "updated_at"
    ],
+   "type": "object"
+  },
+  "DocumentItem": {
+   "properties": {
+    "counted_quantity": {
+     "format": "decimal",
+     "title": "Counted quantity",
+     "type": "string",
+     "x-nullable": true
+    },
+    "difference": {
+     "format": "decimal",
+     "title": "Difference",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "lead_item_id": {
+     "title": "Lead item id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "new_price": {
+     "format": "decimal",
+     "title": "New price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "new_wholesale": {
+     "format": "decimal",
+     "title": "New wholesale",
+     "type": "string",
+     "x-nullable": true
+    },
+    "old_price": {
+     "format": "decimal",
+     "title": "Old price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "old_wholesale": {
+     "format": "decimal",
+     "title": "Old wholesale",
+     "type": "string",
+     "x-nullable": true
+    },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer"
+    },
+    "product_kind": {
+     "minLength": 1,
+     "title": "Product kind",
+     "type": "string"
+    },
+    "product_name": {
+     "minLength": 1,
+     "title": "Product name",
+     "type": "string"
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    },
+    "sku": {
+     "minLength": 1,
+     "title": "Sku",
+     "type": "string",
+     "x-nullable": true
+    },
+    "system_quantity": {
+     "format": "decimal",
+     "title": "System quantity",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unit": {
+     "minLength": 1,
+     "title": "Unit",
+     "type": "string"
+    },
+    "unit_cost": {
+     "format": "decimal",
+     "title": "Unit cost",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "product_id",
+    "quantity",
+    "system_quantity",
+    "counted_quantity",
+    "unit_cost",
+    "old_price",
+    "new_price",
+    "old_wholesale",
+    "new_wholesale",
+    "lead_item_id"
+   ],
+   "type": "object"
+  },
+  "DocumentItemWrite": {
+   "properties": {
+    "counted_quantity": {
+     "format": "decimal",
+     "title": "Counted quantity",
+     "type": "string",
+     "x-nullable": true
+    },
+    "new_price": {
+     "format": "decimal",
+     "title": "New price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "new_wholesale": {
+     "format": "decimal",
+     "title": "New wholesale",
+     "type": "string",
+     "x-nullable": true
+    },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer"
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unit_cost": {
+     "format": "decimal",
+     "title": "Unit cost",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "product_id"
+   ],
+   "type": "object"
+  },
+  "DocumentList": {
+   "properties": {
+    "results": {
+     "items": {
+      "$ref": "#/definitions/InventoryDocument"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results"
+   ],
+   "type": "object"
+  },
+  "DocumentPatch": {
+   "properties": {
+    "confirm": {
+     "default": false,
+     "title": "Confirm",
+     "type": "boolean"
+    },
+    "currency": {
+     "maxLength": 3,
+     "title": "Currency",
+     "type": "string"
+    },
+    "customer_id": {
+     "title": "Customer id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "doc_date": {
+     "format": "date",
+     "title": "Doc date",
+     "type": "string",
+     "x-nullable": true
+    },
+    "external_number": {
+     "maxLength": 100,
+     "title": "External number",
+     "type": "string",
+     "x-nullable": true
+    },
+    "extra_costs": {
+     "format": "decimal",
+     "title": "Extra costs",
+     "type": "string"
+    },
+    "file_id": {
+     "title": "File id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "idempotency_key": {
+     "maxLength": 80,
+     "title": "Idempotency key",
+     "type": "string",
+     "x-nullable": true
+    },
+    "items": {
+     "items": {
+      "$ref": "#/definitions/DocumentItemWrite"
+     },
+     "type": "array"
+    },
+    "kind": {
+     "enum": [
+      "receipt",
+      "transfer",
+      "inventory",
+      "write_off",
+      "revaluation",
+      "sale",
+      "return"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "lead_id": {
+     "title": "Lead id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "note": {
+     "maxLength": 2000,
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "reason": {
+     "maxLength": 30,
+     "title": "Reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "supplier_id": {
+     "title": "Supplier id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "to_warehouse_id": {
+     "title": "To warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    }
+   },
    "type": "object"
   },
   "DocumentRecipient": {
@@ -6087,6 +7009,109 @@
     "created_at",
     "updated_at",
     "recipients"
+   ],
+   "type": "object"
+  },
+  "DocumentWrite": {
+   "properties": {
+    "confirm": {
+     "default": false,
+     "title": "Confirm",
+     "type": "boolean"
+    },
+    "currency": {
+     "maxLength": 3,
+     "title": "Currency",
+     "type": "string"
+    },
+    "customer_id": {
+     "title": "Customer id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "doc_date": {
+     "format": "date",
+     "title": "Doc date",
+     "type": "string",
+     "x-nullable": true
+    },
+    "external_number": {
+     "maxLength": 100,
+     "title": "External number",
+     "type": "string",
+     "x-nullable": true
+    },
+    "extra_costs": {
+     "format": "decimal",
+     "title": "Extra costs",
+     "type": "string"
+    },
+    "file_id": {
+     "title": "File id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "idempotency_key": {
+     "maxLength": 80,
+     "title": "Idempotency key",
+     "type": "string",
+     "x-nullable": true
+    },
+    "items": {
+     "items": {
+      "$ref": "#/definitions/DocumentItemWrite"
+     },
+     "type": "array"
+    },
+    "kind": {
+     "enum": [
+      "receipt",
+      "transfer",
+      "inventory",
+      "write_off",
+      "revaluation",
+      "sale",
+      "return"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "lead_id": {
+     "title": "Lead id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "note": {
+     "maxLength": 2000,
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "reason": {
+     "maxLength": 30,
+     "title": "Reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "supplier_id": {
+     "title": "Supplier id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "to_warehouse_id": {
+     "title": "To warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "kind",
+    "items"
    ],
    "type": "object"
   },
@@ -6531,6 +7556,24 @@
     "title",
     "starts_at",
     "ends_at"
+   ],
+   "type": "object"
+  },
+  "Generate": {
+   "properties": {
+    "period": {
+     "enum": [
+      "day",
+      "week",
+      "month",
+      "year"
+     ],
+     "title": "Period",
+     "type": "string"
+    }
+   },
+   "required": [
+    "period"
    ],
    "type": "object"
   },
@@ -7012,6 +8055,131 @@
    ],
    "type": "object"
   },
+  "ImportCommit": {
+   "properties": {
+    "rows": {
+     "items": {
+      "$ref": "#/definitions/ImportRow"
+     },
+     "type": "array"
+    },
+    "update_existing": {
+     "default": true,
+     "title": "Update existing",
+     "type": "boolean"
+    },
+    "update_fields": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "rows"
+   ],
+   "type": "object"
+  },
+  "ImportRow": {
+   "properties": {
+    "action": {
+     "minLength": 1,
+     "title": "Action",
+     "type": "string"
+    },
+    "barcode": {
+     "title": "Barcode",
+     "type": "string",
+     "x-nullable": true
+    },
+    "brand": {
+     "title": "Brand",
+     "type": "string",
+     "x-nullable": true
+    },
+    "category": {
+     "title": "Category",
+     "type": "string",
+     "x-nullable": true
+    },
+    "description": {
+     "title": "Description",
+     "type": "string",
+     "x-nullable": true
+    },
+    "initial_quantity": {
+     "format": "decimal",
+     "title": "Initial quantity",
+     "type": "string",
+     "x-nullable": true
+    },
+    "kind": {
+     "minLength": 1,
+     "title": "Kind",
+     "type": "string",
+     "x-nullable": true
+    },
+    "line": {
+     "title": "Line",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "min_stock": {
+     "format": "decimal",
+     "title": "Min stock",
+     "type": "string",
+     "x-nullable": true
+    },
+    "name": {
+     "title": "Name",
+     "type": "string"
+    },
+    "purchase_price": {
+     "format": "decimal",
+     "title": "Purchase price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "sale_price": {
+     "format": "decimal",
+     "title": "Sale price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "sku": {
+     "title": "Sku",
+     "type": "string",
+     "x-nullable": true
+    },
+    "supplier": {
+     "title": "Supplier",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unit": {
+     "title": "Unit",
+     "type": "string",
+     "x-nullable": true
+    },
+    "warehouse": {
+     "title": "Warehouse",
+     "type": "string",
+     "x-nullable": true
+    },
+    "wholesale_price": {
+     "format": "decimal",
+     "title": "Wholesale price",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "action",
+    "name"
+   ],
+   "type": "object"
+  },
   "Integration": {
    "properties": {
     "account_name": {
@@ -7019,6 +8187,11 @@
      "title": "Account name",
      "type": "string",
      "x-nullable": true
+    },
+    "ai": {
+     "readOnly": true,
+     "title": "Ai",
+     "type": "string"
     },
     "available": {
      "description": "Whether the server is configured for this provider at all.",
@@ -7175,6 +8348,405 @@
     "lead_count",
     "last_lead_at",
     "last_error"
+   ],
+   "type": "object"
+  },
+  "InventoryDocument": {
+   "properties": {
+    "author_id": {
+     "title": "Author id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "author_name": {
+     "minLength": 1,
+     "title": "Author name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "cancel_reason": {
+     "minLength": 1,
+     "title": "Cancel reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "cancelled_at": {
+     "format": "date-time",
+     "title": "Cancelled at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "cancelled_by_name": {
+     "minLength": 1,
+     "title": "Cancelled by name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "confirmed_at": {
+     "format": "date-time",
+     "title": "Confirmed at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "confirmed_by_name": {
+     "minLength": 1,
+     "title": "Confirmed by name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "currency": {
+     "minLength": 1,
+     "title": "Currency",
+     "type": "string"
+    },
+    "customer_id": {
+     "title": "Customer id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "customer_name": {
+     "minLength": 1,
+     "title": "Customer name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "doc_date": {
+     "format": "date",
+     "title": "Doc date",
+     "type": "string",
+     "x-nullable": true
+    },
+    "external_number": {
+     "minLength": 1,
+     "title": "External number",
+     "type": "string",
+     "x-nullable": true
+    },
+    "extra_costs": {
+     "format": "decimal",
+     "title": "Extra costs",
+     "type": "string"
+    },
+    "file_id": {
+     "title": "File id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "items": {
+     "items": {
+      "$ref": "#/definitions/DocumentItem"
+     },
+     "type": "array"
+    },
+    "kind": {
+     "enum": [
+      "receipt",
+      "transfer",
+      "inventory",
+      "write_off",
+      "revaluation",
+      "sale",
+      "return"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "kind_label": {
+     "minLength": 1,
+     "title": "Kind label",
+     "type": "string"
+    },
+    "lead_id": {
+     "title": "Lead id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "line_count": {
+     "title": "Line count",
+     "type": "integer"
+    },
+    "note": {
+     "minLength": 1,
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "number": {
+     "minLength": 1,
+     "title": "Number",
+     "type": "string",
+     "x-nullable": true
+    },
+    "quantity_total": {
+     "format": "decimal",
+     "title": "Quantity total",
+     "type": "string"
+    },
+    "reason": {
+     "minLength": 1,
+     "title": "Reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "received_at": {
+     "format": "date-time",
+     "title": "Received at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "reversal_of": {
+     "title": "Reversal of",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "reversal_of_number": {
+     "minLength": 1,
+     "title": "Reversal of number",
+     "type": "string",
+     "x-nullable": true
+    },
+    "sent_at": {
+     "format": "date-time",
+     "title": "Sent at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "status": {
+     "enum": [
+      "draft",
+      "sent",
+      "pending",
+      "confirmed",
+      "cancelled"
+     ],
+     "title": "Status",
+     "type": "string"
+    },
+    "supplier_id": {
+     "title": "Supplier id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "supplier_name": {
+     "minLength": 1,
+     "title": "Supplier name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "to_warehouse_id": {
+     "title": "To warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "to_warehouse_name": {
+     "minLength": 1,
+     "title": "To warehouse name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "total": {
+     "format": "decimal",
+     "title": "Total",
+     "type": "string",
+     "x-nullable": true
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "warehouse_name": {
+     "minLength": 1,
+     "title": "Warehouse name",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "kind",
+    "number",
+    "status",
+    "warehouse_id",
+    "to_warehouse_id",
+    "supplier_id",
+    "customer_id",
+    "lead_id",
+    "currency",
+    "extra_costs",
+    "reason",
+    "note",
+    "doc_date",
+    "external_number",
+    "file_id",
+    "reversal_of",
+    "cancel_reason",
+    "author_id",
+    "confirmed_at",
+    "sent_at",
+    "received_at",
+    "cancelled_at",
+    "line_count",
+    "total",
+    "quantity_total",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "InventorySummary": {
+   "properties": {
+    "adjusted_qty": {
+     "format": "decimal",
+     "title": "Adjusted qty",
+     "type": "string"
+    },
+    "adjustment_count": {
+     "title": "Adjustment count",
+     "type": "integer"
+    },
+    "cogs": {
+     "format": "decimal",
+     "title": "Cogs",
+     "type": "string",
+     "x-nullable": true
+    },
+    "daily": {
+     "items": {
+      "$ref": "#/definitions/DailyPoint"
+     },
+     "type": "array"
+    },
+    "date_from": {
+     "format": "date-time",
+     "title": "Date from",
+     "type": "string"
+    },
+    "date_to": {
+     "format": "date-time",
+     "title": "Date to",
+     "type": "string"
+    },
+    "low_stock_count": {
+     "title": "Low stock count",
+     "type": "integer"
+    },
+    "out_of_stock_count": {
+     "title": "Out of stock count",
+     "type": "integer"
+    },
+    "product_count": {
+     "title": "Product count",
+     "type": "integer"
+    },
+    "profit": {
+     "format": "decimal",
+     "title": "Profit",
+     "type": "string",
+     "x-nullable": true
+    },
+    "purchases": {
+     "format": "decimal",
+     "title": "Purchases",
+     "type": "string",
+     "x-nullable": true
+    },
+    "quantity_total": {
+     "format": "decimal",
+     "title": "Quantity total",
+     "type": "string"
+    },
+    "received_qty": {
+     "format": "decimal",
+     "title": "Received qty",
+     "type": "string"
+    },
+    "retail_value": {
+     "format": "decimal",
+     "title": "Retail value",
+     "type": "string"
+    },
+    "returned_qty": {
+     "format": "decimal",
+     "title": "Returned qty",
+     "type": "string"
+    },
+    "revenue": {
+     "format": "decimal",
+     "title": "Revenue",
+     "type": "string"
+    },
+    "sale_count": {
+     "title": "Sale count",
+     "type": "integer"
+    },
+    "sold_qty": {
+     "format": "decimal",
+     "title": "Sold qty",
+     "type": "string"
+    },
+    "stock_value": {
+     "format": "decimal",
+     "title": "Stock value",
+     "type": "string",
+     "x-nullable": true
+    },
+    "top_products": {
+     "items": {
+      "$ref": "#/definitions/TopProduct"
+     },
+     "type": "array"
+    },
+    "turnover_ratio": {
+     "format": "decimal",
+     "title": "Turnover ratio",
+     "type": "string",
+     "x-nullable": true
+    },
+    "write_offs": {
+     "format": "decimal",
+     "title": "Write offs",
+     "type": "string",
+     "x-nullable": true
+    },
+    "written_off_qty": {
+     "format": "decimal",
+     "title": "Written off qty",
+     "type": "string"
+    }
+   },
+   "required": [
+    "date_from",
+    "date_to",
+    "product_count",
+    "quantity_total",
+    "stock_value",
+    "retail_value",
+    "low_stock_count",
+    "out_of_stock_count",
+    "sale_count",
+    "sold_qty",
+    "revenue",
+    "cogs",
+    "profit",
+    "received_qty",
+    "purchases",
+    "written_off_qty",
+    "write_offs",
+    "returned_qty",
+    "adjusted_qty",
+    "adjustment_count",
+    "turnover_ratio",
+    "daily",
+    "top_products"
    ],
    "type": "object"
   },
@@ -7948,9 +9520,24 @@
      "title": "Position",
      "type": "integer"
     },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "qty": {
+     "format": "decimal",
+     "title": "Qty",
+     "type": "string"
+    },
     "unit": {
      "title": "Unit",
      "type": "string"
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer",
+     "x-nullable": true
     }
    },
    "required": [
@@ -7975,10 +9562,26 @@
      "title": "Name",
      "type": "string"
     },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "qty": {
+     "format": "decimal",
+     "title": "Qty",
+     "type": "string",
+     "x-nullable": true
+    },
     "unit": {
      "maxLength": 100,
      "title": "Unit",
      "type": "string"
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer",
+     "x-nullable": true
     }
    },
    "required": [
@@ -8072,6 +9675,12 @@
     "due_date": {
      "format": "date-time",
      "title": "Due date",
+     "type": "string",
+     "x-nullable": true
+    },
+    "idempotency_key": {
+     "maxLength": 80,
+     "title": "Idempotency key",
      "type": "string",
      "x-nullable": true
     },
@@ -8955,7 +10564,8 @@
     "webhook_url",
     "verify_token"
    ],
-   "type": "object"
+   "type": "object",
+   "x-nullable": true
   },
   "MonthlySpendingChartPoint": {
    "properties": {
@@ -9043,6 +10653,259 @@
      "type": "integer"
     }
    },
+   "type": "object"
+  },
+  "Movement": {
+   "properties": {
+    "author_id": {
+     "title": "Author id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "author_name": {
+     "minLength": 1,
+     "title": "Author name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "cost_price": {
+     "format": "decimal",
+     "title": "Cost price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "currency": {
+     "minLength": 1,
+     "title": "Currency",
+     "type": "string"
+    },
+    "customer_name": {
+     "minLength": 1,
+     "title": "Customer name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "document_id": {
+     "title": "Document id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "document_kind": {
+     "minLength": 1,
+     "title": "Document kind",
+     "type": "string",
+     "x-nullable": true
+    },
+    "document_number": {
+     "minLength": 1,
+     "title": "Document number",
+     "type": "string",
+     "x-nullable": true
+    },
+    "document_reason": {
+     "minLength": 1,
+     "title": "Document reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "kind": {
+     "enum": [
+      "receipt",
+      "sale",
+      "write_off",
+      "transfer",
+      "adjustment",
+      "return"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "lead_id": {
+     "title": "Lead id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "note": {
+     "minLength": 1,
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer"
+    },
+    "product_name": {
+     "minLength": 1,
+     "title": "Product name",
+     "type": "string"
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    },
+    "reversal_of": {
+     "title": "Reversal of",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "sku": {
+     "minLength": 1,
+     "title": "Sku",
+     "type": "string",
+     "x-nullable": true
+    },
+    "supplier_name": {
+     "minLength": 1,
+     "title": "Supplier name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "to_warehouse_id": {
+     "title": "To warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "to_warehouse_name": {
+     "minLength": 1,
+     "title": "To warehouse name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unit": {
+     "minLength": 1,
+     "title": "Unit",
+     "type": "string"
+    },
+    "unit_cost": {
+     "format": "decimal",
+     "title": "Unit cost",
+     "type": "string"
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer"
+    },
+    "warehouse_name": {
+     "minLength": 1,
+     "title": "Warehouse name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "kind",
+    "product_id",
+    "warehouse_id",
+    "to_warehouse_id",
+    "quantity",
+    "unit_cost",
+    "cost_price",
+    "note",
+    "lead_id",
+    "author_id",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "MovementList": {
+   "properties": {
+    "results": {
+     "items": {
+      "$ref": "#/definitions/Movement"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results"
+   ],
+   "type": "object"
+  },
+  "MovementWrite": {
+   "properties": {
+    "idempotency_key": {
+     "maxLength": 80,
+     "title": "Idempotency key",
+     "type": "string",
+     "x-nullable": true
+    },
+    "kind": {
+     "enum": [
+      "receipt",
+      "sale",
+      "write_off",
+      "transfer",
+      "adjustment",
+      "return"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "note": {
+     "maxLength": 1000,
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer"
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    },
+    "reason": {
+     "enum": [
+      "defect",
+      "loss",
+      "damage",
+      "internal_use",
+      "other"
+     ],
+     "title": "Reason",
+     "type": "string",
+     "x-nullable": true
+    },
+    "supplier_id": {
+     "title": "Supplier id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "to_warehouse_id": {
+     "title": "To warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "unit_cost": {
+     "format": "decimal",
+     "title": "Unit cost",
+     "type": "string",
+     "x-nullable": true
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "kind",
+    "product_id",
+    "quantity"
+   ],
    "type": "object"
   },
   "Note": {
@@ -9823,6 +11686,603 @@
     "guid",
     "title",
     "district"
+   ],
+   "type": "object"
+  },
+  "PriceHistory": {
+   "properties": {
+    "author_id": {
+     "title": "Author id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "author_name": {
+     "minLength": 1,
+     "title": "Author name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "document_id": {
+     "title": "Document id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "document_number": {
+     "minLength": 1,
+     "title": "Document number",
+     "type": "string",
+     "x-nullable": true
+    },
+    "field": {
+     "minLength": 1,
+     "title": "Field",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "new_price": {
+     "format": "decimal",
+     "title": "New price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "old_price": {
+     "format": "decimal",
+     "title": "Old price",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "field",
+    "old_price",
+    "new_price",
+    "author_id",
+    "document_id",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "Product": {
+   "properties": {
+    "allow_free_price": {
+     "title": "Allow free price",
+     "type": "boolean"
+    },
+    "attributes": {
+     "additionalProperties": {
+      "type": "string",
+      "x-nullable": true
+     },
+     "title": "Attributes",
+     "type": "object"
+    },
+    "available": {
+     "format": "decimal",
+     "title": "Available",
+     "type": "string"
+    },
+    "barcode": {
+     "minLength": 1,
+     "title": "Barcode",
+     "type": "string",
+     "x-nullable": true
+    },
+    "brand": {
+     "minLength": 1,
+     "title": "Brand",
+     "type": "string",
+     "x-nullable": true
+    },
+    "category_id": {
+     "title": "Category id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "category_name": {
+     "minLength": 1,
+     "title": "Category name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "components": {
+     "items": {
+      "$ref": "#/definitions/Component"
+     },
+     "type": "array"
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "currency": {
+     "minLength": 1,
+     "title": "Currency",
+     "type": "string"
+    },
+    "description": {
+     "minLength": 1,
+     "title": "Description",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "is_low": {
+     "title": "Is low",
+     "type": "boolean"
+    },
+    "is_out": {
+     "title": "Is out",
+     "type": "boolean"
+    },
+    "kind": {
+     "enum": [
+      "product",
+      "service",
+      "bundle"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "markup_percent": {
+     "format": "decimal",
+     "title": "Markup percent",
+     "type": "string",
+     "x-nullable": true
+    },
+    "min_stock": {
+     "format": "decimal",
+     "title": "Min stock",
+     "type": "string"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "parent_id": {
+     "title": "Parent id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "parent_name": {
+     "minLength": 1,
+     "title": "Parent name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "photo_url": {
+     "minLength": 1,
+     "title": "Photo url",
+     "type": "string",
+     "x-nullable": true
+    },
+    "purchase_price": {
+     "format": "decimal",
+     "title": "Purchase price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "reserved": {
+     "format": "decimal",
+     "title": "Reserved",
+     "type": "string"
+    },
+    "sale_price": {
+     "format": "decimal",
+     "title": "Sale price",
+     "type": "string"
+    },
+    "sku": {
+     "minLength": 1,
+     "title": "Sku",
+     "type": "string",
+     "x-nullable": true
+    },
+    "stock_status": {
+     "minLength": 1,
+     "title": "Stock status",
+     "type": "string"
+    },
+    "stock_total": {
+     "format": "decimal",
+     "title": "Stock total",
+     "type": "string"
+    },
+    "stock_value": {
+     "format": "decimal",
+     "title": "Stock value",
+     "type": "string",
+     "x-nullable": true
+    },
+    "stocks": {
+     "items": {
+      "$ref": "#/definitions/StockLine"
+     },
+     "type": "array"
+    },
+    "supplier_id": {
+     "title": "Supplier id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "supplier_name": {
+     "minLength": 1,
+     "title": "Supplier name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unit": {
+     "minLength": 1,
+     "title": "Unit",
+     "type": "string"
+    },
+    "updated_at": {
+     "format": "date-time",
+     "title": "Updated at",
+     "type": "string"
+    },
+    "variant_count": {
+     "title": "Variant count",
+     "type": "integer"
+    },
+    "variant_label": {
+     "minLength": 1,
+     "title": "Variant label",
+     "type": "string",
+     "x-nullable": true
+    },
+    "wholesale_price": {
+     "format": "decimal",
+     "title": "Wholesale price",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "kind",
+    "name",
+    "category_id",
+    "sku",
+    "barcode",
+    "unit",
+    "purchase_price",
+    "sale_price",
+    "min_stock",
+    "description",
+    "is_active",
+    "stock_total",
+    "reserved",
+    "available",
+    "stock_value",
+    "is_low",
+    "is_out",
+    "stock_status",
+    "stocks",
+    "created_at",
+    "updated_at"
+   ],
+   "type": "object"
+  },
+  "ProductList": {
+   "properties": {
+    "brands": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "results": {
+     "items": {
+      "$ref": "#/definitions/Product"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results"
+   ],
+   "type": "object"
+  },
+  "ProductPatch": {
+   "properties": {
+    "allow_free_price": {
+     "title": "Allow free price",
+     "type": "boolean"
+    },
+    "attributes": {
+     "additionalProperties": {
+      "type": "string",
+      "x-nullable": true
+     },
+     "title": "Attributes",
+     "type": "object",
+     "x-nullable": true
+    },
+    "barcode": {
+     "maxLength": 100,
+     "title": "Barcode",
+     "type": "string",
+     "x-nullable": true
+    },
+    "brand": {
+     "maxLength": 200,
+     "title": "Brand",
+     "type": "string",
+     "x-nullable": true
+    },
+    "category_id": {
+     "title": "Category id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "components": {
+     "items": {
+      "$ref": "#/definitions/ComponentWrite"
+     },
+     "type": "array"
+    },
+    "currency": {
+     "maxLength": 3,
+     "title": "Currency",
+     "type": "string"
+    },
+    "description": {
+     "title": "Description",
+     "type": "string",
+     "x-nullable": true
+    },
+    "generate_barcode": {
+     "title": "Generate barcode",
+     "type": "boolean"
+    },
+    "generate_sku": {
+     "title": "Generate sku",
+     "type": "boolean"
+    },
+    "initial_quantity": {
+     "format": "decimal",
+     "title": "Initial quantity",
+     "type": "string",
+     "x-nullable": true
+    },
+    "initial_warehouse_id": {
+     "title": "Initial warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "kind": {
+     "enum": [
+      "product",
+      "service",
+      "bundle"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "markup_percent": {
+     "format": "decimal",
+     "title": "Markup percent",
+     "type": "string",
+     "x-nullable": true
+    },
+    "min_stock": {
+     "format": "decimal",
+     "title": "Min stock",
+     "type": "string"
+    },
+    "name": {
+     "maxLength": 300,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "parent_id": {
+     "title": "Parent id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "purchase_price": {
+     "format": "decimal",
+     "title": "Purchase price",
+     "type": "string"
+    },
+    "sale_price": {
+     "format": "decimal",
+     "title": "Sale price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "sku": {
+     "maxLength": 100,
+     "title": "Sku",
+     "type": "string",
+     "x-nullable": true
+    },
+    "supplier_id": {
+     "title": "Supplier id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "unit": {
+     "maxLength": 30,
+     "title": "Unit",
+     "type": "string"
+    },
+    "variant_label": {
+     "maxLength": 200,
+     "title": "Variant label",
+     "type": "string",
+     "x-nullable": true
+    },
+    "wholesale_price": {
+     "format": "decimal",
+     "title": "Wholesale price",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "ProductWrite": {
+   "properties": {
+    "allow_free_price": {
+     "title": "Allow free price",
+     "type": "boolean"
+    },
+    "attributes": {
+     "additionalProperties": {
+      "type": "string",
+      "x-nullable": true
+     },
+     "title": "Attributes",
+     "type": "object",
+     "x-nullable": true
+    },
+    "barcode": {
+     "maxLength": 100,
+     "title": "Barcode",
+     "type": "string",
+     "x-nullable": true
+    },
+    "brand": {
+     "maxLength": 200,
+     "title": "Brand",
+     "type": "string",
+     "x-nullable": true
+    },
+    "category_id": {
+     "title": "Category id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "components": {
+     "items": {
+      "$ref": "#/definitions/ComponentWrite"
+     },
+     "type": "array"
+    },
+    "currency": {
+     "maxLength": 3,
+     "title": "Currency",
+     "type": "string"
+    },
+    "description": {
+     "title": "Description",
+     "type": "string",
+     "x-nullable": true
+    },
+    "generate_barcode": {
+     "title": "Generate barcode",
+     "type": "boolean"
+    },
+    "generate_sku": {
+     "title": "Generate sku",
+     "type": "boolean"
+    },
+    "initial_quantity": {
+     "format": "decimal",
+     "title": "Initial quantity",
+     "type": "string",
+     "x-nullable": true
+    },
+    "initial_warehouse_id": {
+     "title": "Initial warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "kind": {
+     "enum": [
+      "product",
+      "service",
+      "bundle"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "markup_percent": {
+     "format": "decimal",
+     "title": "Markup percent",
+     "type": "string",
+     "x-nullable": true
+    },
+    "min_stock": {
+     "format": "decimal",
+     "title": "Min stock",
+     "type": "string"
+    },
+    "name": {
+     "maxLength": 300,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "parent_id": {
+     "title": "Parent id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "purchase_price": {
+     "format": "decimal",
+     "title": "Purchase price",
+     "type": "string"
+    },
+    "sale_price": {
+     "format": "decimal",
+     "title": "Sale price",
+     "type": "string",
+     "x-nullable": true
+    },
+    "sku": {
+     "maxLength": 100,
+     "title": "Sku",
+     "type": "string",
+     "x-nullable": true
+    },
+    "supplier_id": {
+     "title": "Supplier id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "unit": {
+     "maxLength": 30,
+     "title": "Unit",
+     "type": "string"
+    },
+    "variant_label": {
+     "maxLength": 200,
+     "title": "Variant label",
+     "type": "string",
+     "x-nullable": true
+    },
+    "wholesale_price": {
+     "format": "decimal",
+     "title": "Wholesale price",
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
    ],
    "type": "object"
   },
@@ -11123,6 +13583,61 @@
    ],
    "type": "object"
   },
+  "Settings": {
+   "properties": {
+    "allow_backorder": {
+     "title": "Allow backorder",
+     "type": "boolean"
+    },
+    "base_currency": {
+     "minLength": 1,
+     "title": "Base currency",
+     "type": "string"
+    },
+    "sku_prefix": {
+     "minLength": 1,
+     "title": "Sku prefix",
+     "type": "string"
+    },
+    "write_off_alert": {
+     "format": "decimal",
+     "title": "Write off alert",
+     "type": "string"
+    }
+   },
+   "required": [
+    "allow_backorder",
+    "base_currency",
+    "sku_prefix",
+    "write_off_alert"
+   ],
+   "type": "object"
+  },
+  "SettingsWrite": {
+   "properties": {
+    "allow_backorder": {
+     "title": "Allow backorder",
+     "type": "boolean"
+    },
+    "base_currency": {
+     "maxLength": 3,
+     "minLength": 1,
+     "title": "Base currency",
+     "type": "string"
+    },
+    "sku_prefix": {
+     "maxLength": 10,
+     "title": "Sku prefix",
+     "type": "string"
+    },
+    "write_off_alert": {
+     "format": "decimal",
+     "title": "Write off alert",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
   "StatisticsChartPoint": {
    "properties": {
     "date": {
@@ -11199,6 +13714,85 @@
     "period",
     "periods",
     "by_department"
+   ],
+   "type": "object"
+  },
+  "StockChange": {
+   "properties": {
+    "after": {
+     "format": "decimal",
+     "title": "After",
+     "type": "string"
+    },
+    "before": {
+     "format": "decimal",
+     "title": "Before",
+     "type": "string"
+    },
+    "change": {
+     "format": "decimal",
+     "title": "Change",
+     "type": "string"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer"
+    },
+    "unit": {
+     "minLength": 1,
+     "title": "Unit",
+     "type": "string",
+     "x-nullable": true
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer"
+    },
+    "warehouse_name": {
+     "minLength": 1,
+     "title": "Warehouse name",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "product_id",
+    "name",
+    "unit",
+    "warehouse_id",
+    "warehouse_name",
+    "before",
+    "after",
+    "change"
+   ],
+   "type": "object"
+  },
+  "StockLine": {
+   "properties": {
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer"
+    },
+    "warehouse_name": {
+     "minLength": 1,
+     "title": "Warehouse name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "warehouse_id",
+    "warehouse_name",
+    "quantity"
    ],
    "type": "object"
   },
@@ -11371,6 +13965,178 @@
     "id",
     "title",
     "is_done"
+   ],
+   "type": "object"
+  },
+  "Supplier": {
+   "properties": {
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "email": {
+     "minLength": 1,
+     "title": "Email",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "kind": {
+     "minLength": 1,
+     "title": "Kind",
+     "type": "string"
+    },
+    "last_receipt_at": {
+     "format": "date-time",
+     "title": "Last receipt at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "note": {
+     "minLength": 1,
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "phone": {
+     "minLength": 1,
+     "title": "Phone",
+     "type": "string",
+     "x-nullable": true
+    },
+    "product_count": {
+     "title": "Product count",
+     "type": "integer"
+    },
+    "purchases": {
+     "format": "decimal",
+     "title": "Purchases",
+     "type": "string",
+     "x-nullable": true
+    },
+    "receipt_count": {
+     "title": "Receipt count",
+     "type": "integer"
+    },
+    "requisites": {
+     "minLength": 1,
+     "title": "Requisites",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "kind",
+    "phone",
+    "email",
+    "requisites",
+    "note",
+    "is_active",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "SupplierPatch": {
+   "properties": {
+    "email": {
+     "maxLength": 254,
+     "title": "Email",
+     "type": "string",
+     "x-nullable": true
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "kind": {
+     "enum": [
+      "company",
+      "person"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "name": {
+     "maxLength": 300,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "note": {
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "phone": {
+     "maxLength": 40,
+     "title": "Phone",
+     "type": "string",
+     "x-nullable": true
+    },
+    "requisites": {
+     "title": "Requisites",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "type": "object"
+  },
+  "SupplierWrite": {
+   "properties": {
+    "email": {
+     "maxLength": 254,
+     "title": "Email",
+     "type": "string",
+     "x-nullable": true
+    },
+    "kind": {
+     "enum": [
+      "company",
+      "person"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "name": {
+     "maxLength": 300,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "note": {
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "phone": {
+     "maxLength": 40,
+     "title": "Phone",
+     "type": "string",
+     "x-nullable": true
+    },
+    "requisites": {
+     "title": "Requisites",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "name"
    ],
    "type": "object"
   },
@@ -12253,6 +15019,49 @@
    },
    "type": "object"
   },
+  "TopProduct": {
+   "properties": {
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer"
+    },
+    "profit": {
+     "format": "decimal",
+     "title": "Profit",
+     "type": "string",
+     "x-nullable": true
+    },
+    "revenue": {
+     "format": "decimal",
+     "title": "Revenue",
+     "type": "string"
+    },
+    "sold_qty": {
+     "format": "decimal",
+     "title": "Sold qty",
+     "type": "string"
+    },
+    "unit": {
+     "minLength": 1,
+     "title": "Unit",
+     "type": "string"
+    }
+   },
+   "required": [
+    "product_id",
+    "name",
+    "unit",
+    "sold_qty",
+    "revenue",
+    "profit"
+   ],
+   "type": "object"
+  },
   "Transaction": {
    "properties": {
     "amount": {
@@ -12749,6 +15558,108 @@
    },
    "required": [
     "username"
+   ],
+   "type": "object"
+  },
+  "Warehouse": {
+   "properties": {
+    "address": {
+     "minLength": 1,
+     "title": "Address",
+     "type": "string",
+     "x-nullable": true
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "is_default": {
+     "title": "Is default",
+     "type": "boolean"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "product_count": {
+     "title": "Product count",
+     "type": "integer"
+    },
+    "quantity_total": {
+     "format": "decimal",
+     "title": "Quantity total",
+     "type": "string"
+    },
+    "stock_value": {
+     "format": "decimal",
+     "title": "Stock value",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "name",
+    "is_default",
+    "is_active",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "WarehousePatch": {
+   "properties": {
+    "address": {
+     "title": "Address",
+     "type": "string",
+     "x-nullable": true
+    },
+    "is_active": {
+     "title": "Is active",
+     "type": "boolean"
+    },
+    "is_default": {
+     "title": "Is default",
+     "type": "boolean"
+    },
+    "name": {
+     "maxLength": 200,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "WarehouseWrite": {
+   "properties": {
+    "address": {
+     "title": "Address",
+     "type": "string",
+     "x-nullable": true
+    },
+    "is_default": {
+     "title": "Is default",
+     "type": "boolean"
+    },
+    "name": {
+     "maxLength": 200,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
    ],
    "type": "object"
   },
@@ -16758,6 +19669,160 @@
     ]
    }
   },
+  "/b2b/workspace/analyst/": {
+   "get": {
+    "description": "GET /analyst/ — the button: whether Weel AI runs here, how many reports\nare unread, and the latest one.",
+    "operationId": "b2b_workspace_analyst_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Weel AI status",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/analyst/reports/": {
+   "get": {
+    "description": "GET  /analyst/reports/?period=&limit= — newest first.\nPOST /analyst/reports/ {period} — write one now.",
+    "operationId": "b2b_workspace_analyst_reports_list",
+    "parameters": [
+     {
+      "enum": [
+       "day",
+       "week",
+       "month",
+       "year"
+      ],
+      "in": "query",
+      "name": "period",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Weel AI reports",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET  /analyst/reports/?period=&limit= — newest first.\nPOST /analyst/reports/ {period} — write one now.",
+    "operationId": "b2b_workspace_analyst_reports_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Generate"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Generate"
+      }
+     }
+    },
+    "summary": "Write a Weel AI report now",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/analyst/reports/{report_id}/": {
+   "get": {
+    "description": "GET /analyst/reports/<id>/ — the report, in both languages.",
+    "operationId": "b2b_workspace_analyst_reports_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "One Weel AI report",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "report_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/analyst/reports/{report_id}/discuss/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "report_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /analyst/reports/<id>/discuss/ — hand the report to the assistant.\n\nThe two AIs working together: Weel AI found it, the connected assistant\nexplains how to fix it. The report goes into the caller's assistant chat\nas a card, their question under it, and the assistant's answer comes\nback — and the chat is then where the conversation carries on.",
+    "operationId": "b2b_workspace_analyst_reports_discuss_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Discuss"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Discuss"
+      }
+     }
+    },
+    "summary": "Ask the assistant about a report",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/analyst/seen/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /analyst/seen/ — the reader opened the list; the dot goes.",
+    "operationId": "b2b_workspace_analyst_seen_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Mark Weel AI reports seen",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/app-version/": {
    "get": {
     "description": "GET /api/b2b/workspace/app-version/ — may this build still run?\n\nThe one endpoint in the workspace API that answers before there is a",
@@ -16809,6 +19874,80 @@
     ]
    },
    "parameters": []
+  },
+  "/b2b/workspace/assistant/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/assistant/ — the row on the chat list: whether\nan assistant is connected, and the last thing said in the chat.",
+    "operationId": "b2b_workspace_assistant_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "The AI assistant's row",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/assistant/messages/": {
+   "delete": {
+    "description": "GET    /assistant/messages/ — the whole chat.\nPOST   /assistant/messages/ — say something and get the answer.\nDELETE /assistant/messages/ — start over.",
+    "operationId": "b2b_workspace_assistant_messages_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Clear the assistant chat",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "GET    /assistant/messages/ — the whole chat.\nPOST   /assistant/messages/ — say something and get the answer.\nDELETE /assistant/messages/ — start over.",
+    "operationId": "b2b_workspace_assistant_messages_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "The assistant chat",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET    /assistant/messages/ — the whole chat.\nPOST   /assistant/messages/ — say something and get the answer.\nDELETE /assistant/messages/ — start over.",
+    "operationId": "b2b_workspace_assistant_messages_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AiSend"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AiSend"
+      }
+     }
+    },
+    "summary": "Ask the assistant",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/attendance/": {
    "get": {
@@ -17159,6 +20298,247 @@
      "B2B / Workspace (mobile)"
     ]
    }
+  },
+  "/b2b/workspace/calls/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /calls/ — start a call and ring the other side.",
+    "operationId": "b2b_workspace_calls_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/CallCreate"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Call"
+      }
+     },
+     "409": {
+      "description": "Busy"
+     },
+     "503": {
+      "description": "Jitsi not configured"
+     }
+    },
+    "summary": "Start a video/audio call (Jitsi room + JWT)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/calls/history/": {
+   "get": {
+    "description": "GET /calls/history/?thread_id= | lead_id= | customer_id= — newest first.\nWith no filter, the caller's own calls.",
+    "operationId": "b2b_workspace_calls_history_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "thread_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "lead_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "customer_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "before_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/Call"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/calls/incoming/": {
+   "get": {
+    "description": "Asked on every app resume. A push can be dropped and a socket can be\ndown; this is the third path, and the one that cannot be missed.",
+    "operationId": "b2b_workspace_calls_incoming_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Call"
+      }
+     },
+     "204": {
+      "description": "Nothing ringing"
+     }
+    },
+    "summary": "GET /calls/incoming/ — the call ringing at me right now, if any.",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/calls/{call_id}/": {
+   "get": {
+    "description": "GET /calls/<id>/ — where the call stands now. The phone polls this\nwhen its socket is down, and on resume for a ring it may have missed.",
+    "operationId": "b2b_workspace_calls_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Call"
+      }
+     }
+    },
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "call_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/calls/{call_id}/accept/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "call_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_calls_accept_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Call"
+      }
+     },
+     "409": {
+      "description": "Already settled"
+     }
+    },
+    "summary": "Accept an incoming call — returns this side's JWT",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/calls/{call_id}/decline/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "call_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_calls_decline_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Call"
+      }
+     }
+    },
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/calls/{call_id}/end/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "call_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_calls_end_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Call"
+      }
+     }
+    },
+    "summary": "Hang up (cancels a call that is still ringing)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/calls/{call_id}/token/": {
+   "get": {
+    "description": "GET /calls/<id>/token/ — a fresh JWT for a call still in progress.",
+    "operationId": "b2b_workspace_calls_token_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Call"
+      }
+     }
+    },
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "call_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
   },
   "/b2b/workspace/chats/": {
    "get": {
@@ -18605,6 +21985,1611 @@
     ]
    }
   },
+  "/b2b/workspace/integrations/{provider}/": {
+   "delete": {
+    "description": "GET    /integrations/<provider>/ — where the connection stands.\nPOST   /integrations/<provider>/ — connect with an API key.\nPATCH  /integrations/<provider>/ — pick the model.\nDELETE /integrations/<provider>/ — forget the key.",
+    "operationId": "b2b_workspace_integrations_delete",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Integration"
+      }
+     }
+    },
+    "summary": "Disconnect",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "GET    /integrations/<provider>/ — where the connection stands.\nPOST   /integrations/<provider>/ — connect with an API key.\nPATCH  /integrations/<provider>/ — pick the model.\nDELETE /integrations/<provider>/ — forget the key.",
+    "operationId": "b2b_workspace_integrations_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Integration"
+      }
+     }
+    },
+    "summary": "The AI connection",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "provider",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "GET    /integrations/<provider>/ — where the connection stands.\nPOST   /integrations/<provider>/ — connect with an API key.\nPATCH  /integrations/<provider>/ — pick the model.\nDELETE /integrations/<provider>/ — forget the key.",
+    "operationId": "b2b_workspace_integrations_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AiModel"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Integration"
+      }
+     }
+    },
+    "summary": "Pick the model",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "post": {
+    "description": "GET    /integrations/<provider>/ — where the connection stands.\nPOST   /integrations/<provider>/ — connect with an API key.\nPATCH  /integrations/<provider>/ — pick the model.\nDELETE /integrations/<provider>/ — forget the key.",
+    "operationId": "b2b_workspace_integrations_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AiConnect"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Integration"
+      }
+     },
+     "400": {
+      "description": "The vendor did not accept the key"
+     },
+     "503": {
+      "description": "The server cannot store a key"
+     }
+    },
+    "summary": "Connect Claude or ChatGPT with an API key",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/integrations/{provider}/conversations/": {
+   "get": {
+    "description": "GET  /integrations/<provider>/conversations/?project=&q=&limit=&offset=\nPOST /integrations/<provider>/conversations/ — start a chat here.",
+    "operationId": "b2b_workspace_integrations_conversations_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "project",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AiConversationList"
+      }
+     }
+    },
+    "summary": "The chats",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "provider",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "GET  /integrations/<provider>/conversations/?project=&q=&limit=&offset=\nPOST /integrations/<provider>/conversations/ — start a chat here.",
+    "operationId": "b2b_workspace_integrations_conversations_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AiNewConversation"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AiConversationDetail"
+      }
+     }
+    },
+    "summary": "Start a chat",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/integrations/{provider}/conversations/{conversation_id}/": {
+   "delete": {
+    "description": "GET    /integrations/<provider>/conversations/<id>/ — with its turns.\nDELETE /integrations/<provider>/conversations/<id>/",
+    "operationId": "b2b_workspace_integrations_conversations_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": "Deleted"
+     }
+    },
+    "summary": "Delete a chat",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "GET    /integrations/<provider>/conversations/<id>/ — with its turns.\nDELETE /integrations/<provider>/conversations/<id>/",
+    "operationId": "b2b_workspace_integrations_conversations_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AiConversationDetail"
+      }
+     }
+    },
+    "summary": "One chat, with its messages",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "provider",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "conversation_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/integrations/{provider}/conversations/{conversation_id}/messages/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "provider",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "conversation_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /integrations/<provider>/conversations/<id>/messages/ — say\nsomething and get the assistant's answer.\n\nBoth turns are stored before the answer is returned, the person's first:\na vendor that times out must not lose what they typed, and the app can\nre-read the chat and see the question waiting.",
+    "operationId": "b2b_workspace_integrations_conversations_messages_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AiSend"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AiConversationDetail"
+      }
+     }
+    },
+    "summary": "Send a message",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/integrations/{provider}/import/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "provider",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "consumes": [
+     "multipart/form-data",
+     "application/x-www-form-urlencoded"
+    ],
+    "description": "POST /integrations/<provider>/import/ — the vendor's data export.",
+    "operationId": "b2b_workspace_integrations_import_create",
+    "parameters": [
+     {
+      "in": "formData",
+      "name": "file",
+      "required": true,
+      "type": "file"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AiImportResult"
+      }
+     }
+    },
+    "summary": "Import a Claude / ChatGPT data export",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/integrations/{provider}/projects/": {
+   "get": {
+    "description": "GET /integrations/<provider>/projects/",
+    "operationId": "b2b_workspace_integrations_projects_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AiProjectList"
+      }
+     }
+    },
+    "summary": "The assistant's projects",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "provider",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/inventory/categories/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_categories_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/Category"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "List product categories",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_categories_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/CategoryWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Category"
+      }
+     }
+    },
+    "summary": "Create a product category (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/categories/{category_id}/": {
+   "delete": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_categories_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Delete a product category",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "category_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_categories_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/CategoryPatch"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Category"
+      }
+     }
+    },
+    "summary": "Edit a product category",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/documents/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_list",
+    "parameters": [
+     {
+      "enum": [
+       "receipt",
+       "transfer",
+       "inventory",
+       "write_off",
+       "revaluation",
+       "sale",
+       "return"
+      ],
+      "in": "query",
+      "name": "kind",
+      "type": "string"
+     },
+     {
+      "enum": [
+       "draft",
+       "sent",
+       "pending",
+       "confirmed",
+       "cancelled"
+      ],
+      "in": "query",
+      "name": "status",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "warehouse_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "supplier_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "customer_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "lead_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "from",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "to",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/DocumentList"
+      }
+     }
+    },
+    "summary": "List stock documents",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/DocumentWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InventoryDocument"
+      }
+     }
+    },
+    "summary": "File a stock document (and confirm it)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/documents/pending/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_pending_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/DocumentList"
+      }
+     }
+    },
+    "summary": "Sales waiting for stock (backorders)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/inventory/documents/{document_id}/": {
+   "delete": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Delete a draft document",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InventoryDocument"
+      }
+     }
+    },
+    "summary": "A stock document with its lines",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "document_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/DocumentPatch"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InventoryDocument"
+      }
+     }
+    },
+    "summary": "Edit a draft document",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/documents/{document_id}/cancel/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "document_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_cancel_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Cancel"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InventoryDocument"
+      }
+     }
+    },
+    "summary": "Cancel (storno) a document, with a reason",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/documents/{document_id}/confirm/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "document_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_confirm_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InventoryDocument"
+      }
+     },
+     "409": {
+      "description": "Insufficient stock, with `shortages`"
+     }
+    },
+    "summary": "Confirm a document — apply it to the ledger",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/documents/{document_id}/preview/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_preview_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/StockChange"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "What confirming would do to each balance",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "document_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/inventory/documents/{document_id}/receive/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "document_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_receive_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InventoryDocument"
+      }
+     }
+    },
+    "summary": "Receive a sent transfer",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/documents/{document_id}/send/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "document_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_documents_send_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InventoryDocument"
+      }
+     }
+    },
+    "summary": "Send a transfer (stock leaves the source)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/export/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_export_list",
+    "parameters": [
+     {
+      "enum": [
+       "catalog",
+       "stock",
+       "movements"
+      ],
+      "in": "query",
+      "name": "what",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "from",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "to",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Export the catalogue, balances or ledger as XLSX",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/inventory/generate/": {
+   "get": {
+    "description": "GET /inventory/generate/?what=sku|barcode — a fresh article or barcode.",
+    "operationId": "b2b_workspace_inventory_generate_list",
+    "parameters": [
+     {
+      "enum": [
+       "sku",
+       "barcode"
+      ],
+      "in": "query",
+      "name": "what",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Generate an article or barcode",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/inventory/import/commit/": {
+   "parameters": [],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_import_commit_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/ImportCommit"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/ImportCommit"
+      }
+     }
+    },
+    "summary": "Write the rows a preview produced",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/import/preview/": {
+   "parameters": [],
+   "post": {
+    "consumes": [
+     "multipart/form-data",
+     "application/x-www-form-urlencoded"
+    ],
+    "description": "",
+    "operationId": "b2b_workspace_inventory_import_preview_create",
+    "parameters": [],
+    "responses": {
+     "201": {
+      "description": ""
+     }
+    },
+    "summary": "Read an XLSX and say what importing it would do",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/movements/": {
+   "get": {
+    "description": "GET  /inventory/movements/ — the ledger, newest first.\nPOST /inventory/movements/ — one line booked straight away, as a\ndocument of the matching kind that is confirmed in the same breath.",
+    "operationId": "b2b_workspace_inventory_movements_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "product_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "warehouse_id",
+      "type": "integer"
+     },
+     {
+      "enum": [
+       "receipt",
+       "sale",
+       "write_off",
+       "transfer",
+       "adjustment",
+       "return"
+      ],
+      "in": "query",
+      "name": "kind",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "category_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "supplier_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "customer_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "author_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "document_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     },
+     {
+      "description": "ISO date or datetime, inclusive",
+      "in": "query",
+      "name": "from",
+      "type": "string"
+     },
+     {
+      "description": "ISO date (whole day) or datetime, exclusive",
+      "in": "query",
+      "name": "to",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MovementList"
+      }
+     }
+    },
+    "summary": "List stock movements",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET  /inventory/movements/ — the ledger, newest first.\nPOST /inventory/movements/ — one line booked straight away, as a\ndocument of the matching kind that is confirmed in the same breath.",
+    "operationId": "b2b_workspace_inventory_movements_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MovementWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InventoryDocument"
+      }
+     }
+    },
+    "summary": "Book a one-line stock operation",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/products/": {
+   "get": {
+    "description": "GET  /inventory/products/ — the catalogue with stock per warehouse.\nPOST /inventory/products/ — add to it (manage).",
+    "operationId": "b2b_workspace_inventory_products_list",
+    "parameters": [
+     {
+      "description": "Name, article, barcode or brand",
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "category_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "supplier_id",
+      "type": "integer"
+     },
+     {
+      "description": "Only products with stock in this warehouse",
+      "in": "query",
+      "name": "warehouse_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "brand",
+      "type": "string"
+     },
+     {
+      "enum": [
+       "product",
+       "service",
+       "bundle"
+      ],
+      "in": "query",
+      "name": "kind",
+      "type": "string"
+     },
+     {
+      "enum": [
+       "active",
+       "inactive",
+       "low",
+       "zero",
+       "archived"
+      ],
+      "in": "query",
+      "name": "status",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "price_min",
+      "type": "number"
+     },
+     {
+      "in": "query",
+      "name": "price_max",
+      "type": "number"
+     },
+     {
+      "in": "query",
+      "name": "low_stock",
+      "type": "boolean"
+     },
+     {
+      "description": "Archived products only",
+      "in": "query",
+      "name": "all",
+      "type": "boolean"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/ProductList"
+      }
+     }
+    },
+    "summary": "List products with stock",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET  /inventory/products/ — the catalogue with stock per warehouse.\nPOST /inventory/products/ — add to it (manage).",
+    "operationId": "b2b_workspace_inventory_products_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/ProductWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Product"
+      }
+     }
+    },
+    "summary": "Create a product (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/products/{product_id}/": {
+   "delete": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_products_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Archive a product (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_products_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Product"
+      }
+     }
+    },
+    "summary": "Product with stock, components and variants",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "product_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_products_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/ProductPatch"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Product"
+      }
+     }
+    },
+    "summary": "Edit a product (manage; prices need reprice)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/products/{product_id}/movements/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_products_movements_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MovementList"
+      }
+     }
+    },
+    "summary": "One product's stock history",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "product_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/inventory/products/{product_id}/photo/": {
+   "delete": {
+    "consumes": [
+     "multipart/form-data",
+     "application/x-www-form-urlencoded"
+    ],
+    "description": "",
+    "operationId": "b2b_workspace_inventory_products_photo_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Remove a product's photo (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "product_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "consumes": [
+     "multipart/form-data",
+     "application/x-www-form-urlencoded"
+    ],
+    "description": "",
+    "operationId": "b2b_workspace_inventory_products_photo_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Product"
+      }
+     }
+    },
+    "summary": "Set a product's photo (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/products/{product_id}/prices/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_products_prices_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/PriceHistory"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "One product's price history",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "product_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/inventory/settings/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_settings_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Settings"
+      }
+     }
+    },
+    "summary": "Stock-room settings",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "patch": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_settings_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/SettingsWrite"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Settings"
+      }
+     }
+    },
+    "summary": "Change stock-room settings (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/summary/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_summary_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "from",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "to",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/InventorySummary"
+      }
+     }
+    },
+    "summary": "Stock value and turnover for a period",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/inventory/suppliers/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_suppliers_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "all",
+      "type": "boolean"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/Supplier"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "List suppliers",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_suppliers_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/SupplierWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Supplier"
+      }
+     }
+    },
+    "summary": "Create a supplier (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/suppliers/{supplier_id}/": {
+   "delete": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_suppliers_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Archive a supplier (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_suppliers_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Supplier"
+      }
+     }
+    },
+    "summary": "Supplier with purchase history",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "supplier_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_suppliers_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/SupplierPatch"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Supplier"
+      }
+     }
+    },
+    "summary": "Edit a supplier (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/warehouses/": {
+   "get": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_warehouses_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "all",
+      "type": "boolean"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/Warehouse"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "List warehouses",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_warehouses_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/WarehouseWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Warehouse"
+      }
+     }
+    },
+    "summary": "Create a warehouse (manage)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/warehouses/{warehouse_id}/": {
+   "delete": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_warehouses_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Close a warehouse",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "warehouse_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_warehouses_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/WarehousePatch"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Warehouse"
+      }
+     }
+    },
+    "summary": "Edit a warehouse",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/invites/": {
    "get": {
     "description": "GET/POST /api/b2b/workspace/invites/",
@@ -18674,7 +23659,7 @@
   },
   "/b2b/workspace/join-requests/": {
    "get": {
-    "description": "GET /api/b2b/workspace/join-requests/ — who is asking to be let in.\n\nWhoever runs the workspace: the owner, an administrator, or a manager.\nDeliberately wider than `EMPLOYEE_INVITE`, which is what separates an\nadministrator from a manager and gates *asking another workspace to lend\nsomebody* — a commitment about who is allowed in that is not this. Somebody\nknocking at the door is the day-to-day of running a workspace, and a\nrequest only the owner can answer sits unanswered for as long as the owner\nis away.",
+    "description": "GET /api/b2b/workspace/join-requests/ — who is asking to be let in.\n\nGated on `EMPLOYEE_INVITE`, the permission to let somebody in. TZ v2 §11\ngives \"invite members\" and \"accept join requests\" the same answer on\nevery row — the owner and the administrator, a manager only \"in their own\nworkspace, when permitted\", nobody below — so they are one permission\nrather than two that would have to be kept in step. The same permission\npicks who is told when a request arrives, see\n`access_repository.list_employee_invite_recipients`.",
     "operationId": "b2b_workspace_join-requests_list",
     "parameters": [],
     "responses": {
@@ -18705,7 +23690,7 @@
     }
    ],
    "post": {
-    "description": "POST /api/b2b/workspace/join-requests/<id>/<accept|decline>/\n\nSame audience as the list — see [WorkspaceJoinRequestListView]. What\nstanding the person is let in with is chosen per request; changing a role\nafterwards is a different act and still needs `EMPLOYEE_CHANGE_ROLE`.",
+    "description": "POST /api/b2b/workspace/join-requests/<id>/<accept|decline>/\n\nSame audience as the list — see [WorkspaceJoinRequestListView]. What\nstanding the person is let in with is chosen per request; changing a role\nafterwards is a different act and still needs `EMPLOYEE_CHANGE_ROLE`.\n\nTZ v2 §5.2 names the three answers — accept as asked, decline, or change\nthe modules and then accept — and two rules on accepting: a role is\nalways assigned, and it may not exceed the acceptor's own.",
     "operationId": "b2b_workspace_join-requests_create",
     "parameters": [
      {
