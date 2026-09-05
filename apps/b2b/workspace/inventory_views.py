@@ -614,6 +614,11 @@ class WorkspaceWarehouseListCreateView(_InventoryView):
         responses={200: WarehouseSerializer(many=True)},
     )
     def get(self, request):
+        # A company that has never filed a document has no warehouse yet, and
+        # every sheet that asks "which warehouse?" opened on an empty list.
+        # The default is made here, on the first read, so the list is never
+        # empty — the same row a won lead would have created on its own.
+        inventory.default_warehouse(request.user.company_id)
         rows = inventory.list_warehouses(request.user.company_id, include_inactive=_flag(request, "all"))
         return Response(_hide_costs(rows, request))
 

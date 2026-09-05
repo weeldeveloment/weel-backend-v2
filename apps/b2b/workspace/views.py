@@ -947,6 +947,21 @@ def _may_touch_completed(user) -> bool:
     return Role.clean(user.role) in Role.ADMINISTRATIVE
 
 
+def _task_reactions(rows: list | None, viewer_id: int) -> list[dict]:
+    """The raw (person, emoji) rows grouped per emoji, in first-seen order,
+    with whether the reader is among them — what a pill under the task needs."""
+    grouped: dict[str, dict] = {}
+    for row in rows or ():
+        entry = grouped.setdefault(
+            row["emoji"], {"emoji": row["emoji"], "count": 0, "employee_ids": [], "mine": False}
+        )
+        entry["count"] += 1
+        entry["employee_ids"].append(row["employee_id"])
+        if row["employee_id"] == viewer_id:
+            entry["mine"] = True
+    return list(grouped.values())
+
+
 def _task_payload(task: dict, user) -> dict:
     """Adds the per-task permission flags the app uses to decide which buttons
     to render — the same rules the write endpoints enforce."""
@@ -961,6 +976,7 @@ def _task_payload(task: dict, user) -> dict:
         **task,
         "voice": _task_voice_payload(task.get("voice")),
         "files": [_task_file_payload(f) for f in (task.get("files") or [])],
+        "reactions": _task_reactions(task.get("reactions"), user.id),
         "can_edit": bool(caps["can_edit_task"]) and not frozen,
         "can_delete": bool(caps["can_delete_task"]),
         # An employee moves only their own work along the board.
@@ -1369,6 +1385,39 @@ class WorkspaceTaskCommentView(WorkspaceAPIView):
 
         updated = repo.get_task(task_id, request.user.company_id)
         return Response(_task_payload(updated, request.user), status=status.HTTP_201_CREATED)
+
+
+class WorkspaceTaskReactionView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/tasks/<id>/reactions/ — react to a task, or take
+    the reaction back.
+
+    One endpoint for both directions, as the chat's is: tapping a reaction you
+    already left is how it comes off. Anybody who can see the task may react;
+    no write right is needed, because a reaction is a reader's remark rather
+    than an edit of the record.
+    """
+
+    required_module = Module.TASKS
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="React to a task, or take the reaction back",
+                         request_body=MessageReactionSerializer, responses={200: TaskSerializer()})
+    def post(self, request, task_id: int):
+        task = repo.get_task(task_id, request.user.company_id)
+        if not task:
+            return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
+        if request.user.task_scope is not None and not (
+            task["author_id"] == request.user.id
+            or request.user.id in (task.get("assignee_ids") or [])
+        ):
+            return Response({"detail": _("Task not found.")}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = MessageReactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        repo.toggle_task_reaction(task_id, request.user.id, serializer.validated_data["emoji"])
+
+        updated = repo.get_task(task_id, request.user.company_id)
+        return Response(_task_payload(updated, request.user))
 
 
 class WorkspaceTaskVoiceView(WorkspaceAPIView):

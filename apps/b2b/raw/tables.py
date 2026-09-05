@@ -25,6 +25,7 @@ B2B_TASK_ASSIGNEE_TABLE = "b2b_task_assignee"
 B2B_TASK_SUBTASK_TABLE = "b2b_task_subtask"
 B2B_TASK_COMMENT_TABLE = "b2b_task_comment"
 B2B_TASK_ACTIVITY_TABLE = "b2b_task_activity"
+B2B_TASK_REACTION_TABLE = "b2b_task_reaction"
 B2B_CALENDAR_EVENT_TABLE = "b2b_calendar_event"
 B2B_CALENDAR_PARTICIPANT_TABLE = "b2b_calendar_participant"
 # Which reminders have already gone out for an event, so a catch-up pass over
@@ -39,6 +40,10 @@ B2B_CHAT_REACTION_TABLE = "b2b_chat_reaction"
 # and what came of it. The chat thread gets a system message off it; a lead or
 # customer card lists it as history. See `apps/b2b/workspace/calls.py`.
 B2B_CALL_TABLE = "b2b_call"
+# One conference — a room many people are invited into at once, off the
+# group thread that carries its invitation. A call rings one person; a
+# conference is joined from a button. See `apps/b2b/workspace/conferences.py`.
+B2B_CONFERENCE_TABLE = "b2b_conference"
 B2B_WORKSPACE_LEAD_TABLE = "b2b_workspace_lead"
 # The priced lines a lead is made of, and everything that has happened to it.
 B2B_WORKSPACE_LEAD_ITEM_TABLE = "b2b_workspace_lead_item"

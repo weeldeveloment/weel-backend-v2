@@ -47,6 +47,7 @@ from apps.b2b.raw.tables import (
     B2B_TASK_ACTIVITY_TABLE,
     B2B_TASK_ASSIGNEE_TABLE,
     B2B_TASK_COMMENT_TABLE,
+    B2B_TASK_REACTION_TABLE,
     B2B_TASK_SUBTASK_TABLE,
     B2B_TASK_TABLE,
     B2B_USER_TABLE,
@@ -482,6 +483,7 @@ def _attach_task_children(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         task["comments"] = []
         task["voice"] = None
         task["files"] = []
+        task["reactions"] = []
 
     for row in fetch_all(
         f"SELECT task_id, employee_id FROM {B2B_TASK_ASSIGNEE_TABLE} "
@@ -503,6 +505,16 @@ def _attach_task_children(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         [ids],
     ):
         by_id[row["task_id"]]["comments"].append(row)
+
+    # Raw rows, one per (person, emoji); the view groups them per emoji and
+    # marks the reader's own, which a GROUP BY cannot do without knowing who
+    # is reading.
+    for row in fetch_all(
+        f"SELECT task_id, employee_id, emoji FROM {B2B_TASK_REACTION_TABLE} "
+        f"WHERE task_id = __ANY_MARKER__(%s) ORDER BY created_at ASC, id ASC",
+        [ids],
+    ):
+        by_id[row["task_id"]]["reactions"].append(row)
 
     # Everything a task carries, in one query: the clip recorded while it was
     # written and the documents attached to it. `kind` is what tells them
@@ -589,6 +601,26 @@ def get_task(
     if not task:
         return None
     return _attach_task_children([task])[0]
+
+
+def toggle_task_reaction(task_id: int, employee_id: int, emoji: str) -> bool:
+    """Adds somebody's reaction to a task, or takes it back if it was already
+    theirs — one call for both directions, the same as the chat's. Returns
+    whether the reaction is now on."""
+    removed = execute(
+        f"DELETE FROM {B2B_TASK_REACTION_TABLE} "
+        "WHERE task_id = %s AND employee_id = %s AND emoji = %s",
+        [task_id, employee_id, emoji],
+    )
+    if removed:
+        return False
+    execute(
+        f"INSERT INTO {B2B_TASK_REACTION_TABLE} "
+        "(task_id, employee_id, emoji, created_at) VALUES (%s, %s, %s, %s) "
+        "ON CONFLICT (task_id, employee_id, emoji) DO NOTHING",
+        [task_id, employee_id, emoji, timezone.now()],
+    )
+    return True
 
 
 def is_task_assignee(task_id: int, employee_id: int) -> bool:
@@ -1548,6 +1580,25 @@ def thread_member(thread_id: int, employee_id: int) -> dict[str, Any] | None:
         "WHERE thread_id = %s AND employee_id = %s",
         [thread_id, employee_id],
     )
+
+
+def is_thread_member(thread_id: int, employee_id: int) -> bool:
+    """Whether this person is in the room at all — the access rule behind a
+    conference invitation, which is addressed to a group rather than to a
+    list of its own."""
+    return thread_member(thread_id, employee_id) is not None
+
+
+def thread_member_ids(thread_id: int) -> list[int]:
+    """Everyone in the room, ids only — for telling them all that something
+    happened, where the full rows of `list_thread_members` are not needed."""
+    return [
+        row["employee_id"]
+        for row in fetch_all(
+            f"SELECT employee_id FROM {B2B_CHAT_MEMBER_TABLE} WHERE thread_id = %s",
+            [thread_id],
+        )
+    ]
 
 
 def thread_admin_ids(thread_id: int) -> list[int]:

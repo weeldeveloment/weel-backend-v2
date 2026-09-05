@@ -366,6 +366,28 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_task_comment_task_idx "
             "ON b2b_task_comment (task_id, created_at);"
         )
+        # One emoji per person per task, the way the chat does it — a second
+        # tap on the same emoji takes it back. Kept in its own table rather
+        # than a JSON column on the task so the count is a GROUP BY and a
+        # toggle is one DELETE-or-INSERT.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_task_reaction (
+                id BIGSERIAL PRIMARY KEY,
+                task_id BIGINT NOT NULL REFERENCES b2b_task(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                emoji VARCHAR(16) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_task_reaction_one_idx "
+            "ON b2b_task_reaction (task_id, employee_id, emoji);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_task_reaction_task_idx "
+            "ON b2b_task_reaction (task_id);"
+        )
+        self.stdout.write("  Created b2b_task_reaction")
         self.stdout.write("  Created b2b_task_comment")
 
         # Everything that has happened to a task, company-wide: the events the
@@ -2313,6 +2335,48 @@ class Command(BaseCommand):
             ON b2b_call (target_customer_id, id DESC) WHERE target_customer_id IS NOT NULL;
         """)
         self.stdout.write("  Created b2b_call")
+
+        # ─── Conferences (`/api/b2b/workspace/conferences/`) ───────────────
+        #
+        # A call rings one person; a conference is announced and joined. The
+        # invitation is an ordinary message in a group thread, so the room the
+        # conference lives in is the room its people were already in — which
+        # is also why `thread_id` is NOT NULL here and nullable on `b2b_call`.
+        # `room_name` is the LiveKit room; it is unique for the same reason a
+        # call's is, so a finished conference can never be re-entered by
+        # somebody holding an old token.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_conference (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                room_name VARCHAR(80) NOT NULL UNIQUE,
+                title VARCHAR(200) NOT NULL,
+                thread_id BIGINT NOT NULL REFERENCES b2b_chat_thread(id) ON DELETE CASCADE,
+                -- The invitation itself. Kept so that ending a conference can
+                -- rewrite its card in place ("Tugadi") instead of leaving a
+                -- "Kirish" button that opens a room nobody is in.
+                message_id BIGINT REFERENCES b2b_chat_message(id) ON DELETE SET NULL,
+                scope VARCHAR(12) NOT NULL,
+                created_by BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                status VARCHAR(8) NOT NULL DEFAULT 'live',
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                ended_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        # The invitation card asks "is this one still running" every time the
+        # thread is drawn, and the chat list asks "is anything running here at
+        # all" — both are index probes over the live rows only.
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS b2b_conference_thread_idx
+            ON b2b_conference (thread_id, id DESC);
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS b2b_conference_live_idx
+            ON b2b_conference (company_id, id DESC) WHERE status = 'live';
+        """)
+        self.stdout.write("  Created b2b_conference")
 
         # ─── Stock and catalogue (`/api/b2b/workspace/inventory/`) ─────────
         #

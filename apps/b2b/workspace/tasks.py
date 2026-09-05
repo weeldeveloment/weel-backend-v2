@@ -564,6 +564,56 @@ def notify_missed_call(
     return 1
 
 
+@app.task(name="b2b.workspace.notify_conference_invite")
+def notify_conference_invite(
+    conference_id: int,
+    company_id: int,
+    thread_id: int,
+    title: str,
+    organiser_name: str,
+    employee_ids: list[int],
+) -> int:
+    """"Konferensiya · Aziz Karimov · Haftalik yig'ilish" to everybody
+    invited — a feed row and a push that opens the group the invitation card
+    is sitting in.
+
+    One task for the whole invitation rather than one per person: a
+    company-wide conference is a hundred rows, and a hundred queued tasks to
+    write them is a hundred round trips to Redis for a notification that is
+    already late by then.
+    """
+    sent = 0
+    push_title = push_text.CONFERENCE_TITLE
+    body = push_text.conference_invite_body(organiser_name, title)
+    data = {
+        "type": "conference",
+        "action": "invited",
+        "conference_id": str(conference_id),
+        "thread_id": str(thread_id),
+    }
+    recipients = []
+    for employee_id in employee_ids:
+        employee = repo.get_workspace_employee(employee_id)
+        if not employee:
+            continue
+        create_notification(
+            company_id=employee["company_id"],
+            employee_id=employee["id"],
+            kind="chat",
+            title=push_title,
+            body=body,
+            payload={"conference_id": conference_id, "thread_id": thread_id},
+        )
+        recipients.append({
+            "employee_id": employee["id"],
+            "company_id": employee["company_id"],
+            "fcm_token": employee.get("fcm_token"),
+        })
+        sent += 1
+    _push(recipients, title=push_title, body=body, data=data)
+    return sent
+
+
 @app.task(name="b2b.workspace.send_call_guest_link")
 def send_call_guest_link(call_id: int, company_id: int, phone: str, link: str) -> bool:
     """The browser link to a lead or customer who is not in Weel, by SMS."""
@@ -604,3 +654,13 @@ def expire_ringing_calls() -> int:
     from apps.b2b.workspace import calls
 
     return calls.expire_stale()
+
+
+@app.task(name="b2b.workspace.end_stale_conferences")
+def end_stale_conferences() -> int:
+    """Conferences nobody closed. Rarer than a stale call and so on a slower
+    beat: the organiser leaving does not end one — the others may carry on —
+    so only the clock can shut a room that emptied out at lunchtime."""
+    from apps.b2b.workspace import conferences
+
+    return conferences.end_stale()

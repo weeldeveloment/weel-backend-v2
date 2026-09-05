@@ -982,6 +982,31 @@ JITSI_TOKEN_TTL_SECONDS = int((os.getenv("JITSI_TOKEN_TTL_SECONDS") or "7200").s
 JITSI_GUEST_LINK_TTL_SECONDS = int(
     (os.getenv("JITSI_GUEST_LINK_TTL_SECONDS") or "1800").strip() or "1800"
 )
+# ─── LiveKit — the media server behind the in-app call screen ─────────────────
+#
+# Jitsi ships its own screen; LiveKit ships none, which is the point: the
+# dashboard and the phone draw the call themselves and LiveKit only carries
+# the audio and video (`livekit/` beside `jitsi/`). Same token model — a
+# short-lived HS256 JWT naming one room and one person — with LiveKit's own
+# claim layout, verified against `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`,
+# which must be the pair the stack was started with.
+LIVEKIT_URL = (os.getenv("LIVEKIT_URL") or "").strip().rstrip("/")
+LIVEKIT_API_KEY = (os.getenv("LIVEKIT_API_KEY") or "").strip()
+LIVEKIT_API_SECRET = (os.getenv("LIVEKIT_API_SECRET") or "").strip()
+LIVEKIT_TOKEN_TTL_SECONDS = int((os.getenv("LIVEKIT_TOKEN_TTL_SECONDS") or "7200").strip() or "7200")
+# Which server a new call is opened on: "livekit" or "jitsi". Empty picks
+# LiveKit when it is configured and Jitsi otherwise, so a deployment with only
+# one of them set needs no extra switch — and one with both can be flipped
+# back with a single variable if the new screen misbehaves.
+CALL_PROVIDER = (os.getenv("CALL_PROVIDER") or "").strip().lower()
+# Where the browser link for an outside person (a lead rung from the CRM)
+# opens. LiveKit has no web page of its own, so the link lands on the
+# dashboard's guest call page, with the token in the fragment where a proxy
+# log never sees it.
+CALL_GUEST_BASE_URL = (
+    (os.getenv("CALL_GUEST_BASE_URL") or "https://business.weel.uz").strip().rstrip("/")
+)
+
 # How long a call rings before it is written down as missed (TZ §4.1.2).
 CALL_RING_TIMEOUT_SECONDS = int((os.getenv("CALL_RING_TIMEOUT_SECONDS") or "30").strip() or "30")
 # The longest an *answered* call may stay open before the server stops
@@ -995,6 +1020,13 @@ CALL_RING_TIMEOUT_SECONDS = int((os.getenv("CALL_RING_TIMEOUT_SECONDS") or "30")
 # longer than any real consultation and far shorter than for ever.
 CALL_MAX_DURATION_SECONDS = int(
     (os.getenv("CALL_MAX_DURATION_SECONDS") or "14400").strip() or "14400"
+)
+# The longest a conference stays advertised as running before the server stops
+# believing in it. Its organiser leaving does not end one — the others may
+# well carry on without them — so nothing but the clock can close a room that
+# quietly emptied out.
+CONFERENCE_MAX_DURATION_SECONDS = int(
+    (os.getenv("CONFERENCE_MAX_DURATION_SECONDS") or "14400").strip() or "14400"
 )
 
 # Test user - OTP so'ralmaydi (development va production)

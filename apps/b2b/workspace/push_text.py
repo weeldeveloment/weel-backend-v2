@@ -99,6 +99,18 @@ CALL_MISSED_TITLE = "Javobsiz qo’ng’iroq"
 
 _CALL_KIND = {"video": "Video qo’ng’iroq", "audio": "Audio qo’ng’iroq"}
 
+#: What a conference is called wherever it has to be named on its own — the
+#: push title, and the fallback when somebody opens one without typing a name.
+CONFERENCE_TITLE = "Konferensiya"
+
+
+def conference_invite_body(organiser_name: str, title: str) -> str:
+    """"Aziz Karimov · Haftalik yig'ilish" — who called it and what it is
+    about, in the order a reader scans them."""
+    name = (organiser_name or "").strip() or "Weel"
+    subject = (title or "").strip()
+    return f"{name} · {subject}" if subject else name
+
 
 def call_kind_label(call_type: str) -> str:
     return _CALL_KIND.get(call_type, _CALL_KIND["video"])

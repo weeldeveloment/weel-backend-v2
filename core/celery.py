@@ -89,6 +89,13 @@ app.conf.beat_schedule = {
         "task": "b2b.workspace.expire_ringing_calls",
         "schedule": 60.0,
     },
+    # Conferences nobody closed. Every ten minutes rather than every minute:
+    # the window is four hours, so a sweep a minute would only ask the same
+    # question six hundred times before it could answer differently.
+    "end_stale_conferences": {
+        "task": "b2b.workspace.end_stale_conferences",
+        "schedule": crontab(minute="*/10"),
+    },
     "persist_story_views": {
         "task": "stories.tasks.persist_story_views",
         "schedule": crontab(minute="*/10"),  # every 10 minutes

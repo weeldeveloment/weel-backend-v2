@@ -57,6 +57,10 @@ class WorkspaceRefreshSerializer(serializers.Serializer):
 class TeamMemberSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     full_name = serializers.CharField()
+    # The department's id as well as its name: the conference form picks whole
+    # departments, and matching them by name would put two departments called
+    # "Sotuv" in different offices into the same invitation.
+    department_id = serializers.IntegerField(allow_null=True, required=False)
     # The handle, without its "@" — the app adds that where it draws it, the
     # same way it is typed into the search.
     username = serializers.CharField(allow_null=True, required=False)
@@ -167,6 +171,13 @@ class TaskFileSerializer(serializers.Serializer):
     url = serializers.CharField()
 
 
+class TaskReactionSerializer(serializers.Serializer):
+    emoji = serializers.CharField()
+    count = serializers.IntegerField()
+    employee_ids = serializers.ListField(child=serializers.IntegerField())
+    mine = serializers.BooleanField()
+
+
 class TaskSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     title = serializers.CharField()
@@ -181,6 +192,7 @@ class TaskSerializer(serializers.Serializer):
     subtasks = SubtaskSerializer(many=True)
     comments = TaskCommentSerializer(many=True)
     files = TaskFileSerializer(many=True, required=False)
+    reactions = TaskReactionSerializer(many=True, required=False)
     can_edit = serializers.BooleanField()
     can_delete = serializers.BooleanField()
     can_change_status = serializers.BooleanField()
