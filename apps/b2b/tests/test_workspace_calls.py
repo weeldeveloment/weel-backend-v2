@@ -47,6 +47,16 @@ JITSI = dict(
 )
 
 
+LIVEKIT = dict(
+    LIVEKIT_URL="wss://live.weel.uz",
+    LIVEKIT_API_KEY="weel",
+    LIVEKIT_API_SECRET="lk-s3cret",
+    LIVEKIT_TOKEN_TTL_SECONDS=7200,
+    CALL_PROVIDER="",
+    CALL_GUEST_BASE_URL="https://business.weel.uz",
+)
+
+
 def _user(employee_id: int, role: str = "employee") -> WorkspaceUser:
     return WorkspaceUser({
         "id": employee_id,
@@ -135,6 +145,42 @@ class TestToken:
         claims = jwt.decode(token, "s3cret", algorithms=["HS256"], audience="jitsi")
         assert claims["exp"] - claims["iat"] == 1800
         assert claims["context"]["user"]["id"] == "guest-100"
+
+    def test_livekit_wins_when_both_servers_are_configured(self):
+        with override_settings(**JITSI, **LIVEKIT):
+            assert calls.provider() == "livekit"
+            assert calls.server_url() == "wss://live.weel.uz"
+        with override_settings(**{**JITSI, **LIVEKIT, "CALL_PROVIDER": "jitsi"}):
+            assert calls.provider() == "jitsi"
+        with override_settings(**JITSI, LIVEKIT_URL="", LIVEKIT_API_KEY="", LIVEKIT_API_SECRET=""):
+            assert calls.provider() == "jitsi"
+
+    def test_a_livekit_token_opens_one_room_for_one_identity(self):
+        with override_settings(**JITSI, **LIVEKIT):
+            token, expires = calls.sign_token(
+                room="weel-abc", user_id=7, name="Aziz", avatar="https://x/a.jpg", moderator=True
+            )
+        claims = jwt.decode(token, "lk-s3cret", algorithms=["HS256"], issuer="weel")
+        assert claims["sub"] == "7"
+        assert claims["name"] == "Aziz"
+        assert claims["video"] == {
+            "room": "weel-abc", "roomJoin": True, "canPublish": True,
+            "canSubscribe": True, "canPublishData": True, "roomAdmin": True,
+        }
+        assert '"avatar":"https://x/a.jpg"' in claims["metadata"]
+        assert (expires - timezone.now()) > timedelta(hours=1, minutes=55)
+        # The wrong secret must not open it.
+        with pytest.raises(jwt.InvalidSignatureError):
+            jwt.decode(token, "s3cret", algorithms=["HS256"], issuer="weel")
+
+    def test_a_livekit_guest_link_lands_on_the_dashboard_with_the_token_hidden(self):
+        with override_settings(**JITSI, **LIVEKIT):
+            link = calls.guest_link(_call(), "Mijoz")
+        assert link.startswith("https://business.weel.uz/call/weel-abc#token=")
+        assert "?" not in link
+        claims = jwt.decode(link.split("#token=", 1)[1], "lk-s3cret", algorithms=["HS256"], issuer="weel")
+        assert claims["sub"] == "guest-100"
+        assert claims["exp"] - claims["iat"] == 1800
 
     def test_room_names_are_unguessable_and_distinct(self):
         names = {calls.new_room_name() for _ in range(50)}

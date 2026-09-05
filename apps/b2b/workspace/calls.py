@@ -29,6 +29,7 @@ is already committed and the phone is waiting for its token.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -67,8 +68,42 @@ class CallError(Exception):
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 
-def is_configured() -> bool:
+LIVEKIT = "livekit"
+JITSI = "jitsi"
+
+
+def _livekit_configured() -> bool:
+    return bool(
+        getattr(settings, "LIVEKIT_URL", "")
+        and getattr(settings, "LIVEKIT_API_KEY", "")
+        and getattr(settings, "LIVEKIT_API_SECRET", "")
+    )
+
+
+def _jitsi_configured() -> bool:
     return bool(settings.JITSI_SERVER_URL and settings.JITSI_APP_SECRET)
+
+
+def provider() -> str:
+    """Which media server a call is opened on.
+
+    `CALL_PROVIDER` decides when set; otherwise LiveKit if it is configured
+    and Jitsi if not, so a deployment that has only ever set one of them
+    needs no switch at all. The answer rides in every payload as `provider`
+    so a phone or browser knows which client to bring up.
+    """
+    chosen = (getattr(settings, "CALL_PROVIDER", "") or "").strip().lower()
+    if chosen in (LIVEKIT, JITSI):
+        return chosen
+    return LIVEKIT if _livekit_configured() else JITSI
+
+
+def is_configured() -> bool:
+    return _livekit_configured() if provider() == LIVEKIT else _jitsi_configured()
+
+
+def server_url() -> str:
+    return settings.LIVEKIT_URL if provider() == LIVEKIT else settings.JITSI_SERVER_URL
 
 
 def _require_configured() -> None:
@@ -104,9 +139,16 @@ def sign_token(
     moderator: bool = False,
     ttl_seconds: int | None = None,
 ) -> tuple[str, datetime]:
-    """A Jitsi JWT for one person in one room.
+    """A join token for one person in one room, in whichever layout the
+    configured media server verifies.
 
-    The claim layout is the one `docker-jitsi-meet` verifies with
+    LiveKit's is the smaller: `iss` is the API key, `sub` the identity the
+    other side sees this person as, and everything the token *allows* sits
+    under `video` — the one room it opens, and that they may both send and
+    receive. `name` is what is drawn on their tile; the avatar travels in
+    `metadata`, because LiveKit has no field of its own for it.
+
+    Jitsi's is the one `docker-jitsi-meet` verifies with
     `AUTH_TYPE=jwt`: `iss` is the app id, `aud` is literally "jitsi", `sub`
     the host (or "*"), `room` the room the token opens, and `context.user`
     is what the other participants see this person as — so the name and
@@ -114,6 +156,34 @@ def sign_token(
     typed into Jitsi last.
     """
     now = int(time.time())
+    if provider() == LIVEKIT:
+        ttl = int(ttl_seconds or settings.LIVEKIT_TOKEN_TTL_SECONDS)
+        expires = now + ttl
+        claims = {
+            "iss": settings.LIVEKIT_API_KEY,
+            "sub": str(user_id),
+            "nbf": now - 10,
+            "iat": now,
+            "exp": expires,
+            "name": name or "Weel",
+            "video": {
+                "room": room,
+                "roomJoin": True,
+                "canPublish": True,
+                "canSubscribe": True,
+                "canPublishData": True,
+                "roomAdmin": bool(moderator),
+            },
+            "metadata": json.dumps(
+                {"avatar": avatar or "", "moderator": bool(moderator)},
+                separators=(",", ":"),
+            ),
+        }
+        token = jwt.encode(claims, settings.LIVEKIT_API_SECRET, algorithm="HS256")
+        if isinstance(token, bytes):
+            token = token.decode()
+        return token, datetime.fromtimestamp(expires, tz=dt_timezone.utc)
+
     ttl = int(ttl_seconds or settings.JITSI_TOKEN_TTL_SECONDS)
     expires = now + ttl
     payload = {
@@ -150,16 +220,24 @@ def sign_token(
 
 
 def guest_link(call: dict[str, Any], display_name: str) -> str:
-    """The browser URL a lead or customer joins from — Jitsi's own web UI,
-    with a short-lived token in the fragment so it never reaches a proxy
-    log as a query string."""
+    """The browser URL a lead or customer joins from, with a short-lived
+    token for them alone.
+
+    On LiveKit that is the dashboard's own guest page — LiveKit has no web
+    page — and the token rides in the fragment, which a browser never sends
+    to the server and so never reaches a proxy log. Jitsi's page reads it
+    from `?jwt=`, so there it has to be a query string.
+    """
     token, _ = sign_token(
         room=call["room_name"],
         user_id=f"guest-{call['id']}",
         name=display_name,
         ttl_seconds=settings.JITSI_GUEST_LINK_TTL_SECONDS,
     )
-    return f"{settings.JITSI_SERVER_URL}/{quote(call['room_name'])}?jwt={token}"
+    room = quote(call["room_name"])
+    if provider() == LIVEKIT:
+        return f"{settings.CALL_GUEST_BASE_URL}/call/{room}#token={token}"
+    return f"{settings.JITSI_SERVER_URL}/{room}?jwt={token}"
 
 
 # ─── Payload ──────────────────────────────────────────────────────────────────
@@ -204,7 +282,8 @@ def payload(
         "answered_at": call.get("answered_at"),
         "ended_at": call.get("ended_at"),
         "duration_seconds": call.get("duration_seconds"),
-        "server_url": settings.JITSI_SERVER_URL,
+        "provider": provider(),
+        "server_url": server_url(),
         "ring_timeout_seconds": int(ring_timeout().total_seconds()),
         "token": token,
         "token_expires_at": token_expires_at,
