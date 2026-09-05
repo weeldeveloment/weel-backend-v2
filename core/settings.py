@@ -327,14 +327,17 @@ if DEBUG and not _redis_url:
         },
     }
 else:
-    # channels_redis hands the URL straight to redis-py, and redis-py lets URL
-    # query params (e.g. ?socket_timeout=3) override everything. The channel
-    # layer's receive loop blocks in BZPOPMIN for 5s, so any read timeout
-    # shorter than that kills every idle websocket with
-    # "redis.exceptions.TimeoutError: Timeout reading from ..." — seen in
-    # production on 2026-09-05 at ~600 tracebacks/hour. Strip the socket
-    # timeout params for the channel layer; the cache keeps its own
-    # SOCKET_TIMEOUT via CACHES["OPTIONS"] above.
+    # The channel layer's receive loop blocks in BZPOPMIN for 5s (channels_redis
+    # brpop_timeout). redis-py 8.x gives every connection a DEFAULT_SOCKET_TIMEOUT
+    # instead of None, and blocking commands are read under that same timeout,
+    # so with the plain URL every idle websocket died every few seconds with
+    # "redis.exceptions.TimeoutError: Timeout reading from ..." (production
+    # 2026-09-05, ~600 tracebacks/hour; redis-py 8.1.0 in the image). Pass the
+    # timeouts explicitly: a read timeout comfortably above brpop_timeout still
+    # protects against a hung socket, and a short connect timeout keeps startup
+    # failures fast. URL query params would override kwargs in from_url(), so
+    # any socket timeout params are stripped from the URL first. The cache keeps
+    # its own SOCKET_TIMEOUT via CACHES["OPTIONS"] above.
     _channels_redis_parts = urlsplit(_redis_url)
     _channels_redis_query = urlencode(
         [
@@ -348,7 +351,13 @@ else:
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [_channels_redis_url],
+                "hosts": [
+                    {
+                        "address": _channels_redis_url,
+                        "socket_timeout": float(os.environ.get("CHANNELS_REDIS_SOCKET_TIMEOUT_SECONDS", "30")),
+                        "socket_connect_timeout": _redis_socket_connect_timeout,
+                    }
+                ],
             },
         },
     }
