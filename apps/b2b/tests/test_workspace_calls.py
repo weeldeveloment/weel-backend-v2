@@ -178,7 +178,9 @@ class TestToken:
             link = calls.guest_link(_call(), "Mijoz")
         assert link.startswith("https://business.weel.uz/call/weel-abc#token=")
         assert "?" not in link
-        claims = jwt.decode(link.split("#token=", 1)[1], "lk-s3cret", algorithms=["HS256"], issuer="weel")
+        assert link.endswith("&url=wss%3A%2F%2Flive.weel.uz")
+        token = link.split("#token=", 1)[1].split("&", 1)[0]
+        claims = jwt.decode(token, "lk-s3cret", algorithms=["HS256"], issuer="weel")
         assert claims["sub"] == "guest-100"
         assert claims["exp"] - claims["iat"] == 1800
 

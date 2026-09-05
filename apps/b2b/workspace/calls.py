@@ -236,7 +236,10 @@ def guest_link(call: dict[str, Any], display_name: str) -> str:
     )
     room = quote(call["room_name"])
     if provider() == LIVEKIT:
-        return f"{settings.CALL_GUEST_BASE_URL}/call/{room}#token={token}"
+        # The page needs the media server too, and a guest has no API session
+        # to ask for it — so it rides in the same fragment.
+        server = quote(settings.LIVEKIT_URL, safe="")
+        return f"{settings.CALL_GUEST_BASE_URL}/call/{room}#token={token}&url={server}"
     return f"{settings.JITSI_SERVER_URL}/{room}?jwt={token}"
 
 
