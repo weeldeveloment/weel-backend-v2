@@ -1550,6 +1550,25 @@ def thread_member(thread_id: int, employee_id: int) -> dict[str, Any] | None:
     )
 
 
+def is_thread_member(thread_id: int, employee_id: int) -> bool:
+    """Whether this person is in the room at all — the access rule behind a
+    conference invitation, which is addressed to a group rather than to a
+    list of its own."""
+    return thread_member(thread_id, employee_id) is not None
+
+
+def thread_member_ids(thread_id: int) -> list[int]:
+    """Everyone in the room, ids only — for telling them all that something
+    happened, where the full rows of `list_thread_members` are not needed."""
+    return [
+        row["employee_id"]
+        for row in fetch_all(
+            f"SELECT employee_id FROM {B2B_CHAT_MEMBER_TABLE} WHERE thread_id = %s",
+            [thread_id],
+        )
+    ]
+
+
 def thread_admin_ids(thread_id: int) -> list[int]:
     return [
         row["employee_id"]

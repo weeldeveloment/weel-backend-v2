@@ -57,6 +57,10 @@ class WorkspaceRefreshSerializer(serializers.Serializer):
 class TeamMemberSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     full_name = serializers.CharField()
+    # The department's id as well as its name: the conference form picks whole
+    # departments, and matching them by name would put two departments called
+    # "Sotuv" in different offices into the same invitation.
+    department_id = serializers.IntegerField(allow_null=True, required=False)
     # The handle, without its "@" — the app adds that where it draws it, the
     # same way it is typed into the search.
     username = serializers.CharField(allow_null=True, required=False)

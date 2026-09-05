@@ -123,6 +123,9 @@ EVENT_INVENTORY = "inventory"
 # bare "something changed" would cost a round trip in the one place a
 # second matters. See `calls.py`.
 EVENT_CALL = "call"
+#: A conference started or ended. Carries the whole conference, so a
+#: chat list can raise its "davom etmoqda" strip without a fetch.
+EVENT_CONFERENCE = "conference"
 
 
 # ─── Chat, kept as named calls ────────────────────────────────────────────────

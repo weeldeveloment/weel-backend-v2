@@ -1015,6 +1015,13 @@ CALL_RING_TIMEOUT_SECONDS = int((os.getenv("CALL_RING_TIMEOUT_SECONDS") or "30")
 CALL_MAX_DURATION_SECONDS = int(
     (os.getenv("CALL_MAX_DURATION_SECONDS") or "14400").strip() or "14400"
 )
+# The longest a conference stays advertised as running before the server stops
+# believing in it. Its organiser leaving does not end one — the others may
+# well carry on without them — so nothing but the clock can close a room that
+# quietly emptied out.
+CONFERENCE_MAX_DURATION_SECONDS = int(
+    (os.getenv("CONFERENCE_MAX_DURATION_SECONDS") or "14400").strip() or "14400"
+)
 
 # Test user - OTP so'ralmaydi (development va production)
 TEST_USER_PHONE_NUMBER = (os.getenv("TEST_USER_PHONE_NUMBER") or "").strip() or None

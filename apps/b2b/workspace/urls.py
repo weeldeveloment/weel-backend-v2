@@ -67,6 +67,12 @@ from apps.b2b.workspace.calls_views import (
     WorkspaceCallListCreateView,
     WorkspaceCallTokenView,
 )
+from apps.b2b.workspace.conferences_views import (
+    WorkspaceConferenceDetailView,
+    WorkspaceConferenceEndView,
+    WorkspaceConferenceJoinView,
+    WorkspaceConferenceListCreateView,
+)
 from apps.b2b.workspace.joining_views import (
     AccountDeletionPreviewView,
     AccountDeviceTokenView,
@@ -400,6 +406,20 @@ urlpatterns = [
     path("calls/<int:call_id>/decline/", WorkspaceCallDeclineView.as_view(), name="ws-call-decline"),
     path("calls/<int:call_id>/end/", WorkspaceCallEndView.as_view(), name="ws-call-end"),
     path("calls/<int:call_id>/token/", WorkspaceCallTokenView.as_view(), name="ws-call-token"),
+    # Conferences — a room many people are invited into at once, off the group
+    # thread that carries the invitation card. See `conferences.py`.
+    path("conferences/", WorkspaceConferenceListCreateView.as_view(), name="ws-conferences"),
+    path("conferences/<int:conference_id>/", WorkspaceConferenceDetailView.as_view(), name="ws-conference"),
+    path(
+        "conferences/<int:conference_id>/join/",
+        WorkspaceConferenceJoinView.as_view(),
+        name="ws-conference-join",
+    ),
+    path(
+        "conferences/<int:conference_id>/end/",
+        WorkspaceConferenceEndView.as_view(),
+        name="ws-conference-end",
+    ),
 
     path("chats/", WorkspaceThreadListCreateView.as_view(), name="ws-chats"),
     # The AI assistant's row under "Saqlangan xabarlar" — every employee's
