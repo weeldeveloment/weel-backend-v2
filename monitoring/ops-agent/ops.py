@@ -57,6 +57,17 @@ GRAFANA_DOMAIN = os.getenv("GRAFANA_DOMAIN", "grafana.weel.uz")
 DOCKER_SOCK = os.getenv("DOCKER_SOCK", "/var/run/docker.sock")
 PORT = int(os.getenv("OPS_PORT", "8090"))
 
+FORCE_IPV4 = (os.getenv("OPS_FORCE_IPV4", "1").strip() or "1") not in ("0", "false", "no")
+_real_getaddrinfo = socket.getaddrinfo
+if FORCE_IPV4:
+    # Docker konteynerlarida IPv6 marshruti yo'q; getaddrinfo AAAA qaytarsa urllib
+    # "Network unreachable" bilan yiqiladi (api.telegram.org, 2026-09-05). Faqat A yozuvlar.
+    def _ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):  # noqa: A002
+        res = _real_getaddrinfo(host, port, family, type, proto, flags)
+        v4 = [r for r in res if r[0] == socket.AF_INET]
+        return v4 or res
+    socket.getaddrinfo = _ipv4_getaddrinfo
+
 _lock = threading.Lock()
 _actions: deque = deque(maxlen=200)      # audit
 _action_times: deque = deque()           # rate limit
@@ -67,6 +78,8 @@ _counters = {
     "ops_actions_failed_total": 0,
     "ops_actions_rate_limited_total": 0,
     "ops_notify_total": 0,
+    "ops_notify_retry_total": 0,
+    "ops_notify_failed_total": 0,
 }
 
 # exec oq ro'yxati: (konteyner regex, buyruq prefiksi). Prefiks shlex bo'yicha tokenlarda.
@@ -483,14 +496,54 @@ def telegram(text: str, silent: bool = False) -> dict:
         raise Denied(503, "TELEGRAM_BOT_TOKEN/CHAT_ID sozlanmagan")
     body = json.dumps({"chat_id": TG_CHAT, "text": text[:4000], "disable_web_page_preview": True,
                        "disable_notification": silent}).encode()
-    req = urllib.request.Request(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data=body,
-                                 headers={"Content-Type": "application/json"}, method="POST")
+    # VPS'dan api.telegram.org ga ulanish vaqti-vaqti bilan "Network unreachable"/"reset" beradi
+    # (2026-09-05: 3 urinishdan 1 tasi o'tgan) — 4 marta qayta urinamiz.
+    last = None
+    for attempt in range(4):
+        req = urllib.request.Request(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data=body,
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                _counters["ops_notify_total"] += 1
+                return {"ok": True, "status": r.status, "attempts": attempt + 1}
+        except urllib.error.HTTPError as e:
+            raise Denied(502, f"telegram {e.code}: {e.read(300).decode('utf-8', 'replace')}")
+        except Exception as e:  # noqa: BLE001
+            last = e
+            _counters["ops_notify_retry_total"] += 1
+            time.sleep(1.5 * (attempt + 1))
+    _counters["ops_notify_failed_total"] += 1
+    raise Denied(502, f"telegram tarmoq xatosi (4 urinish): {last!r}")
+
+
+def net_check(host: str, port: int = 443) -> dict:
+    """Tarmoq diagnostikasi: DNS javoblari + har manzilga TCP ulanish (IPv4/IPv6 alohida)."""
+    out: dict = {"host": host, "port": port, "force_ipv4": FORCE_IPV4, "addresses": []}
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            _counters["ops_notify_total"] += 1
-            return {"ok": True, "status": r.status}
-    except urllib.error.HTTPError as e:
-        raise Denied(502, f"telegram {e.code}: {e.read(300).decode('utf-8', 'replace')}")
+        infos = _real_getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    except Exception as e:  # noqa: BLE001
+        out["dns_error"] = repr(e)
+        return out
+    seen = set()
+    for family, _t, _p, _c, sockaddr in infos:
+        ip = sockaddr[0]
+        if ip in seen:
+            continue
+        seen.add(ip)
+        rec = {"ip": ip, "family": "ipv6" if family == socket.AF_INET6 else "ipv4"}
+        s = socket.socket(family, socket.SOCK_STREAM)
+        s.settimeout(5)
+        t0 = time.time()
+        try:
+            s.connect(sockaddr)
+            rec["connect"] = "ok"
+        except Exception as e:  # noqa: BLE001
+            rec["connect"] = repr(e)
+        finally:
+            s.close()
+        rec["ms"] = int((time.time() - t0) * 1000)
+        out["addresses"].append(rec)
+    return out
 
 
 # ───────────────────────────── Amallar (audit + limit) ─────────────────────────
@@ -603,6 +656,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._text(200, container_logs(name, int(q.get("tail", "200")), int(q.get("since", "0")), q.get("grep")))
         if method == "GET" and path == "/service":
             return self._json(200, service_inspect(q.get("name", "")))
+        if method == "GET" and path == "/net":
+            return self._json(200, net_check(q.get("host", "api.telegram.org"), int(q.get("port", "443"))))
         if method == "GET" and path == "/disk":
             return self._json(200, docker_df())
         if method == "GET" and path == "/actions":
@@ -787,6 +842,7 @@ HELP = {
         "GET /ops/container?name=<nom|regex>": "inspect + stats (restartlar, OOM, health, xotira)",
         "GET /ops/logs?name=<nom|regex>&tail=200&since=<sekund>&grep=<regex>": "konteyner loglari (matn; traefik/dokploy ham o'qiladi)",
         "GET /ops/service?name=<swarm service nomi|regex>": "Dokploy ilovasi (swarm service): image, replicas, traefik label'lari, portlar, update status",
+        "GET /ops/net?host=api.telegram.org&port=443": "tarmoq diagnostikasi: DNS + har IP'ga TCP ulanish (IPv4/IPv6) — Telegram/tashqi API muammolari uchun",
         "GET /ops/disk": "docker system df (image/volume/build cache)",
         "GET|POST /ops/query  {ds: prometheus|loki|tempo, q, start?, end?, step?, limit?}": "PromQL / LogQL / TraceQL",
         "GET /ops/dokploy/apps": "Dokploy ilovalari (id, nom, status) — redeploy uchun",

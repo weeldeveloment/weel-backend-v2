@@ -181,6 +181,9 @@ services:
       - --storage.path=/alertmanager
       - --web.external-url=https://${GRAFANA_DOMAIN}/alertmanager
       - --web.route-prefix=/
+    # api.telegram.org AAAA qaytaradi, konteynerda IPv6 marshruti yo'q -> "context deadline exceeded".
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
@@ -235,6 +238,9 @@ services:
     volumes:
       - ./ops-agent/ops.py:/app/ops.py:ro
       - /var/run/docker.sock:/var/run/docker.sock
+    # Konteynerda IPv6 marshruti yo'q; api.telegram.org AAAA qaytarganda "Network unreachable".
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/ops/health >/dev/null || exit 1"]
       interval: 30s
