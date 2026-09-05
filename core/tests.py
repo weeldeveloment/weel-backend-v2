@@ -175,6 +175,46 @@ class MetricsGuardMiddlewareTests(SimpleTestCase):
         self.assertEqual(host, "evil.example")
 
 
+class MetricsHostASGIMiddlewareTests(SimpleTestCase):
+    """core.asgi.MetricsHostASGIMiddleware fixes the Host header before Django sees it."""
+
+    def _run(self, path="/metrics", client="10.0.1.12", host=b"weel-devbackend-y95c8w:8000", auth=None, allowed=("dev.weel.uz",), token=""):
+        import asyncio
+
+        from django.test import override_settings
+
+        from core.asgi import MetricsHostASGIMiddleware
+
+        seen = {}
+
+        async def app(scope, receive, send):
+            seen["headers"] = dict(scope["headers"])
+
+        headers = [(b"host", host), (b"user-agent", b"Prometheus/3.5")]
+        if auth:
+            headers.append((b"authorization", auth))
+        scope = {"type": "http", "path": path, "headers": headers, "client": (client, 51000)}
+        with override_settings(ALLOWED_HOSTS=list(allowed), PROMETHEUS_METRICS_TOKEN=token):
+            asyncio.run(MetricsHostASGIMiddleware(app)(scope, None, None))
+        return seen["headers"]
+
+    def test_internal_scrape_host_is_replaced(self):
+        self.assertEqual(self._run()[b"host"], b"dev.weel.uz")
+
+    def test_public_client_host_untouched(self):
+        self.assertEqual(self._run(client="8.8.8.8")[b"host"], b"weel-devbackend-y95c8w:8000")
+
+    def test_token_from_outside_is_enough(self):
+        headers = self._run(client="8.8.8.8", auth=b"Bearer t0k", token="t0k")
+        self.assertEqual(headers[b"host"], b"dev.weel.uz")
+
+    def test_other_paths_untouched(self):
+        self.assertEqual(self._run(path="/api/")[b"host"], b"weel-devbackend-y95c8w:8000")
+
+    def test_allowed_host_untouched(self):
+        self.assertEqual(self._run(host=b"dev.weel.uz")[b"host"], b"dev.weel.uz")
+
+
 class ChannelsRedisUrlTests(SimpleTestCase):
     """core.settings strips socket timeouts from the channel-layer Redis URL."""
 

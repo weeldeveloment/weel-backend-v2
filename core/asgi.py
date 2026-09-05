@@ -41,6 +41,41 @@ def _header_value(scope, name: bytes) -> str:
     return ""
 
 
+class MetricsHostASGIMiddleware:
+    """
+    Prometheus scrapes the container by its Dokploy service name
+    (`weel-devbackend-xyz:8000`), which is never in ALLOWED_HOSTS. Anything
+    that calls request.get_host() before our Django middleware runs — the
+    OpenTelemetry Django instrumentation inserts itself at MIDDLEWARE[0] —
+    turns that into 400 DisallowedHost and a false BackendDown alert. So the
+    Host header is fixed here, before Django ever builds the request: only for
+    /metrics, only when the peer is a private address (the Docker network) or
+    presents the metrics bearer token.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path", "").startswith("/metrics"):
+            from core.middleware import metrics_guard as guard
+
+            headers = list(scope.get("headers", []))
+            hdr = {k: v for k, v in headers}
+            client = (scope.get("client") or ("", 0))[0] or ""
+            token = (getattr(settings, "PROMETHEUS_METRICS_TOKEN", "") or "").strip()
+            auth = hdr.get(b"authorization", b"").decode("latin1")
+            authorized = guard._is_private(client) or (bool(token) and auth == f"Bearer {token}")
+            host = hdr.get(b"host", b"").decode("latin1")
+            domain, _port = split_domain_port(host)
+            if authorized and not (domain and validate_host(domain, settings.ALLOWED_HOSTS)):
+                substitute = guard._substitute_host().encode("latin1")
+                headers = [(k, v) for k, v in headers if k not in (b"host", b"x-forwarded-host")]
+                headers.append((b"host", substitute))
+                scope = {**scope, "headers": headers}
+        return await self.app(scope, receive, send)
+
+
 class TracingASGIMiddleware:
     """
     ASGI middleware that wraps HTTP requests with OpenTelemetry spans.
@@ -120,7 +155,7 @@ class OptionalOriginAllowedHostsValidator:
         return await self.app(scope, receive, send)
 
 application = ProtocolTypeRouter({
-    "http": TracingASGIMiddleware(django_asgi_app),
+    "http": TracingASGIMiddleware(MetricsHostASGIMiddleware(django_asgi_app)),
     # The b2b workspace's own routes come first: both lists are ordered and
     # `chat.routing` matches a bare `ws/chat/`, so anything the workspace adds
     # under its own prefix must be reachable regardless of what the older
