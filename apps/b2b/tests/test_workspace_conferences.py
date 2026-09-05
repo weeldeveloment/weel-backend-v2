@@ -121,8 +121,18 @@ def mocks():
             status=ConferenceStatus.ENDED, ended_at=timezone.now()
         )
         repo.create_thread.return_value = {"id": THREAD_ID, "group_name": "Haftalik yig’ilish"}
-        repo.send_message.return_value = {"id": 900, "thread_id": THREAD_ID}
-        repo.edit_message.return_value = {"id": 900, "thread_id": THREAD_ID}
+        # Bound to the real signature: a mock that accepts any arguments is a
+        # mock that agrees with calls the database layer would reject.
+        repo.edit_message.side_effect = lambda message_id, thread_id, text: {
+            "id": message_id,
+            "thread_id": thread_id,
+            "text": text,
+        }
+        repo.send_message.side_effect = lambda thread_id, sender_id, text: {
+            "id": 900,
+            "thread_id": thread_id,
+            "text": text,
+        }
         repo.employee_ids_in_company.side_effect = lambda company_id, ids: list(ids)
         repo.is_thread_member.return_value = True
         repo.thread_member_ids.return_value = [AZIZ_ID, BEK_ID, DILNOZA_ID]
@@ -295,8 +305,13 @@ class TestEnd:
 
     def test_ending_rewrites_the_card_in_place(self, mocks):
         conferences.end(_conference(), AZIZ)
-        message_id, text = mocks["repo"].edit_message.call_args[0]
-        assert message_id == 900
+        # Positionally, and all three: `edit_message` scopes the update to the
+        # thread as well as the id, and calling it with two arguments raised a
+        # TypeError that the "nothing here may fail the request" guard swallowed
+        # — the card stayed live while the room was shut. Asserting the shape is
+        # what stops a mock from agreeing with a call the real function refuses.
+        message_id, thread_id, text = mocks["repo"].edit_message.call_args[0]
+        assert (message_id, thread_id) == (900, THREAD_ID)
         assert f"{conferences.CONF_TAG} {CONFERENCE_ID} ended" in text
         # One card, not a second message under the first.
         mocks["repo"].send_message.assert_not_called()

@@ -331,7 +331,9 @@ def _rewrite_invite(conference: dict[str, Any]) -> None:
     if not message_id:
         return
     try:
-        message = repo.edit_message(message_id, invite_text(conference))
+        message = repo.edit_message(
+            message_id, conference["thread_id"], invite_text(conference)
+        )
         if not message:
             return
         from apps.b2b.workspace.views import _message_payload
