@@ -3,6 +3,7 @@
 #   Grafana · Prometheus · Loki · Tempo · Alertmanager · Alloy (log shipper)
 #   + exporterlar (node, cadvisor, postgres, redis, blackbox, celery)
 #   + alert-relay (Alertmanager -> Claude Routine)  + mcp-grafana (Claude uchun MCP)
+#   + ops-agent (Claude Routine uchun kuzatish + tuzatish API, /ops/)
 #
 # Tarmoq: backend konteynerlari bilan BITTA Docker tarmog'ida (dokploy-network)
 # bo'lishi shart — shunda `weel-backend:8000`, Postgres va Redis nomlari hal bo'ladi,
@@ -208,6 +209,7 @@ services:
       ROUTINE_FIRE_URL: ${ROUTINE_FIRE_URL:-}
       ROUTINE_FIRE_TOKEN: ${ROUTINE_FIRE_TOKEN:-}
       ROUTINE_BETA_HEADER: ${ROUTINE_BETA_HEADER:-}
+      ROUTINE_FIRE_BODY_KEY: ${ROUTINE_FIRE_BODY_KEY:-text}
       RELAY_MIN_INTERVAL_SECONDS: ${RELAY_MIN_INTERVAL_SECONDS:-900}
       GRAFANA_DOMAIN: ${GRAFANA_DOMAIN}
     volumes:
@@ -217,6 +219,42 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # ───────── ops-agent: Claude Routine uchun kuzatish + tuzatish API ─────────
+  # https://MCP_DOMAIN/ops/...  (Bearer OPS_TOKEN). Amallar oq ro'yxat + soatlik limit.
+  ops-agent:
+    <<: *common
+    image: python:3.12-alpine
+    command: ["python", "-u", "/app/ops.py"]
+    environment:
+      OPS_TOKEN: ${OPS_TOKEN:-}
+      OPS_ALLOW_REGEX: ${OPS_ALLOW_REGEX:-.*}
+      OPS_DENY_REGEX: ${OPS_DENY_REGEX:-.*(dokploy|traefik).*}
+      OPS_MAX_ACTIONS_PER_HOUR: ${OPS_MAX_ACTIONS_PER_HOUR:-12}
+      DOKPLOY_URL: ${DOKPLOY_URL:-}
+      DOKPLOY_API_KEY: ${DOKPLOY_API_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      GRAFANA_DOMAIN: ${GRAFANA_DOMAIN}
+    volumes:
+      - ./ops-agent/ops.py:/app/ops.py:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/ops/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${DOKPLOY_NETWORK:-dokploy-network}
+      - traefik.http.routers.weel-ops.rule=Host(`${MCP_DOMAIN}`) && PathPrefix(`/ops/`)
+      - traefik.http.routers.weel-ops.priority=100
+      - traefik.http.routers.weel-ops.entrypoints=websecure
+      - traefik.http.routers.weel-ops.tls.certresolver=letsencrypt
+      - traefik.http.routers.weel-ops.middlewares=weel-ops-ratelimit@docker
+      - traefik.http.middlewares.weel-ops-ratelimit.ratelimit.average=10
+      - traefik.http.middlewares.weel-ops-ratelimit.ratelimit.burst=30
+      - traefik.http.services.weel-ops.loadbalancer.server.port=8090
 
   # ─────────────────────────── Exporterlar ─────────────────────────
   node-exporter:

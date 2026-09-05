@@ -15,6 +15,7 @@ monitoring/
 │               rules/*.rules.yml  56 ta alert (backend, celery, postgres, redis, host, containers, blackbox, self)
 ├─ alertmanager/ alertmanager.yml  route/inhibit/receivers (SHABLON), templates/telegram.tmpl (o'zbekcha)
 ├─ alert-relay/  relay.py          Alertmanager webhook → Claude Routine "fire" (stdlib, build kerak emas)
+├─ ops-agent/    ops.py            Claude uchun Ops API: kuzatish + cheklangan tuzatish + Telegram (/ops/, stdlib)
 ├─ loki/        loki.yml, rules/fake/logs.rules.yml   log asosidagi 9 ta alert (LogQL)
 ├─ alloy/       config.alloy       docker.sock → barcha konteyner loglari → Loki (JSON/celery/uvicorn parse)
 ├─ tempo/       tempo.yml          OTLP 4318/4317, span-metrics + service-graph → Prometheus
@@ -30,7 +31,7 @@ Alert oqimi (bitta pipeline, hammasi kodda):
 ```
 Prometheus rules ─┐                        ┌─► Telegram (bot, guruh)
                   ├─► Alertmanager ─ route ─┤
-Loki ruler (LogQL)┘   (inhibit, group)     └─► alert-relay ─► Claude Routine /fire ─► Grafana MCP ─► Telegram (tahlil)
+Loki ruler (LogQL)┘   (inhibit, group)     └─► alert-relay ─► Claude Routine /fire ─► ops-agent (tekshir + TUZAT) ─► Telegram (hisobot)
 ```
 
 ---
@@ -150,25 +151,42 @@ daqiqasiga ≤20, takrorlar 60s ichida bir marta. Grafana: **Weel — Frontend**
 4. **claude.ai connector** (routine uchun): https://claude.ai/customize/connectors → Add custom connector →
    nomi `weel-grafana`, URL yuqoridagi MCP manzili, auth: yo'q (OAuth bo'sh). Ulangach chatda tool'lar ko'rinadi.
 
-## 6-bosqich. Bulutdagi Claude Routine (kompyuter o'chiq bo'lsa ham)
+## 6-bosqich. ops-agent — Claude'ning production'dagi "qo'li"
+
+`ops-agent` (compose'da bor, `monitoring/ops-agent/ops.py`) — bitta HTTP API:
+kuzatish (alertlar, PromQL/LogQL/TraceQL, konteyner inspect/loglar, disk) + **cheklangan tuzatish**
+(restart, oq ro'yxatdagi `exec`, `prune safe`, Dokploy redeploy, silence) + Telegram xabar.
+Bulutdagi Claude Routine faqat shu API bilan ishlaydi — Grafana MCP connector shart emas.
+
+- Manzil: **`https://mcp.weel.uz/ops/...`** (Traefik `PathPrefix(/ops/)`, MCP domenida — yangi DNS kerak emas).
+- Auth: `Authorization: Bearer <OPS_TOKEN>`. Token: `openssl rand -hex 32` → Dokploy monitoring env `OPS_TOKEN` → redeploy.
+- Ixtiyoriy: Dokploy → Settings → API/CLI → token → `DOKPLOY_URL`, `DOKPLOY_API_KEY` (shunda `/ops/redeploy` ishlaydi).
+- Chegaralar: `OPS_DENY_REGEX` (default `dokploy|traefik`), soatiga `OPS_MAX_ACTIONS_PER_HOUR=12` amal;
+  `exec` oq ro'yxati va SQL cheklovi kodda (`EXEC_ALLOW`, `SQL_ALLOW_RE`). Har amal Loki'da (`{container=~".*ops-agent.*"}`)
+  va `GET /ops/actions` da; `OpsAgentRateLimited` alerti odamni chaqiradi.
+- Tekshirish: `curl -s -H "Authorization: Bearer $OPS_TOKEN" https://mcp.weel.uz/ops/status | head -c 600`.
+
+## 7-bosqich. Bulutdagi Claude Routine (kompyuter o'chiq bo'lsa ham TUZATADI)
 
 **Muhim:** Routine claude.ai obuna (Pro/Max/Team) akkountida ishlaydi — API token emas.
 Claude Code'da `claude /login` orqali **obuna akkounti** bilan kirilgan bo'lishi va
 `ANTHROPIC_API_KEY` o'rnatilmagan bo'lishi kerak (`env | grep ANTHROPIC` bo'sh).
 
-1. `cd weel-backend-v2 && claude` → `/schedule` → **create**:
-   - Repo: `https://github.com/weeldeveloment/weel-backend-v2` (RUNBOOK.md shu yerda)
-   - Connector: `weel-grafana` (5-bosqich)
-   - Jadval: har soat (`0 * * * *`) + kunlik to'liq hisobot 09:00 Toshkent = `0 4 * * *` UTC
-     (bitta routine'da bitta cron; ikkita routine yarating: `weel-monitor-hourly`, `weel-monitor-daily`)
-   - Prompt: RUNBOOK.md boshidagi **"Routine prompt"** bloki (nusxalang)
-   - Telegram: bot tokenni prompt ichida emas, routine'ning environment/secret'iga qo'ying
-     (prompt "TELEGRAM_BOT_TOKEN env'dan o'qi" deydi).
-2. Routine sahifasida (claude.ai/code/routines/<id>) **API trigger** bo'lsa, uning URL va tokenini
-   monitoring env'ga: `ROUTINE_FIRE_URL`, `ROUTINE_FIRE_TOKEN` (+ kerak bo'lsa `ROUTINE_BETA_HEADER`) → redeploy.
-   Shundan keyin har critical/warning alert Telegram'dan tashqari Claude tahlilini ham keltiradi
-   (alert-relay 15 daqiqada 1 martadan oshirmaydi — obuna limitini asraydi).
-3. Test: backend konteynerini 3 daqiqaga to'xtating → `BackendDown` → Telegram alert + Claude hisobot.
+Routine'lar (2026-09-05 da yaratilgan, https://claude.ai/code/routines):
+- `weel-ops-hourly` — har soat; alert bo'lsa RUNBOOK 3-bo'lim bo'yicha **tuzatadi**, hammasi yashil bo'lsa jim.
+- `weel-ops-daily` — 09:00 Toshkent (`0 4 * * *` UTC); bir qatorli kunlik hisobot + kechagi amallar.
+Promptlar: `RUNBOOK.md` 2-bo'lim. Siyosat (nima mumkin / mumkin emas): `RUNBOOK.md` 1-bo'lim.
+
+Yoqishdan oldin (claude.ai UI, bir marta):
+1. **Environment o'zgaruvchilari** — https://claude.ai/code → Environments → Default → Environment variables:
+   `OPS_TOKEN=<Dokploy'dagi bilan bir xil>`, `OPS_URL=https://mcp.weel.uz/ops`.
+   Tarmoq ruxsati (network access) `mcp.weel.uz` va `github.com` ga ochiq bo'lsin (Full yoki allowlist).
+2. **GitHub** — routine `fix/ops-*` branch push + PR ochadi: Claude GitHub App'ida repo'ga write ruxsati bo'lsin.
+3. Routine sahifasida **Enable**. Test: `Run now` → 2–3 daqiqada Telegram'da hisobot (yoki jim — hammasi yashil).
+4. **Alert → darhol uyg'otish**: routine sahifasidagi "Trigger via API" (URL + token) → monitoring env
+   `ROUTINE_FIRE_URL`, `ROUTINE_FIRE_TOKEN` (+ kerak bo'lsa `ROUTINE_BETA_HEADER`, `ROUTINE_FIRE_BODY_KEY`) → redeploy.
+   Shundan keyin har critical/warning alert 10–30 soniyada Claude'ni uyg'otadi (relay 15 daqiqada 1 martadan oshirmaydi).
+5. Test: backend konteynerini to'xtating → `BackendDown` → Telegram alert → Claude restart qiladi → hisobot.
    Kompyuterni yoping, keyingi soatlik run'ni kuting → claude.ai/code da session, Telegram'da hisobot.
 
 ---

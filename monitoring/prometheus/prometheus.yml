@@ -32,6 +32,9 @@ scrape_configs:
     static_configs: [{ targets: [alertmanager:9093] }]
   - job_name: alert-relay
     static_configs: [{ targets: [alert-relay:8080] }]
+  - job_name: ops-agent
+    metrics_path: /ops/metrics
+    static_configs: [{ targets: [ops-agent:8090] }]
 
   # ── infra exporterlar ──
   - job_name: node-exporter

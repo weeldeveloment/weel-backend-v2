@@ -12,6 +12,8 @@ Env:
   ROUTINE_FIRE_URL            routine'ning "Trigger via API" URL'i (bo'sh = o'chiq, faqat log)
   ROUTINE_FIRE_TOKEN          shu trigger'ning bearer tokeni
   ROUTINE_BETA_HEADER         ixtiyoriy, masalan "anthropic-beta: experimental-cc-routine-2026-04-01"
+  ROUTINE_FIRE_BODY_KEY       JSON body'dagi matn kaliti (default "text"; routine sahifasidagi
+                              "Trigger via API" namunasi boshqacha bo'lsa shu yerda o'zgartiring)
   RELAY_MIN_INTERVAL_SECONDS  ketma-ket ikki uyg'otish orasidagi minimal vaqt (default 900)
   GRAFANA_DOMAIN              matndagi havolalar uchun
 """
@@ -28,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 FIRE_URL = os.getenv("ROUTINE_FIRE_URL", "").strip()
 FIRE_TOKEN = os.getenv("ROUTINE_FIRE_TOKEN", "").strip()
 BETA_HEADER = os.getenv("ROUTINE_BETA_HEADER", "").strip()
+BODY_KEY = os.getenv("ROUTINE_FIRE_BODY_KEY", "text").strip() or "text"
 MIN_INTERVAL = int(os.getenv("RELAY_MIN_INTERVAL_SECONDS", "900") or "900")
 GRAFANA_DOMAIN = os.getenv("GRAFANA_DOMAIN", "grafana.weel.uz").strip()
 PORT = int(os.getenv("RELAY_PORT", "8080"))
@@ -52,7 +55,7 @@ def build_text(payload: dict) -> str:
     alerts = [a for a in payload.get("alerts", []) if a.get("status") == "firing"]
     if not alerts:
         return ""
-    lines = ["Weel production'da alert yondi. Grafana MCP orqali tekshirib, RUNBOOK.md bo'yicha tahlil qil va Telegram'ga o'zbekcha qisqa hisobot yoz.", ""]
+    lines = ["Weel production'da alert yondi. monitoring/RUNBOOK.md bo'yicha Ops API orqali tekshir, ruxsat etilgan doirada TUZAT va Telegram'ga o'zbekcha qisqa hisobot yoz.", ""]
     for a in alerts[:10]:
         labels = a.get("labels", {})
         ann = a.get("annotations", {})
@@ -84,7 +87,7 @@ def fire(text: str) -> bool:
     if BETA_HEADER and ":" in BETA_HEADER:
         k, v = BETA_HEADER.split(":", 1)
         headers[k.strip()] = v.strip()
-    body = json.dumps({"text": text}).encode("utf-8")
+    body = json.dumps({BODY_KEY: text}).encode("utf-8")
     req = urllib.request.Request(FIRE_URL, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:

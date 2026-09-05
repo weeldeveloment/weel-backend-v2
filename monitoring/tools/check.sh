@@ -27,6 +27,10 @@ docker run --rm -v "$PWD/alloy/config.alloy:/c/config.alloy:ro" grafana/alloy:v1
 echo "▶ blackbox"
 docker run --rm -v "$PWD/blackbox/blackbox.yml:/b.yml:ro" --entrypoint /bin/blackbox_exporter prom/blackbox-exporter:v0.28.0 --config.check --config.file=/b.yml 2>&1 | grep -q "Config file is ok" && echo "  blackbox ok"
 
+echo "▶ python (alert-relay, ops-agent)"
+python3 -m py_compile alert-relay/relay.py ops-agent/ops.py && echo "  relay.py, ops.py compile ok"
+grep -q 'ops_actions_rate_limited_total' prometheus/rules/self.rules.yml && echo "  ops-agent alertlari bor"
+
 echo "▶ compose"
 docker compose -f docker-compose.yml --env-file .env.example config >/dev/null && echo "  compose ok"
 

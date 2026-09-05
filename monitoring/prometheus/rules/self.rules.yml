@@ -41,6 +41,30 @@ groups:
           summary: "alert-relay Claude Routine'ni uyg'ota olmayapti"
           description: "ROUTINE_FIRE_URL/TOKEN yoki beta header. docker compose logs alert-relay."
 
+      - alert: OpsAgentDown
+        expr: up{job="ops-agent"} == 0
+        for: 5m
+        labels: { severity: warning, service: monitoring }
+        annotations:
+          summary: "ops-agent ishlamayapti — Claude production'ni tuzata olmaydi"
+          description: "docker compose logs ops-agent; OPS_TOKEN va docker.sock mount'ni tekshiring."
+
+      - alert: OpsAgentActionsFailing
+        expr: increase(ops_actions_failed_total[1h]) >= 3
+        for: 0m
+        labels: { severity: warning, service: monitoring }
+        annotations:
+          summary: "ops-agent amallari ketma-ket yiqilmoqda"
+          description: "GET /ops/actions — Claude qilgan amallar va xatolari. Halqa bo'lishi mumkin."
+
+      - alert: OpsAgentRateLimited
+        expr: increase(ops_actions_rate_limited_total[1h]) > 0
+        for: 0m
+        labels: { severity: critical, service: monitoring }
+        annotations:
+          summary: "Claude soatlik amal limitiga yetdi — odam aralashishi kerak"
+          description: "Avtomatik tuzatish yetarli bo'lmadi. GET /ops/actions va Telegram'dagi hisobotlarni ko'ring."
+
       - alert: LokiIngestErrors
         expr: sum(increase(loki_request_duration_seconds_count{route=~"loki_api_v1_push|/loki/api/v1/push", status_code=~"5.."}[10m])) > 0
         for: 10m
