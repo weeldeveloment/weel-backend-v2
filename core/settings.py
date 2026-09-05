@@ -181,6 +181,9 @@ USE_NORM_DATASTORE = False  # Explicitly disable norm_* datastore usage
 
 LOCAL_APPS: list[str] = [
     "apps.recommendation",
+    # Registers no models and no admin pages (both files are deliberately empty) — it is
+    # listed so its management commands are discoverable, `set_admin_password` above all.
+    "apps.admin_auth",
     "apps.b2b",
     "apps.documents",
     "apps.activities",
