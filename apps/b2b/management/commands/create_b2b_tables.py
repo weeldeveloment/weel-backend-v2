@@ -366,6 +366,28 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_task_comment_task_idx "
             "ON b2b_task_comment (task_id, created_at);"
         )
+        # One emoji per person per task, the way the chat does it — a second
+        # tap on the same emoji takes it back. Kept in its own table rather
+        # than a JSON column on the task so the count is a GROUP BY and a
+        # toggle is one DELETE-or-INSERT.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_task_reaction (
+                id BIGSERIAL PRIMARY KEY,
+                task_id BIGINT NOT NULL REFERENCES b2b_task(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                emoji VARCHAR(16) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_task_reaction_one_idx "
+            "ON b2b_task_reaction (task_id, employee_id, emoji);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_task_reaction_task_idx "
+            "ON b2b_task_reaction (task_id);"
+        )
+        self.stdout.write("  Created b2b_task_reaction")
         self.stdout.write("  Created b2b_task_comment")
 
         # Everything that has happened to a task, company-wide: the events the

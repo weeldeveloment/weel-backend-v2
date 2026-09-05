@@ -144,6 +144,7 @@ from apps.b2b.workspace.views import (
     WorkspaceSubtaskToggleView,
     WorkspaceTaskActivityFeedView,
     WorkspaceTaskCommentView,
+    WorkspaceTaskReactionView,
     WorkspaceEmployeeStatsView,
     WorkspaceTaskDetailView,
     WorkspaceTaskFileDetailView,
@@ -374,6 +375,7 @@ urlpatterns = [
     path("tasks/<int:task_id>/", WorkspaceTaskDetailView.as_view(), name="ws-task-detail"),
     path("tasks/<int:task_id>/status/", WorkspaceTaskStatusView.as_view(), name="ws-task-status"),
     path("tasks/<int:task_id>/comments/", WorkspaceTaskCommentView.as_view(), name="ws-task-comments"),
+    path("tasks/<int:task_id>/reactions/", WorkspaceTaskReactionView.as_view(), name="ws-task-reactions"),
     path("tasks/<int:task_id>/voice/", WorkspaceTaskVoiceView.as_view(), name="ws-task-voice"),
     path("tasks/<int:task_id>/files/", WorkspaceTaskFilesView.as_view(), name="ws-task-files"),
     path(

@@ -25,6 +25,7 @@ B2B_TASK_ASSIGNEE_TABLE = "b2b_task_assignee"
 B2B_TASK_SUBTASK_TABLE = "b2b_task_subtask"
 B2B_TASK_COMMENT_TABLE = "b2b_task_comment"
 B2B_TASK_ACTIVITY_TABLE = "b2b_task_activity"
+B2B_TASK_REACTION_TABLE = "b2b_task_reaction"
 B2B_CALENDAR_EVENT_TABLE = "b2b_calendar_event"
 B2B_CALENDAR_PARTICIPANT_TABLE = "b2b_calendar_participant"
 # Which reminders have already gone out for an event, so a catch-up pass over

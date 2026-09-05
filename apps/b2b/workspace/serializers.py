@@ -171,6 +171,13 @@ class TaskFileSerializer(serializers.Serializer):
     url = serializers.CharField()
 
 
+class TaskReactionSerializer(serializers.Serializer):
+    emoji = serializers.CharField()
+    count = serializers.IntegerField()
+    employee_ids = serializers.ListField(child=serializers.IntegerField())
+    mine = serializers.BooleanField()
+
+
 class TaskSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     title = serializers.CharField()
@@ -185,6 +192,7 @@ class TaskSerializer(serializers.Serializer):
     subtasks = SubtaskSerializer(many=True)
     comments = TaskCommentSerializer(many=True)
     files = TaskFileSerializer(many=True, required=False)
+    reactions = TaskReactionSerializer(many=True, required=False)
     can_edit = serializers.BooleanField()
     can_delete = serializers.BooleanField()
     can_change_status = serializers.BooleanField()

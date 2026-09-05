@@ -548,6 +548,7 @@ _OPEN_LEAD_LINES = f"""
     FROM {B2B_WORKSPACE_LEAD_ITEM_TABLE} li
     JOIN {B2B_WORKSPACE_LEAD_TABLE} l ON l.id = li.lead_id
     WHERE li.product_id IS NOT NULL
+      AND l.deleted_at IS NULL
       AND l.status <> 'completed'
       AND l.stage NOT IN ('lost', 'archived')
       AND NOT EXISTS (
