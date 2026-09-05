@@ -48,7 +48,7 @@ JITSI = dict(
 
 
 LIVEKIT = dict(
-    LIVEKIT_URL="wss://live.weel.uz",
+    LIVEKIT_URL="wss://call.weel.uz",
     LIVEKIT_API_KEY="weel",
     LIVEKIT_API_SECRET="lk-s3cret",
     LIVEKIT_TOKEN_TTL_SECONDS=7200,
@@ -149,7 +149,7 @@ class TestToken:
     def test_livekit_wins_when_both_servers_are_configured(self):
         with override_settings(**JITSI, **LIVEKIT):
             assert calls.provider() == "livekit"
-            assert calls.server_url() == "wss://live.weel.uz"
+            assert calls.server_url() == "wss://call.weel.uz"
         with override_settings(**{**JITSI, **LIVEKIT, "CALL_PROVIDER": "jitsi"}):
             assert calls.provider() == "jitsi"
         with override_settings(**JITSI, LIVEKIT_URL="", LIVEKIT_API_KEY="", LIVEKIT_API_SECRET=""):
@@ -178,7 +178,7 @@ class TestToken:
             link = calls.guest_link(_call(), "Mijoz")
         assert link.startswith("https://business.weel.uz/call/weel-abc#token=")
         assert "?" not in link
-        assert link.endswith("&url=wss%3A%2F%2Flive.weel.uz")
+        assert link.endswith("&url=wss%3A%2F%2Fcall.weel.uz")
         token = link.split("#token=", 1)[1].split("&", 1)[0]
         claims = jwt.decode(token, "lk-s3cret", algorithms=["HS256"], issuer="weel")
         assert claims["sub"] == "guest-100"
