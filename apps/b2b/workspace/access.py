@@ -22,6 +22,16 @@ workspace can move away from without inventing a sixth role.
 """
 from __future__ import annotations
 
+from django.utils.translation import get_language
+
+
+def request_lang() -> str:
+    """The reader's language for labels: ``ru`` when the request came in
+    Russian (``X-Language`` / ``Accept-Language``, activated by the locale
+    middleware), otherwise ``uz`` — the mobile app's default."""
+    code = (get_language() or "uz").split("-")[0].lower()
+    return "ru" if code == "ru" else "uz"
+
 
 class Role:
     """The five, and only five.
@@ -61,6 +71,14 @@ class Role:
         MANAGER: "Rahbar",
         EMPLOYEE: "Xodim",
         GUEST: "Mehmon",
+    }
+
+    LABELS_RU = {
+        OWNER: "Владелец",
+        ADMIN: "Администратор",
+        MANAGER: "Руководитель",
+        EMPLOYEE: "Сотрудник",
+        GUEST: "Гость",
     }
 
     #: What the roster has called these. `performer` is the manager — the
@@ -105,8 +123,9 @@ class Role:
         return name if name in cls.CHOICES else cls.EMPLOYEE
 
     @classmethod
-    def label(cls, role: str | None) -> str:
-        return cls.LABELS.get(cls.clean(role), cls.LABELS[cls.EMPLOYEE])
+    def label(cls, role: str | None, lang: str | None = None) -> str:
+        labels = cls.LABELS_RU if (lang or request_lang()) == "ru" else cls.LABELS
+        return labels.get(cls.clean(role), labels[cls.EMPLOYEE])
 
 
 class Module:
@@ -141,6 +160,23 @@ class Module:
         EMPLOYEES: "Xodimlar",
         REPORTS: "Hisobotlar",
     }
+
+    LABELS_RU = {
+        TASKS: "Задачи",
+        CHAT: "Чат",
+        SALES: "Продажи",
+        CRM: "Клиенты",
+        CALENDAR: "Календарь",
+        FILES: "Файлы",
+        TRIPS: "Командировки",
+        EMPLOYEES: "Сотрудники",
+        REPORTS: "Отчёты",
+    }
+
+    @classmethod
+    def label(cls, module: str, lang: str | None = None) -> str:
+        labels = cls.LABELS_RU if (lang or request_lang()) == "ru" else cls.LABELS
+        return labels.get(module, cls.LABELS.get(module, module))
 
     #: What the mobile app called these before the TZ named them. The app's
     #: "Qo'shimcha dostup" card shipped with Uzbek keys and there are grants

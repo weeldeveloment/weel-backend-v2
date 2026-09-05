@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from apps.b2b.models import LeadStatus
 from apps.b2b.workspace import access_repository as arepo
 from apps.b2b.workspace import repository as repo
-from apps.b2b.workspace.access import Module, Permission, Role
+from apps.b2b.workspace.access import Module, Permission, Role, request_lang
 from apps.b2b.workspace.permissions import IsWorkspaceManager, IsWorkspaceUser
 from apps.b2b.workspace.views import WORKSPACE_TAG, WorkspaceAPIView
 
@@ -77,7 +77,7 @@ class WorkspaceAccessCatalogueView(WorkspaceAPIView):
             "modules": [
                 {
                     "code": module,
-                    "label": Module.LABELS[module],
+                    "label": Module.label(module),
                     "permissions": [
                         {"code": permission, "label": _permission_label(permission)}
                         for permission in Permission.BY_MODULE[module]
@@ -88,11 +88,51 @@ class WorkspaceAccessCatalogueView(WorkspaceAPIView):
         })
 
 
-def _permission_label(permission: str) -> str:
-    """The verb, in Uzbek. Derived from the permission's own name rather than
-    listed separately, so a new permission cannot be added without one."""
+def _permission_label(permission: str, lang: str | None = None) -> str:
+    """The verb, in the reader's language (Uzbek unless the request came in
+    Russian). Derived from the permission's own name rather than listed
+    separately, so a new permission cannot be added without one."""
     verb = permission.split(".", 1)[1]
-    return _VERB_LABELS.get(verb, verb.replace("_", " ").capitalize())
+    labels = _VERB_LABELS_RU if (lang or request_lang()) == "ru" else _VERB_LABELS
+    return labels.get(verb, _VERB_LABELS.get(verb, verb.replace("_", " ").capitalize()))
+
+
+_VERB_LABELS_RU = {
+    "view": "Просмотр",
+    "create": "Создание",
+    "create_own": "Создание для себя",
+    "edit": "Редактирование",
+    "delete": "Удаление",
+    "assign": "Назначение",
+    "reassign": "Переназначение",
+    "comment": "Комментирование",
+    "export": "Экспорт",
+    "send": "Отправка сообщений",
+    "delete_own": "Удаление своих сообщений",
+    "manage_group": "Управление группой",
+    "change_stage": "Смена этапа",
+    "change_status": "Смена статуса",
+    "manage_pipeline": "Управление воронкой",
+    "invite": "Приглашение",
+    "upload": "Загрузка",
+    "download": "Скачивание",
+    "create_folder": "Создание папок",
+    "manage_access": "Управление доступом",
+    "manage": "Управление",
+    "change_role": "Смена роли",
+    "change_modules": "Изменение модулей",
+    "change_permissions": "Изменение прав",
+    "remove_from_workspace": "Удаление из рабочей среды",
+    "remove_from_company": "Удаление из компании",
+    "create_workspace": "Создание рабочей среды",
+    "stock_view": "Склад: просмотр каталога и остатков",
+    "stock_manage": "Склад: приход, перемещение, инвентаризация",
+    "stock_write_off": "Склад: списание",
+    "stock_reprice": "Склад: переоценка",
+    "stock_free_price": "Склад: продажа по свободной цене",
+    "stock_view_cost": "Склад: просмотр закупочной цены",
+    "stock_import": "Склад: импорт и экспорт",
+}
 
 
 _VERB_LABELS = {
@@ -109,6 +149,7 @@ _VERB_LABELS = {
     "delete_own": "O’z xabarini o’chirish",
     "manage_group": "Guruhni boshqarish",
     "change_stage": "Bosqichni o’zgartirish",
+    "change_status": "Holatni o’zgartirish",
     "manage_pipeline": "Voronkani boshqarish",
     "invite": "Taklif qilish",
     "upload": "Yuklash",

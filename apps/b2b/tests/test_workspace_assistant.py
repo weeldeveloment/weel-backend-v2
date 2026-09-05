@@ -49,6 +49,14 @@ def _nobody(company_id):
     return None, None, None
 
 
+@pytest.fixture(autouse=True)
+def _no_own_key():
+    """These tests are about the workspace key. Nobody here pasted one of
+    their own, and there is no database to ask."""
+    with patch.object(assistant.assistant_keys, "get", return_value=None):
+        yield
+
+
 # ─── The thread list ─────────────────────────────────────────────────────────
 
 def test_a_thread_payload_names_its_kind():
@@ -72,7 +80,10 @@ def test_status_says_when_nobody_has_connected_a_vendor():
         response = AssistantView.as_view()(request)
     assert response.status_code == 200
     assert response.data["connected"] is False
-    assert response.data["can_connect"] is False
+    # Anybody may connect their own key now, whatever their role.
+    assert response.data["can_connect"] is True
+    assert response.data["own"] is False
+    assert response.data["connection"] is None
     assert response.data["message_count"] == 0
     assert response.data["name"] == "AI yordamchi"
 

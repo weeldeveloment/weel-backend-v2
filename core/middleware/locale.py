@@ -17,6 +17,11 @@ class HeaderLocaleMiddleware:
         if language:
             translation.activate(language)
             request.LANGUAGE_CODE = language
+            # Django's own LocaleMiddleware runs next and re-resolves the
+            # language from the cookie and Accept-Language, falling back to
+            # LANGUAGE_CODE — which silently undid an X-Language-only request.
+            # Feeding it the same answer keeps both middlewares in agreement.
+            request.META["HTTP_ACCEPT_LANGUAGE"] = language
         response = self.get_response(request)
         return response
 

@@ -22,8 +22,13 @@ from apps.b2b.workspace.analyst_views import (
     AnalystReportView,
     AnalystSeenView,
     AnalystView,
+    WeelAiChatView,
 )
-from apps.b2b.workspace.assistant import AssistantMessagesView, AssistantView
+from apps.b2b.workspace.assistant import (
+    AssistantConnectionView,
+    AssistantMessagesView,
+    AssistantView,
+)
 from apps.b2b.workspace.inventory_views import (
     WorkspaceCategoryDetailView,
     WorkspaceCategoryListCreateView,
@@ -402,6 +407,12 @@ urlpatterns = [
     # See `assistant.py`. Not a thread: it lives in the AI tables.
     path("assistant/", AssistantView.as_view(), name="ws-assistant"),
     path("assistant/messages/", AssistantMessagesView.as_view(), name="ws-assistant-messages"),
+    # This person's own Claude/ChatGPT key, for every role. The workspace
+    # key on the integrations screen stays the fallback.
+    path("assistant/connection/", AssistantConnectionView.as_view(), name="ws-assistant-connection"),
+    # Weel AI as a chat about the reader's own work — for every role. The
+    # reports under `analyst/reports/` stay with whoever runs the company.
+    path("analyst/chat/", WeelAiChatView.as_view(), name="ws-analyst-chat"),
     # Weel AI — the built-in analyst at the top right of the chat list. See
     # `analyst.py`. Managers only; `CanReadAnalyst` says why.
     path("analyst/", AnalystView.as_view(), name="ws-analyst"),

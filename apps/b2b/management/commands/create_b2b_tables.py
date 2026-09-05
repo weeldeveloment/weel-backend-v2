@@ -1078,6 +1078,25 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_ai_message")
 
+        # Each employee's own AI key for "AI yordamchi" — see
+        # `workspace/assistant_keys.py`. One row per person; the workspace's
+        # key in b2b_integration stays the fallback for anybody without one.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_employee_ai_key (
+                employee_id BIGINT PRIMARY KEY REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                provider VARCHAR(30) NOT NULL,
+                key_enc TEXT NOT NULL,
+                key_hint VARCHAR(60),
+                model VARCHAR(120),
+                models JSONB NOT NULL DEFAULT '[]',
+                status VARCHAR(20) NOT NULL DEFAULT 'connected',
+                error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        self.stdout.write("  Created b2b_employee_ai_key")
+
         # What a thread *is*. 'chat' is a direct or group room; 'saved' is
         # the one-member "Saqlangan xabarlar" room every employee gets, the
         # way Telegram gives everyone a Saved Messages chat. Kept on the

@@ -83,6 +83,10 @@ def ring_timeout() -> timedelta:
     return timedelta(seconds=int(getattr(settings, "CALL_RING_TIMEOUT_SECONDS", 30)))
 
 
+def max_call_duration() -> timedelta:
+    return timedelta(seconds=int(getattr(settings, "CALL_MAX_DURATION_SECONDS", 14400)))
+
+
 # ─── Tokens ───────────────────────────────────────────────────────────────────
 
 
@@ -263,8 +267,28 @@ def start(
     # another, and a colleague already ringing or talking is "band" rather
     # than being rung twice — the second ring would only replace the first
     # on their screen.
-    if _live_after_expiry(user.id):
-        raise CallError("Siz allaqachon qo’ng’iroqdasiz.", status=409)
+    # The caller's own line is released rather than refused. The app will not
+    # place a call while it believes one is running — `CallService.startCall`
+    # returns early on `hasLiveCall` — so a live row belonging to the person
+    # *making* this request is a row their phone has already forgotten: a
+    # hang-up whose `/end` was lost, or an app killed mid-call. Refusing it
+    # made the caller "band" to themselves until the row aged out, which is
+    # the bug this exists to close. `end` writes it down honestly — cancelled
+    # if it was still ringing, ended with its duration if it was answered.
+    mine = _live_after_expiry(user.id)
+    if mine:
+        try:
+            end(mine, user)
+        except CallError:
+            # Somebody settled it between the read and here; either way the
+            # line is free now.
+            pass
+
+    # The other side is different: their row may be a real conversation with
+    # a third person, and no request of ours may hang that up. A stale one of
+    # theirs is closed by the maximum-duration sweep instead. A stale row from
+    # the call *we* just shared is the same row as `mine` above, so it has
+    # already been settled by the time we look.
     if target and _live_after_expiry(target["id"]):
         raise CallError("Bu xodim hozir band.", status=409)
 
@@ -356,14 +380,15 @@ def _resolve_chat_target(user, thread_id, target_employee_id):
 
 
 def _live_after_expiry(employee_id: int) -> dict[str, Any] | None:
-    """Whether this person is on a call — after settling any ring that has
-    outlived its window, so a colleague who never answered an hour ago is
-    not "band" for the rest of the day if the worker missed the timeout."""
+    """Whether this person is on a call — after settling anything that has
+    outlived its window, so a colleague who never answered an hour ago, or a
+    conversation whose `/end` was lost this morning, is not "band" for the
+    rest of the day if the worker missed it."""
     live = calls_repo.live_call_for(employee_id)
-    if live and live["status"] == CallStatus.RINGING and _ring_expired(live):
-        expire(live)
+    if not live:
         return None
-    return live
+    settled = settle(live)
+    return settled if settled["status"] in CallStatus.LIVE else None
 
 
 # ─── Answering, refusing, hanging up ──────────────────────────────────────────
@@ -496,12 +521,31 @@ def _ring_expired(call: dict[str, Any]) -> bool:
     return timezone.now() - started > ring_timeout()
 
 
+def _talk_expired(call: dict[str, Any]) -> bool:
+    """An answered call nobody ever closed.
+
+    `/end` is the only thing that ends a conversation, and it is the request
+    most likely to be lost — the network is worst at the moment a call drops,
+    and an app killed mid-call never sends it. Left alone the row stays
+    `accepted` for ever and both people are "band" for ever with it.
+    """
+    if call.get("status") != CallStatus.ACCEPTED:
+        return False
+    answered = call.get("answered_at") or call.get("started_at")
+    if answered is None:
+        return False
+    return timezone.now() - answered > max_call_duration()
+
+
 def settle(call: dict[str, Any]) -> dict[str, Any]:
     """The row as it truly is: a ring that outlived its window is written
-    down as missed before anybody reads it. Used by every read path, so the
-    Celery timeout is a convenience rather than a dependency."""
+    down as missed, and a conversation that outlived the maximum duration as
+    ended, before anybody reads it. Used by every read path, so the Celery
+    timeout is a convenience rather than a dependency."""
     if _ring_expired(call):
         return expire(call) or call
+    if _talk_expired(call):
+        return abandon(call) or call
     return call
 
 
@@ -524,12 +568,42 @@ def expire(call: dict[str, Any]) -> dict[str, Any] | None:
     return updated
 
 
+def abandon(call: dict[str, Any]) -> dict[str, Any] | None:
+    """An answered call whose `/end` never arrived, closed by the server.
+
+    Written down as `ended` with the duration it is known to have had, the
+    same as a normal hang-up: from the outside nothing distinguishes this
+    from a conversation whose last request was lost, because that is what it
+    is. `ended_by` stays null — nobody pressed anything.
+    """
+    answered = call.get("answered_at") or call.get("started_at")
+    now = timezone.now()
+    seconds = max(0, int((now - answered).total_seconds())) if answered else 0
+    updated = calls_repo.transition(
+        call["id"],
+        to=CallStatus.ENDED,
+        only_from=[CallStatus.ACCEPTED],
+        ended_at=now,
+        duration_seconds=seconds,
+    )
+    if not updated:
+        return None
+    cards = calls_repo.employee_cards(_participants(updated))
+    _announce(updated, "ended", cards)
+    _log_to_chat(updated)
+    return updated
+
+
 def expire_stale() -> int:
     """The safety net behind the per-call timeout — every ring older than the
-    window, settled in one pass. Runs from Celery beat."""
+    window and every conversation older than the maximum duration, settled in
+    one pass. Runs from Celery beat."""
     count = 0
     for call in calls_repo.stale_ringing(timezone.now() - ring_timeout()):
         if expire(call):
+            count += 1
+    for call in calls_repo.stale_accepted(timezone.now() - max_call_duration()):
+        if abandon(call):
             count += 1
     return count
 

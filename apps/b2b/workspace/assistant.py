@@ -29,7 +29,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from drf_yasg.utils import swagger_auto_schema
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -37,9 +37,10 @@ from apps.b2b import repository as b2b_repo
 from apps.b2b.integrations import ai, crypto
 from apps.b2b.integrations import ai_repository as ai_repo
 from apps.b2b.integrations import repository as int_repo
-from apps.b2b.integrations.ai_views import _message_payload
+from apps.b2b.integrations.ai_views import CONSOLE_URLS, _message_payload, _wrong_console
 from apps.b2b.integrations.serializers import AiSendSerializer
 from apps.b2b.models import IntegrationProvider, IntegrationStatus
+from apps.b2b.workspace import assistant_keys
 from apps.b2b.workspace.access import Module
 from apps.b2b.workspace.permissions import IsWorkspaceUser
 from apps.b2b.workspace.views import WORKSPACE_TAG, WorkspaceAPIView
@@ -94,6 +95,72 @@ def connected_vendor(company_id: int) -> tuple[str | None, dict | None, str | No
             continue
         return provider, integration, key
     return None, None, None
+
+
+class Resolved:
+    """Whose key the assistant answers this person on.
+
+    The person's own connection first (`assistant_keys`), the workspace's
+    as the fallback. ``own`` says which, so the status can tell the app
+    whether the settings screen is about this person's key or an owner's.
+    """
+
+    def __init__(
+        self,
+        *,
+        provider: str | None,
+        key: str | None,
+        model: str | None,
+        own: bool,
+        integration: dict | None = None,
+        connection: dict | None = None,
+    ) -> None:
+        self.provider = provider
+        self.key = key
+        self.model = model
+        self.own = own
+        self.integration = integration
+        self.connection = connection
+
+    @property
+    def connected(self) -> bool:
+        return self.key is not None and bool(self.model)
+
+
+def resolve_vendor(user) -> Resolved:
+    own = assistant_keys.get(user.id)
+    if own and own.get("key_enc"):
+        try:
+            key = crypto.decrypt(own["key_enc"])
+        except (ValueError, ImproperlyConfigured):
+            key = None
+        if key:
+            return Resolved(
+                provider=own["provider"], key=key, model=own.get("model"),
+                own=True, connection=own,
+            )
+    provider, integration, key = connected_vendor(user.company_id)
+    return Resolved(
+        provider=provider, key=key,
+        model=(integration or {}).get("ai_model") if integration else None,
+        own=False, integration=integration, connection=own,
+    )
+
+
+def _connection_payload(row: dict | None) -> dict | None:
+    """The person's own key as the app may see it — never the key itself."""
+    if not row:
+        return None
+    return {
+        "provider": row["provider"],
+        "provider_name": IntegrationProvider.LABELS.get(row["provider"]),
+        "key_hint": row.get("key_hint"),
+        "model": row.get("model"),
+        "models": list(row.get("models") or []),
+        "status": row.get("status") or assistant_keys.STATUS_CONNECTED,
+        "error": row.get("error"),
+        "console_url": CONSOLE_URLS.get(row["provider"]),
+    }
 
 
 # ─── The conversation ────────────────────────────────────────────────────────
@@ -155,36 +222,44 @@ def answer(user, conversation: dict, *, system: str | None = None) -> tuple[str 
     person's own turn has to be stored *before* this is called: a vendor that
     times out must not lose what they typed.
     """
-    provider, integration, key = connected_vendor(user.company_id)
-    if provider is None or key is None:
-        return None, Response(
-            {"detail": _("Ask an owner to connect Claude or ChatGPT in Integrations first.")},
-            status=status.HTTP_409_CONFLICT,
-        )
-    model = integration.get("ai_model")
+    resolved = resolve_vendor(user)
+    if not resolved.connected:
+        return None, Response({"detail": NOT_CONNECTED_MESSAGE}, status=status.HTTP_409_CONFLICT)
     try:
         text = ai.complete(
-            provider, key, model, _turns(conversation["id"]),
+            resolved.provider, resolved.key, resolved.model, _turns(conversation["id"]),
             system=system or _system_prompt(user),
         )
     except ai.AiError as exc:
         if exc.is_key_problem:
-            int_repo.set_integration_status(
-                integration["id"], IntegrationStatus.ERROR, error=str(exc)
-            )
+            if resolved.own:
+                assistant_keys.set_status(user.id, assistant_keys.STATUS_ERROR, error=str(exc))
+            elif resolved.integration:
+                int_repo.set_integration_status(
+                    resolved.integration["id"], IntegrationStatus.ERROR, error=str(exc)
+                )
         code = status.HTTP_400_BAD_REQUEST if exc.is_key_problem else status.HTTP_502_BAD_GATEWAY
         return None, Response({"detail": str(exc)}, status=code)
-    if integration.get("status") == IntegrationStatus.ERROR:
-        int_repo.set_integration_status(integration["id"], IntegrationStatus.CONNECTED)
+    if resolved.own:
+        if (resolved.connection or {}).get("status") == assistant_keys.STATUS_ERROR:
+            assistant_keys.set_status(user.id, assistant_keys.STATUS_CONNECTED)
+    elif resolved.integration and resolved.integration.get("status") == IntegrationStatus.ERROR:
+        int_repo.set_integration_status(resolved.integration["id"], IntegrationStatus.CONNECTED)
     if text:
         ai_repo.append_message(conversation["id"], "assistant", text)
     return text, None
 
 
+#: What the app is told when nobody has connected anything for this person.
+#: Their own key is the fix, whatever their role — so the sentence no longer
+#: sends them to an owner.
+NOT_CONNECTED_MESSAGE = _("Connect your Claude or ChatGPT key in the assistant's settings first.")
+
+
 # ─── Payloads ────────────────────────────────────────────────────────────────
 
 def status_payload(user) -> dict:
-    provider, integration, key = connected_vendor(user.company_id)
+    resolved = resolve_vendor(user)
     conversation = conversation_for(user.company_id, user.id)
     last = None
     if conversation and conversation.get("message_count"):
@@ -193,13 +268,23 @@ def status_payload(user) -> dict:
             last = _message_payload(recent[-1])
     return {
         "name": NAMES[_language()],
-        "connected": key is not None,
-        "provider": provider,
-        "provider_name": IntegrationProvider.LABELS.get(provider) if provider else None,
-        "model": (integration or {}).get("ai_model") if integration else None,
-        # Whether this caller could go and connect one — the empty state's
-        # button is drawn for them and a sentence for everybody else.
-        "can_connect": bool(user.capabilities.get("can_manage_integrations")),
+        "connected": resolved.connected,
+        "provider": resolved.provider,
+        "provider_name": IntegrationProvider.LABELS.get(resolved.provider) if resolved.provider else None,
+        "model": resolved.model,
+        # Whose key the answers come on. False when it is the workspace's
+        # fallback (or nothing at all), so the app can offer "connect your own".
+        "own": resolved.own,
+        # Everybody may connect their own key, whatever their role — that is
+        # the whole point of a personal assistant. Kept for older builds that
+        # read it as "may this person see the connect button".
+        "can_connect": True,
+        # This person's own connection, connected or in error; null when they
+        # never pasted a key.
+        "connection": _connection_payload(resolved.connection),
+        # Whether an owner connected a workspace key this person falls back to.
+        "workspace_connected": connected_vendor(user.company_id)[2] is not None,
+        "console_urls": dict(CONSOLE_URLS),
         "message_count": int((conversation or {}).get("message_count") or 0),
         "last_message": last,
     }
@@ -248,14 +333,11 @@ class AssistantMessagesView(AssistantAPIView):
         serializer.is_valid(raise_exception=True)
         text = serializer.validated_data["text"].strip()
 
-        provider, integration, key = connected_vendor(request.user.company_id)
-        if key is None:
-            return Response(
-                {"detail": _("Ask an owner to connect Claude or ChatGPT in Integrations first.")},
-                status=status.HTTP_409_CONFLICT,
-            )
+        resolved = resolve_vendor(request.user)
+        if not resolved.connected:
+            return Response({"detail": NOT_CONNECTED_MESSAGE}, status=status.HTTP_409_CONFLICT)
         conversation = ensure_conversation(
-            request.user.company_id, request.user.id, model=integration.get("ai_model")
+            request.user.company_id, request.user.id, model=resolved.model
         )
         ai_repo.append_message(conversation["id"], "user", text)
         _answer, refusal = answer(request.user, conversation)
@@ -273,3 +355,83 @@ class AssistantMessagesView(AssistantAPIView):
                 conversation["id"], request.user.company_id, ASSISTANT_PROVIDER
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─── The person's own key ────────────────────────────────────────────────────
+
+class OwnConnectSerializer(serializers.Serializer):
+    provider = serializers.ChoiceField(choices=list(IntegrationProvider.AI))
+    api_key = serializers.CharField(max_length=400, write_only=True, trim_whitespace=True)
+
+
+class OwnModelSerializer(serializers.Serializer):
+    model = serializers.CharField(max_length=120)
+
+
+class AssistantConnectionView(AssistantAPIView):
+    """GET    /assistant/connection/ — this person's own key, as a hint.
+    POST   /assistant/connection/ {provider, api_key} — connect (or replace).
+    PATCH  /assistant/connection/ {model} — pick the model.
+    DELETE /assistant/connection/ — forget the key; the workspace's, if any,
+    takes over again.
+
+    Open to every role. The key is checked against the vendor before it is
+    kept, the same way the workspace's is on the integrations screen.
+    """
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="My own AI connection")
+    def get(self, request):
+        return Response(status_payload(request.user))
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Connect my own Claude or ChatGPT key",
+                         request_body=OwnConnectSerializer())
+    def post(self, request):
+        serializer = OwnConnectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        provider = serializer.validated_data["provider"]
+        key = serializer.validated_data["api_key"]
+
+        if not crypto.is_configured():
+            return Response(
+                {"detail": _("The server has no key to store credentials with. "
+                             "Ask an administrator to set B2B_INTEGRATIONS_SECRET_KEY.")},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        if not ai.looks_like_key(provider, key):
+            return Response({"api_key": [_wrong_console(provider)]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            check = ai.verify_key(provider, key)
+        except ai.AiError as exc:
+            code = status.HTTP_400_BAD_REQUEST if exc.is_key_problem else status.HTTP_502_BAD_GATEWAY
+            return Response({"api_key": [str(exc)]}, status=code)
+
+        previous = assistant_keys.get(request.user.id) or {}
+        model = previous.get("model") if previous.get("model") in check.models else check.default_model
+        assistant_keys.save(
+            request.user.id,
+            provider=provider,
+            key_enc=crypto.encrypt(key),
+            key_hint=ai.key_hint(key),
+            model=model,
+            models=check.models,
+        )
+        return Response(status_payload(request.user))
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Pick the model my key answers on",
+                         request_body=OwnModelSerializer())
+    def patch(self, request):
+        serializer = OwnModelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        own = assistant_keys.get(request.user.id)
+        if not own:
+            return Response({"detail": _("Connect a key first.")}, status=status.HTTP_409_CONFLICT)
+        model = serializer.validated_data["model"]
+        if own.get("models") and model not in own["models"]:
+            return Response({"model": [_("This key cannot use that model.")]}, status=status.HTTP_400_BAD_REQUEST)
+        assistant_keys.set_model(request.user.id, model)
+        return Response(status_payload(request.user))
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Forget my own key")
+    def delete(self, request):
+        assistant_keys.delete(request.user.id)
+        return Response(status_payload(request.user))

@@ -7,8 +7,11 @@ their own corner of it.
 """
 from __future__ import annotations
 
+import json
 import logging
+from datetime import timedelta
 
+from django.conf import settings
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
@@ -17,12 +20,21 @@ from rest_framework import serializers, status
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 
+from apps.b2b import repository as b2b_repo
+from apps.b2b.integrations import ai
 from apps.b2b.integrations import ai_repository as ai_repo
+from apps.b2b.integrations.ai_views import _message_payload
+from apps.b2b.integrations.serializers import AiSendSerializer
 from apps.b2b.workspace import analyst
 from apps.b2b.workspace import analyst_repository as repo
 from apps.b2b.workspace import assistant
+from apps.b2b.workspace import repository as wrepo
 from apps.b2b.workspace.permissions import IsWorkspaceUser
 from apps.b2b.workspace.views import WORKSPACE_TAG, WorkspaceAPIView
+
+#: The `provider` column of each person's Weel AI chat. Not a vendor — the
+#: chat belongs to Weel AI whichever model answers it.
+WEEL_AI_PROVIDER = "weel_ai"
 
 logger = logging.getLogger(__name__)
 
@@ -74,16 +86,32 @@ def _report_detail(report: dict) -> dict:
     }
 
 
+def _reads_reports(user) -> bool:
+    return bool(getattr(user, "capabilities", {}).get("sees_all_company_data"))
+
+
 def status_payload(user) -> dict:
-    latest = repo.latest_report(user.company_id)
+    reads_reports = _reads_reports(user)
+    latest = repo.latest_report(user.company_id) if reads_reports else None
+    conversation = ai_repo.find_owned_conversation(user.company_id, WEEL_AI_PROVIDER, user.id)
+    last = None
+    if conversation and conversation.get("message_count"):
+        recent = ai_repo.recent_messages(conversation["id"], 1)
+        if recent:
+            last = _message_payload(recent[-1])
     return {
         "name": "Weel AI",
         "available": analyst.is_available(user.company_id),
-        "unseen_count": repo.unseen_count(user.company_id, user.id),
+        # The reports are about the whole company and stay with the people
+        # who run it; the chat under `analyst/chat/` is everybody's.
+        "can_read_reports": reads_reports,
+        "unseen_count": repo.unseen_count(user.company_id, user.id) if reads_reports else 0,
         "latest": _report_row(latest) if latest else None,
         # Whether the connected assistant can take a report and talk it
         # through — the "Qanday tuzatish mumkin?" button is drawn on that.
-        "assistant_connected": assistant.connected_vendor(user.company_id)[2] is not None,
+        "assistant_connected": assistant.resolve_vendor(user).connected,
+        "message_count": int((conversation or {}).get("message_count") or 0),
+        "last_message": last,
     }
 
 
@@ -97,9 +125,12 @@ class DiscussSerializer(serializers.Serializer):
     question = serializers.CharField(required=False, allow_blank=True, max_length=4000)
 
 
-class AnalystView(AnalystAPIView):
-    """GET /analyst/ — the button: whether Weel AI runs here, how many reports
-    are unread, and the latest one."""
+class AnalystView(WorkspaceAPIView):
+    """GET /analyst/ — the row: whether Weel AI runs here, how many reports
+    are unread (for whoever may read them), and the last thing said in the
+    chat. Every role: the row is drawn for everybody now that the chat is."""
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
 
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Weel AI status")
     def get(self, request):
@@ -204,12 +235,9 @@ class AnalystDiscussView(AnalystAPIView):
         serializer = DiscussSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        provider, integration, key = assistant.connected_vendor(request.user.company_id)
-        if key is None:
-            return Response(
-                {"detail": _("Ask an owner to connect Claude or ChatGPT in Integrations first.")},
-                status=status.HTTP_409_CONFLICT,
-            )
+        resolved = assistant.resolve_vendor(request.user)
+        if not resolved.connected:
+            return Response({"detail": assistant.NOT_CONNECTED_MESSAGE}, status=status.HTTP_409_CONFLICT)
 
         lang = _lang()
         question = (serializer.validated_data.get("question") or "").strip() or (
@@ -222,7 +250,7 @@ class AnalystDiscussView(AnalystAPIView):
         card = f"{headline}\n\n{body}".strip() if headline else body
 
         conversation = assistant.ensure_conversation(
-            request.user.company_id, request.user.id, model=integration.get("ai_model")
+            request.user.company_id, request.user.id, model=resolved.model
         )
         ai_repo.append_message(conversation["id"], assistant.ROLE_REPORT, card)
         ai_repo.append_message(conversation["id"], "user", question)
@@ -233,3 +261,169 @@ class AnalystDiscussView(AnalystAPIView):
             request.user,
             assistant.conversation_for(request.user.company_id, request.user.id),
         ))
+
+
+# ─── Weel AI as a chat, for everybody ────────────────────────────────────────
+
+WEEL_AI_SYSTEM = """You are Weel AI, the analyst built into the Weel workspace app, talking to one employee of a company about their own work.
+
+Language: answer in the language the person writes in. The app's languages are Uzbek (Latin script) and Russian; if the message is ambiguous or very short, answer in {language}. Never mix languages in one answer, and never switch to English unless the person writes in English.
+
+You see this person's numbers below — their tasks, deals, attendance for the last 30 days, and their open tasks — and, if they run the company, the company's totals. Use them: say what is going well, what is behind, what to do today and this week. Be concrete and short; plain paragraphs and simple lists, no headings. Do not invent numbers that are not in the data; if something is missing, say what to check in the app.
+
+The person: {name}, {position}, {role} at {company}.
+
+Data (JSON):
+{data}"""
+
+
+def _weel_ai_context(user) -> dict:
+    """What Weel AI knows about this person: their month, their open tasks,
+    and — for whoever runs the company — the company line as well."""
+    window = analyst.window_for("month")
+    rows = repo.employee_window_stats(user.company_id, window.start, window.end)
+    mine = next((r for r in rows if int(r.get("employee_id") or 0) == int(user.id)), None)
+    person = None
+    if mine:
+        person = {
+            "tasks_completed": int(mine.get("completed_count") or 0),
+            "tasks_on_time_rate": analyst._rate(int(mine.get("on_time_count") or 0), int(mine.get("due_count") or 0)),
+            "tasks_open": int(mine.get("open_count") or 0),
+            "tasks_overdue": int(mine.get("overdue_count") or 0),
+            "deals_won": int(mine.get("won_count") or 0),
+            "deals_won_amount": analyst._num(mine.get("won_amount")) or 0,
+            "deals_lost": int(mine.get("lost_count") or 0),
+            "days_present": int(mine.get("present_days") or 0),
+            "days_late": int(mine.get("late_days") or 0),
+            "days_absent": int(mine.get("absent_days") or 0),
+        }
+    tasks = []
+    try:
+        for task in wrepo.list_tasks(user.company_id, visible_to=user.id, limit=60):
+            if task.get("status") == "done":
+                continue
+            tasks.append({
+                "title": task.get("title"),
+                "status": task.get("status"),
+                "priority": task.get("priority"),
+                "due_date": task["due_date"].isoformat() if task.get("due_date") else None,
+                "project": task.get("project"),
+            })
+            if len(tasks) >= 15:
+                break
+    except Exception:  # noqa: BLE001 - the chat is worth more than one list
+        pass
+    data = {
+        "window": {"start": window.start_date.isoformat(), "end": (window.end_date - timedelta(days=1)).isoformat()},
+        "me": person,
+        "open_tasks": tasks,
+    }
+    if _reads_reports(user):
+        try:
+            whole = analyst.gather(user.company_id, window)
+            data["company_totals"] = whole.get("company_totals")
+            data["departments"] = whole.get("departments")
+        except Exception:  # noqa: BLE001
+            pass
+        latest = repo.latest_report(user.company_id)
+        if latest and latest.get("status") == repo.STATUS_READY:
+            lang = _lang()
+            data["latest_report"] = {
+                "period": latest.get("period"),
+                "headline": latest.get(f"headline_{lang}") or "",
+            }
+    return data
+
+
+def _weel_ai_system(user) -> str:
+    company = b2b_repo.get_company(user.company_id) or {}
+    employee = user._data if hasattr(user, "_data") else {}
+    return WEEL_AI_SYSTEM.format(
+        language=assistant.LANGUAGE_NAMES[_lang()],
+        name=user.full_name or "",
+        position=employee.get("position") or "",
+        role=user.role,
+        company=company.get("name") or "",
+        data=json.dumps(_weel_ai_context(user), ensure_ascii=False, default=analyst._json_default),
+    )
+
+
+def _weel_ai_conversation(user) -> dict | None:
+    return ai_repo.find_owned_conversation(user.company_id, WEEL_AI_PROVIDER, user.id)
+
+
+def _weel_ai_payload(user) -> dict:
+    conversation = _weel_ai_conversation(user)
+    messages = ai_repo.list_messages(conversation["id"]) if conversation else []
+    return {
+        **status_payload(user),
+        "id": conversation["id"] if conversation else None,
+        "messages": [_message_payload(m) for m in messages],
+    }
+
+
+class WeelAiChatView(WorkspaceAPIView):
+    """GET    /analyst/chat/ — this person's chat with Weel AI.
+    POST   /analyst/chat/ {text} — ask, and get the answer.
+    DELETE /analyst/chat/ — start over.
+
+    Every role. Where the reports read the whole company for its managers,
+    this reads the one person asking — their tasks, deals and attendance —
+    and helps them with their own work, on the deployment's key
+    (`B2B_ANALYST_API_KEY`, or the workspace's as the fallback).
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="My chat with Weel AI")
+    def get(self, request):
+        return Response(_weel_ai_payload(request.user))
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Ask Weel AI", request_body=AiSendSerializer())
+    def post(self, request):
+        serializer = AiSendSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        text = serializer.validated_data["text"].strip()
+        vendor = analyst.vendor_for(request.user.company_id)
+        if vendor is None or not analyst.is_available(request.user.company_id):
+            return Response(
+                {"detail": _("Weel AI is not enabled on this server yet.")},
+                status=status.HTTP_409_CONFLICT,
+            )
+        conversation = _weel_ai_conversation(request.user)
+        if not conversation:
+            row = ai_repo.create_conversation(
+                company_id=request.user.company_id,
+                provider=WEEL_AI_PROVIDER,
+                title="Weel AI",
+                model=vendor.model,
+                project_id=None,
+                created_by_id=request.user.id,
+            )
+            conversation = ai_repo.get_conversation(row["id"], request.user.company_id, WEEL_AI_PROVIDER) or row
+        ai_repo.append_message(conversation["id"], "user", text)
+
+        history = int(getattr(settings, "B2B_AI_HISTORY_TURNS", 40))
+        turns = [
+            ai.Turn(role=m["role"], text=m["text"])
+            for m in ai_repo.recent_messages(conversation["id"], history)
+            if m["role"] in ("user", "assistant")
+        ]
+        try:
+            answer = ai.complete(
+                vendor.provider, vendor.key, vendor.model, turns,
+                system=_weel_ai_system(request.user),
+            )
+        except ai.AiError as exc:
+            code = status.HTTP_400_BAD_REQUEST if exc.is_key_problem else status.HTTP_502_BAD_GATEWAY
+            return Response({"detail": str(exc)}, status=code)
+        if answer:
+            ai_repo.append_message(conversation["id"], "assistant", answer)
+        return Response(_weel_ai_payload(request.user))
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Clear my Weel AI chat")
+    def delete(self, request):
+        conversation = _weel_ai_conversation(request.user)
+        if conversation:
+            ai_repo.delete_conversation(conversation["id"], request.user.company_id, WEEL_AI_PROVIDER)
+        return Response(status=status.HTTP_204_NO_CONTENT)

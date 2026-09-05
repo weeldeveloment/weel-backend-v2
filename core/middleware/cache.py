@@ -76,8 +76,13 @@ def _get_auth_token(request) -> str:
     return auth
 
 
-def _build_cache_key(tenant_key: str, version: int, path: str, query_string: str) -> str:
-    raw = f"{path}:{query_string}"
+def _build_cache_key(
+    tenant_key: str, version: int, path: str, query_string: str, language: str = ""
+) -> str:
+    # Labels the server composes (roles, modules, permissions) follow the
+    # request language, so a Russian and an Uzbek reader must not share an
+    # entry — `language` is what the locale middleware resolved just before.
+    raw = f"{path}:{query_string}:{language}"
     path_hash = hashlib.md5(raw.encode()).hexdigest()
     return f"{CACHE_PREFIX}:{tenant_key}:{version}:{path_hash}"
 
@@ -146,7 +151,11 @@ class CacheMiddleware:
             return self.get_response(request)
 
         cache_key = _build_cache_key(
-            token, version, request.path, request.META.get("QUERY_STRING", "")
+            token,
+            version,
+            request.path,
+            request.META.get("QUERY_STRING", ""),
+            getattr(request, "LANGUAGE_CODE", "") or "",
         )
 
         try:
