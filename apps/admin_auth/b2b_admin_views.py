@@ -145,7 +145,13 @@ class AdminB2BSupportThreadView(AdminBaseView):
             employee_id=employee_id,
             text=serializer.validated_data["text"],
             is_staff=True,
-            author_user_id=getattr(request.user, "id", None),
+            # Deliberately null. `author_user_id` references `b2b_user`, and the
+            # person replying here is a WEEL admin from `users` — a different table
+            # with its own id space. Passing `request.user.id` violated the foreign
+            # key (a 500 on every reply) or, where the two ids happened to collide,
+            # credited the message to an unrelated B2B user. `is_staff` is what marks
+            # a line as support's; there is no correct value for this column.
+            author_user_id=None,
         )
         workspace_repo.mark_support_answered(employee_id)
         return Response(

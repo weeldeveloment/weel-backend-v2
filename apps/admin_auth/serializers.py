@@ -1,14 +1,19 @@
+import logging
 import os
 
+from django.contrib.auth.hashers import check_password
 from rest_framework import serializers
 
 from .raw_repository import (
     create_admin_user,
     exists_admin_email,
     get_active_admin_by_email,
+    get_admin_password_hash,
     is_super_admin,
     make_unique_admin_username,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AdminLoginSerializer(serializers.Serializer):
@@ -25,11 +30,36 @@ class AdminLoginSerializer(serializers.Serializer):
         if not user:
             raise serializers.ValidationError("Invalid credentials.")
 
-        # Optional strict password for normalized DB flow.
-        # If env is missing, login remains email-based to keep endpoint usable.
+        # The account's own hash is authoritative. This used to compare against a single
+        # shared ADMIN_LOGIN_PASSWORD and, when that env var was unset — which it was —
+        # skipped the check entirely, so any password signed in any active admin.
+        stored_hash = get_admin_password_hash(user.id)
+        if stored_hash:
+            if not check_password(password, stored_hash):
+                raise serializers.ValidationError("Invalid credentials.")
+            attrs["user"] = user
+            return attrs
+
+        # No hash yet: accounts predating per-admin passwords. ADMIN_LOGIN_PASSWORD keeps
+        # them usable during the migration and nothing else — set a real password with
+        # `manage.py set_admin_password`, then remove the variable.
         static_password = (os.getenv("ADMIN_LOGIN_PASSWORD") or "").strip()
-        if static_password and password != static_password:
+        if not static_password:
+            logger.warning(
+                "Admin %s has no password set and ADMIN_LOGIN_PASSWORD is not configured; "
+                "refusing the sign-in. Run: manage.py set_admin_password %s",
+                email,
+                email,
+            )
             raise serializers.ValidationError("Invalid credentials.")
+        if password != static_password:
+            raise serializers.ValidationError("Invalid credentials.")
+        logger.warning(
+            "Admin %s signed in with the shared ADMIN_LOGIN_PASSWORD. Set a per-account "
+            "password with `manage.py set_admin_password %s` and drop the variable.",
+            email,
+            email,
+        )
 
         attrs["user"] = user
         return attrs
@@ -81,4 +111,7 @@ class AdminCreateSerializer(serializers.Serializer):
             username=username,
             first_name=first_name,
             last_name=last_name,
+            # Was accepted and silently discarded, leaving every new admin with no
+            # password at all — which is half of why login could not check one.
+            password=validated_data["password"],
         )

@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from django.contrib.auth.hashers import make_password
 from django.utils import timezone
 
 from shared.raw.compat import return_star
-from shared.raw.db import fetch_all, fetch_one
+from shared.raw.db import execute, fetch_all, fetch_one
 from shared.raw.entities import RawUser
 from shared.raw.tables import USER_TABLE
 from users.raw_repository import get_user_by_id
@@ -31,6 +32,28 @@ def _parse_super_admin_ids() -> list[int]:
         if item.isdigit():
             values.append(int(item))
     return values
+
+
+def get_admin_password_hash(user_id: int) -> str:
+    """The stored hash for an admin, or "" when none has ever been set.
+
+    Deliberately not on `RawUser`: the hash is needed at exactly one place — verifying a
+    login — and an entity that carried it would leak it into every serializer that
+    happens to dump a user.
+    """
+    row = fetch_one(
+        f"SELECT password FROM {USER_TABLE} WHERE id = %s AND role = 'admin'",
+        [user_id],
+    )
+    return (row or {}).get("password") or ""
+
+
+def set_admin_password(user_id: int, raw_password: str) -> bool:
+    """Store a hashed password for an admin. Returns False if there is no such admin."""
+    return execute(
+        f"UPDATE {USER_TABLE} SET password = %s, updated_at = %s WHERE id = %s AND role = 'admin'",
+        [make_password(raw_password), timezone.now(), user_id],
+    ) > 0
 
 
 def is_super_admin(user_id: int) -> bool:
@@ -108,7 +131,10 @@ def create_admin_user(
     username: str,
     first_name: str = "",
     last_name: str = "",
+    password: str | None = None,
 ) -> RawUser:
+    """Create an admin. Without `password` the account is created unusable on purpose —
+    it cannot sign in until someone sets one (`manage.py set_admin_password`)."""
     now = timezone.now()
     row = fetch_one(
         f"""
@@ -146,7 +172,10 @@ def create_admin_user(
         )
     if row is None:
         raise RuntimeError("Failed to create admin user")
-    return RawUser.from_row(row)
+    user = RawUser.from_row(row)
+    if password:
+        set_admin_password(user.id, password)
+    return user
 
 
 def make_unique_admin_username(base_username: str) -> str:
