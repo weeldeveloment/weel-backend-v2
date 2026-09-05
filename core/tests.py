@@ -138,6 +138,27 @@ class MetricsGuardMiddlewareTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(host, "metrics.weel.uz")
 
+    def test_internal_scrape_host_rewritten_even_without_token(self):
+        response, host = self._get_host(
+            token="", REMOTE_ADDR="10.0.1.5", HTTP_HOST="weel-devbackend-y95c8w:8000"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(host, "dev.weel.uz")
+
+    def test_public_scrape_without_token_is_not_rewritten(self):
+        response, host = self._get_host(token="", REMOTE_ADDR="8.8.8.8", HTTP_HOST="evil.example")
+        self.assertEqual(response.status_code, 200)  # guard is off without a token
+        self.assertEqual(host, "evil.example")  # but no host laundering for outsiders
+
+    def test_full_stack_scrape_by_service_name_returns_metrics(self):
+        from django.test import Client, override_settings
+
+        with override_settings(ALLOWED_HOSTS=["dev.weel.uz"], PROMETHEUS_METRICS_TOKEN="", DEBUG=False):
+            client = Client()
+            client.handler.load_middleware()
+            response = client.get("/metrics", HTTP_HOST="weel-devbackend-y95c8w:8000", REMOTE_ADDR="10.0.1.12")
+        self.assertNotEqual(response.status_code, 400)
+
     def test_allowed_host_is_left_alone(self):
         response, host = self._get_host(REMOTE_ADDR="10.0.1.5", HTTP_HOST="dev.weel.uz")
         self.assertEqual(response.status_code, 200)

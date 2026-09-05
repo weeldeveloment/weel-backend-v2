@@ -81,12 +81,16 @@ class MetricsGuardMiddleware:
         self.token = (getattr(settings, "PROMETHEUS_METRICS_TOKEN", "") or "").strip()
 
     def __call__(self, request):
-        if self.token and request.path.startswith(_GUARDED_PREFIXES):
+        if request.path.startswith(_GUARDED_PREFIXES):
             header = request.META.get("HTTP_AUTHORIZATION", "")
-            authorized = header == f"Bearer {self.token}" or _is_private(_client_ip(request))
-            if not authorized:
+            internal = _is_private(_client_ip(request))
+            authorized = internal or (bool(self.token) and header == f"Bearer {self.token}")
+            if self.token and not authorized:
                 return HttpResponseNotFound()
-            if not _host_allowed(request):
+            # Host substitution does not depend on the token being configured:
+            # an internal scraper by service name must work even before the
+            # token is rolled out (and a wrong token already got its 404 above).
+            if authorized and not _host_allowed(request):
                 request.META["HTTP_HOST"] = _substitute_host()
                 request.META.pop("HTTP_X_FORWARDED_HOST", None)
         return self.get_response(request)
