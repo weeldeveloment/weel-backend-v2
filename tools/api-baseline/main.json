@@ -11378,43 +11378,6 @@
    ],
    "type": "object"
   },
-  "OwnConnect": {
-   "properties": {
-    "api_key": {
-     "maxLength": 400,
-     "minLength": 1,
-     "title": "Api key",
-     "type": "string"
-    },
-    "provider": {
-     "enum": [
-      "claude",
-      "chatgpt"
-     ],
-     "title": "Provider",
-     "type": "string"
-    }
-   },
-   "required": [
-    "provider",
-    "api_key"
-   ],
-   "type": "object"
-  },
-  "OwnModel": {
-   "properties": {
-    "model": {
-     "maxLength": 120,
-     "minLength": 1,
-     "title": "Model",
-     "type": "string"
-    }
-   },
-   "required": [
-    "model"
-   ],
-   "type": "object"
-  },
   "OwnProfile": {
    "properties": {
     "email": {
@@ -20171,7 +20134,7 @@
   },
   "/b2b/workspace/analyst/chat/": {
    "delete": {
-    "description": "GET    /analyst/chat/ — this person's chat with Weel AI.\nPOST   /analyst/chat/ {text} — ask, and get the answer.\nDELETE /analyst/chat/ — start over.\n\nEvery role. Where the reports read the whole company for its managers,\nthis reads the one person asking — their tasks, deals and attendance —\nand helps them with their own work, on the deployment's key\n(`B2B_ANALYST_API_KEY`, or the workspace's as the fallback).",
+    "description": "GET    /analyst/chat/ — this person's chat with Weel AI.\nPOST   /analyst/chat/ {text} — ask, and get the answer.\nDELETE /analyst/chat/ — start over.\n\nEvery role, two readers. An employee gets their own month and open\ntasks in the prompt and help with their own work. Whoever runs the\ncompany (`sees_all_company_data`) gets the business advisor instead —\n`advisor.py` — which reads the whole company through tools as it\nanswers and keeps what it is told between conversations. Both on the\ndeployment's key (`B2B_ANALYST_API_KEY`, or the workspace's as the\nfallback).",
     "operationId": "b2b_workspace_analyst_chat_delete",
     "parameters": [],
     "responses": {
@@ -20185,7 +20148,7 @@
     ]
    },
    "get": {
-    "description": "GET    /analyst/chat/ — this person's chat with Weel AI.\nPOST   /analyst/chat/ {text} — ask, and get the answer.\nDELETE /analyst/chat/ — start over.\n\nEvery role. Where the reports read the whole company for its managers,\nthis reads the one person asking — their tasks, deals and attendance —\nand helps them with their own work, on the deployment's key\n(`B2B_ANALYST_API_KEY`, or the workspace's as the fallback).",
+    "description": "GET    /analyst/chat/ — this person's chat with Weel AI.\nPOST   /analyst/chat/ {text} — ask, and get the answer.\nDELETE /analyst/chat/ — start over.\n\nEvery role, two readers. An employee gets their own month and open\ntasks in the prompt and help with their own work. Whoever runs the\ncompany (`sees_all_company_data`) gets the business advisor instead —\n`advisor.py` — which reads the whole company through tools as it\nanswers and keeps what it is told between conversations. Both on the\ndeployment's key (`B2B_ANALYST_API_KEY`, or the workspace's as the\nfallback).",
     "operationId": "b2b_workspace_analyst_chat_list",
     "parameters": [],
     "responses": {
@@ -20200,7 +20163,7 @@
    },
    "parameters": [],
    "post": {
-    "description": "GET    /analyst/chat/ — this person's chat with Weel AI.\nPOST   /analyst/chat/ {text} — ask, and get the answer.\nDELETE /analyst/chat/ — start over.\n\nEvery role. Where the reports read the whole company for its managers,\nthis reads the one person asking — their tasks, deals and attendance —\nand helps them with their own work, on the deployment's key\n(`B2B_ANALYST_API_KEY`, or the workspace's as the fallback).",
+    "description": "GET    /analyst/chat/ — this person's chat with Weel AI.\nPOST   /analyst/chat/ {text} — ask, and get the answer.\nDELETE /analyst/chat/ — start over.\n\nEvery role, two readers. An employee gets their own month and open\ntasks in the prompt and help with their own work. Whoever runs the\ncompany (`sees_all_company_data`) gets the business advisor instead —\n`advisor.py` — which reads the whole company through tools as it\nanswers and keeps what it is told between conversations. Both on the\ndeployment's key (`B2B_ANALYST_API_KEY`, or the workspace's as the\nfallback).",
     "operationId": "b2b_workspace_analyst_chat_create",
     "parameters": [
      {
@@ -20320,7 +20283,7 @@
     }
    ],
    "post": {
-    "description": "POST /analyst/reports/<id>/discuss/ — hand the report to the assistant.\n\nThe two AIs working together: Weel AI found it, the connected assistant\nexplains how to fix it. The report goes into the caller's assistant chat\nas a card, their question under it, and the assistant's answer comes\nback — and the chat is then where the conversation carries on.",
+    "description": "POST /analyst/reports/<id>/discuss/ — talk a report through with\nWeel AI.\n\nThe report goes into the caller's Weel AI chat as a card, their\nquestion under it, and the advisor's answer comes back — and the chat\nis then where the conversation carries on. Managers only, like the\nreport itself, so the answer is always the advisor's, with the tools.",
     "operationId": "b2b_workspace_analyst_reports_discuss_create",
     "parameters": [
      {
@@ -20340,7 +20303,7 @@
       }
      }
     },
-    "summary": "Ask the assistant about a report",
+    "summary": "Ask Weel AI about a report",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -20358,6 +20321,256 @@
      }
     },
     "summary": "Mark Weel AI reports seen",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/analytics/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/analytics/",
+    "operationId": "b2b_workspace_analytics_list",
+    "parameters": [
+     {
+      "enum": [
+       "sales",
+       "tasks",
+       "stock",
+       "trips",
+       "attendance"
+      ],
+      "in": "query",
+      "name": "section",
+      "type": "string"
+     },
+     {
+      "enum": [
+       "day",
+       "week",
+       "month",
+       "year"
+      ],
+      "in": "query",
+      "name": "period",
+      "type": "string"
+     },
+     {
+      "description": "Anchor day, YYYY-MM-DD; the period containing it. Defaults to today.",
+      "in": "query",
+      "name": "date",
+      "type": "string"
+     },
+     {
+      "description": "Managers only: narrow the figures to one person.",
+      "in": "query",
+      "name": "employee_id",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "One report section: KPIs and the employee table",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/analytics/export/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/analytics/export/?type=xlsx|csv\n\n``type`` and not ``format``: DRF reads ``?format=`` as its own renderer\nswitch and answers 404 for a name it does not know.",
+    "operationId": "b2b_workspace_analytics_export_list",
+    "parameters": [
+     {
+      "enum": [
+       "sales",
+       "tasks",
+       "stock",
+       "trips",
+       "attendance"
+      ],
+      "in": "query",
+      "name": "section",
+      "type": "string"
+     },
+     {
+      "enum": [
+       "day",
+       "week",
+       "month",
+       "year"
+      ],
+      "in": "query",
+      "name": "period",
+      "type": "string"
+     },
+     {
+      "description": "Anchor day, YYYY-MM-DD; the period containing it. Defaults to today.",
+      "in": "query",
+      "name": "date",
+      "type": "string"
+     },
+     {
+      "description": "Managers only: narrow the figures to one person.",
+      "in": "query",
+      "name": "employee_id",
+      "type": "integer"
+     },
+     {
+      "enum": [
+       "xlsx",
+       "csv"
+      ],
+      "in": "query",
+      "name": "type",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "The section as a spreadsheet",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/analytics/items/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/analytics/items/",
+    "operationId": "b2b_workspace_analytics_items_list",
+    "parameters": [
+     {
+      "enum": [
+       "sales",
+       "tasks",
+       "stock",
+       "trips",
+       "attendance"
+      ],
+      "in": "query",
+      "name": "section",
+      "type": "string"
+     },
+     {
+      "enum": [
+       "day",
+       "week",
+       "month",
+       "year"
+      ],
+      "in": "query",
+      "name": "period",
+      "type": "string"
+     },
+     {
+      "description": "Anchor day, YYYY-MM-DD; the period containing it. Defaults to today.",
+      "in": "query",
+      "name": "date",
+      "type": "string"
+     },
+     {
+      "description": "Managers only: narrow the figures to one person.",
+      "in": "query",
+      "name": "employee_id",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "metric",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "enum": [
+       "date",
+       "amount"
+      ],
+      "in": "query",
+      "name": "sort",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "The rows behind one KPI",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/analytics/subscription/": {
+   "get": {
+    "description": "GET / PUT /api/b2b/workspace/analytics/subscription/?section=sales",
+    "operationId": "b2b_workspace_analytics_subscription_list",
+    "parameters": [
+     {
+      "enum": [
+       "sales",
+       "tasks",
+       "stock",
+       "trips",
+       "attendance"
+      ],
+      "in": "query",
+      "name": "section",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "This person's report subscription for a section",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "put": {
+    "description": "GET / PUT /api/b2b/workspace/analytics/subscription/?section=sales",
+    "operationId": "b2b_workspace_analytics_subscription_update",
+    "parameters": [
+     {
+      "enum": [
+       "sales",
+       "tasks",
+       "stock",
+       "trips",
+       "attendance"
+      ],
+      "in": "query",
+      "name": "section",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "Switch, schedule and address the subscription",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -20414,163 +20627,6 @@
     ]
    },
    "parameters": []
-  },
-  "/b2b/workspace/assistant/": {
-   "get": {
-    "description": "GET /api/b2b/workspace/assistant/ — the row on the chat list: whether\nan assistant is connected, and the last thing said in the chat.",
-    "operationId": "b2b_workspace_assistant_list",
-    "parameters": [],
-    "responses": {
-     "200": {
-      "description": ""
-     }
-    },
-    "summary": "The AI assistant's row",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   },
-   "parameters": []
-  },
-  "/b2b/workspace/assistant/connection/": {
-   "delete": {
-    "description": "GET    /assistant/connection/ — this person's own key, as a hint.\nPOST   /assistant/connection/ {provider, api_key} — connect (or replace).\nPATCH  /assistant/connection/ {model} — pick the model.\nDELETE /assistant/connection/ — forget the key; the workspace's, if any,\ntakes over again.\n\nOpen to every role. The key is checked against the vendor before it is\nkept, the same way the workspace's is on the integrations screen.",
-    "operationId": "b2b_workspace_assistant_connection_delete",
-    "parameters": [],
-    "responses": {
-     "204": {
-      "description": ""
-     }
-    },
-    "summary": "Forget my own key",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   },
-   "get": {
-    "description": "GET    /assistant/connection/ — this person's own key, as a hint.\nPOST   /assistant/connection/ {provider, api_key} — connect (or replace).\nPATCH  /assistant/connection/ {model} — pick the model.\nDELETE /assistant/connection/ — forget the key; the workspace's, if any,\ntakes over again.\n\nOpen to every role. The key is checked against the vendor before it is\nkept, the same way the workspace's is on the integrations screen.",
-    "operationId": "b2b_workspace_assistant_connection_list",
-    "parameters": [],
-    "responses": {
-     "200": {
-      "description": ""
-     }
-    },
-    "summary": "My own AI connection",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   },
-   "parameters": [],
-   "patch": {
-    "description": "GET    /assistant/connection/ — this person's own key, as a hint.\nPOST   /assistant/connection/ {provider, api_key} — connect (or replace).\nPATCH  /assistant/connection/ {model} — pick the model.\nDELETE /assistant/connection/ — forget the key; the workspace's, if any,\ntakes over again.\n\nOpen to every role. The key is checked against the vendor before it is\nkept, the same way the workspace's is on the integrations screen.",
-    "operationId": "b2b_workspace_assistant_connection_partial_update",
-    "parameters": [
-     {
-      "in": "body",
-      "name": "data",
-      "required": true,
-      "schema": {
-       "$ref": "#/definitions/OwnModel"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "",
-      "schema": {
-       "$ref": "#/definitions/OwnModel"
-      }
-     }
-    },
-    "summary": "Pick the model my key answers on",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   },
-   "post": {
-    "description": "GET    /assistant/connection/ — this person's own key, as a hint.\nPOST   /assistant/connection/ {provider, api_key} — connect (or replace).\nPATCH  /assistant/connection/ {model} — pick the model.\nDELETE /assistant/connection/ — forget the key; the workspace's, if any,\ntakes over again.\n\nOpen to every role. The key is checked against the vendor before it is\nkept, the same way the workspace's is on the integrations screen.",
-    "operationId": "b2b_workspace_assistant_connection_create",
-    "parameters": [
-     {
-      "in": "body",
-      "name": "data",
-      "required": true,
-      "schema": {
-       "$ref": "#/definitions/OwnConnect"
-      }
-     }
-    ],
-    "responses": {
-     "201": {
-      "description": "",
-      "schema": {
-       "$ref": "#/definitions/OwnConnect"
-      }
-     }
-    },
-    "summary": "Connect my own Claude or ChatGPT key",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   }
-  },
-  "/b2b/workspace/assistant/messages/": {
-   "delete": {
-    "description": "GET    /assistant/messages/ — the whole chat.\nPOST   /assistant/messages/ — say something and get the answer.\nDELETE /assistant/messages/ — start over.",
-    "operationId": "b2b_workspace_assistant_messages_delete",
-    "parameters": [],
-    "responses": {
-     "204": {
-      "description": ""
-     }
-    },
-    "summary": "Clear the assistant chat",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   },
-   "get": {
-    "description": "GET    /assistant/messages/ — the whole chat.\nPOST   /assistant/messages/ — say something and get the answer.\nDELETE /assistant/messages/ — start over.",
-    "operationId": "b2b_workspace_assistant_messages_list",
-    "parameters": [],
-    "responses": {
-     "200": {
-      "description": ""
-     }
-    },
-    "summary": "The assistant chat",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   },
-   "parameters": [],
-   "post": {
-    "description": "GET    /assistant/messages/ — the whole chat.\nPOST   /assistant/messages/ — say something and get the answer.\nDELETE /assistant/messages/ — start over.",
-    "operationId": "b2b_workspace_assistant_messages_create",
-    "parameters": [
-     {
-      "in": "body",
-      "name": "data",
-      "required": true,
-      "schema": {
-       "$ref": "#/definitions/AiSend"
-      }
-     }
-    ],
-    "responses": {
-     "201": {
-      "description": "",
-      "schema": {
-       "$ref": "#/definitions/AiSend"
-      }
-     }
-    },
-    "summary": "Ask the assistant",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   }
   },
   "/b2b/workspace/attendance/": {
    "get": {
