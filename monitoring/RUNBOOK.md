@@ -22,7 +22,8 @@ To'liq ro'yxat: `GET /ops/help`. Manba: `monitoring/ops-agent/ops.py`.
 | `GET /ops/status` | **avval shuni ol**: faol alertlar + golden signals + muhim konteynerlar + oxirgi amallar |
 | `GET /ops/alerts` | Alertmanager'dagi firing alertlar |
 | `GET /ops/containers`, `GET /ops/container?name=<nom\|regex>` | ro'yxat / inspect + stats (restartlar, OOM, health, xotira) |
-| `GET /ops/logs?name=<nom\|regex>&tail=200&since=<sek>&grep=<regex>` | konteyner loglari (matn) |
+| `GET /ops/logs?name=<nom\|regex>&tail=200&since=<sek>&grep=<regex>` | konteyner loglari (matn; `dokploy-traefik` loglari ham o'qiladi — 502/404 sabablari) |
+| `GET /ops/service?name=<swarm service\|regex>` | Dokploy ilovasi (swarm service): image, replicas, **traefik label'lari** (port, host), update status |
 | `GET /ops/disk` | `docker system df` (image/volume/build cache) |
 | `POST /ops/query {"ds":"prometheus\|loki\|tempo","q":"...","start"?,"end"?,"step"?,"limit"?}` | PromQL / LogQL / TraceQL |
 | `GET /ops/dokploy/apps` | Dokploy ilovalari (id, nom, status) — redeploy uchun |
@@ -40,6 +41,9 @@ backend → `python manage.py check|showmigrations|migrate|create_b2b_tables|cre
 postgres → `psql -U <user> -d <db> -c "SELECT ..."` (faqat SELECT/EXPLAIN/`pg_terminate_backend`/`pg_cancel_backend`), `pg_isready`;
 redis → `redis-cli info|ping|dbsize|config get|client list|memory|slowlog|llen|scan|keys|del <celery/_kombu/unacked kalit>`.
 Shell metabelgilar (`; | & > $`) ruxsat etilmagan. `migrate --fake`/`zero` yo'q.
+Sir kerak bo'lsa `$ENV:NAME` yoz — ops-agent konteynerning o'z env'idan server tomonda almashtiradi, qiymat senga qaytmaydi:
+`redis-cli -a $ENV:REDIS_PASSWORD info memory`, `psql -U $ENV:POSTGRES_USER -d $ENV:POSTGRES_DB -c "SELECT ..."`.
+Konteyner env kalit nomlari: `GET /container?name=...` → `env_keys`. `env` buyrug'i ruxsat etilmagan (sirlar).
 
 Limitlar: soatiga **12** o'zgartiruvchi amal (restart / migrate / terminate / purge / prune / redeploy).
 Tugasa API `429` qaytaradi va `OpsAgentRateLimited` alerti odamni chaqiradi.
@@ -203,7 +207,10 @@ Konteyner nomlari Dokploy'da `weel-backend-<id>`, `weel-postgres-<id>`, `weel-re
 
 ### Uptime / TLS
 
-**EndpointDown** (critical) — qaysi domen (`app`). Backend bo'lsa BackendProbeDown; frontend konteyneri `exited` bo'lsa restart (weel-b2b va boshqa `weel-*` frontendlar). Traefik/DNS/sertifikat → **odam**.
+**EndpointDown** (critical) — qaysi domen (`app`) va `probe_http_status_code`:
+- **502** → Traefik konteynerga yeta olmayapti: `GET /service?name=<dokploy app>` → traefik label'idagi port konteyner tinglayotgan port bilan bir xilmi (`GET /logs` da "Local: http://localhost:3000" kabi); `GET /logs?name=dokploy-traefik&grep=<domen>`. Port mos emas → **odam** (Dokploy'da port); konteyner `exited` → restart.
+- **404** → Traefik'da route yo'q: ilova konteyneri umuman yo'q (`GET /containers` da nomi yo'q) — deploy qilinmagan yoki o'chirilgan → **odam**; blackbox target eskirgan bo'lsa `monitoring/blackbox/targets.yml` uchun PR.
+- **403/5xx boshqa** → ilova o'zi; loglar → tegishli bo'lim. Backend bo'lsa BackendProbeDown. Traefik/DNS/sertifikat → **odam**.
 **EndpointSlow** — backend p95 bilan solishtir, hisobot.
 **TLSCertExpiringSoon / TLSCertExpired** — **odam** (Traefik acme).
 
@@ -217,6 +224,12 @@ Konteyner nomlari Dokploy'da `weel-backend-<id>`, `weel-postgres-<id>`, `weel-re
 **OOMKilledInLogs** — xotira bo'limi. **DbConnectionErrorsInLogs** — Postgres/Redis bo'limlari.
 
 ### Monitoring o'zi
+
+**Dokploy redeploy'dan keyin config eskirgan bo'lishi mumkin.** Compose redeploy repo'ni qayta klonlaydi, lekin faqat
+o'zgargan servislarni qayta yaratadi; bind-mount qilingan config (prometheus.yml, rules, loki.yml, alloy) eski inode'ga
+qarab qoladi (Loki: `unable to read dir /loki/rules`; Prometheus yangi scrape/qoidalarni ko'rmaydi). Belgisi: konteyner
+`Up N hours` bo'lib, redeploy yaqinda bo'lgan. **Tuzatish:** `prometheus`, `loki`, `alertmanager`, `alloy` ni restart
+(policy bo'yicha ruxsat etilgan), keyin `up{job="ops-agent"}` kabi yangi metrikani tekshir.
 
 **MonitoringTargetDown** — komponent: `GET /container?name=<komponent>` → `exited`/`unhealthy` bo'lsa restart.
 **AlertmanagerNotificationFailing** (critical) — Telegram token/chat id/tarmoq. `GET /logs?name=alertmanager`. Tarmoq bo'lsa alertmanager restart (1 marta); token bo'lsa **odam**.

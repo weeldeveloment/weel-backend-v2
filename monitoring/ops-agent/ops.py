@@ -85,7 +85,7 @@ EXEC_ALLOW: list[tuple[str, list[str]]] = [
     (r".*backend.*", ["find"]),
     (r".*backend.*", ["ls"]),
     (r".*backend.*", ["cat"]),
-    (r".*backend.*", ["env"]),
+    # `env` ATAYIN yo'q — sirlarni chiqarib yuboradi; kalit nomlari GET /container da (env_keys).
     (r".*redis.*", ["redis-cli"]),
     (r".*postgres.*", ["psql"]),
     (r".*postgres.*", ["pg_isready"]),
@@ -251,13 +251,78 @@ def container_restart(name: str, timeout: int = 20) -> dict:
     return container_inspect(name)
 
 
+_ENV_REF = re.compile(r"\$ENV:([A-Z0-9_]+)")
+
+
+def resolve_env_refs(name: str, cmd: list[str]) -> list[str]:
+    """`$ENV:NAME` tokenlarini konteynerning o'z env qiymatiga almashtiradi (server tomonda —
+    qiymat so'rovchiga qaytmaydi). Misol: redis-cli -a $ENV:REDIS_PASSWORD info memory;
+    psql -U $ENV:POSTGRES_USER -d $ENV:POSTGRES_DB -c "SELECT 1"."""
+    if not any(_ENV_REF.search(t) for t in cmd):
+        return cmd
+    d = docker("GET", f"/containers/{urllib.parse.quote(name)}/json")
+    env = dict(e.split("=", 1) for e in (d.get("Config", {}).get("Env") or []) if "=" in e)
+    out = []
+    for t in cmd:
+        def sub(m):
+            if m.group(1) not in env:
+                raise Denied(400, f"konteynerda {m.group(1)} env yo'q")
+            return env[m.group(1)]
+        out.append(_ENV_REF.sub(sub, t))
+    return out
+
+
+def redact(text: str, cmd: list[str], real: list[str]) -> str:
+    """Almashtirilgan sir qiymatlari chiqishda ko'rinib qolsa, yashiramiz."""
+    for a, b in zip(cmd, real):
+        if a != b:
+            for secret in (b, *[b[len(p):] for p in ("-a", "-p") if b.startswith(p) and len(b) > 4]):
+                if len(secret) >= 4:
+                    text = text.replace(secret, "***")
+    return text
+
+
+def service_inspect(name: str) -> dict:
+    """Docker Swarm service (Dokploy ilovalari shunday deploy bo'ladi): image, replicas, labels, portlar."""
+    svcs = docker("GET", f"/services?filters={urllib.parse.quote(json.dumps({'name': [name]}))}")
+    hits = [s for s in svcs if s.get("Spec", {}).get("Name") == name] or svcs
+    if not hits:
+        try:
+            rx = re.compile(name)
+        except re.error:
+            raise Denied(400, "noto'g'ri regex")
+        hits = [s for s in docker("GET", "/services") if rx.search(s.get("Spec", {}).get("Name", ""))]
+    if not hits:
+        raise Denied(404, f"service topilmadi: {name}")
+    if len(hits) > 1:
+        raise Denied(409, f"bir nechta service: {[s['Spec']['Name'] for s in hits][:10]}")
+    s = hits[0]
+    spec = s.get("Spec", {}); task = spec.get("TaskTemplate", {}); cs = task.get("ContainerSpec", {})
+    labels = {k: v for k, v in (spec.get("Labels") or {}).items()}
+    return {
+        "name": spec.get("Name"), "id": s.get("ID"), "image": cs.get("Image"),
+        "replicas": (spec.get("Mode", {}).get("Replicated") or {}).get("Replicas"),
+        "update_status": s.get("UpdateStatus"),
+        "traefik_labels": {k: v for k, v in labels.items() if k.startswith("traefik.")},
+        "other_labels": {k: v for k, v in labels.items() if not k.startswith("traefik.")},
+        "ports": (spec.get("EndpointSpec") or {}).get("Ports"),
+        "networks": [n.get("Target") for n in task.get("Networks") or []],
+        "env_keys": sorted(e.split("=", 1)[0] for e in cs.get("Env") or []),
+        "healthcheck": cs.get("Healthcheck"),
+        "resources": task.get("Resources"),
+        "restart_policy": task.get("RestartPolicy"),
+        "created_at": s.get("CreatedAt"), "updated_at": s.get("UpdatedAt"),
+    }
+
+
 def container_exec(name: str, cmd: list[str], timeout: int = 120) -> dict:
+    real = resolve_env_refs(name, cmd)
     ex = docker("POST", f"/containers/{urllib.parse.quote(name)}/exec",
-                {"AttachStdout": True, "AttachStderr": True, "Cmd": cmd})
+                {"AttachStdout": True, "AttachStderr": True, "Cmd": real})
     exec_id = ex["Id"]
     out = docker("POST", f"/exec/{exec_id}/start", {"Detach": False, "Tty": False}, raw=True, timeout=timeout)
     info = docker("GET", f"/exec/{exec_id}/json")
-    return {"exit_code": info.get("ExitCode"), "output": demux(out)[-100_000:]}
+    return {"exit_code": info.get("ExitCode"), "output": redact(demux(out)[-100_000:], cmd, real)}
 
 
 def check_exec_allowed(name: str, cmd: list[str]) -> None:
@@ -533,9 +598,11 @@ class Handler(BaseHTTPRequestHandler):
                 res["stats_error"] = str(e)
             return self._json(200, res)
         if method == "GET" and path == "/logs":
+            # O'qish — deny ro'yxatiga qaramay (traefik/dokploy loglari diagnostika uchun kerak).
             name = resolve_container(q.get("name", ""))
-            guard_container(name)
             return self._text(200, container_logs(name, int(q.get("tail", "200")), int(q.get("since", "0")), q.get("grep")))
+        if method == "GET" and path == "/service":
+            return self._json(200, service_inspect(q.get("name", "")))
         if method == "GET" and path == "/disk":
             return self._json(200, docker_df())
         if method == "GET" and path == "/actions":
@@ -718,7 +785,8 @@ HELP = {
         "GET /ops/alerts": "Alertmanager'dagi faol alertlar",
         "GET /ops/containers": "barcha konteynerlar",
         "GET /ops/container?name=<nom|regex>": "inspect + stats (restartlar, OOM, health, xotira)",
-        "GET /ops/logs?name=<nom|regex>&tail=200&since=<sekund>&grep=<regex>": "konteyner loglari (matn)",
+        "GET /ops/logs?name=<nom|regex>&tail=200&since=<sekund>&grep=<regex>": "konteyner loglari (matn; traefik/dokploy ham o'qiladi)",
+        "GET /ops/service?name=<swarm service nomi|regex>": "Dokploy ilovasi (swarm service): image, replicas, traefik label'lari, portlar, update status",
         "GET /ops/disk": "docker system df (image/volume/build cache)",
         "GET|POST /ops/query  {ds: prometheus|loki|tempo, q, start?, end?, step?, limit?}": "PromQL / LogQL / TraceQL",
         "GET /ops/dokploy/apps": "Dokploy ilovalari (id, nom, status) — redeploy uchun",
@@ -726,7 +794,7 @@ HELP = {
     },
     "act": {
         "POST /ops/restart {name, reason}": "konteynerni restart (deny: dokploy/traefik)",
-        "POST /ops/exec {name, cmd, reason}": "oq ro'yxatdagi buyruq: manage.py migrate/check/showmigrations/create_*_tables, celery inspect, psql -c 'SELECT…|pg_terminate_backend', redis-cli info/…",
+        "POST /ops/exec {name, cmd, reason}": "oq ro'yxatdagi buyruq: manage.py migrate/check/showmigrations/create_*_tables, celery inspect, psql -c 'SELECT…|pg_terminate_backend', redis-cli info/…; $ENV:NAME -> konteyner env qiymati (server tomonda, masalan -a $ENV:REDIS_PASSWORD)",
         "POST /ops/prune {what: safe|images|build|containers|all}": "disk tozalash (24h dan eski, ishlatilmayotgan)",
         "POST /ops/redeploy {kind: application|compose, id, reason}": "Dokploy redeploy (oxirgi image bilan qayta ko'tarish)",
         "POST /ops/silence {alertname, hours, comment}": "Alertmanager'da alertni vaqtincha jimlash",

@@ -433,7 +433,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "count(container_last_seen{name=~\".*weel[-_]?backend.*\"}) or vector(0)",
+     "expr": "count(container_last_seen{name=~\".*weel[-_]?(dev|prod|stage)?[-_]?backend.*\"}) or vector(0)",
      "legendFormat": "__auto",
      "range": true
     }

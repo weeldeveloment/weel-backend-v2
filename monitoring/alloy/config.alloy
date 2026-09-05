@@ -50,7 +50,7 @@ discovery.relabel "containers" {
   // Weel backend / b2b: nomi qanday bo'lmasin barqaror `service` label.
   rule {
     source_labels = ["container"]
-    regex         = coalesce(sys.env("BACKEND_CONTAINER_REGEX"), ".*weel[-_]?backend.*")
+    regex         = coalesce(sys.env("BACKEND_CONTAINER_REGEX"), ".*weel[-_]?(dev|prod|stage)?[-_]?backend.*")
     target_label  = "service"
     replacement   = "weel-backend"
   }

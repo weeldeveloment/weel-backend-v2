@@ -44,7 +44,8 @@ groups:
           dashboard: weel-containers
 
       - alert: BackendContainerMissing
-        expr: absent(container_last_seen{name=~".*weel[-_]?backend.*"})
+        # Dokploy nomi: weel-devbackend-<id> (prefiks dev/prod/stage bo'lishi mumkin).
+        expr: absent(container_last_seen{name=~".*weel[-_]?(dev|prod|stage)?[-_]?backend.*"})
         for: 5m
         labels: { severity: critical, service: containers }
         annotations:

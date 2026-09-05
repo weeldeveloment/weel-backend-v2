@@ -399,7 +399,7 @@ g.add(stat("Restart (1h)", [T(f'sum(changes(container_start_time_seconds{{{C}}}[
 g.add(stat("OOM (24h)", [T(f'sum(increase(container_oom_events_total{{{C}}}[24h]))')], thresholds=[(None, "green"), (1, "red")], decimals=0), 4, 4)
 g.add(stat("Jami CPU (yadro)", [T(f'sum(rate(container_cpu_usage_seconds_total{{{C}}}[$__rate_interval]))')], decimals=2, color="none"), 4, 4)
 g.add(stat("Jami xotira", [T(f'sum(container_memory_working_set_bytes{{{C}}})')], unit="bytes", color="none"), 4, 4)
-g.add(stat("Backend konteyner", [T('count(container_last_seen{name=~".*weel[-_]?backend.*"}) or vector(0)')], thresholds=[(None, "red"), (1, "green")]), 4, 4)
+g.add(stat("Backend konteyner", [T('count(container_last_seen{name=~".*weel[-_]?(dev|prod|stage)?[-_]?backend.*"}) or vector(0)')], thresholds=[(None, "red"), (1, "green")]), 4, 4)
 
 g.add(timeseries("CPU (yadro) — konteyner bo'yicha", [T(f'topk(15, sum by (name) (rate(container_cpu_usage_seconds_total{{{C}}}[$__rate_interval])))', "{{name}}")], stack=True, fill=30), 12, 9)
 g.add(timeseries("Xotira (working set) — konteyner bo'yicha", [T(f'topk(15, sum by (name) (container_memory_working_set_bytes{{{C}}}))', "{{name}}")], unit="bytes", stack=True, fill=30), 12, 9)
