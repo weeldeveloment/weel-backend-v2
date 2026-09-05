@@ -11248,6 +11248,43 @@
    ],
    "type": "object"
   },
+  "OwnConnect": {
+   "properties": {
+    "api_key": {
+     "maxLength": 400,
+     "minLength": 1,
+     "title": "Api key",
+     "type": "string"
+    },
+    "provider": {
+     "enum": [
+      "claude",
+      "chatgpt"
+     ],
+     "title": "Provider",
+     "type": "string"
+    }
+   },
+   "required": [
+    "provider",
+    "api_key"
+   ],
+   "type": "object"
+  },
+  "OwnModel": {
+   "properties": {
+    "model": {
+     "maxLength": 120,
+     "minLength": 1,
+     "title": "Model",
+     "type": "string"
+    }
+   },
+   "required": [
+    "model"
+   ],
+   "type": "object"
+  },
   "OwnProfile": {
    "properties": {
     "email": {
@@ -16069,6 +16106,18 @@
     "calendar"
    ],
    "type": "object"
+  },
+  "_Active": {
+   "properties": {
+    "active": {
+     "title": "Active",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "active"
+   ],
+   "type": "object"
   }
  },
  "info": {
@@ -16921,6 +16970,269 @@
     "summary": "GET/POST ``/api/admin-auth/b2b/support/<employee_id>/`` — one\nconversation, and the reply into it.",
     "tags": [
      "api"
+    ]
+   }
+  },
+  "/admin-auth/ccd/approvals/": {
+   "get": {
+    "description": "GET — delete, ownership and join requests as one queue.",
+    "operationId": "admin-auth_ccd_approvals_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "tags": [
+     "CCD"
+    ]
+   },
+   "parameters": []
+  },
+  "/admin-auth/ccd/audit/": {
+   "get": {
+    "description": "",
+    "operationId": "admin-auth_ccd_audit_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "tags": [
+     "CCD"
+    ]
+   },
+   "parameters": []
+  },
+  "/admin-auth/ccd/calls/": {
+   "get": {
+    "description": "",
+    "operationId": "admin-auth_ccd_calls_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "tags": [
+     "CCD"
+    ]
+   },
+   "parameters": []
+  },
+  "/admin-auth/ccd/companies/": {
+   "get": {
+    "description": "GET — every company (a `b2b_org`) with the counts the desk's table shows.",
+    "operationId": "admin-auth_ccd_companies_list",
+    "parameters": [
+     {
+      "description": "Free-text search.",
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "tags": [
+     "CCD"
+    ]
+   },
+   "parameters": []
+  },
+  "/admin-auth/ccd/companies/{company_id}/": {
+   "get": {
+    "description": "",
+    "operationId": "admin-auth_ccd_companies_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "tags": [
+     "CCD"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "company_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/admin-auth/ccd/employees/": {
+   "get": {
+    "description": "GET — the roster across every company, which is what the desk's Users screen is.",
+    "operationId": "admin-auth_ccd_employees_list",
+    "parameters": [
+     {
+      "description": "Free-text search.",
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     },
+     {
+      "description": "Restrict to one company (a b2b_org id).",
+      "in": "query",
+      "name": "company_id",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "tags": [
+     "CCD"
+    ]
+   },
+   "parameters": []
+  },
+  "/admin-auth/ccd/employees/{employee_id}/active/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST — block or unblock a person. `{\"active\": false}` is the desk's Block.",
+    "operationId": "admin-auth_ccd_employees_active_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/_Active"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/_Active"
+      }
+     }
+    },
+    "tags": [
+     "CCD"
+    ]
+   }
+  },
+  "/admin-auth/ccd/tickets/": {
+   "get": {
+    "description": "GET — the support inbox. Same threads as `/b2b/support/`, but carrying the org id\nthe desk links a ticket to; see `ccd_repository.list_support_threads`.",
+    "operationId": "admin-auth_ccd_tickets_list",
+    "parameters": [
+     {
+      "description": "Free-text search.",
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "tags": [
+     "CCD"
+    ]
+   },
+   "parameters": []
+  },
+  "/admin-auth/ccd/tickets/{employee_id}/": {
+   "get": {
+    "description": "Reading does *not* mark the employee's lines answered here: that is what clears the\ninbox counter, and it belongs to actually replying (`/b2b/support/<id>/`), not to an\noperator glancing at a thread.",
+    "operationId": "admin-auth_ccd_tickets_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "GET — one conversation, oldest first.",
+    "tags": [
+     "CCD"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/admin-auth/ccd/workspaces/": {
+   "get": {
+    "description": "GET — workspaces (`b2b_company` rows), optionally for one company.",
+    "operationId": "admin-auth_ccd_workspaces_list",
+    "parameters": [
+     {
+      "description": "Restrict to one company (a b2b_org id).",
+      "in": "query",
+      "name": "company_id",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "tags": [
+     "CCD"
+    ]
+   },
+   "parameters": []
+  },
+  "/admin-auth/ccd/workspaces/{workspace_id}/active/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "workspace_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST — freeze or unfreeze a workspace. `{\"active\": false}` is the desk's Freeze.",
+    "operationId": "admin-auth_ccd_workspaces_active_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/_Active"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/_Active"
+      }
+     }
+    },
+    "tags": [
+     "CCD"
     ]
    }
   },
@@ -19671,7 +19983,7 @@
   },
   "/b2b/workspace/analyst/": {
    "get": {
-    "description": "GET /analyst/ — the button: whether Weel AI runs here, how many reports\nare unread, and the latest one.",
+    "description": "GET /analyst/ — the row: whether Weel AI runs here, how many reports\nare unread (for whoever may read them), and the last thing said in the\nchat. Every role: the row is drawn for everybody now that the chat is.",
     "operationId": "b2b_workspace_analyst_list",
     "parameters": [],
     "responses": {
@@ -19685,6 +19997,63 @@
     ]
    },
    "parameters": []
+  },
+  "/b2b/workspace/analyst/chat/": {
+   "delete": {
+    "description": "GET    /analyst/chat/ — this person's chat with Weel AI.\nPOST   /analyst/chat/ {text} — ask, and get the answer.\nDELETE /analyst/chat/ — start over.\n\nEvery role. Where the reports read the whole company for its managers,\nthis reads the one person asking — their tasks, deals and attendance —\nand helps them with their own work, on the deployment's key\n(`B2B_ANALYST_API_KEY`, or the workspace's as the fallback).",
+    "operationId": "b2b_workspace_analyst_chat_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Clear my Weel AI chat",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "GET    /analyst/chat/ — this person's chat with Weel AI.\nPOST   /analyst/chat/ {text} — ask, and get the answer.\nDELETE /analyst/chat/ — start over.\n\nEvery role. Where the reports read the whole company for its managers,\nthis reads the one person asking — their tasks, deals and attendance —\nand helps them with their own work, on the deployment's key\n(`B2B_ANALYST_API_KEY`, or the workspace's as the fallback).",
+    "operationId": "b2b_workspace_analyst_chat_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "My chat with Weel AI",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET    /analyst/chat/ — this person's chat with Weel AI.\nPOST   /analyst/chat/ {text} — ask, and get the answer.\nDELETE /analyst/chat/ — start over.\n\nEvery role. Where the reports read the whole company for its managers,\nthis reads the one person asking — their tasks, deals and attendance —\nand helps them with their own work, on the deployment's key\n(`B2B_ANALYST_API_KEY`, or the workspace's as the fallback).",
+    "operationId": "b2b_workspace_analyst_chat_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AiSend"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/AiSend"
+      }
+     }
+    },
+    "summary": "Ask Weel AI",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/analyst/reports/": {
    "get": {
@@ -19891,6 +20260,89 @@
     ]
    },
    "parameters": []
+  },
+  "/b2b/workspace/assistant/connection/": {
+   "delete": {
+    "description": "GET    /assistant/connection/ — this person's own key, as a hint.\nPOST   /assistant/connection/ {provider, api_key} — connect (or replace).\nPATCH  /assistant/connection/ {model} — pick the model.\nDELETE /assistant/connection/ — forget the key; the workspace's, if any,\ntakes over again.\n\nOpen to every role. The key is checked against the vendor before it is\nkept, the same way the workspace's is on the integrations screen.",
+    "operationId": "b2b_workspace_assistant_connection_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Forget my own key",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "get": {
+    "description": "GET    /assistant/connection/ — this person's own key, as a hint.\nPOST   /assistant/connection/ {provider, api_key} — connect (or replace).\nPATCH  /assistant/connection/ {model} — pick the model.\nDELETE /assistant/connection/ — forget the key; the workspace's, if any,\ntakes over again.\n\nOpen to every role. The key is checked against the vendor before it is\nkept, the same way the workspace's is on the integrations screen.",
+    "operationId": "b2b_workspace_assistant_connection_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": ""
+     }
+    },
+    "summary": "My own AI connection",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "patch": {
+    "description": "GET    /assistant/connection/ — this person's own key, as a hint.\nPOST   /assistant/connection/ {provider, api_key} — connect (or replace).\nPATCH  /assistant/connection/ {model} — pick the model.\nDELETE /assistant/connection/ — forget the key; the workspace's, if any,\ntakes over again.\n\nOpen to every role. The key is checked against the vendor before it is\nkept, the same way the workspace's is on the integrations screen.",
+    "operationId": "b2b_workspace_assistant_connection_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/OwnModel"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/OwnModel"
+      }
+     }
+    },
+    "summary": "Pick the model my key answers on",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "post": {
+    "description": "GET    /assistant/connection/ — this person's own key, as a hint.\nPOST   /assistant/connection/ {provider, api_key} — connect (or replace).\nPATCH  /assistant/connection/ {model} — pick the model.\nDELETE /assistant/connection/ — forget the key; the workspace's, if any,\ntakes over again.\n\nOpen to every role. The key is checked against the vendor before it is\nkept, the same way the workspace's is on the integrations screen.",
+    "operationId": "b2b_workspace_assistant_connection_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/OwnConnect"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/OwnConnect"
+      }
+     }
+    },
+    "summary": "Connect my own Claude or ChatGPT key",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/assistant/messages/": {
    "delete": {
