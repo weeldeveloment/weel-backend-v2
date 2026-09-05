@@ -1008,7 +1008,20 @@ CALL_GUEST_BASE_URL = (
 )
 
 # How long a call rings before it is written down as missed (TZ §4.1.2).
-CALL_RING_TIMEOUT_SECONDS = int((os.getenv("CALL_RING_TIMEOUT_SECONDS") or "30").strip() or "30")
+#
+# Sixty seconds, not thirty. The phone being rung usually learns of the call
+# from a push it has to notice and tap — the socket is put down half a minute
+# after the app leaves the foreground — and by the time the incoming screen
+# was up, a thirty-second window had a few seconds left in it: the screen
+# opened and closed itself as "Javob bermadi" before the green button could
+# be pressed. A minute is what the other messengers ring for.
+CALL_RING_TIMEOUT_SECONDS = int((os.getenv("CALL_RING_TIMEOUT_SECONDS") or "60").strip() or "60")
+# How far past that window the server still takes an answer. The phones run
+# their own countdown off the same window, and a tap that lands as it closes
+# — or a request that spends a second on the network — must not be refused
+# with the caller's screen still up. The phones give the same slack to their
+# own countdowns, so nobody's screen closes before the server has said so.
+CALL_RING_GRACE_SECONDS = int((os.getenv("CALL_RING_GRACE_SECONDS") or "5").strip() or "5")
 # The longest an *answered* call may stay open before the server stops
 # believing in it.
 #

@@ -1,4 +1,6 @@
 import logging
+import time
+from datetime import timedelta
 
 from django.conf import settings
 from firebase_admin import messaging
@@ -69,7 +71,7 @@ B2B_ANDROID_CHANNEL = "weel_workspace"
 
 
 def _android_config(
-    channel_id: str | None, badge: int | None = None
+    channel_id: str | None, badge: int | None = None, ttl_seconds: int | None = None
 ) -> messaging.AndroidConfig:
     """Delivery hints for the Android half of a push.
 
@@ -98,11 +100,18 @@ def _android_config(
         if channel_id
         else None
     )
-    return messaging.AndroidConfig(priority="high", notification=notification)
+    return messaging.AndroidConfig(
+        priority="high",
+        notification=notification,
+        # How long FCM keeps trying. Left unset it is four weeks, which is
+        # right for a chat message and wrong for a ring: a phone that was
+        # out of reach must not ring for a call that ended an hour ago.
+        ttl=timedelta(seconds=ttl_seconds) if ttl_seconds is not None else None,
+    )
 
 
 def _apns_config(
-    title: str, body: str, badge: int | None = None
+    title: str, body: str, badge: int | None = None, ttl_seconds: int | None = None
 ) -> messaging.APNSConfig:
     """The APNs half of a push, which FCM does not fill in on its own.
 
@@ -122,8 +131,13 @@ def _apns_config(
     sender has to know the recipient's whole unread count, not just that one
     more thing arrived. `None` leaves the icon as it is.
     """
+    headers = {"apns-priority": "10"}
+    if ttl_seconds is not None:
+        # The APNs spelling of the Android `ttl`: an absolute expiry, after
+        # which Apple discards the push instead of holding it for the phone.
+        headers["apns-expiration"] = str(int(time.time()) + int(ttl_seconds))
     return messaging.APNSConfig(
-        headers={"apns-priority": "10"},
+        headers=headers,
         payload=messaging.APNSPayload(
             aps=messaging.Aps(
                 alert=messaging.ApsAlert(title=title, body=body),
@@ -179,8 +193,13 @@ class FCMService:
         deactivate_invalid=None,
         android_channel_id=None,
         badge_for=None,
+        ttl_seconds=None,
     ):
         """Send one message to many tokens.
+
+        `ttl_seconds` caps how long FCM and APNs hold the push for a phone
+        that is out of reach; unset, they keep it for weeks. A ring passes
+        its own window here, a chat message passes nothing.
 
         `app` names the Firebase app to send from, and `None` means the default
         one — which is what every consumer and partner send passes. B2B callers
@@ -237,8 +256,8 @@ class FCMService:
                         body=body,
                     ),
                     data=normalized_data,
-                    android=_android_config(android_channel_id),
-                    apns=_apns_config(title, body),
+                    android=_android_config(android_channel_id, ttl_seconds=ttl_seconds),
+                    apns=_apns_config(title, body, ttl_seconds=ttl_seconds),
                     tokens=tokens,
                 )
                 response = messaging.send_each_for_multicast(message, app=app)
@@ -251,9 +270,13 @@ class FCMService:
                         ),
                         data=normalized_data,
                         android=_android_config(
-                            android_channel_id, badge=badges.get(token)
+                            android_channel_id,
+                            badge=badges.get(token),
+                            ttl_seconds=ttl_seconds,
                         ),
-                        apns=_apns_config(title, body, badge=badges.get(token)),
+                        apns=_apns_config(
+                            title, body, badge=badges.get(token), ttl_seconds=ttl_seconds
+                        ),
                         token=token,
                     )
                     for token in tokens

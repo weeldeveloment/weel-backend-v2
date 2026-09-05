@@ -467,7 +467,14 @@ def notify_join_request_decided(request_id: int) -> int:
 CALLS_ANDROID_CHANNEL = "weel_calls"
 
 
-def _push_call(tokens: list[str], *, title: str, body: str, data: dict[str, str]) -> None:
+def _push_call(
+    tokens: list[str],
+    *,
+    title: str,
+    body: str,
+    data: dict[str, str],
+    ttl_seconds: int | None = None,
+) -> None:
     if not tokens:
         return
     try:
@@ -482,6 +489,7 @@ def _push_call(tokens: list[str], *, title: str, body: str, data: dict[str, str]
             android_channel_id=CALLS_ANDROID_CHANNEL,
             deactivate_invalid=repo.clear_employee_fcm_tokens,
             badge_for=repo.unread_badges_for_tokens,
+            ttl_seconds=ttl_seconds,
         )
     except Exception:  # noqa: BLE001
         logger.exception("Call push failed for %s", data)
@@ -495,8 +503,13 @@ def notify_incoming_call(
     caller_name: str,
     call_type: str,
     thread_id: int | None = None,
+    ttl_seconds: int | None = None,
 ) -> int:
     """"Kiruvchi qo'ng'iroq" to the phone being rung.
+
+    `ttl_seconds` is how long FCM may hold the push before dropping it — the
+    ring window, so a phone that comes back online later is not rung for a
+    call that has already been written down as missed.
 
     No feed row: a ring is not something to read later — if it is not
     answered, [notify_missed_call] writes the row that is.
@@ -524,6 +537,7 @@ def notify_incoming_call(
         title=push_text.CALL_INCOMING_TITLE,
         body=push_text.call_incoming_body(caller_name, call_type),
         data=data,
+        ttl_seconds=ttl_seconds,
     )
     return 1
 

@@ -115,7 +115,15 @@ def _require_configured() -> None:
 
 
 def ring_timeout() -> timedelta:
-    return timedelta(seconds=int(getattr(settings, "CALL_RING_TIMEOUT_SECONDS", 30)))
+    return timedelta(seconds=int(getattr(settings, "CALL_RING_TIMEOUT_SECONDS", 60)))
+
+
+def ring_grace() -> timedelta:
+    """How long past [ring_timeout] a ring is still answerable — see
+    `CALL_RING_GRACE_SECONDS`. The phones count down the window and close
+    their screens this much later, so the server is always the first to say
+    a ring is over."""
+    return timedelta(seconds=int(getattr(settings, "CALL_RING_GRACE_SECONDS", 5)))
 
 
 def max_call_duration() -> timedelta:
@@ -600,7 +608,7 @@ def _ring_expired(call: dict[str, Any]) -> bool:
     started = call.get("started_at")
     if started is None:
         return False
-    return timezone.now() - started > ring_timeout()
+    return timezone.now() - started > ring_timeout() + ring_grace()
 
 
 def _talk_expired(call: dict[str, Any]) -> bool:
@@ -681,7 +689,7 @@ def expire_stale() -> int:
     window and every conversation older than the maximum duration, settled in
     one pass. Runs from Celery beat."""
     count = 0
-    for call in calls_repo.stale_ringing(timezone.now() - ring_timeout()):
+    for call in calls_repo.stale_ringing(timezone.now() - ring_timeout() - ring_grace()):
         if expire(call):
             count += 1
     for call in calls_repo.stale_accepted(timezone.now() - max_call_duration()):
@@ -704,7 +712,7 @@ def _schedule_expiry(call: dict[str, Any]) -> None:
 
         expire_call.apply_async(
             args=[call["id"], call["company_id"]],
-            countdown=int(ring_timeout().total_seconds()) + 2,
+            countdown=int((ring_timeout() + ring_grace()).total_seconds()) + 2,
         )
     except Exception:  # noqa: BLE001
         logger.exception("Could not schedule the ring timeout for call %s", call["id"])
@@ -749,6 +757,11 @@ def _ring(call: dict[str, Any], cards: dict[int, dict[str, Any]]) -> None:
             name,
             call["type"],
             call.get("thread_id"),
+            # The push is worthless once the ring is over: a phone that was
+            # out of reach for a minute must not light up for a call nobody
+            # can answer any more. FCM holds a push for up to four weeks
+            # otherwise.
+            int((ring_timeout() + ring_grace()).total_seconds()),
         )
     except Exception:  # noqa: BLE001
         logger.exception("Could not queue the incoming-call push for %s", call["id"])
