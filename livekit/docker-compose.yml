@@ -1,0 +1,72 @@
+# Weel B2B — LiveKit (self-hosted), Dokploy'da ALOHIDA "Compose" ilova.
+#
+# Jonli qo'ng'iroqning media serveri. Jitsi'dan farqi: LiveKit hech qanday
+# tayyor ekran bermaydi — u faqat video/audio oqimlarini tashiydi, ekranning
+# o'zi esa butunlay bizniki (dashboard'da React, telefonda Flutter). Aynan
+# shuning uchun tanlangan.
+#
+# Bitta konteyner. Signal (WebSocket) Traefik orqali ${PUBLIC_URL} da; media
+# esa Traefik'dan O'TMAYDI — host'da 7881/tcp va 7882/udp ochiq bo'lishi
+# SHART (UDP 10000 Jitsi uchun qanday ochilgan bo'lsa, xuddi shunday).
+# Bu serverda Docker'ning e'lon qilgan portlari ufw'dan o'tib ketadi — 2026-09
+# da tekshirilgan — shuning uchun qo'shimcha firewall qoidasi kerak emas.
+#
+# Konfiguratsiya to'liq .env dan (qarang .env.example): LIVEKIT_CONFIG
+# butun YAML'ni ko'taradi, kalitlar esa alohida LIVEKIT_KEYS da — repoda
+# hech qanday sir yo'q. Backend (`core/settings.py`) LIVEKIT_API_KEY /
+# LIVEKIT_API_SECRET sifatida AYNAN shu juftlikni ishlatishi kerak.
+
+services:
+  livekit:
+    image: livekit/livekit-server:${LIVEKIT_IMAGE_VERSION:-v1.13}
+    restart: unless-stopped
+    command: --config /dev/null
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      # ICE/TCP — UDP to'silgan tarmoqlar (ba'zi ofis Wi-Fi'lari) uchun zaxira.
+      - "${LIVEKIT_TCP_PORT:-7881}:7881/tcp"
+      # Media: hamma ulanishlar bitta UDP portda (mux). Jitsi'dagi 10000 kabi.
+      - "${LIVEKIT_UDP_PORT:-7882}:7882/udp"
+    environment:
+      # Qo'shtirnoq shart: "kalit: sir" YAML uchun lug'at, satr emas.
+      - "LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+      - |
+        LIVEKIT_CONFIG=
+        port: 7880
+        log_level: info
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          # Konteyner ichidagi manzil emas, serverning tashqi IP'si e'lon
+          # qilinsin — aks holda telefonlar bridge'ni topa olmaydi.
+          node_ip: ${LIVEKIT_NODE_IP}
+          # Ikki kishilik suhbat: past sifatdan boshlab, kanal ko'tarsa
+          # oshirish (TZ §9, §11.4). Simulcast shuning uchun.
+          congestion_control:
+            enabled: true
+        room:
+          # Xona bo'sh qolsa o'zi yopiladi — server tomonida yetim xona qolmaydi.
+          empty_timeout: 120
+          departure_timeout: 20
+          max_participants: 4
+          auto_create: true
+        turn:
+          enabled: false
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.weel-livekit.rule=Host(`${PUBLIC_URL}`)
+      - traefik.http.routers.weel-livekit.entrypoints=websecure
+      - traefik.http.routers.weel-livekit.tls.certresolver=letsencrypt
+      - traefik.http.services.weel-livekit.loadbalancer.server.port=7880
+    networks:
+      - dokploy-network
+
+networks:
+  # Traefik bilan bitta tarmoq — monitoring va jitsi stack'laridagi kabi.
+  dokploy-network:
+    external: true
