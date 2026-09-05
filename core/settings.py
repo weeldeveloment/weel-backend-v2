@@ -2,7 +2,7 @@ import logging
 import sys
 import os.path
 import importlib.util
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from datetime import timedelta
 from pathlib import Path
@@ -324,11 +324,28 @@ if DEBUG and not _redis_url:
         },
     }
 else:
+    # channels_redis hands the URL straight to redis-py, and redis-py lets URL
+    # query params (e.g. ?socket_timeout=3) override everything. The channel
+    # layer's receive loop blocks in BZPOPMIN for 5s, so any read timeout
+    # shorter than that kills every idle websocket with
+    # "redis.exceptions.TimeoutError: Timeout reading from ..." — seen in
+    # production on 2026-09-05 at ~600 tracebacks/hour. Strip the socket
+    # timeout params for the channel layer; the cache keeps its own
+    # SOCKET_TIMEOUT via CACHES["OPTIONS"] above.
+    _channels_redis_parts = urlsplit(_redis_url)
+    _channels_redis_query = urlencode(
+        [
+            (k, v)
+            for k, v in parse_qsl(_channels_redis_parts.query, keep_blank_values=True)
+            if k not in {"socket_timeout", "socket_connect_timeout", "timeout"}
+        ]
+    )
+    _channels_redis_url = urlunsplit(_channels_redis_parts._replace(query=_channels_redis_query))
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [_redis_url],
+                "hosts": [_channels_redis_url],
             },
         },
     }

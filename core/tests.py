@@ -104,3 +104,72 @@ class MetricsGuardMiddlewareTests(SimpleTestCase):
     def test_other_paths_untouched(self):
         response = self._get(path="/health/", REMOTE_ADDR="8.8.8.8")
         self.assertEqual(response.status_code, 200)
+
+    def _get_host(self, path="/metrics", token="secret-token", allowed=("dev.weel.uz",), **meta):
+        """Like _get, but returns the HTTP_HOST the downstream app ends up seeing."""
+        from django.test import override_settings
+
+        from core.middleware.metrics_guard import MetricsGuardMiddleware
+
+        seen = {}
+
+        def downstream(request):
+            seen["host"] = request.META.get("HTTP_HOST")
+            return HttpResponse("ok")
+
+        with override_settings(PROMETHEUS_METRICS_TOKEN=token, ALLOWED_HOSTS=list(allowed)):
+            middleware = MetricsGuardMiddleware(downstream)
+            request = RequestFactory().get(path, **meta)
+            response = middleware(request)
+        return response, seen.get("host")
+
+    def test_internal_scrape_by_service_name_gets_an_allowed_host(self):
+        # Prometheus scrapes weel-devbackend-xyz:8000 — never in ALLOWED_HOSTS.
+        response, host = self._get_host(
+            REMOTE_ADDR="10.0.1.5", HTTP_HOST="weel-devbackend-y95c8w:8000"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(host, "dev.weel.uz")
+
+    def test_wildcard_allowed_hosts_get_a_concrete_substitute(self):
+        response, host = self._get_host(
+            allowed=(".weel.uz",), REMOTE_ADDR="10.0.1.5", HTTP_HOST="weel-devbackend-y95c8w:8000"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(host, "metrics.weel.uz")
+
+    def test_allowed_host_is_left_alone(self):
+        response, host = self._get_host(REMOTE_ADDR="10.0.1.5", HTTP_HOST="dev.weel.uz")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(host, "dev.weel.uz")
+
+    def test_unauthorized_scrape_host_is_not_rewritten(self):
+        response, host = self._get_host(REMOTE_ADDR="8.8.8.8", HTTP_HOST="weel-devbackend-y95c8w:8000")
+        self.assertEqual(response.status_code, 404)
+        self.assertIsNone(host)
+
+    def test_non_metrics_path_host_untouched(self):
+        response, host = self._get_host(path="/api/", REMOTE_ADDR="10.0.1.5", HTTP_HOST="evil.example")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(host, "evil.example")
+
+
+class ChannelsRedisUrlTests(SimpleTestCase):
+    """core.settings strips socket timeouts from the channel-layer Redis URL."""
+
+    def test_socket_timeout_params_are_dropped(self):
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+        url = "redis://default:pw@weel-redis:6379/0?socket_timeout=3&socket_connect_timeout=3&ssl_cert_reqs=none"
+        parts = urlsplit(url)
+        query = urlencode(
+            [
+                (k, v)
+                for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                if k not in {"socket_timeout", "socket_connect_timeout", "timeout"}
+            ]
+        )
+        self.assertEqual(
+            urlunsplit(parts._replace(query=query)),
+            "redis://default:pw@weel-redis:6379/0?ssl_cert_reqs=none",
+        )
