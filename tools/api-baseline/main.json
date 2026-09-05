@@ -14479,6 +14479,12 @@
      "type": "string",
      "x-nullable": true
     },
+    "reactions": {
+     "items": {
+      "$ref": "#/definitions/TaskReaction"
+     },
+     "type": "array"
+    },
     "status": {
      "minLength": 1,
      "title": "Status",
@@ -14720,6 +14726,36 @@
    "required": [
     "priority",
     "count"
+   ],
+   "type": "object"
+  },
+  "TaskReaction": {
+   "properties": {
+    "count": {
+     "title": "Count",
+     "type": "integer"
+    },
+    "emoji": {
+     "minLength": 1,
+     "title": "Emoji",
+     "type": "string"
+    },
+    "employee_ids": {
+     "items": {
+      "type": "integer"
+     },
+     "type": "array"
+    },
+    "mine": {
+     "title": "Mine",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "emoji",
+    "count",
+    "employee_ids",
+    "mine"
    ],
    "type": "object"
   },
@@ -26334,6 +26370,42 @@
      "type": "string"
     }
    ]
+  },
+  "/b2b/workspace/tasks/{task_id}/reactions/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "task_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/tasks/<id>/reactions/ — react to a task, or take\nthe reaction back.\n\nOne endpoint for both directions, as the chat's is: tapping a reaction you\nalready left is how it comes off. Anybody who can see the task may react;\nno write right is needed, because a reaction is a reader's remark rather\nthan an edit of the record.",
+    "operationId": "b2b_workspace_tasks_reactions_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MessageReaction"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Task"
+      }
+     }
+    },
+    "summary": "React to a task, or take the reaction back",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
   },
   "/b2b/workspace/tasks/{task_id}/status/": {
    "parameters": [
