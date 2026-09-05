@@ -4230,6 +4230,11 @@
      "type": "string",
      "x-nullable": true
     },
+    "department_id": {
+     "title": "Department id",
+     "type": "integer",
+     "x-nullable": true
+    },
     "department_name": {
      "minLength": 1,
      "title": "Department name",
@@ -4672,6 +4677,131 @@
    "required": [
     "component_id",
     "quantity"
+   ],
+   "type": "object"
+  },
+  "Conference": {
+   "properties": {
+    "created_by": {
+     "title": "Created by",
+     "type": "integer"
+    },
+    "ended_at": {
+     "format": "date-time",
+     "title": "Ended at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "message_id": {
+     "title": "Message id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "provider": {
+     "minLength": 1,
+     "title": "Provider",
+     "type": "string"
+    },
+    "room_name": {
+     "minLength": 1,
+     "title": "Room name",
+     "type": "string"
+    },
+    "scope": {
+     "minLength": 1,
+     "title": "Scope",
+     "type": "string"
+    },
+    "server_url": {
+     "minLength": 1,
+     "title": "Server url",
+     "type": "string"
+    },
+    "started_at": {
+     "format": "date-time",
+     "title": "Started at",
+     "type": "string"
+    },
+    "status": {
+     "minLength": 1,
+     "title": "Status",
+     "type": "string"
+    },
+    "thread_id": {
+     "title": "Thread id",
+     "type": "integer"
+    },
+    "title": {
+     "minLength": 1,
+     "title": "Title",
+     "type": "string"
+    },
+    "token": {
+     "minLength": 1,
+     "title": "Token",
+     "type": "string",
+     "x-nullable": true
+    },
+    "token_expires_at": {
+     "format": "date-time",
+     "title": "Token expires at",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "room_name",
+    "title",
+    "thread_id",
+    "message_id",
+    "scope",
+    "status",
+    "created_by",
+    "started_at",
+    "ended_at",
+    "provider",
+    "server_url",
+    "token",
+    "token_expires_at"
+   ],
+   "type": "object"
+  },
+  "ConferenceCreate": {
+   "properties": {
+    "department_ids": {
+     "items": {
+      "type": "integer"
+     },
+     "type": "array"
+    },
+    "employee_ids": {
+     "items": {
+      "type": "integer"
+     },
+     "type": "array"
+    },
+    "scope": {
+     "enum": [
+      "all",
+      "departments",
+      "employees"
+     ],
+     "title": "Scope",
+     "type": "string"
+    },
+    "title": {
+     "maxLength": 200,
+     "title": "Title",
+     "type": "string"
+    }
+   },
+   "required": [
+    "scope"
    ],
    "type": "object"
   },
@@ -14776,6 +14906,11 @@
      "type": "string",
      "x-nullable": true
     },
+    "department_id": {
+     "title": "Department id",
+     "type": "integer",
+     "x-nullable": true
+    },
     "department_name": {
      "minLength": 1,
      "title": "Department name",
@@ -21575,6 +21710,134 @@
      }
     },
     "summary": "Ask to transfer or close the company",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/conferences/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /conferences/ — open a conference and invite people into it.",
+    "operationId": "b2b_workspace_conferences_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/ConferenceCreate"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Conference"
+      }
+     },
+     "403": {
+      "description": "Not allowed"
+     },
+     "503": {
+      "description": "Not configured"
+     }
+    },
+    "summary": "Open a conference (group + room + invitation card)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/conferences/{conference_id}/": {
+   "get": {
+    "description": "GET /conferences/<id>/ — where it stands now. The app asks on resume,\nand when its socket has been down long enough to have missed the ending.",
+    "operationId": "b2b_workspace_conferences_read",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Conference"
+      }
+     },
+     "404": {
+      "description": "Not found"
+     }
+    },
+    "summary": "One conference",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "conference_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "/b2b/workspace/conferences/{conference_id}/end/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "conference_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /conferences/<id>/end/ — the organiser closes it for everybody.",
+    "operationId": "b2b_workspace_conferences_end_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Conference"
+      }
+     },
+     "403": {
+      "description": "Not the organiser"
+     }
+    },
+    "summary": "End a conference",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/conferences/{conference_id}/join/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "conference_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /conferences/<id>/join/ — this person's own token for the room.",
+    "operationId": "b2b_workspace_conferences_join_create",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Conference"
+      }
+     },
+     "403": {
+      "description": "Not invited"
+     },
+     "409": {
+      "description": "Already over"
+     }
+    },
+    "summary": "Join a conference",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
