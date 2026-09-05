@@ -744,25 +744,47 @@ def _ring(call: dict[str, Any], cards: dict[int, dict[str, Any]]) -> None:
 
     target = cards.get(call.get("target_employee_id"))
     caller = cards.get(call.get("initiator_id")) or {}
-    if not target or not target.get("fcm_token"):
+    if not target:
+        return
+    fcm = target.get("fcm_token")
+    voip = target.get("voip_token")
+    if not fcm and not voip:
         return
     name = caller.get("full_name") or "Weel"
+    avatar = photo_url(caller.get("photo")) if caller.get("photo") else None
+    # The push is worthless once the ring is over: a phone that was out of
+    # reach for a minute must not light up for a call nobody can answer any
+    # more. FCM holds a push for up to four weeks otherwise.
+    window = int((ring_timeout() + ring_grace()).total_seconds())
     try:
-        from apps.b2b.workspace.tasks import notify_incoming_call
+        from apps.b2b.workspace import apns_voip
+        from apps.b2b.workspace.tasks import notify_incoming_call, notify_incoming_call_voip
 
-        notify_incoming_call.delay(
-            call["id"],
-            call["company_id"],
-            target["fcm_token"],
-            name,
-            call["type"],
-            call.get("thread_id"),
-            # The push is worthless once the ring is over: a phone that was
-            # out of reach for a minute must not light up for a call nobody
-            # can answer any more. FCM holds a push for up to four weeks
-            # otherwise.
-            int((ring_timeout() + ring_grace()).total_seconds()),
-        )
+        if voip and apns_voip.is_configured():
+            # An iPhone with a PushKit token: CallKit's own screen, with the
+            # ordinary push as the fallback if APNs refuses.
+            notify_incoming_call_voip.delay(
+                call["id"],
+                call["company_id"],
+                voip,
+                name,
+                call["type"],
+                call.get("thread_id"),
+                window,
+                avatar,
+                fcm,
+            )
+        elif fcm:
+            notify_incoming_call.delay(
+                call["id"],
+                call["company_id"],
+                fcm,
+                name,
+                call["type"],
+                call.get("thread_id"),
+                window,
+                avatar,
+            )
     except Exception:  # noqa: BLE001
         logger.exception("Could not queue the incoming-call push for %s", call["id"])
 

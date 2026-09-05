@@ -179,6 +179,28 @@ def set_employee_fcm_token(employee_id: int, token: str | None) -> None:
     )
 
 
+def set_employee_voip_token(employee_id: int, token: str | None) -> None:
+    """The iPhone's PushKit token — what a ring is sent to when Apple's VoIP
+    push is configured. Separate from the FCM token because it addresses a
+    different service: FCM cannot deliver a `voip` push."""
+    execute(
+        f"UPDATE {B2B_EMPLOYEE_TABLE} SET voip_token = %s, updated_at = %s WHERE id = %s",
+        [token, timezone.now(), employee_id],
+    )
+
+
+def clear_employee_voip_tokens(tokens: list[str]) -> None:
+    """Drop the VoIP tokens APNs has just declared dead — the PushKit
+    counterpart of [clear_employee_fcm_tokens]."""
+    if not tokens:
+        return
+    execute(
+        f"UPDATE {B2B_EMPLOYEE_TABLE} SET voip_token = NULL, updated_at = %s "
+        f"WHERE voip_token = __ANY_MARKER__(%s)",
+        [timezone.now(), list(tokens)],
+    )
+
+
 def clear_employee_fcm_tokens(tokens: list[str]) -> None:
     """Drop the workspace tokens Firebase has just reported as dead.
 

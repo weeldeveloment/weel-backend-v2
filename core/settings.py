@@ -1022,6 +1022,26 @@ CALL_RING_TIMEOUT_SECONDS = int((os.getenv("CALL_RING_TIMEOUT_SECONDS") or "60")
 # with the caller's screen still up. The phones give the same slack to their
 # own countdowns, so nobody's screen closes before the server has said so.
 CALL_RING_GRACE_SECONDS = int((os.getenv("CALL_RING_GRACE_SECONDS") or "5").strip() or "5")
+
+# ─── Apple VoIP push (PushKit) for incoming calls ────────────────────────────
+#
+# A ring on an iPhone that is closed can only come in through PushKit: an
+# ordinary alert waits in the tray until it is tapped, a VoIP push wakes the
+# app and CallKit draws the phone's own incoming-call screen over whatever is
+# on it. It goes straight to APNs — FCM cannot carry the `voip` push type —
+# signed with the same .p8 key the Firebase console was given. With the team
+# id, key id and key all unset, iPhones fall back to the ordinary alert.
+APNS_TEAM_ID = (os.getenv("APNS_TEAM_ID") or "").strip()
+APNS_KEY_ID = (os.getenv("APNS_KEY_ID") or "").strip()
+# The .p8 file's contents (PEM). Dokploy keeps an env value on one line, so a
+# literal `\n` in it is put back as a newline when the key is read.
+APNS_AUTH_KEY = os.getenv("APNS_AUTH_KEY") or ""
+APNS_AUTH_KEY_FILE = (os.getenv("APNS_AUTH_KEY_FILE") or "").strip()
+# PushKit's topic: the iOS bundle id with `.voip` on the end.
+APNS_VOIP_TOPIC = (os.getenv("APNS_VOIP_TOPIC") or "uz.weel.weelB2bV2.voip").strip()
+# A build installed from Xcode registers with the sandbox gateway; TestFlight
+# and the App Store with production. The wrong gateway answers BadDeviceToken.
+APNS_USE_SANDBOX = env_bool("APNS_USE_SANDBOX", False)
 # The longest an *answered* call may stay open before the server stops
 # believing in it.
 #

@@ -3289,6 +3289,14 @@ class WorkspaceDeviceTokenView(WorkspaceAPIView):
     def post(self, request):
         token = (request.data.get("fcm_token") or "").strip() or None
         repo.set_employee_fcm_token(request.user.id, token)
+        # The iPhone's PushKit token rides the same request when the app has
+        # one. Only touched when the key is present: an Android phone, or an
+        # older build, registers its FCM token without saying anything about
+        # VoIP, and must not wipe a token another device of the same person
+        # registered.
+        if "voip_token" in request.data:
+            voip = (request.data.get("voip_token") or "").strip() or None
+            repo.set_employee_voip_token(request.user.id, voip)
         return Response({"detail": _("Saved")})
 
 

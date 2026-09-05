@@ -236,7 +236,7 @@ def employee_cards(employee_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
     if not ids:
         return {}
     rows = fetch_all(
-        f"SELECT id, full_name, photo, fcm_token, company_id FROM {B2B_EMPLOYEE_TABLE} "
+        f"SELECT id, full_name, photo, fcm_token, voip_token, company_id FROM {B2B_EMPLOYEE_TABLE} "
         "WHERE id = __ANY_MARKER__(%s)",
         [ids],
     )

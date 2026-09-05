@@ -71,7 +71,10 @@ B2B_ANDROID_CHANNEL = "weel_workspace"
 
 
 def _android_config(
-    channel_id: str | None, badge: int | None = None, ttl_seconds: int | None = None
+    channel_id: str | None,
+    badge: int | None = None,
+    ttl_seconds: int | None = None,
+    data_only: bool = False,
 ) -> messaging.AndroidConfig:
     """Delivery hints for the Android half of a push.
 
@@ -97,7 +100,7 @@ def _android_config(
             default_vibrate_timings=True,
             notification_count=badge,
         )
-        if channel_id
+        if channel_id and not data_only
         else None
     )
     return messaging.AndroidConfig(
@@ -194,12 +197,20 @@ class FCMService:
         android_channel_id=None,
         badge_for=None,
         ttl_seconds=None,
+        android_data_only=False,
     ):
         """Send one message to many tokens.
 
         `ttl_seconds` caps how long FCM and APNs hold the push for a phone
         that is out of reach; unset, they keep it for weeks. A ring passes
         its own window here, a chat message passes nothing.
+
+        `android_data_only` leaves the `notification` block out, so Android
+        hands the message to the app's background handler instead of drawing
+        a banner itself — which is how an incoming call becomes a full-screen
+        ringing screen there. iOS still gets the alert: it is written into
+        the APNs half explicitly, where a missing top-level block changes
+        nothing.
 
         `app` names the Firebase app to send from, and `None` means the default
         one — which is what every consumer and partner send passes. B2B callers
@@ -251,12 +262,15 @@ class FCMService:
         try:
             if badges is None:
                 message = messaging.MulticastMessage(
-                    notification=messaging.Notification(
-                        title=title,
-                        body=body,
-                    ),
+                    notification=None
+                    if android_data_only
+                    else messaging.Notification(title=title, body=body),
                     data=normalized_data,
-                    android=_android_config(android_channel_id, ttl_seconds=ttl_seconds),
+                    android=_android_config(
+                        android_channel_id,
+                        ttl_seconds=ttl_seconds,
+                        data_only=android_data_only,
+                    ),
                     apns=_apns_config(title, body, ttl_seconds=ttl_seconds),
                     tokens=tokens,
                 )
@@ -264,15 +278,15 @@ class FCMService:
             else:
                 messages = [
                     messaging.Message(
-                        notification=messaging.Notification(
-                            title=title,
-                            body=body,
-                        ),
+                        notification=None
+                        if android_data_only
+                        else messaging.Notification(title=title, body=body),
                         data=normalized_data,
                         android=_android_config(
                             android_channel_id,
                             badge=badges.get(token),
                             ttl_seconds=ttl_seconds,
+                            data_only=android_data_only,
                         ),
                         apns=_apns_config(
                             title, body, badge=badges.get(token), ttl_seconds=ttl_seconds

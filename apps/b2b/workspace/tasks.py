@@ -474,6 +474,7 @@ def _push_call(
     body: str,
     data: dict[str, str],
     ttl_seconds: int | None = None,
+    android_data_only: bool = False,
 ) -> None:
     if not tokens:
         return
@@ -490,6 +491,7 @@ def _push_call(
             deactivate_invalid=repo.clear_employee_fcm_tokens,
             badge_for=repo.unread_badges_for_tokens,
             ttl_seconds=ttl_seconds,
+            android_data_only=android_data_only,
         )
     except Exception:  # noqa: BLE001
         logger.exception("Call push failed for %s", data)
@@ -504,12 +506,18 @@ def notify_incoming_call(
     call_type: str,
     thread_id: int | None = None,
     ttl_seconds: int | None = None,
+    avatar: str | None = None,
 ) -> int:
     """"Kiruvchi qo'ng'iroq" to the phone being rung.
 
     `ttl_seconds` is how long FCM may hold the push before dropping it — the
     ring window, so a phone that comes back online later is not rung for a
     call that has already been written down as missed.
+
+    Data-only on Android: the app's background handler turns it into the
+    phone's own full-screen ringing screen (see `NativeCallUi` in the app),
+    which a system-drawn banner could never be. iOS without a VoIP token
+    still gets the alert.
 
     No feed row: a ring is not something to read later — if it is not
     answered, [notify_missed_call] writes the row that is.
@@ -532,14 +540,71 @@ def notify_incoming_call(
     }
     if thread_id:
         data["thread_id"] = str(thread_id)
+    if avatar:
+        data["avatar"] = avatar
+    if ttl_seconds:
+        # How long the ringing screen shows before giving up on its own.
+        data["ring_ms"] = str(int(ttl_seconds) * 1000)
     _push_call(
         [fcm_token],
         title=push_text.CALL_INCOMING_TITLE,
         body=push_text.call_incoming_body(caller_name, call_type),
         data=data,
         ttl_seconds=ttl_seconds,
+        android_data_only=True,
     )
     return 1
+
+
+@app.task(name="b2b.workspace.notify_incoming_call_voip")
+def notify_incoming_call_voip(
+    call_id: int,
+    company_id: int,
+    voip_token: str,
+    caller_name: str,
+    call_type: str,
+    thread_id: int | None = None,
+    ttl_seconds: int | None = None,
+    avatar: str | None = None,
+    fcm_token: str | None = None,
+) -> int:
+    """The same ring, to an iPhone through PushKit — see `apns_voip`.
+
+    Falls back to the ordinary push when APNs will not take it, so a phone
+    with a stale VoIP token is still told something.
+    """
+    from apps.b2b.workspace import apns_voip
+    from apps.b2b.workspace import calls_repository as calls_repo
+
+    call = calls_repo.get_call(call_id, company_id)
+    if not call or call["status"] != calls_repo.CallStatus.RINGING:
+        return 0
+    window = int(ttl_seconds or 60)
+    payload: dict[str, str] = {
+        "type": "call",
+        "action": "ringing",
+        "call_id": str(call_id),
+        "call_type": call_type,
+        "caller_name": caller_name,
+        "caller_id": str(call["initiator_id"]),
+        "ring_ms": str(window * 1000),
+    }
+    if thread_id:
+        payload["thread_id"] = str(thread_id)
+    if avatar:
+        payload["avatar"] = avatar
+    if apns_voip.send(
+        voip_token,
+        payload,
+        ttl_seconds=window,
+        on_dead_token=lambda token: repo.clear_employee_voip_tokens([token]),
+    ):
+        return 1
+    if fcm_token:
+        return notify_incoming_call(
+            call_id, company_id, fcm_token, caller_name, call_type, thread_id, ttl_seconds, avatar
+        )
+    return 0
 
 
 @app.task(name="b2b.workspace.notify_missed_call")

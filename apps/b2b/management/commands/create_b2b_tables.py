@@ -153,6 +153,11 @@ class Command(BaseCommand):
             cursor.execute("""
                 ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS fcm_token VARCHAR(500);
             """)
+            # The iPhone's PushKit token, for the VoIP push that rings a
+            # closed app — see apps/b2b/workspace/apns_voip.py.
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS voip_token VARCHAR(500);
+            """)
             self.stdout.write("  Created b2b_employee")
 
             cursor.execute("""
