@@ -120,3 +120,4 @@ B2B_OWNERSHIP_REQUEST_TABLE = "b2b_ownership_request"
 # Weel AI — the built-in analyst's reports, and who has read them.
 B2B_AI_REPORT_TABLE = "b2b_ai_report"
 B2B_AI_REPORT_SEEN_TABLE = "b2b_ai_report_seen"
+B2B_AI_ADVISOR_NOTE_TABLE = "b2b_ai_advisor_note"

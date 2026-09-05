@@ -261,3 +261,36 @@ def test_generate_without_a_key_raises(settings):
     with patch("apps.b2b.workspace.analyst.int_repo.get_integration", return_value=None):
         with pytest.raises(analyst.AnalystUnavailable):
             analyst.generate(55, "day")
+
+
+# ─── The advisor's extras ────────────────────────────────────────────────────
+
+def test_extras_fold_the_funnel_shelf_and_notes_into_the_report():
+    from apps.b2b.workspace import advisor_repository as arepo
+    from apps.b2b.workspace import inventory_repository as inv_repo
+
+    window = analyst.window_for("week", now=datetime(2026, 9, 5, 3, 0, tzinfo=dt_timezone.utc))
+    funnel = {"open_by_stage": [{"stage": "new", "count": 2}], "closed_recently": {"created": 2}}
+    with patch.object(arepo, "funnel", return_value=funnel), \
+         patch.object(inv_repo, "summary", return_value={"product_count": 3, "daily": [1, 2]}), \
+         patch.object(arepo, "low_stock", return_value=[{"name": "Qog'oz"}]), \
+         patch.object(arepo, "top_products", return_value=[]), \
+         patch.object(arepo, "list_notes", return_value=[{"id": 1, "text": "No wholesale."}]):
+        out = analyst.extras(55, window)
+    assert out["funnel"] is funnel
+    assert out["inventory"]["product_count"] == 3
+    assert "daily" not in out["inventory"]
+    assert out["inventory"]["low_stock"] == [{"name": "Qog'oz"}]
+    assert out["owner_notes"] == ["No wholesale."]
+
+
+def test_extras_leave_out_what_the_company_does_not_use():
+    from apps.b2b.workspace import advisor_repository as arepo
+    from apps.b2b.workspace import inventory_repository as inv_repo
+
+    window = analyst.window_for("day")
+    empty_funnel = {"open_by_stage": [{"stage": "new", "count": 0}], "closed_recently": {"created": 0}}
+    with patch.object(arepo, "funnel", return_value=empty_funnel), \
+         patch.object(inv_repo, "summary", side_effect=RuntimeError("no module")), \
+         patch.object(arepo, "list_notes", return_value=[]):
+        assert analyst.extras(55, window) == {}

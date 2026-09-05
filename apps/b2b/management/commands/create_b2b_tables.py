@@ -1078,24 +1078,12 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_ai_message")
 
-        # Each employee's own AI key for "AI yordamchi" — see
-        # `workspace/assistant_keys.py`. One row per person; the workspace's
-        # key in b2b_integration stays the fallback for anybody without one.
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS b2b_employee_ai_key (
-                employee_id BIGINT PRIMARY KEY REFERENCES b2b_employee(id) ON DELETE CASCADE,
-                provider VARCHAR(30) NOT NULL,
-                key_enc TEXT NOT NULL,
-                key_hint VARCHAR(60),
-                model VARCHAR(120),
-                models JSONB NOT NULL DEFAULT '[]',
-                status VARCHAR(20) NOT NULL DEFAULT 'connected',
-                error TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
-        self.stdout.write("  Created b2b_employee_ai_key")
+        # "AI yordamchi" — the per-employee chat on a pasted Claude/ChatGPT
+        # key — was removed on 2026-09-05; Weel AI is the one AI in the app.
+        # Its key table goes, and so do its chats: nothing can open them.
+        cursor.execute("DROP TABLE IF EXISTS b2b_employee_ai_key;")
+        cursor.execute("DELETE FROM b2b_ai_conversation WHERE provider = 'assistant';")
+        self.stdout.write("  Dropped b2b_employee_ai_key")
 
         # What a thread *is*. 'chat' is a direct or group room; 'saved' is
         # the one-member "Saqlangan xabarlar" room every employee gets, the
@@ -1156,6 +1144,25 @@ class Command(BaseCommand):
             );
         """)
         self.stdout.write("  Created b2b_ai_report")
+
+        # What Weel AI, as the owner's business advisor, was told to keep in
+        # mind — decisions taken, facts about the business the numbers do not
+        # show, advice already given. One row per note, read back into every
+        # conversation for that company. See `workspace/advisor.py`.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_ai_advisor_note (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                employee_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                text TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_ai_advisor_note_company_idx "
+            "ON b2b_ai_advisor_note (company_id, created_at);"
+        )
+        self.stdout.write("  Created b2b_ai_advisor_note")
 
         cursor.execute(
             "ALTER TABLE b2b_workspace_lead "
@@ -2668,3 +2675,33 @@ class Command(BaseCommand):
             "ON b2b_stock_movement (document_id) WHERE document_id IS NOT NULL;"
         )
         self.stdout.write("  Linked b2b_stock_movement to documents")
+
+        # ─── Hisobotga obuna — report subscriptions ──────────────────────────
+        #
+        # One row per person per report section: on or off, how often, who
+        # receives it and by which channel. Read by the export sheet on the
+        # phone and by the morning pass in `analytics_tasks`. `recipients`
+        # and `channels` are JSON lists rather than join tables: ten
+        # addresses at most, and nothing ever queries by address.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_report_subscription (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                employee_id BIGINT NOT NULL REFERENCES b2b_employee(id) ON DELETE CASCADE,
+                section VARCHAR(20) NOT NULL,
+                is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                frequency VARCHAR(10) NOT NULL DEFAULT 'weekly',
+                recipients JSONB NOT NULL DEFAULT '[]'::jsonb,
+                channels JSONB NOT NULL DEFAULT '["chat"]'::jsonb,
+                last_sent_at TIMESTAMPTZ,
+                last_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (employee_id, section)
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_report_subscription_due_idx "
+            "ON b2b_report_subscription (is_enabled, frequency);"
+        )
+        self.stdout.write("  Created b2b_report_subscription")

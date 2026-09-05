@@ -27,6 +27,8 @@ TASK_MODULES = [
     "apps.b2b.integrations.tasks",
     # Weel AI's nightly reports — see apps/b2b/workspace/analyst_tasks.py.
     "apps.b2b.workspace.analyst_tasks",
+    # Report subscriptions — see apps/b2b/workspace/analytics_tasks.py.
+    "apps.b2b.workspace.analytics_tasks",
     "stories.tasks",
     "notification.tasks",
     "payment.tasks",
@@ -191,6 +193,13 @@ app.conf.beat_schedule = {
     "b2b_workspace_analyst_reports": {
         "task": "b2b.workspace.analyst_reports",
         "schedule": crontab(hour=settings.B2B_ANALYST_HOUR, minute=0),
+    },
+    # Hisobotga obuna: every switched-on report subscription whose cadence
+    # fires today, half an hour after Weel AI so the two do not race for the
+    # same mailbox. A no-op when nobody has subscribed.
+    "b2b_workspace_report_subscriptions": {
+        "task": "b2b.workspace.report_subscriptions",
+        "schedule": crontab(hour=settings.B2B_ANALYST_HOUR, minute=30),
     },
 }
 

@@ -944,6 +944,12 @@ B2B_ANALYST_MAX_OUTPUT_TOKENS = int(os.getenv("B2B_ANALYST_MAX_OUTPUT_TOKENS") o
 B2B_ANALYST_HOUR = int(os.getenv("B2B_ANALYST_HOUR") or "8")
 B2B_ANALYST_ENABLED = env_bool("B2B_ANALYST_ENABLED", True)
 
+# Weel AI as the owner's business advisor (apps/b2b/workspace/advisor.py):
+# the model may call up to this many rounds of tools per answer, and may
+# write this long — a plan for the week is longer than a chat reply.
+B2B_AI_MAX_TOOL_ROUNDS = int(os.getenv("B2B_AI_MAX_TOOL_ROUNDS") or "8")
+B2B_ADVISOR_MAX_OUTPUT_TOKENS = int(os.getenv("B2B_ADVISOR_MAX_OUTPUT_TOKENS") or "8000")
+
 # DEBUG=True da Celery tasklari sinxron ishlaydi — worker ishlamasa ham OTP SMS yuboriladi
 CELERY_TASK_ALWAYS_EAGER = DEBUG
 

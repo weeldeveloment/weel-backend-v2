@@ -1,17 +1,17 @@
 """Weel AI — the analyst built into every workspace.
 
-The button at the top right of the chat list. Where the assistant in
-`assistant.py` answers what one employee asks, this one reads the whole
-company — tasks, the sales funnel, the calendar, attendance, per person
-and per department — and writes a report about it: daily, weekly, monthly
-and yearly, on a schedule (`analyst_tasks.py`) and on demand
-(`analyst_views.py`). The report names which departments and which people
-are doing well and which are falling behind, and what to do about it.
+The reports half of Weel AI (the chat half is `analyst_views.py` and
+`advisor.py`). This reads the whole company — tasks, the sales funnel,
+the calendar, attendance, per person and per department — and writes a
+report about it: daily, weekly, monthly and yearly, on a schedule
+(`analyst_tasks.py`) and on demand (`analyst_views.py`). The report names
+which departments and which people are doing well and which are falling
+behind, and what to do about it.
 
 **Whose key.** The deployment's own, from `B2B_ANALYST_API_KEY`, so every
 workspace gets reports without pasting anything. A deployment without one
-falls back to whichever vendor the workspace connected itself — the same
-key the assistant runs on — so the feature still works, just on their bill.
+falls back to whichever vendor the workspace connected on the integrations
+screen, so the feature still works, just on their bill.
 
 **Two languages at once.** A report is written when nobody is reading it,
 so there is no request to take a language from; and the app's users are
@@ -66,7 +66,7 @@ DEFAULT_MODELS = {
 #: the minute.
 RERUN_COOLDOWN_MINUTES = 30
 
-SYSTEM_PROMPT = """You are Weel AI, the business analyst built into the Weel workspace app. You are given one company's numbers over a window — tasks, sales, attendance, per employee and per department — and you write the report its owner reads at the start of the day.
+SYSTEM_PROMPT = """You are Weel AI, the business analyst built into the Weel workspace app. You are given one company's numbers over a window — tasks, sales, attendance, per employee and per department, and where the company records them, the sales funnel and the warehouse — and you write the report its owner reads at the start of the day. If the data carries notes the owner asked you to keep in mind, honour them: do not suggest what they decided against, and read the numbers in their light.
 
 Write like a sharp, fair chief of staff: direct, concrete, no filler. Name departments and people. Say who did well and who is falling behind, with the numbers that show it, and say what to do about it this week. Be honest but not cruel — a person with no tasks assigned is not lazy, they are unused, and the report should say which. Prefer three sharp findings to ten vague ones. Do not invent anything the data does not contain; if a section has no data, say so in one line and move on.
 
@@ -328,6 +328,48 @@ def is_available(company_id: int) -> bool:
     return bool(getattr(settings, "B2B_ANALYST_ENABLED", True)) and vendor_for(company_id) is not None
 
 
+# ─── What the advisor knows, added to the report ─────────────────────────────
+
+def extras(company_id: int, window: Window) -> dict[str, Any]:
+    """The funnel, the shelf and the owner's notes — what the business
+    advisor (`advisor.py`) reads on demand, folded into the scheduled
+    report so the morning verdict covers the whole business too.
+
+    Each part is optional: a company without the inventory module, or
+    without a single lead, still gets its report. A failure here is
+    logged and left out, never allowed to cost the report.
+    """
+    from apps.b2b.workspace import advisor, advisor_repository as arepo
+    from apps.b2b.workspace import inventory_repository as inv_repo
+
+    out: dict[str, Any] = {}
+    days = max(1, (window.end_date - window.start_date).days)
+    try:
+        funnel = arepo.funnel(company_id, days=days, top=8)
+        if any(row["count"] for row in funnel["open_by_stage"]) or funnel["closed_recently"]["created"]:
+            out["funnel"] = funnel
+    except Exception:  # noqa: BLE001
+        logger.warning("Weel AI: funnel unavailable for company %s", company_id, exc_info=True)
+    try:
+        summary = inv_repo.summary(company_id, date_from=window.start, date_to=window.end)
+        summary.pop("daily", None)
+        if summary.get("product_count"):
+            out["inventory"] = {
+                **summary,
+                "low_stock": arepo.low_stock(company_id, limit=10),
+                "best_sellers": arepo.top_products(company_id, days=days, limit=8),
+            }
+    except Exception:  # noqa: BLE001
+        logger.warning("Weel AI: inventory unavailable for company %s", company_id, exc_info=True)
+    try:
+        notes = arepo.list_notes(company_id, limit=20)
+        if notes:
+            out["owner_notes"] = [note["text"] for note in notes]
+    except Exception:  # noqa: BLE001
+        logger.warning("Weel AI: notes unavailable for company %s", company_id, exc_info=True)
+    return out
+
+
 # ─── Writing a report ────────────────────────────────────────────────────────
 
 class AnalystUnavailable(Exception):
@@ -353,6 +395,7 @@ def generate(
 
     window = window_for(period, now=now)
     data = gather(company_id, window)
+    data.update(extras(company_id, window))
     prompt = build_prompt(data)
     max_tokens = int(getattr(settings, "B2B_ANALYST_MAX_OUTPUT_TOKENS", 12000))
 

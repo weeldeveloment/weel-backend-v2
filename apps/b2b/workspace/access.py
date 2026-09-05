@@ -628,6 +628,11 @@ CAPABILITY_PERMISSIONS: dict[str, str] = {
     "can_request_help": Permission.EMPLOYEE_INVITE,
     "can_view_hotels": Permission.TRIP_VIEW,
     "can_book_hotel": Permission.TRIP_CREATE,
+    # «Hisobotlar» — whether the report screen opens at all, and whether its
+    # figures may leave the phone as a file. An employee has neither by
+    # default (TZ v2: no reports module); the role editor can grant both.
+    "can_view_reports": Permission.REPORT_VIEW,
+    "can_export_reports": Permission.REPORT_EXPORT,
 }
 
 

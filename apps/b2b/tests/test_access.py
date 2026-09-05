@@ -710,6 +710,9 @@ LEGACY_FLAGS = {
         # TZ v2 §11 "Создавать рабочую среду": the owner and the
         # administrator, unconditionally.
         "can_create_workspace",
+        # «Hisobotlar»: the screen and the file. Reading it is the manager's
+        # too; taking the figures off the phone stops here.
+        "can_view_reports", "can_export_reports",
     },
 
     # The roster calls this one `performer`; the app calls it "Manager".
@@ -731,6 +734,9 @@ LEGACY_FLAGS = {
         "can_post_lead",
         "can_update_task_status", "can_use_mail", "can_view_attendance",
         "can_view_hotels", "can_view_team", "sees_all_company_data",
+        # The report screen opens to a manager; exporting it does not, by
+        # default — the role editor can widen that.
+        "can_view_reports",
     },
 
     # `can_post_lead` is a deliberate widening, not a drift: raising a lead is

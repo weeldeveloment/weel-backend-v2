@@ -19,10 +19,11 @@ project's outbound HTTP already goes through one library.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import requests
 from django.conf import settings
@@ -316,3 +317,173 @@ def complete(
             part.get("text", "") for part in content if isinstance(part, dict)
         )
     return (content or "").strip()
+
+
+# ─── A turn with tools ───────────────────────────────────────────────────────
+
+@dataclass
+class Tool:
+    """One function the model may call: a name, what it is for, and the
+    JSON schema of its arguments. Vendor-neutral; `complete_with_tools`
+    writes it in each vendor's dialect."""
+
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+#: How the results of the model's calls are handed back: the tool's name
+#: and its parsed arguments in, anything JSON-serialisable out. Raising
+#: `ToolError` tells the model what went wrong instead of failing the turn.
+ToolCall = Callable[[str, dict[str, Any]], Any]
+
+
+class ToolError(Exception):
+    """A tool that could not do what it was asked — shown to the model as
+    the tool's result, so it can say so or try differently."""
+
+
+def _tool_result_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _run_tool(call: ToolCall, name: str, args: Any) -> tuple[str, bool]:
+    """Returns ``(text, is_error)``. Nothing a tool raises escapes into the
+    request: the model is told, the conversation goes on."""
+    if not isinstance(args, dict):
+        args = {}
+    try:
+        return _tool_result_text(call(name, args)), False
+    except ToolError as exc:
+        return str(exc) or "The tool failed.", True
+    except Exception as exc:  # noqa: BLE001 - one bad tool must not lose the answer
+        logger.exception("AI tool %s failed", name)
+        return f"The tool failed: {exc}", True
+
+
+def _max_rounds() -> int:
+    return int(getattr(settings, "B2B_AI_MAX_TOOL_ROUNDS", 8))
+
+
+def complete_with_tools(
+    provider: str,
+    key: str,
+    model: str,
+    turns: list[Turn],
+    *,
+    tools: list[Tool],
+    call: ToolCall,
+    system: str | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """One answer to the conversation, with the model free to call `tools`
+    on the way. Returns the assistant's final text.
+
+    The loop is the plain one: send, and while the model asks for tools,
+    run them and send the results back. `B2B_AI_MAX_TOOL_ROUNDS` bounds
+    it; when the bound is hit the last text the model wrote is returned,
+    so a runaway never costs more than that many calls.
+
+    No forced tool use (``tool_choice`` any/tool): Claude's newest models
+    refuse it, and the tools' descriptions plus the system prompt are what
+    tell the model when to look something up.
+    """
+    key = key.strip()
+    messages: list[dict[str, Any]] = _alternating(turns)
+    if not messages:
+        raise AiError("There is nothing to send.")
+    limit = max_tokens or _max_tokens()
+    if not tools:
+        return complete(provider, key, model, turns, system=system, max_tokens=limit)
+
+    if provider == IntegrationProvider.CLAUDE:
+        return _claude_with_tools(key, model, messages, tools, call, system, limit)
+    return _openai_with_tools(key, model, messages, tools, call, system, limit)
+
+
+def _claude_with_tools(key, model, messages, tools, call, system, limit) -> str:
+    payload: dict[str, Any] = {
+        "model": model,
+        "max_tokens": limit,
+        "messages": list(messages),
+        "tools": [
+            {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+            for t in tools
+        ],
+    }
+    if system:
+        payload["system"] = system
+    last_text = ""
+    for _round in range(_max_rounds() + 1):
+        body = _request(IntegrationProvider.CLAUDE, key, "POST", "/messages", json=payload)
+        if body.get("stop_reason") == "refusal":
+            raise AiError("Claude declined to answer this message.", 200)
+        content = [b for b in (body.get("content") or []) if isinstance(b, dict)]
+        text = "".join(b.get("text", "") for b in content if b.get("type") == "text").strip()
+        last_text = text or last_text
+        uses = [b for b in content if b.get("type") == "tool_use"]
+        if body.get("stop_reason") != "tool_use" or not uses:
+            return text
+        # The assistant turn goes back whole — thinking blocks included, if
+        # any — and every result in one user turn, in the order asked.
+        payload["messages"].append({"role": "assistant", "content": content})
+        results = []
+        for use in uses:
+            result, failed = _run_tool(call, use.get("name") or "", use.get("input"))
+            block: dict[str, Any] = {
+                "type": "tool_result", "tool_use_id": use.get("id"), "content": result,
+            }
+            if failed:
+                block["is_error"] = True
+            results.append(block)
+        payload["messages"].append({"role": "user", "content": results})
+    return last_text
+
+
+def _openai_with_tools(key, model, messages, tools, call, system, limit) -> str:
+    chat: list[dict[str, Any]] = []
+    if system:
+        chat.append({"role": "system", "content": system})
+    chat.extend(messages)
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": chat,
+        "max_completion_tokens": limit,
+        "tools": [
+            {"type": "function", "function": {
+                "name": t.name, "description": t.description, "parameters": t.input_schema,
+            }}
+            for t in tools
+        ],
+    }
+    last_text = ""
+    for _round in range(_max_rounds() + 1):
+        body = _request(IntegrationProvider.CHATGPT, key, "POST", "/chat/completions", json=payload)
+        choices = body.get("choices") or []
+        if not choices:
+            raise AiError("ChatGPT answered with no choices.")
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        if isinstance(content, list):
+            content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+        text = (content or "").strip()
+        last_text = text or last_text
+        calls = message.get("tool_calls") or []
+        if not calls:
+            return text
+        payload["messages"].append({
+            "role": "assistant", "content": content or None, "tool_calls": calls,
+        })
+        for tool_call in calls:
+            function = tool_call.get("function") or {}
+            try:
+                args = json.loads(function.get("arguments") or "{}")
+            except ValueError:
+                args = {}
+            result, _failed = _run_tool(call, function.get("name") or "", args)
+            payload["messages"].append({
+                "role": "tool", "tool_call_id": tool_call.get("id"), "content": result,
+            })
+    return last_text

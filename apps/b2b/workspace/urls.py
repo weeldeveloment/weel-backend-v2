@@ -16,6 +16,12 @@ from apps.b2b.workspace.access_views import (
     WorkspaceRoleListView,
     WorkspaceTrashView,
 )
+from apps.b2b.workspace.analytics_views import (
+    AnalyticsExportView,
+    AnalyticsItemsView,
+    AnalyticsReportView,
+    AnalyticsSubscriptionView,
+)
 from apps.b2b.workspace.analyst_views import (
     AnalystDiscussView,
     AnalystReportListView,
@@ -23,11 +29,6 @@ from apps.b2b.workspace.analyst_views import (
     AnalystSeenView,
     AnalystView,
     WeelAiChatView,
-)
-from apps.b2b.workspace.assistant import (
-    AssistantConnectionView,
-    AssistantMessagesView,
-    AssistantView,
 )
 from apps.b2b.workspace.inventory_views import (
     WorkspaceCategoryDetailView,
@@ -402,19 +403,22 @@ urlpatterns = [
     path("calls/<int:call_id>/token/", WorkspaceCallTokenView.as_view(), name="ws-call-token"),
 
     path("chats/", WorkspaceThreadListCreateView.as_view(), name="ws-chats"),
-    # The AI assistant's row under "Saqlangan xabarlar" — every employee's
-    # own chat with whichever of Claude / ChatGPT the workspace connected.
-    # See `assistant.py`. Not a thread: it lives in the AI tables.
-    path("assistant/", AssistantView.as_view(), name="ws-assistant"),
-    path("assistant/messages/", AssistantMessagesView.as_view(), name="ws-assistant-messages"),
-    # This person's own Claude/ChatGPT key, for every role. The workspace
-    # key on the integrations screen stays the fallback.
-    path("assistant/connection/", AssistantConnectionView.as_view(), name="ws-assistant-connection"),
-    # Weel AI as a chat about the reader's own work — for every role. The
-    # reports under `analyst/reports/` stay with whoever runs the company.
+    # Weel AI — the one AI in the app, pinned under "Saqlangan xabarlar" for
+    # every role. The chat: an employee's help with their own work, the
+    # business advisor for whoever runs the company (`advisor.py`). The
+    # reports under `analyst/reports/` stay with the managers.
     path("analyst/chat/", WeelAiChatView.as_view(), name="ws-analyst-chat"),
-    # Weel AI — the built-in analyst at the top right of the chat list. See
-    # `analyst.py`. Managers only; `CanReadAnalyst` says why.
+    # Hisobotlar — the KPI screen, one section per call: the figures, the
+    # rows behind a figure, the file, and the standing order for it. See
+    # `analytics_views`. `reports/` above stays for the web dashboard.
+    path("analytics/", AnalyticsReportView.as_view(), name="ws-analytics"),
+    path("analytics/items/", AnalyticsItemsView.as_view(), name="ws-analytics-items"),
+    path("analytics/export/", AnalyticsExportView.as_view(), name="ws-analytics-export"),
+    path(
+        "analytics/subscription/",
+        AnalyticsSubscriptionView.as_view(),
+        name="ws-analytics-subscription",
+    ),
     path("analyst/", AnalystView.as_view(), name="ws-analyst"),
     path("analyst/seen/", AnalystSeenView.as_view(), name="ws-analyst-seen"),
     path("analyst/reports/", AnalystReportListView.as_view(), name="ws-analyst-reports"),
