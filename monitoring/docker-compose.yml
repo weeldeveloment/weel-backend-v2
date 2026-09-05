@@ -247,7 +247,8 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=${DOKPLOY_NETWORK:-dokploy-network}
-      - traefik.http.routers.weel-ops.rule=Host(`${MCP_DOMAIN}`) && PathPrefix(`/ops/`)
+      # Grafana domenida ham ishlaydi (DNS + sertifikat allaqachon bor): https://GRAFANA_DOMAIN/ops/...
+      - traefik.http.routers.weel-ops.rule=(Host(`${GRAFANA_DOMAIN}`) || Host(`${MCP_DOMAIN}`)) && PathPrefix(`/ops/`)
       - traefik.http.routers.weel-ops.priority=100
       - traefik.http.routers.weel-ops.entrypoints=websecure
       - traefik.http.routers.weel-ops.tls.certresolver=letsencrypt

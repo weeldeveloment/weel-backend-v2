@@ -13,7 +13,7 @@ Dashboard UID'lari: `weel-overview`, `weel-backend`, `weel-celery`, `weel-postgr
 
 ## 0. Ops API (agentning qo'li)
 
-Bazaviy URL: `$OPS_URL` (default `https://mcp.weel.uz/ops`). Har so'rovga
+Bazaviy URL: `$OPS_URL` (default `https://grafana.weel.uz/ops`; `https://mcp.weel.uz/ops` ham ishlaydi, DNS bo'lsa). Har so'rovga
 `Authorization: Bearer $OPS_TOKEN` va `X-Actor: <routine nomi>` header'i.
 To'liq ro'yxat: `GET /ops/help`. Manba: `monitoring/ops-agent/ops.py`.
 
@@ -84,7 +84,7 @@ doirasida O'ZING TUZATASAN. Repo klonlangan (weeldeveloment/weel-backend-v2). EN
 ni to'liq o'qi — siyosat (1-bo'lim), Ops API (0-bo'lim) va har alert uchun tuzatish yo'li (3-bo'lim) u yerda.
 Prompt bilan RUNBOOK ziddiyatda bo'lsa RUNBOOK'dagi TAQIQLAR ustun.
 
-Ops API: OPS_URL env (bo'sh bo'lsa https://mcp.weel.uz/ops), token OPS_TOKEN env'da
+Ops API: OPS_URL env (bo'sh bo'lsa https://grafana.weel.uz/ops), token OPS_TOKEN env'da
 (header: Authorization: Bearer $OPS_TOKEN, X-Actor: weel-ops-hourly). curl bilan ishla. Token bo'sh bo'lsa —
 hech narsa qilma, sessiya oxirida "OPS_TOKEN yo'q" deb yoz va tugat.
 Telegram: POST $OPS_URL/notify {"text":"..."} — bot token kerak emas.

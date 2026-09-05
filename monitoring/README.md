@@ -158,13 +158,14 @@ kuzatish (alertlar, PromQL/LogQL/TraceQL, konteyner inspect/loglar, disk) + **ch
 (restart, oq ro'yxatdagi `exec`, `prune safe`, Dokploy redeploy, silence) + Telegram xabar.
 Bulutdagi Claude Routine faqat shu API bilan ishlaydi — Grafana MCP connector shart emas.
 
-- Manzil: **`https://mcp.weel.uz/ops/...`** (Traefik `PathPrefix(/ops/)`, MCP domenida — yangi DNS kerak emas).
+- Manzil: **`https://grafana.weel.uz/ops/...`** (Traefik `PathPrefix(/ops/)` Grafana domenida — DNS va sertifikat allaqachon bor).
+  `https://mcp.weel.uz/ops/...` ham ishlaydi, lekin faqat `mcp.weel.uz` A yozuvi qo'yilgach (aks holda Traefik default cert).
 - Auth: `Authorization: Bearer <OPS_TOKEN>`. Token: `openssl rand -hex 32` → Dokploy monitoring env `OPS_TOKEN` → redeploy.
 - Ixtiyoriy: Dokploy → Settings → API/CLI → token → `DOKPLOY_URL`, `DOKPLOY_API_KEY` (shunda `/ops/redeploy` ishlaydi).
 - Chegaralar: `OPS_DENY_REGEX` (default `dokploy|traefik`), soatiga `OPS_MAX_ACTIONS_PER_HOUR=12` amal;
   `exec` oq ro'yxati va SQL cheklovi kodda (`EXEC_ALLOW`, `SQL_ALLOW_RE`). Har amal Loki'da (`{container=~".*ops-agent.*"}`)
   va `GET /ops/actions` da; `OpsAgentRateLimited` alerti odamni chaqiradi.
-- Tekshirish: `curl -s -H "Authorization: Bearer $OPS_TOKEN" https://mcp.weel.uz/ops/status | head -c 600`.
+- Tekshirish: `curl -s -H "Authorization: Bearer $OPS_TOKEN" https://grafana.weel.uz/ops/status | head -c 600`.
 
 ## 7-bosqich. Bulutdagi Claude Routine (kompyuter o'chiq bo'lsa ham TUZATADI)
 
@@ -179,7 +180,7 @@ Promptlar: `RUNBOOK.md` 2-bo'lim. Siyosat (nima mumkin / mumkin emas): `RUNBOOK.
 
 Yoqishdan oldin (claude.ai UI, bir marta):
 1. **Environment o'zgaruvchilari** — https://claude.ai/code → Environments → Default → Environment variables:
-   `OPS_TOKEN=<Dokploy'dagi bilan bir xil>`, `OPS_URL=https://mcp.weel.uz/ops`.
+   `OPS_TOKEN=<Dokploy'dagi bilan bir xil>`, `OPS_URL=https://grafana.weel.uz/ops`.
    Tarmoq ruxsati (network access) `mcp.weel.uz` va `github.com` ga ochiq bo'lsin (Full yoki allowlist).
 2. **GitHub** — routine `fix/ops-*` branch push + PR ochadi: Claude GitHub App'ida repo'ga write ruxsati bo'lsin.
 3. Routine sahifasida **Enable**. Test: `Run now` → 2–3 daqiqada Telegram'da hisobot (yoki jim — hammasi yashil).
