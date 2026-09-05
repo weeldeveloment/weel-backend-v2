@@ -32,7 +32,8 @@ services:
       # Media: hamma ulanishlar bitta UDP portda (mux). Jitsi'dagi 10000 kabi.
       - "${LIVEKIT_UDP_PORT:-7882}:7882/udp"
     environment:
-      - LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+      # Qo'shtirnoq shart: "kalit: sir" YAML uchun lug'at, satr emas.
+      - "LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
       - |
         LIVEKIT_CONFIG=
         port: 7880
