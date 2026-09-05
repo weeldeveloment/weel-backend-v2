@@ -181,6 +181,18 @@ def stale_ringing(cutoff: datetime) -> list[dict[str, Any]]:
     )
 
 
+def stale_accepted(cutoff: datetime) -> list[dict[str, Any]]:
+    """Every answered call whose `/end` never came — answered before `cutoff`
+    and still open. `answered_at` can be null on a row written by an older
+    build, so `started_at` stands in for it."""
+    return fetch_all(
+        f"SELECT * FROM {B2B_CALL_TABLE} WHERE status = %s "
+        "AND COALESCE(answered_at, started_at) < %s "
+        "ORDER BY started_at ASC LIMIT 500",
+        [CallStatus.ACCEPTED, cutoff],
+    )
+
+
 def list_history(
     company_id: int,
     *,

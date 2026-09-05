@@ -974,6 +974,18 @@ JITSI_GUEST_LINK_TTL_SECONDS = int(
 )
 # How long a call rings before it is written down as missed (TZ §4.1.2).
 CALL_RING_TIMEOUT_SECONDS = int((os.getenv("CALL_RING_TIMEOUT_SECONDS") or "30").strip() or "30")
+# The longest an *answered* call may stay open before the server stops
+# believing in it.
+#
+# `/end` is what closes a call, and it is the one request most likely never to
+# arrive: the network is at its worst exactly when a call drops, and an app the
+# user swipes away mid-call never sends it at all. Without a ceiling that row
+# stays `accepted` for ever and both people are "band" until somebody edits the
+# database — which is precisely what happened in production. Four hours is far
+# longer than any real consultation and far shorter than for ever.
+CALL_MAX_DURATION_SECONDS = int(
+    (os.getenv("CALL_MAX_DURATION_SECONDS") or "14400").strip() or "14400"
+)
 
 # Test user - OTP so'ralmaydi (development va production)
 TEST_USER_PHONE_NUMBER = (os.getenv("TEST_USER_PHONE_NUMBER") or "").strip() or None

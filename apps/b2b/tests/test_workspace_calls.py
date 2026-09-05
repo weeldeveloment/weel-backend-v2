@@ -215,6 +215,58 @@ class TestStart:
         assert mocks["calls_repo"].transition.call_args.kwargs["to"] == CallStatus.MISSED
         mocks["calls_repo"].create_call.assert_called_once()
 
+    def test_my_own_unclosed_call_does_not_make_me_busy_to_myself(self, mocks):
+        """The bug that shipped: hang up, `/end` is lost, and every call you
+        try to place afterwards answers "band" — for ever, because an
+        answered call had no timeout at all.
+
+        The phone will not place a call while it believes one is running, so a
+        live row for the *caller* is a row their phone has already forgotten.
+        It is closed here rather than refused.
+        """
+        mine = _call(
+            id=88,
+            status=CallStatus.ACCEPTED,
+            started_at=timezone.now() - timedelta(minutes=4),
+            answered_at=timezone.now() - timedelta(minutes=3),
+        )
+        mocks["repo"].get_workspace_employee.return_value = {"id": BEK_ID, "company_id": COMPANY_ID}
+        mocks["repo"].find_direct_thread.return_value = {"id": 3}
+        mocks["calls_repo"].live_call_for.side_effect = (
+            lambda eid: mine if eid == AZIZ_ID else None
+        )
+        mocks["calls_repo"].transition.return_value = dict(mine, status=CallStatus.ENDED)
+        mocks["calls_repo"].create_call.return_value = _call()
+
+        calls.start(user=AZIZ, call_type="video", source_module="chat", target_employee_id=BEK_ID)
+
+        assert mocks["calls_repo"].transition.call_args.kwargs["to"] == CallStatus.ENDED
+        mocks["calls_repo"].create_call.assert_called_once()
+
+    def test_the_other_side_is_still_refused_while_they_are_talking(self, mocks):
+        """Releasing my own line must not release anybody else's — theirs may
+        be a real conversation with a third person."""
+        theirs = _call(
+            id=91,
+            initiator_id=BEK_ID,
+            target_employee_id=404,
+            status=CallStatus.ACCEPTED,
+            answered_at=timezone.now() - timedelta(minutes=1),
+        )
+        mocks["repo"].get_workspace_employee.return_value = {"id": BEK_ID, "company_id": COMPANY_ID}
+        mocks["repo"].find_direct_thread.return_value = {"id": 3}
+        mocks["calls_repo"].live_call_for.side_effect = (
+            lambda eid: theirs if eid == BEK_ID else None
+        )
+
+        with pytest.raises(calls.CallError) as raised:
+            calls.start(
+                user=AZIZ, call_type="video", source_module="chat", target_employee_id=BEK_ID
+            )
+
+        assert raised.value.status == 409
+        mocks["calls_repo"].create_call.assert_not_called()
+
     def test_a_lead_gets_a_browser_link_by_sms(self, mocks):
         mocks["repo"].get_lead.return_value = {
             "id": 5, "contact_full_name": "Mijoz", "contact_phone": "+998901112233",
@@ -237,6 +289,50 @@ class TestStart:
 
 
 # ─── Answering, refusing, hanging up ──────────────────────────────────────────
+
+
+class TestAbandonedCalls:
+    """An answered call whose `/end` never arrived."""
+
+    def test_settle_closes_a_conversation_past_the_maximum_duration(self, mocks):
+        forgotten = _call(
+            status=CallStatus.ACCEPTED,
+            answered_at=timezone.now() - timedelta(hours=9),
+        )
+        mocks["calls_repo"].transition.return_value = dict(
+            forgotten, status=CallStatus.ENDED
+        )
+
+        settled = calls.settle(forgotten)
+
+        assert settled["status"] == CallStatus.ENDED
+        kwargs = mocks["calls_repo"].transition.call_args.kwargs
+        assert kwargs["to"] == CallStatus.ENDED
+        assert kwargs["only_from"] == [CallStatus.ACCEPTED]
+        # Counted, not thrown away: the chat line should read the length it had.
+        assert kwargs["duration_seconds"] > 0
+
+    def test_settle_leaves_a_conversation_inside_the_window_alone(self, mocks):
+        live = _call(
+            status=CallStatus.ACCEPTED,
+            answered_at=timezone.now() - timedelta(minutes=20),
+        )
+
+        assert calls.settle(live)["status"] == CallStatus.ACCEPTED
+        mocks["calls_repo"].transition.assert_not_called()
+
+    def test_the_sweep_covers_both_kinds_of_stale_row(self, mocks):
+        mocks["calls_repo"].stale_ringing.return_value = [_call(id=1)]
+        mocks["calls_repo"].stale_accepted.return_value = [
+            _call(id=2, status=CallStatus.ACCEPTED,
+                  answered_at=timezone.now() - timedelta(hours=9))
+        ]
+        mocks["calls_repo"].transition.side_effect = lambda cid, **kw: _call(
+            id=cid, status=kw["to"]
+        )
+
+        assert calls.expire_stale() == 2
+        mocks["calls_repo"].stale_accepted.assert_called_once()
 
 
 class TestTransitions:
