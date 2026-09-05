@@ -10,6 +10,19 @@ from .b2b_admin_views import (
     AdminB2BSupportThreadsView,
     AdminB2BSupportThreadView,
 )
+from .ccd_views import (
+    CcdApprovalsView,
+    CcdAuditView,
+    CcdCallsView,
+    CcdCompaniesView,
+    CcdCompanyDetailView,
+    CcdEmployeeActiveView,
+    CcdEmployeesView,
+    CcdTicketMessagesView,
+    CcdTicketsView,
+    CcdWorkspaceActiveView,
+    CcdWorkspacesView,
+)
 from apps.activities.views import (
     AdminActivityCalendarView,
     AdminActivityDetailView,
@@ -40,6 +53,20 @@ urlpatterns = [
     path('b2b/ownership-requests/<int:request_id>/decide/',
          AdminB2BOwnershipRequestView.as_view(),
          name='admin-b2b-ownership-request-decide'),
+    # ─── Call Center Desk (weelccd) ──────────────────────────────────────────
+    # The desk is a separate service with its own UI and operator records; it keeps no
+    # copy of the B2B data and reads all of it from here. See apps/admin_auth/ccd_views.py.
+    path('ccd/companies/', CcdCompaniesView.as_view(), name='ccd-companies'),
+    path('ccd/companies/<int:company_id>/', CcdCompanyDetailView.as_view(), name='ccd-company-detail'),
+    path('ccd/workspaces/', CcdWorkspacesView.as_view(), name='ccd-workspaces'),
+    path('ccd/workspaces/<int:workspace_id>/active/', CcdWorkspaceActiveView.as_view(), name='ccd-workspace-active'),
+    path('ccd/employees/', CcdEmployeesView.as_view(), name='ccd-employees'),
+    path('ccd/employees/<int:employee_id>/active/', CcdEmployeeActiveView.as_view(), name='ccd-employee-active'),
+    path('ccd/calls/', CcdCallsView.as_view(), name='ccd-calls'),
+    path('ccd/audit/', CcdAuditView.as_view(), name='ccd-audit'),
+    path('ccd/approvals/', CcdApprovalsView.as_view(), name='ccd-approvals'),
+    path('ccd/tickets/', CcdTicketsView.as_view(), name='ccd-tickets'),
+    path('ccd/tickets/<int:employee_id>/', CcdTicketMessagesView.as_view(), name='ccd-ticket-messages'),
     # Adventure Activities
     path('activities/', AdminActivityListView.as_view(), name='admin-activities-list'),
     path('activities/<uuid:guid>/', AdminActivityDetailView.as_view(), name='admin-activity-detail'),
