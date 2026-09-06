@@ -384,14 +384,21 @@ class TestViews:
         with patch.object(view_class, "required_module", None):
             return view_class.as_view()(request, **kwargs)
 
-    def test_a_role_that_cannot_open_a_group_cannot_open_a_conference(self, mocks):
+    def test_a_role_that_cannot_open_a_group_may_still_call_a_meeting(self, mocks):
+        """Anybody in the workspace may open a conference.
+
+        It used to need `can_create_group_chat`, on the reasoning that a
+        conference *is* a group. The row it writes is; the feature is not —
+        the group is only where the invitation lands. The owner asked for it
+        to be everybody's.
+        """
         response = self._post(
             WorkspaceConferenceListCreateView,
             _Capable(AZIZ_ID, can_create_group=False),
             body={"scope": ConferenceScope.ALL, "title": "Yig’ilish"},
         )
-        assert response.status_code == 403
-        mocks["repo"].create_thread.assert_not_called()
+        assert response.status_code == 201
+        assert response.data["thread_id"] == THREAD_ID
 
     def test_a_role_that_can_opens_one(self, mocks):
         response = self._post(

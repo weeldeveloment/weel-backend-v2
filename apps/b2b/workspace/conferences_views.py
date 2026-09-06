@@ -4,10 +4,11 @@ Thin like `calls_views`: every rule lives in `conferences.py`, and a view
 here only loads the row, checks the person is signed in, and turns a
 `CallError` into the status code it names.
 
-The right to open one is the right to open a group chat — a conference *is* a
-group, made in the same breath as the room it announces — so the capability
-checked here is `can_create_group_chat` and no new permission was invented
-for it.
+Opening one needs no capability at all, by the owner's decision: anybody in
+the workspace may call a meeting. It used to require `can_create_group_chat`,
+on the reasoning that a conference *is* a group — which is true of the row it
+writes and false of what the feature is for. The group it opens is the room
+the invitation lands in, not a group the person went out to create.
 """
 from __future__ import annotations
 
@@ -85,12 +86,6 @@ class WorkspaceConferenceListCreateView(_ConferenceView):
         serializer = ConferenceCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-
-        if not request.user.capabilities["can_create_group_chat"]:
-            return Response(
-                {"detail": "Sizning rolingiz konferensiya ocha olmaydi."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
 
         try:
             payload = conferences.create(
