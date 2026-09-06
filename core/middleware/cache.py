@@ -101,8 +101,48 @@ def _acquire_lock(lock_key: str) -> str | None:
 
 
 def _release_lock(lock_key: str, token: str) -> None:
+    """Drops the lock this request took, and only that one.
+
+    `cache.eval` does not exist. Django's cache API has no such method and
+    neither does django-redis's `RedisCache` — the call raised AttributeError
+    on every single release, straight into an `except Exception: pass`, so
+    **no lock was ever released**. Each one instead sat out its full
+    `LOCK_TIMEOUT` of ten seconds, during which every other request for the
+    same key fell through to `_wait_for_cache` and slept the whole
+    `LOCK_WAIT_MAX` before doing the work anyway. Measured on the mobile home
+    screen: `GET /employee-of-month/`, which answers 204 in well under a
+    millisecond, took a flat 550 ms on every call.
+
+    The script is still the right thing to run — the check and the delete have
+    to be one round trip, or a lock that expired and was retaken by somebody
+    else is deleted by its previous holder. It has to be run against what
+    Redis actually holds, though, which is not what `_acquire_lock` was
+    handed: django-redis prefixes every key (`:1:weel:cache:lock:v1:...`) and
+    pickles every value, so a script given the bare key and the bare token
+    matches nothing and deletes nothing. `make_key` and `encode` are the same
+    two transformations the write went through.
+    """
     try:
-        cache.eval(RELEASE_LOCK_SCRIPT, 1, lock_key, token)
+        client = cache.client.get_client(write=True)
+        redis_key = str(cache.client.make_key(lock_key))
+        redis_value = cache.client.encode(token)
+    except Exception:
+        client = None
+
+    if client is not None:
+        try:
+            client.eval(RELEASE_LOCK_SCRIPT, 1, redis_key, redis_value)
+            return
+        except Exception:
+            pass
+
+    # A cache backend that is not Redis. The read and the delete are two calls
+    # here, so a lock that expires between them can be taken by somebody else
+    # and then deleted by us — which costs that request a duplicated query and
+    # nothing else. Not worth a second lock implementation to close.
+    try:
+        if cache.get(lock_key) == token:
+            cache.delete(lock_key)
     except Exception:
         pass
 
@@ -118,6 +158,40 @@ def _wait_for_cache(cache_key: str, max_wait: float) -> dict | None:
             return cached
         time.sleep(0.05)
     return None
+
+
+CACHEABLE_STATUSES = (200, 204)
+
+
+def _is_cacheable(response) -> bool:
+    """Whether this answer is worth remembering.
+
+    204 belongs here as much as 200 does, and leaving it out was not a
+    conservative choice — it was the thing that made every miss cost the full
+    `LOCK_WAIT_MAX`. "Nobody has been named employee of the month" is a real,
+    stable answer that the app asks for on every home screen; unstored, the
+    key it would live under stayed empty forever, so every request found no
+    cache, failed to take the lock, and slept.
+    """
+    return response.status_code in CACHEABLE_STATUSES and hasattr(response, "data")
+
+
+def _response_from_cache(cached: dict) -> HttpResponse:
+    """Rebuilds a stored answer.
+
+    A 204 is rebuilt empty. `json.dumps(None)` is the four bytes `null`, and a
+    204 carrying a body is a response no client is required to read — the app's
+    own `ApiClient` treats an empty 204 as "nothing here" and would have to be
+    taught otherwise.
+    """
+    status_code = cached["status"]
+    if status_code == 204 or cached.get("data") is None:
+        return HttpResponse(status=status_code)
+    return HttpResponse(
+        json.dumps(cached["data"], cls=DjangoJSONEncoder),
+        status=status_code,
+        content_type=cached["content_type"],
+    )
 
 
 class CacheMiddleware:
@@ -166,27 +240,19 @@ class CacheMiddleware:
         if cached is not None:
             age = time.time() - cached.get("cached_at", 0)
             if age < DEFAULT_TTL:
-                return HttpResponse(
-                    json.dumps(cached["data"], cls=DjangoJSONEncoder),
-                    status=cached["status"],
-                    content_type=cached["content_type"],
-                )
+                return _response_from_cache(cached)
             if age < DEFAULT_TTL + GRACE_PERIOD:
                 lock_key = _build_lock_key(cache_key)
                 lock_token = _acquire_lock(lock_key)
                 if lock_token:
                     try:
                         response = self.get_response(request)
-                        if response.status_code == 200 and hasattr(response, "data"):
+                        if _is_cacheable(response):
                             self._store_cache(cache_key, response)
                         return response
                     finally:
                         _release_lock(lock_key, lock_token)
-                return HttpResponse(
-                    json.dumps(cached["data"], cls=DjangoJSONEncoder),
-                    status=cached["status"],
-                    content_type=cached["content_type"],
-                )
+                return _response_from_cache(cached)
 
         lock_key = _build_lock_key(cache_key)
         lock_token = _acquire_lock(lock_key)
@@ -194,7 +260,7 @@ class CacheMiddleware:
         if lock_token:
             try:
                 response = self.get_response(request)
-                if response.status_code == 200 and hasattr(response, "data"):
+                if _is_cacheable(response):
                     self._store_cache(cache_key, response)
                 return response
             finally:
@@ -202,14 +268,10 @@ class CacheMiddleware:
 
         cached = _wait_for_cache(cache_key, LOCK_WAIT_MAX)
         if cached is not None:
-            return HttpResponse(
-                json.dumps(cached["data"], cls=DjangoJSONEncoder),
-                status=cached["status"],
-                content_type=cached["content_type"],
-            )
+            return _response_from_cache(cached)
 
         response = self.get_response(request)
-        if response.status_code == 200 and hasattr(response, "data"):
+        if _is_cacheable(response):
             self._store_cache(cache_key, response)
         return response
 

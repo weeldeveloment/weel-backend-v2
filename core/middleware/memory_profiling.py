@@ -7,6 +7,20 @@ NOTE: pympler was removed from the per-request path because
 muppy.get_objects() + summary.summarize() takes ~4.7s on a
 fully-loaded Django heap (711k+ objects), causing Daphne worker
 pool exhaustion and 503 timeouts under concurrent load.
+
+OFF unless asked for, which is the second version of that same lesson. The
+sampling rate only decides how often a *snapshot* is taken; `tracemalloc.start()`
+taxes every allocation in the process for as long as it is running, and Django
+request handling is nothing but allocation. Measured on this codebase, with the
+sample rate at its default 1%:
+
+    GET /api/b2b/workspace/tasks/ (200 tasks)   38 ms off   ->  195 ms on
+    GET /api/b2b/workspace/me/                  10 ms off   ->   18 ms on
+
+That is a 2-5x tax on every request of every deploy, to sample one request in a
+hundred. It is a tool to switch on while chasing a leak, so
+MEMORY_PROFILING_ENABLED now defaults to off and the deployment that wants it
+asks for it.
 """
 import logging
 import os
@@ -29,6 +43,20 @@ def _parse_sample_rate() -> float:
         return 0.01
 
 
+def _route_of(request) -> str:
+    """The URL *pattern*, not the URL.
+
+    Labelled by `request.path`, a metric about `/tasks/<id>/` grows one time
+    series per task and one per employee — the label set is unbounded, which
+    costs memory in every worker and in Prometheus, and makes the histogram
+    unusable besides. The resolved route is the same answer with the ids
+    collapsed.
+    """
+    match = getattr(request, "resolver_match", None)
+    route = getattr(match, "route", None) if match else None
+    return route or "<unmatched>"
+
+
 class MemoryProfilingMiddleware(MiddlewareMixin):
     """
     Middleware that captures memory allocation growth per HTTP request.
@@ -37,7 +65,7 @@ class MemoryProfilingMiddleware(MiddlewareMixin):
 
     def __init__(self, get_response=None):
         super().__init__(get_response)
-        self._enabled = os.getenv("MEMORY_PROFILING_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+        self._enabled = os.getenv("MEMORY_PROFILING_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
         self._sample_rate = _parse_sample_rate()
         self._trace_started = False
         if self._enabled and not tracemalloc.is_tracing():
@@ -66,11 +94,17 @@ class MemoryProfilingMiddleware(MiddlewareMixin):
         return random.random() < self._sample_rate
 
     def process_request(self, request: HttpRequest):
-        if self._enabled and self._should_sample():
+        # `is_tracing` as well as `_enabled`: tracing is process-global and
+        # something else can stop it (a test, a shell, this middleware being
+        # re-instantiated). `take_snapshot` raises when it is off, and raising
+        # here is a 500 on a request that only wanted to be measured.
+        if self._enabled and tracemalloc.is_tracing() and self._should_sample():
             request._mem_snapshot_before = tracemalloc.take_snapshot()
 
     def process_response(self, request, response):
         if not self._enabled or not hasattr(request, "_mem_snapshot_before"):
+            return response
+        if not tracemalloc.is_tracing():
             return response
 
         try:
@@ -80,7 +114,7 @@ class MemoryProfilingMiddleware(MiddlewareMixin):
 
             total_growth = sum(stat.size_diff for stat in top_stats if stat.size_diff > 0)
             method = request.method or "UNKNOWN"
-            path = request.path or "/"
+            path = _route_of(request)
 
             if self._prom_growth is not None:
                 self._prom_growth.labels(method=method, path=path).observe(total_growth)
@@ -115,7 +149,7 @@ class CeleryMemoryProfiler:
 
     def __init__(self, task_func):
         self.task_func = task_func
-        self._enabled = os.getenv("MEMORY_PROFILING_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+        self._enabled = os.getenv("MEMORY_PROFILING_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
         self._sample_rate = _parse_sample_rate()
         self._prom_growth = None
         try:

@@ -215,6 +215,24 @@ MIDDLEWARE = [
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Compresses every response big enough to be worth it, which on this API
+    # is most of them. The mobile app's own numbers: `GET /workspace/tasks/`
+    # for a company with 200 tasks is 285 KB of JSON and 10 KB gzipped — a 28x
+    # difference, and on a phone on mobile data that difference *is* the load
+    # time. Nothing in front of uvicorn was compressing (checked: responses
+    # from dev.weel.uz carried no `Content-Encoding`), so this had been paid in
+    # full on every screen.
+    #
+    # High in the list on purpose: the response phase runs bottom-up, so this
+    # sees the finished body, including one rebuilt by [CacheMiddleware]. It
+    # skips anything already encoded, so WhiteNoise's precompressed static
+    # files below are left alone.
+    #
+    # On BREACH: the attack needs a secret and attacker-controlled input
+    # reflected in the same compressed response. These are bearer-token JSON
+    # endpoints — no session cookie, no CSRF token in the body — so there is no
+    # such secret to extract here.
+    "django.middleware.gzip.GZipMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
