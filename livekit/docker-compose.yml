@@ -44,6 +44,13 @@ services:
           # Konteyner ichidagi manzil emas, serverning tashqi IP'si e'lon
           # qilinsin — aks holda telefonlar bridge'ni topa olmaydi.
           node_ip: ${LIVEKIT_NODE_IP}
+          # LIVEKIT_NODE_IP bo'sh qolsa LiveKit tashqi IP'ni STUN orqali
+          # o'zi topsin. Busiz u konteynerning 172.x manzilini e'lon qiladi,
+          # va o'shanda signal (Traefik orqali 443) ishlaydi-yu, media
+          # umuman o'tmaydi: qo'ng'iroq "ulandi" bo'lib ko'rinadi, lekin
+          # ovoz yo'q. Bitta noto'g'ri o'zgaruvchi butun qo'ng'iroqni jim
+          # qilib qo'ymasin.
+          use_external_ip: true
           # Ikki kishilik suhbat: past sifatdan boshlab, kanal ko'tarsa
           # oshirish (TZ §9, §11.4). Simulcast shuning uchun.
           congestion_control:
