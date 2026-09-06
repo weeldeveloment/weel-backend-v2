@@ -120,7 +120,17 @@ def mocks():
         conf_repo.finish.side_effect = lambda cid, **kw: _conference(
             status=ConferenceStatus.ENDED, ended_at=timezone.now()
         )
+        # By default these people have no conference group yet and nothing is
+        # running — the tests that care say otherwise. A bare MagicMock would
+        # be truthy here, which is exactly the "reuse" branch, so both are
+        # pinned rather than left to the mock's default.
+        conf_repo.thread_for_members.return_value = None
+        conf_repo.live_for_thread.return_value = None
         repo.create_thread.return_value = {"id": THREAD_ID, "group_name": "Haftalik yig’ilish"}
+        repo.get_thread_for_member.return_value = {
+            "id": THREAD_ID,
+            "group_name": "Haftalik yig’ilish",
+        }
         # Bound to the real signature: a mock that accepts any arguments is a
         # mock that agrees with calls the database layer would reject.
         repo.edit_message.side_effect = lambda message_id, thread_id, text: {
@@ -255,6 +265,62 @@ class TestCreate:
     def test_an_untitled_conference_is_still_named(self, mocks):
         payload = conferences.create(AZIZ, title="  ", scope=ConferenceScope.ALL)
         assert payload["title"] == "Konferensiya"
+
+    def test_the_same_people_keep_one_group(self, mocks):
+        """A second conference for the same people lands in the group they
+        already have, instead of adding another one-message row to everybody's
+        chat list."""
+        mocks["conf_repo"].thread_for_members.return_value = THREAD_ID
+
+        payload = conferences.create(AZIZ, title="Sotuv brifingi", scope=ConferenceScope.ALL)
+
+        mocks["repo"].create_thread.assert_not_called()
+        mocks["conf_repo"].thread_for_members.assert_called_once_with(
+            COMPANY_ID, [AZIZ_ID, BEK_ID, DILNOZA_ID]
+        )
+        assert payload["thread_id"] == THREAD_ID
+        # A new room all the same: reusing the group is not reusing the
+        # meeting.
+        assert payload["status"] == ConferenceStatus.LIVE
+        assert mocks["conf_repo"].create_conference.called
+
+    def test_a_group_that_vanished_is_opened_again(self, mocks):
+        """The lookup found a thread this person can no longer read — deleted,
+        or they were removed from it. Falling back to a new group beats
+        failing the request."""
+        mocks["conf_repo"].thread_for_members.return_value = THREAD_ID
+        mocks["repo"].get_thread_for_member.return_value = None
+
+        conferences.create(AZIZ, title="Yig’ilish", scope=ConferenceScope.ALL)
+
+        assert mocks["repo"].create_thread.called
+
+    def test_a_conference_already_running_there_is_joined_not_doubled(self, mocks):
+        """Two organisers pressing "Yangi konferensiya" for the same people
+        must end up in one room, not in two halves of a meeting."""
+        mocks["conf_repo"].thread_for_members.return_value = THREAD_ID
+        mocks["conf_repo"].live_for_thread.return_value = _conference()
+
+        payload = conferences.create(BEK, title="Yig’ilish", scope=ConferenceScope.ALL)
+
+        mocks["conf_repo"].create_conference.assert_not_called()
+        mocks["repo"].send_message.assert_not_called()
+        assert payload["id"] == CONFERENCE_ID
+        assert payload["room_name"] == "weel-conf-abc"
+        assert payload["token"]
+        assert payload["thread"]["id"] == THREAD_ID
+
+    def test_a_conference_that_outlived_its_clock_does_not_block_a_new_one(self, mocks):
+        """The row says live, but it started four hours ago. `settle` closes
+        it, and the new conference opens as if nothing had been running."""
+        mocks["conf_repo"].thread_for_members.return_value = THREAD_ID
+        mocks["conf_repo"].live_for_thread.return_value = _conference(
+            started_at=timezone.now() - timedelta(hours=5)
+        )
+
+        conferences.create(AZIZ, title="Yig’ilish", scope=ConferenceScope.ALL)
+
+        assert mocks["conf_repo"].create_conference.called
 
     def test_refuses_when_no_media_server_is_configured(self, mocks):
         with override_settings(**UNCONFIGURED):

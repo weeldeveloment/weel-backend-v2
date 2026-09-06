@@ -59,7 +59,15 @@ services:
           # Xona bo'sh qolsa o'zi yopiladi — server tomonida yetim xona qolmaydi.
           empty_timeout: 120
           departure_timeout: 20
-          max_participants: 4
+          # Chegara YO'Q (0). Bu qiymat qo'ng'iroqqa emas — konferensiyaga
+          # tegishli: kim uchun ochilgani serverda hal qilinadi va token
+          # faqat taklif qilingan odamga imzolanadi, ya'ni xonani "kichik"
+          # ushlab turishning himoya sifatida foydasi yo'q. Ilgari bu yerda
+          # 4 turardi va butun bo'lim yig'ilishi to'rtinchi odamdan keyin
+          # "ulanmadi" bo'lib qolardi — o'chib ketgan ishtirokchining o'rni
+          # `departure_timeout` davomida band turgani uchun amalda undan
+          # ham kamroq.
+          max_participants: 0
           auto_create: true
         turn:
           enabled: false

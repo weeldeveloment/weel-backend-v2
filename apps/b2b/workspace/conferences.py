@@ -8,10 +8,10 @@ The flow, end to end:
 
 1. Somebody who may create group chats posts ``/conferences/`` with a title
    and who it is for — the whole company, some departments, or a hand-picked
-   list. The people are resolved to employee ids, a **group thread** is
-   opened for exactly them, a row is written in ``b2b_conference`` with an
-   unguessable LiveKit room, and the first message in that thread is the
-   invitation: ``📹 <title>`` with ``#conf <id> live`` under it.
+   list. The people are resolved to employee ids, the **group thread** for
+   exactly them is found or opened, a row is written in ``b2b_conference``
+   with an unguessable LiveKit room, and the next message in that thread is
+   the invitation: ``📹 <title>`` with ``#conf <id> live`` under it.
 2. Everyone invited gets that message the way they get any other — the
    socket draws it in an open room, the push reaches an app that is asleep —
    and pressing **Kirish** posts ``/conferences/<id>/join/``, which hands
@@ -24,7 +24,8 @@ Why the invitation is an ordinary chat message rather than a notification of
 its own: the thread is where the people already are, it survives being
 missed, and it gives the conference a place to be talked about afterwards.
 The group is reused — a second conference for the same people lands in the
-same room instead of opening another.
+same room instead of opening another, and if one is still running there it is
+joined rather than doubled. See `_group_for`.
 
 The media server is the one `calls.py` is pointed at, and the token layout is
 that module's `sign_token` unchanged: a conference room is a room like any
@@ -151,6 +152,34 @@ def resolve_members(
     return members
 
 
+def _group_for(user, *, member_ids: Sequence[int], title: str) -> dict[str, Any] | None:
+    """The group this conference is announced in — the one these people
+    already have, or a new one.
+
+    One set of people, one group. Opening a fresh group per conference buried
+    the chat list under a row for every meeting ever called, and each of them
+    held exactly one message; worse, the conversation that follows a meeting
+    ended up somewhere different from the conversation that followed the last
+    one with the same people.
+
+    The group keeps the name it was opened with rather than taking this
+    conference's title: it is the room these people meet in, not this
+    meeting, and somebody may well have renamed it on purpose. The title
+    still travels — it is what the invitation card says.
+    """
+    existing = conf_repo.thread_for_members(user.company_id, member_ids)
+    if existing:
+        thread = repo.get_thread_for_member(existing, user.company_id, user.id)
+        if thread:
+            return thread
+    return repo.create_thread(
+        company_id=user.company_id,
+        created_by=user.id,
+        member_ids=[i for i in member_ids if i != user.id],
+        group_name=title,
+    )
+
+
 def create(
     user,
     *,
@@ -178,14 +207,21 @@ def create(
     if not others:
         raise CallError("O’zingizdan boshqa hech kim tanlanmadi.", status=400)
 
-    thread = repo.create_thread(
-        company_id=user.company_id,
-        created_by=user.id,
-        member_ids=others,
-        group_name=title,
-    )
+    thread = _group_for(user, member_ids=[user.id, *others], title=title)
     if not thread:
         raise CallError("Konferensiya xonasi ochilmadi.", status=500)
+
+    # The same people already talking in that group may already be *in* a
+    # conference there. Opening a second one would post a second card and
+    # split them across two rooms, each half wondering where everybody is —
+    # so the answer to "yangi konferensiya" here is the running one.
+    running = conf_repo.live_for_thread(thread["id"])
+    if running:
+        running = settle(running)
+        if running["status"] == ConferenceStatus.LIVE:
+            joined = join(running, user)
+            joined["thread"] = thread
+            return joined
 
     conference = conf_repo.create_conference(
         company_id=user.company_id,

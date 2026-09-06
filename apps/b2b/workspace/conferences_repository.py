@@ -18,7 +18,12 @@ from typing import Any, Sequence
 
 from django.utils import timezone
 
-from apps.b2b.raw.tables import B2B_CONFERENCE_TABLE, B2B_EMPLOYEE_TABLE
+from apps.b2b.raw.tables import (
+    B2B_CHAT_MEMBER_TABLE,
+    B2B_CHAT_THREAD_TABLE,
+    B2B_CONFERENCE_TABLE,
+    B2B_EMPLOYEE_TABLE,
+)
 from shared.raw.db import execute, fetch_all, fetch_one
 
 
@@ -69,6 +74,42 @@ def create_conference(
             now,
         ],
     )
+
+
+def thread_for_members(company_id: int, employee_ids: Sequence[int]) -> int | None:
+    """The conference group these exact people already have, if there is one.
+
+    Matched by membership, the way `repository.direct_thread` matches a
+    one-to-one chat: a count that agrees plus every member inside the invited
+    set is set equality, because `(thread_id, employee_id)` is unique. Only
+    threads a conference has already been announced in are candidates — a
+    company-wide conference must not take over a "Hammasi" group the team made
+    for itself and start writing invitation cards into it.
+
+    Newest first, so a company that collected duplicate groups before this
+    existed settles on one of them rather than on the oldest.
+    """
+    ids = sorted({int(i) for i in employee_ids or []})
+    if not ids:
+        return None
+    row = fetch_one(
+        f"""
+        SELECT t.id
+        FROM {B2B_CHAT_THREAD_TABLE} t
+        JOIN {B2B_CHAT_MEMBER_TABLE} m ON m.thread_id = t.id
+        WHERE t.company_id = %s
+          AND t.group_name IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM {B2B_CONFERENCE_TABLE} c WHERE c.thread_id = t.id
+          )
+        GROUP BY t.id
+        HAVING COUNT(*) = %s AND BOOL_AND(m.employee_id = ANY(%s))
+        ORDER BY t.id DESC
+        LIMIT 1
+        """,
+        [company_id, len(ids), ids],
+    )
+    return int(row["id"]) if row else None
 
 
 def set_message(conference_id: int, message_id: int) -> None:
