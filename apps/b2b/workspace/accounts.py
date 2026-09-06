@@ -713,7 +713,7 @@ def delete_account(account_id: int) -> dict[str, Any]:
     }
 
 
-def list_org_workspaces(org_id: int) -> list[dict[str, Any]]:
+def list_org_workspaces(org_id: int, *, account_id: int | None = None) -> list[dict[str, Any]]:
     """Every workspace under this company — not just the ones the caller
     happens to be on the roster of.
 
@@ -721,14 +721,25 @@ def list_org_workspaces(org_id: int) -> list[dict[str, Any]]:
     not only the workspace they were hired into, and `WorkspaceOrgPeopleView`
     already treats an org's other workspaces as visible to anyone on one of
     them — this is the same boundary, one level up.
+
+    With an [account_id] each row also carries what that account can *do*
+    about a workspace it is not on: the `slug` a join request names, and
+    whether one is already waiting. Without those the screen could list a
+    room, refuse to open it, and offer nothing else — which is what it did.
     """
     return fetch_all(
         f"""
-        SELECT c.id, c.name, c.description, c.icon,
+        SELECT c.id, c.name, c.slug, c.description, c.icon,
                (SELECT COUNT(*) FROM {B2B_EMPLOYEE_TABLE} m
                  WHERE m.company_id = c.id AND m.is_active = TRUE
                    AND m.is_chat_only = FALSE) AS member_count,
-               admin.full_name AS admin_name
+               admin.full_name AS admin_name,
+               EXISTS (
+                 SELECT 1 FROM b2b_join_request j
+                  WHERE j.company_id = c.id
+                    AND j.account_id = %s
+                    AND j.status = 'pending'
+               ) AS has_pending_request
           FROM {B2B_COMPANY_TABLE} c
           LEFT JOIN LATERAL (
                 SELECT e.full_name
@@ -741,7 +752,7 @@ def list_org_workspaces(org_id: int) -> list[dict[str, Any]]:
          WHERE c.org_id = %s AND c.is_active = TRUE
          ORDER BY c.name ASC
         """,
-        [org_id],
+        [account_id, org_id],
     )
 
 

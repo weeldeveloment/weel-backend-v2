@@ -642,18 +642,22 @@ def test_an_orgs_workspaces_list_the_seat_you_hold_in_each():
             {
                 "id": 10,
                 "name": "Sotuv bo’limi",
+                "slug": "sotuv",
                 "description": None,
                 "icon": "chart",
                 "member_count": 12,
                 "admin_name": "Aziz Karimov",
+                "has_pending_request": False,
             },
             {
                 "id": 11,
                 "name": "HR bo’limi",
+                "slug": "hr",
                 "description": None,
                 "icon": "people",
                 "member_count": 5,
                 "admin_name": "Dilnoza Rahimova",
+                "has_pending_request": True,
             },
         ],
     ), patch(
@@ -673,6 +677,12 @@ def test_an_orgs_workspaces_list_the_seat_you_hold_in_each():
     assert results[10]["employee_id"] == 7
     assert results[10]["member_count"] == 12
     assert results[11]["employee_id"] is None
+    # And what can be done about the one there is no seat on: the slug a join
+    # request names, and whether one is already waiting. Without these the
+    # screen can list a room, refuse to open it, and offer nothing else.
+    assert results[11]["slug"] == "hr"
+    assert results[11]["has_pending_request"] is True
+    assert results[10]["has_pending_request"] is False
 
 
 def test_an_account_session_cannot_reach_a_workspace_endpoint():

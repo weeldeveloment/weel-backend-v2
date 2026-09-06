@@ -429,6 +429,10 @@ class AccountOrgWorkspacesView(AccountAPIView):
                 {
                     "id": row["id"],
                     "name": row["name"],
+                    # What a join request names. Carried on every row so the
+                    # screen can ask to be let into one it may not open —
+                    # before this, that was a dead end with a toast.
+                    "slug": row.get("slug") or "",
                     "description": row.get("description"),
                     "icon": row.get("icon"),
                     "member_count": row["member_count"],
@@ -438,8 +442,11 @@ class AccountOrgWorkspacesView(AccountAPIView):
                     "employee_id": mine[row["id"]]["employee_id"]
                     if row["id"] in mine
                     else None,
+                    "has_pending_request": bool(row.get("has_pending_request")),
                 }
-                for row in accounts.list_org_workspaces(org_id)
+                for row in accounts.list_org_workspaces(
+                    org_id, account_id=request.user.id
+                )
             ],
         })
 
