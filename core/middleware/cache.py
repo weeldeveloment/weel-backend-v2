@@ -57,6 +57,18 @@ EXEMPT_PATH_PREFIXES = (
     # unread. The inbox list has the same freshness argument as chat.
     "/api/b2b/workspace/mail/",
     "/api/b2b/workspace/notifications/",
+    # A live call, and the worst case of the OCR problem above. The caller's
+    # phone asks `GET /calls/<id>/` every four seconds for one fact — has the
+    # other side picked up? — because the socket frame that says so may not
+    # arrive. The first of those polls answered "ringing" and that answer was
+    # then served back for the next sixty seconds: `_invalidate` bumps the
+    # version of the token that *wrote*, and the person who accepts is not the
+    # person who is waiting to hear it. Sixty seconds is also the ring window,
+    # so the caller could never learn of an answer this way at all — they sat
+    # on "Chaqirilmoqda…" while the person who had answered sat alone in the
+    # room. Conferences are the same endpoint shape and the same argument.
+    "/api/b2b/workspace/calls/",
+    "/api/b2b/workspace/conferences/",
 )
 
 AUTH_HEADER_PREFIX = "Bearer "
