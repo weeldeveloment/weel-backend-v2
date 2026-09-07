@@ -6377,6 +6377,71 @@
    ],
    "type": "object"
   },
+  "CustomerDebt": {
+   "properties": {
+    "company_name": {
+     "title": "Company name",
+     "type": "string"
+    },
+    "customer_id": {
+     "title": "Customer id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "deal_count": {
+     "title": "Deal count",
+     "type": "integer"
+    },
+    "debt": {
+     "format": "decimal",
+     "title": "Debt",
+     "type": "string"
+    },
+    "full_name": {
+     "title": "Full name",
+     "type": "string"
+    },
+    "last_payment_at": {
+     "format": "date-time",
+     "title": "Last payment at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "oldest_at": {
+     "format": "date-time",
+     "title": "Oldest at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "paid": {
+     "format": "decimal",
+     "title": "Paid",
+     "type": "string"
+    },
+    "phone": {
+     "title": "Phone",
+     "type": "string"
+    },
+    "total": {
+     "format": "decimal",
+     "title": "Total",
+     "type": "string"
+    }
+   },
+   "required": [
+    "customer_id",
+    "full_name",
+    "company_name",
+    "phone",
+    "deal_count",
+    "total",
+    "paid",
+    "debt",
+    "last_payment_at",
+    "oldest_at"
+   ],
+   "type": "object"
+  },
   "CustomerList": {
    "properties": {
     "results": {
@@ -9315,7 +9380,9 @@
       "due_date",
       "quality",
       "task_created",
-      "task_done"
+      "task_done",
+      "payment",
+      "returned"
      ],
      "title": "Kind",
      "type": "string"
@@ -9398,6 +9465,18 @@
    },
    "required": [
     "text"
+   ],
+   "type": "object"
+  },
+  "LeadDebtWrite": {
+   "properties": {
+    "tracked": {
+     "title": "Tracked",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "tracked"
    ],
    "type": "object"
   },
@@ -9785,6 +9864,99 @@
    ],
    "type": "object"
   },
+  "LeadPayment": {
+   "properties": {
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
+    "author_id": {
+     "title": "Author id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "author_name": {
+     "minLength": 1,
+     "title": "Author name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "lead_id": {
+     "title": "Lead id",
+     "type": "integer"
+    },
+    "method": {
+     "enum": [
+      "cash",
+      "card",
+      "transfer",
+      "installment",
+      "other"
+     ],
+     "title": "Method",
+     "type": "string",
+     "x-nullable": true
+    },
+    "note": {
+     "title": "Note",
+     "type": "string"
+    },
+    "paid_at": {
+     "format": "date-time",
+     "title": "Paid at",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "lead_id",
+    "amount",
+    "note",
+    "paid_at"
+   ],
+   "type": "object"
+  },
+  "LeadPaymentWrite": {
+   "properties": {
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
+    "method": {
+     "enum": [
+      "cash",
+      "card",
+      "transfer",
+      "installment",
+      "other"
+     ],
+     "title": "Method",
+     "type": "string",
+     "x-nullable": true
+    },
+    "note": {
+     "maxLength": 2000,
+     "title": "Note",
+     "type": "string"
+    },
+    "paid_at": {
+     "format": "date-time",
+     "title": "Paid at",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "amount"
+   ],
+   "type": "object"
+  },
   "LeadQualityWrite": {
    "properties": {
     "quality": {
@@ -9799,6 +9971,103 @@
    },
    "required": [
     "quality"
+   ],
+   "type": "object"
+  },
+  "LeadReturnLine": {
+   "properties": {
+    "lead_item_id": {
+     "title": "Lead item id",
+     "type": "integer"
+    },
+    "qty": {
+     "format": "decimal",
+     "title": "Qty",
+     "type": "string"
+    }
+   },
+   "required": [
+    "lead_item_id",
+    "qty"
+   ],
+   "type": "object"
+  },
+  "LeadReturnWrite": {
+   "properties": {
+    "lines": {
+     "items": {
+      "$ref": "#/definitions/LeadReturnLine"
+     },
+     "type": "array"
+    },
+    "note": {
+     "maxLength": 2000,
+     "title": "Note",
+     "type": "string"
+    }
+   },
+   "required": [
+    "lines"
+   ],
+   "type": "object"
+  },
+  "LeadReturnable": {
+   "properties": {
+    "amount": {
+     "format": "decimal",
+     "title": "Amount",
+     "type": "string"
+    },
+    "lead_item_id": {
+     "title": "Lead item id",
+     "type": "integer"
+    },
+    "left": {
+     "format": "decimal",
+     "title": "Left",
+     "type": "string"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "qty": {
+     "format": "decimal",
+     "title": "Qty",
+     "type": "string"
+    },
+    "returned": {
+     "format": "decimal",
+     "title": "Returned",
+     "type": "string"
+    },
+    "unit": {
+     "title": "Unit",
+     "type": "string",
+     "x-nullable": true
+    },
+    "warehouse_id": {
+     "title": "Warehouse id",
+     "type": "integer",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "lead_item_id",
+    "name",
+    "unit",
+    "product_id",
+    "warehouse_id",
+    "qty",
+    "returned",
+    "left",
+    "amount"
    ],
    "type": "object"
   },
@@ -9884,6 +10153,12 @@
     "note": {
      "maxLength": 2000,
      "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "paid_amount": {
+     "format": "decimal",
+     "title": "Paid amount",
      "type": "string",
      "x-nullable": true
     },
@@ -22327,6 +22602,35 @@
     }
    ]
   },
+  "/b2b/workspace/crm/debts/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/crm/debts/ — \"Mijozlar qarzi\", one row per buyer.\n\nCompany-wide and management's to read: a debt is the company's money, and\nthe screen exists to be worked down by whoever chases it.",
+    "operationId": "b2b_workspace_crm_debts_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "customer_id",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/CustomerDebt"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "What customers owe",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
   "/b2b/workspace/customers/": {
    "get": {
     "description": "GET /api/b2b/workspace/customers/?q= — the company's customer directory.\n\nWhat step 1 of the \"Yangi lead\" sheet searches. Any employee may look a\ncustomer up: the point of the search is to stop the same buyer being typed\nin twice, and a directory only half the company can see would not.\n\nDeliberately not paged. It answers a search box the moment somebody stops\ntyping, and twenty matches is already more than anyone reads before\nnarrowing the query.",
@@ -25251,6 +25555,42 @@
     ]
    }
   },
+  "/b2b/workspace/leads/{lead_id}/debt/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/leads/<id>/debt/ — start (or stop) counting\nthis deal as money owed.\n\nThe way to say \"sotildi, puli keyin\" without inventing a payment of zero:\nthe deal joins the debts screen at its full amount, and the instalments\ncome later.",
+    "operationId": "b2b_workspace_leads_debt_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadDebtWrite"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Lead"
+      }
+     }
+    },
+    "summary": "Mark a deal as sold on credit",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
   "/b2b/workspace/leads/{lead_id}/due-date/": {
    "parameters": [
     {
@@ -25388,6 +25728,92 @@
     }
    ]
   },
+  "/b2b/workspace/leads/{lead_id}/payments/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/leads/<id>/payments/ — what has been paid.\nPOST /api/b2b/workspace/leads/<id>/payments/ — record money received.\n\nThe ledger behind \"Mijozlar qarzi\". Reading it is open to anybody who may\nsee the deal; writing to it is management's — see `can_take_payment` on\nthe lead payload for the one rule both sides read.",
+    "operationId": "b2b_workspace_leads_payments_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/LeadPayment"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "A deal's payments",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "GET  /api/b2b/workspace/leads/<id>/payments/ — what has been paid.\nPOST /api/b2b/workspace/leads/<id>/payments/ — record money received.\n\nThe ledger behind \"Mijozlar qarzi\". Reading it is open to anybody who may\nsee the deal; writing to it is management's — see `can_take_payment` on\nthe lead payload for the one rule both sides read.",
+    "operationId": "b2b_workspace_leads_payments_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadPaymentWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/LeadPayment"
+      }
+     }
+    },
+    "summary": "Record a payment against a deal",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/leads/{lead_id}/payments/{payment_id}/": {
+   "delete": {
+    "description": "DELETE /api/b2b/workspace/leads/<id>/payments/<payment_id>/ — takes a\nwrong entry back off the deal. The deal stays counted: it was sold on\nthose terms whether or not the last figure typed was right.",
+    "operationId": "b2b_workspace_leads_payments_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": "Deleted"
+     }
+    },
+    "summary": "Delete a payment",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "in": "path",
+     "name": "payment_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
   "/b2b/workspace/leads/{lead_id}/quality/": {
    "parameters": [
     {
@@ -25422,6 +25848,62 @@
      }
     },
     "summary": "Mark a lead good or bad, or clear the mark",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/leads/{lead_id}/return/": {
+   "get": {
+    "description": "GET  /api/b2b/workspace/leads/<id>/return/ — what can still come back.\nPOST /api/b2b/workspace/leads/<id>/return/ — send some of it back.\n\nA return is filed as the warehouse module's own return document, which is\nwhat puts the goods on the shelf, prints them on the product's ledger and\nlists them under \"Amallar\" — this view only decides what a deal allows.\nPartial by design: a customer brings back one of the three chairs.",
+    "operationId": "b2b_workspace_leads_return_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/LeadReturnable"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "The deal's lines that can still be returned",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "lead_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "GET  /api/b2b/workspace/leads/<id>/return/ — what can still come back.\nPOST /api/b2b/workspace/leads/<id>/return/ — send some of it back.\n\nA return is filed as the warehouse module's own return document, which is\nwhat puts the goods on the shelf, prints them on the product's ledger and\nlists them under \"Amallar\" — this view only decides what a deal allows.\nPartial by design: a customer brings back one of the three chairs.",
+    "operationId": "b2b_workspace_leads_return_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/LeadReturnWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "The return documents that were filed"
+     },
+     "409": {
+      "description": "More than was sold, or nothing sold yet"
+     }
+    },
+    "summary": "Return goods from a deal to the warehouse",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -25480,6 +25962,28 @@
       "in": "formData",
       "maxLength": 2000,
       "name": "note",
+      "required": false,
+      "type": "string",
+      "x-nullable": true
+     },
+     {
+      "enum": [
+       "cash",
+       "card",
+       "transfer",
+       "installment",
+       "other"
+      ],
+      "in": "formData",
+      "name": "payment_method",
+      "required": false,
+      "type": "string",
+      "x-nullable": true
+     },
+     {
+      "format": "decimal",
+      "in": "formData",
+      "name": "paid_amount",
       "required": false,
       "type": "string",
       "x-nullable": true
