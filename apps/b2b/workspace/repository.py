@@ -58,6 +58,7 @@ from apps.b2b.raw.tables import (
     B2B_WORKSPACE_LEAD_ACTIVITY_TABLE,
     B2B_WORKSPACE_LEAD_ITEM_TABLE,
     B2B_WORKSPACE_NOTE_TABLE,
+    B2B_LEAD_PAYMENT_TABLE,
 )
 
 # ─── Identity ─────────────────────────────────────────────────────────────────
@@ -3024,6 +3025,223 @@ def add_lead_comment(lead_id: int, *, author_id: int, text: str) -> dict[str, An
     # author fields every other row has.
     rows = list_lead_activity(lead_id, limit=1)
     return rows[0] if rows else activity
+
+
+# ─── What was paid, and what is still owed ────────────────────────────────────
+#
+# A deal's money has two halves. ``amount`` is what was agreed, and every deal
+# on the board has one. ``paid_amount`` is what has actually come in, and only
+# deals somebody is counting have one — see ``debt_tracked`` on the table.
+#
+# The split is deliberate. Every deal filed before this existed was paid, or
+# was never about money, or was simply never recorded; treating "no payments"
+# as "owes the whole amount" would open the debts screen on the company's
+# entire history. So a deal joins the debt ledger by an act: it was sold on
+# credit, or somebody recorded a payment against it. Until then it is silent.
+
+
+def list_lead_payments(lead_id: int) -> list[dict[str, Any]]:
+    """The deal's instalments, newest first, with who recorded each."""
+    return fetch_all(
+        f"""
+        SELECT p.*, e.full_name AS author_name
+        FROM {B2B_LEAD_PAYMENT_TABLE} p
+        LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = p.author_id
+        WHERE p.lead_id = %s
+        ORDER BY p.paid_at DESC, p.id DESC
+        """,
+        [lead_id],
+    )
+
+
+def recount_lead_payments(lead_id: int) -> Decimal:
+    """Re-totals the ledger onto the lead, and answers with the new total.
+
+    Called after every write to the ledger rather than incremented in place:
+    a deleted instalment has to take its money back off the deal, and one
+    rule that reads the rows beats two that agree until they do not.
+    """
+    row = fetch_one(
+        f"SELECT COALESCE(SUM(amount), 0) AS paid FROM {B2B_LEAD_PAYMENT_TABLE} "
+        "WHERE lead_id = %s",
+        [lead_id],
+    )
+    paid = Decimal(str((row or {}).get("paid") or 0))
+    execute(
+        f"UPDATE {B2B_WORKSPACE_LEAD_TABLE} SET paid_amount = %s, updated_at = %s "
+        "WHERE id = %s",
+        [paid, timezone.now(), lead_id],
+    )
+    return paid
+
+
+def add_lead_payment(
+    lead_id: int,
+    company_id: int,
+    *,
+    amount,
+    author_id: int | None,
+    method: str | None = None,
+    note: str = "",
+    paid_at=None,
+) -> dict[str, Any] | None:
+    """Records money received, and starts counting this deal if nobody was.
+
+    Recording a payment is the act that puts a deal on the debts screen: it
+    says somebody is watching this one, and from that point the rest of the
+    agreed amount is a debt rather than an absence of information.
+    """
+    row = fetch_one(
+        f"""
+        INSERT INTO {B2B_LEAD_PAYMENT_TABLE}
+            (company_id, lead_id, author_id, amount, method, note, paid_at, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        [
+            company_id, lead_id, author_id, Decimal(str(amount)), method or None,
+            (note or "").strip(), paid_at or timezone.now(), timezone.now(),
+        ],
+    )
+    if not row:
+        return None
+    set_lead_debt_tracked(lead_id, company_id, tracked=True)
+    recount_lead_payments(lead_id)
+    return row
+
+
+def delete_lead_payment(payment_id: int, lead_id: int, company_id: int) -> bool:
+    """Takes an instalment back off the deal — a wrong figure, or one entered
+    twice. The deal stays tracked: it was sold on those terms whether or not
+    the last entry was right."""
+    removed = execute(
+        f"DELETE FROM {B2B_LEAD_PAYMENT_TABLE} "
+        "WHERE id = %s AND lead_id = %s AND company_id = %s",
+        [payment_id, lead_id, company_id],
+    ) > 0
+    if removed:
+        recount_lead_payments(lead_id)
+    return removed
+
+
+def set_lead_debt_tracked(lead_id: int, company_id: int, *, tracked: bool) -> None:
+    """Turns the counting on — "sotildi, puli keyin" — or off again."""
+    execute(
+        f"UPDATE {B2B_WORKSPACE_LEAD_TABLE} SET debt_tracked = %s, updated_at = %s "
+        "WHERE id = %s AND company_id = %s",
+        [bool(tracked), timezone.now(), lead_id, company_id],
+    )
+
+
+def settle_lead(
+    lead_id: int,
+    company_id: int,
+    *,
+    method: str,
+    paid_amount=None,
+    employee_id: int | None = None,
+) -> dict[str, Any] | None:
+    """Savdo yopilgan payt aytilgan to'lov: nima bilan to'landi va qanchasi.
+
+    Ikki joydan chaqiriladi — tezkor savdo yozilganda va lid "Yutdik" ga
+    o'tkazilganda — chunki ikkalasi ham bitta savolga javob beradi va
+    javobni ikki xil yozib qo'yish qarzlar ekranini ikki xil ko'rsatardi.
+
+    ``paid_amount`` — hozir qo'lga tekkan pul. ``None`` "hammasi to'landi"
+    degani: naqd, karta yoki o'tkazma bilan sotilgan mol odatda shunday.
+    Qarzga (``installment``) sotilganda esa qanchasi to'langani so'raladi va
+    qolgani qarz bo'lib qoladi — nol ham javob, va u ham deal'ni hisobga
+    qo'yadi, chunki "hech narsa to'lanmadi" ham kuzatilishi kerak bo'lgan
+    holat.
+    """
+    lead = get_lead(lead_id, company_id)
+    if not lead:
+        return None
+    method = method if method in PaymentMethod.CHOICES else PaymentMethod.OTHER
+    execute(
+        f"UPDATE {B2B_WORKSPACE_LEAD_TABLE} SET payment_method = %s, updated_at = %s "
+        "WHERE id = %s AND company_id = %s",
+        [method, timezone.now(), lead_id, company_id],
+    )
+    total = Decimal(str(lead.get("amount") or 0))
+    paid = total if paid_amount is None else Decimal(str(paid_amount))
+    if paid < 0:
+        paid = Decimal(0)
+    # To'liq to'langan savdo ham yozib qo'yiladi: "qancha to'landi" degan
+    # savolga har doim javob bo'lishi kerak, va qarzlar ekrani baribir
+    # `amount > paid_amount` bo'yicha filtrlaydi, shuning uchun bu yerdan
+    # o'sha ekranga hech narsa tushmaydi.
+    if paid > 0:
+        add_lead_payment(
+            lead_id, company_id, amount=paid, author_id=employee_id, method=method,
+        )
+    else:
+        # Hech narsa to'lanmadi — pul yo'q, lekin deal endi kuzatiladi.
+        set_lead_debt_tracked(lead_id, company_id, tracked=True)
+    return get_lead(lead_id, company_id)
+
+
+def list_debtor_leads(company_id: int, *, customer_id: int | None = None) -> list[dict[str, Any]]:
+    """Every tracked deal that is not paid off, newest first.
+
+    Quick sales and worked leads together: the buyer does not care which
+    screen their purchase was recorded on, and neither does the debt.
+    """
+    sql = f"""
+        SELECT l.*, c.full_name AS customer_name, c.phone AS customer_phone,
+               c.company_name AS customer_company,
+               (SELECT MAX(p.paid_at) FROM {B2B_LEAD_PAYMENT_TABLE} p
+                 WHERE p.lead_id = l.id) AS last_payment_at
+        FROM {B2B_WORKSPACE_LEAD_TABLE} l
+        LEFT JOIN {B2B_WORKSPACE_CUSTOMER_TABLE} c ON c.id = l.customer_id
+        WHERE l.company_id = %s AND l.deleted_at IS NULL
+          AND l.debt_tracked AND l.amount > l.paid_amount
+    """
+    params: list[Any] = [company_id]
+    if customer_id:
+        sql += " AND l.customer_id = %s"
+        params.append(customer_id)
+    sql += " ORDER BY l.created_at DESC, l.id DESC"
+    return fetch_all(sql, params)
+
+
+def customer_debts(company_id: int) -> list[dict[str, Any]]:
+    """The debts screen: one row per buyer, biggest debt first.
+
+    Deals with no customer card behind them are not dropped — they are
+    grouped under the name typed on the deal, because a debt nobody can find
+    is worse than a row without a link to a card.
+    """
+    rows = list_debtor_leads(company_id)
+    groups: dict[Any, dict[str, Any]] = {}
+    for lead in rows:
+        customer_id = lead.get("customer_id")
+        key = ("c", customer_id) if customer_id else ("l", lead["id"])
+        amount = Decimal(str(lead.get("amount") or 0))
+        paid = Decimal(str(lead.get("paid_amount") or 0))
+        group = groups.setdefault(key, {
+            "customer_id": customer_id,
+            "full_name": lead.get("customer_name") or lead.get("contact_full_name") or "",
+            "company_name": lead.get("customer_company") or lead.get("company_name") or "",
+            "phone": lead.get("customer_phone") or lead.get("contact_phone") or "",
+            "deal_count": 0,
+            "total": Decimal(0),
+            "paid": Decimal(0),
+            "debt": Decimal(0),
+            "last_payment_at": None,
+            "oldest_at": None,
+        })
+        group["deal_count"] += 1
+        group["total"] += amount
+        group["paid"] += paid
+        group["debt"] += amount - paid
+        last = lead.get("last_payment_at")
+        if last and (group["last_payment_at"] is None or last > group["last_payment_at"]):
+            group["last_payment_at"] = last
+        created = lead.get("created_at")
+        if created and (group["oldest_at"] is None or created < group["oldest_at"]):
+            group["oldest_at"] = created
+    return sorted(groups.values(), key=lambda row: row["debt"], reverse=True)
 
 
 # ─── Tasks raised off a lead ──────────────────────────────────────────────────

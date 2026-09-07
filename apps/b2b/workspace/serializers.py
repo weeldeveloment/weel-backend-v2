@@ -6,7 +6,13 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from apps.b2b.models import LeadActivityKind, LeadKind, LeadStage, LeadStatus
+from apps.b2b.models import (
+    LeadActivityKind,
+    LeadKind,
+    LeadStage,
+    LeadStatus,
+    PaymentMethod,
+)
 from apps.b2b.workspace.repository import (
     EVENT_TYPES,
     LEAD_KINDS,
@@ -700,6 +706,11 @@ class LeadWriteSerializer(serializers.Serializer):
     payment_method = serializers.ChoiceField(
         choices=PAYMENT_METHODS, required=False, allow_null=True
     )
+    #: Qarzga berilgan tezkor savdoda qanchasi to'langani. Null "hammasi
+    #: to'landi" degani; qarzga sotilganda esa so'raladi — nol ham javob.
+    paid_amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True
+    )
     #: The client's own id for this submission. A double tap on "Savdoni
     #: yozish" sends it twice; the second lands on the first row instead of
     #: selling the same goods again. Stored as the lead's `external_id`,
@@ -721,8 +732,16 @@ class LeadWriteSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     {"payment_method": _("Choose how the sale was paid for.")}
                 )
+            if (
+                attrs["payment_method"] == PaymentMethod.INSTALLMENT
+                and attrs.get("paid_amount") is None
+            ):
+                raise serializers.ValidationError(
+                    {"paid_amount": _("Say how much of it has been paid.")}
+                )
         else:
             attrs.pop("payment_method", None)
+            attrs.pop("paid_amount", None)
         # The board prints a company on every card and the funnel prints a
         # product; neither is worth blocking a lead over, so they fall back to
         # what the sheet does know rather than being demanded from it.
@@ -739,8 +758,8 @@ class LeadWriteSerializer(serializers.Serializer):
 
 
 class LeadStageWriteSerializer(serializers.Serializer):
-    """A move along the funnel, and what closing it as lost has to say for
-    itself."""
+    """A move along the funnel, what closing it as lost has to say for
+    itself, and what closing it as won was paid with."""
 
     stage = serializers.ChoiceField(choices=LEAD_STAGES)
     lost_reason = serializers.ChoiceField(
@@ -750,6 +769,18 @@ class LeadStageWriteSerializer(serializers.Serializer):
     note = serializers.CharField(
         max_length=2000, required=False, allow_blank=True, allow_null=True
     )
+    #: Required on the move to ``won`` — see `validate`. A deal is won by
+    #: being paid for, and how it was paid is the one figure no report can
+    #: reconstruct afterwards; the quick sale sheet has asked for it since it
+    #: shipped, and the funnel's own "Yutdik" was the hole beside it.
+    payment_method = serializers.ChoiceField(
+        choices=PAYMENT_METHODS, required=False, allow_null=True
+    )
+    #: Qarzga sotilganda hozir qo'lga tekkan pul. Null "hammasi to'landi"
+    #: degani, va nol ham javob: "olib ketdi, puli keyin".
+    paid_amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True
+    )
 
     def validate(self, attrs: dict) -> dict:
         # A lost deal with no reason is a number nobody can act on, so this is
@@ -758,6 +789,24 @@ class LeadStageWriteSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"lost_reason": _("Choose why the deal was lost.")}
             )
+        if attrs.get("stage") == LeadStage.WON:
+            if not attrs.get("payment_method"):
+                raise serializers.ValidationError(
+                    {"payment_method": _("Choose how the deal was paid for.")}
+                )
+            # Qarzga sotildi deyilsa, qanchasi to'langani aytilishi kerak —
+            # nol bo'lsa ham. Aks holda qarzlar ekrani "qancha qoldi" degan
+            # savolga javob bera olmaydi.
+            if (
+                attrs["payment_method"] == PaymentMethod.INSTALLMENT
+                and attrs.get("paid_amount") is None
+            ):
+                raise serializers.ValidationError(
+                    {"paid_amount": _("Say how much of it has been paid.")}
+                )
+        else:
+            attrs.pop("payment_method", None)
+            attrs.pop("paid_amount", None)
         return attrs
 
 
@@ -790,6 +839,77 @@ class LeadAssignWriteSerializer(serializers.Serializer):
 
 class LeadCommentWriteSerializer(serializers.Serializer):
     text = serializers.CharField(max_length=2000)
+
+
+class LeadPaymentSerializer(serializers.Serializer):
+    """One instalment against a deal."""
+
+    id = serializers.IntegerField()
+    lead_id = serializers.IntegerField()
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    method = serializers.ChoiceField(choices=PAYMENT_METHODS, allow_null=True, required=False)
+    note = serializers.CharField(allow_blank=True)
+    paid_at = serializers.DateTimeField()
+    author_id = serializers.IntegerField(allow_null=True, required=False)
+    author_name = serializers.CharField(allow_null=True, required=False)
+
+
+class LeadPaymentWriteSerializer(serializers.Serializer):
+    """Money received. ``amount`` may be zero — that is how "sold on credit,
+    nothing paid yet" is recorded, and it is what starts counting the deal."""
+
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    method = serializers.ChoiceField(choices=PAYMENT_METHODS, required=False, allow_null=True)
+    note = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+    paid_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class LeadDebtWriteSerializer(serializers.Serializer):
+    """Turns the debt counting on or off for one deal, with no money moving."""
+
+    tracked = serializers.BooleanField()
+
+
+class LeadReturnLineSerializer(serializers.Serializer):
+    """One line of the deal, and how much of it is coming back."""
+
+    lead_item_id = serializers.IntegerField()
+    qty = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=0)
+
+
+class LeadReturnWriteSerializer(serializers.Serializer):
+    lines = LeadReturnLineSerializer(many=True)
+    note = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+
+
+class LeadReturnableSerializer(serializers.Serializer):
+    """A sold line as the return sheet reads it: what it was, how much went
+    out, and how much of that has already come back."""
+
+    lead_item_id = serializers.IntegerField()
+    name = serializers.CharField()
+    unit = serializers.CharField(allow_blank=True, allow_null=True)
+    product_id = serializers.IntegerField(allow_null=True)
+    warehouse_id = serializers.IntegerField(allow_null=True)
+    qty = serializers.DecimalField(max_digits=12, decimal_places=3)
+    returned = serializers.DecimalField(max_digits=12, decimal_places=3)
+    left = serializers.DecimalField(max_digits=12, decimal_places=3)
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+
+
+class CustomerDebtSerializer(serializers.Serializer):
+    """One buyer on the debts screen."""
+
+    customer_id = serializers.IntegerField(allow_null=True)
+    full_name = serializers.CharField(allow_blank=True)
+    company_name = serializers.CharField(allow_blank=True)
+    phone = serializers.CharField(allow_blank=True)
+    deal_count = serializers.IntegerField()
+    total = serializers.DecimalField(max_digits=16, decimal_places=2)
+    paid = serializers.DecimalField(max_digits=16, decimal_places=2)
+    debt = serializers.DecimalField(max_digits=16, decimal_places=2)
+    last_payment_at = serializers.DateTimeField(allow_null=True)
+    oldest_at = serializers.DateTimeField(allow_null=True)
 
 
 class TaskPatchSerializer(TaskWriteSerializer):

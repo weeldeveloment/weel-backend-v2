@@ -26,11 +26,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
-from apps.b2b.models import LeadKind, LeadSource, LeadStage, LeadStatus
+from apps.b2b.models import LeadActivityKind, LeadKind, LeadSource, LeadStage, LeadStatus
 from apps.b2b.repository import get_company, get_org
 from apps.b2b.mail import repository as mail_repo
 from apps.b2b.workspace import push_text
 from apps.b2b.workspace.access import Permission, Role
+from apps.b2b.workspace.access_repository import record_audit
 from apps.b2b.workspace.secondment import Module
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import inventory_repository as inventory
@@ -71,11 +72,17 @@ from apps.b2b.workspace.serializers import (
     EmployeeOfMonthSerializer,
     EventPatchSerializer,
     EventWriteSerializer,
+    CustomerDebtSerializer,
     LeadActivitySerializer,
     LeadAssignWriteSerializer,
     LeadCommentWriteSerializer,
+    LeadDebtWriteSerializer,
     LeadDetailSerializer,
     LeadDueDateWriteSerializer,
+    LeadPaymentSerializer,
+    LeadPaymentWriteSerializer,
+    LeadReturnableSerializer,
+    LeadReturnWriteSerializer,
     LeadQualityWriteSerializer,
     LeadItemSerializer,
     LeadItemWriteSerializer,
@@ -3333,6 +3340,32 @@ def _lead_activity_feed(lead_id: int) -> list[dict]:
     return [_lead_activity_payload(row) for row in repo.list_lead_activity(lead_id)]
 
 
+def _sale_happened(lead: dict) -> bool:
+    """Whether goods have actually gone out on this deal.
+
+    A quick sale is born sold; a worked lead sells when it is won. Nothing
+    else has taken anything off a shelf, so nothing else can put it back.
+    """
+    return (
+        lead.get("kind") == LeadKind.QUICK_SALE
+        or lead.get("stage") == LeadStage.WON
+    )
+
+
+def _lead_debt(lead: dict) -> Decimal | None:
+    """What is left to pay, or None where this deal is not counted.
+
+    None rather than zero on purpose: "nobody is tracking this" and "paid in
+    full" are different answers, and the card draws them differently.
+    """
+    if not lead.get("debt_tracked"):
+        return None
+    amount = Decimal(str(lead.get("amount") or 0))
+    paid = Decimal(str(lead.get("paid_amount") or 0))
+    left = amount - paid
+    return left if left > 0 else Decimal(0)
+
+
 def _lead_payload(lead: dict, user) -> dict:
     """Shapes a lead for one viewer.
 
@@ -3367,6 +3400,21 @@ def _lead_payload(lead: dict, user) -> dict:
         # lead is — the owner, or a manager over their head — see
         # `WorkspaceLeadDetailView.delete`.
         "can_delete": is_owner or user.is_manager,
+        # What is still owed on this deal, and nothing at all where nobody is
+        # counting: see the note over `repository.list_lead_payments`. A
+        # figure computed for every deal would put the whole board in debt
+        # the day the column shipped.
+        "debt": _lead_debt(lead),
+        # Money coming in is management's entry, not the salesperson's: it is
+        # the fact the debts screen is read from, and a completed deal is
+        # closed to everybody else by TZ v2 §8 anyway.
+        "can_take_payment": _may_touch_completed(user) or user.is_manager,
+        # Goods going back on the shelf. Whoever keeps the warehouse, and the
+        # owner or administrator who may still touch a finished deal.
+        "can_return": (
+            _sale_happened(lead)
+            and (user.may(Permission.STOCK_MANAGE) or _may_touch_completed(user))
+        ),
     }
     if not can_view_details:
         # The whole contact card, not just the two original fields: an address
@@ -3711,6 +3759,17 @@ class WorkspaceLeadListCreateView(WorkspaceAPIView):
                 logger.exception("Failed to push new-lead notification for lead %s.", lead["id"])
 
         if is_quick_sale:
+            # Tezkor savdo tug'ilishidayoq sotilgan: to'lovi ham shu yerda
+            # yoziladi. Qarzga berilgan bo'lsa qanchasi to'langani sheet'dan
+            # keladi va qolgani qarzlar ekraniga tushadi.
+            settled = repo.settle_lead(
+                lead["id"],
+                request.user.company_id,
+                method=data["payment_method"],
+                paid_amount=data.get("paid_amount"),
+                employee_id=request.user.id,
+            )
+            lead = settled or lead
             _book_sale(lead, request.user)
         return Response(_lead_payload(lead, request.user), status=status.HTTP_201_CREATED)
 
@@ -3906,6 +3965,17 @@ class WorkspaceLeadStageView(WorkspaceAPIView):
             attachment_file_id=file["id"] if file else None,
         )
         if stage == LeadStage.WON:
+            # Yutilgan deal — to'langan (yoki qarzga olingan) deal. Nima
+            # bilan to'langani va qanchasi shu yerda yoziladi, chunki keyin
+            # buni hech bir hisobot tiklab bera olmaydi.
+            settled = repo.settle_lead(
+                lead_id,
+                request.user.company_id,
+                method=serializer.validated_data["payment_method"],
+                paid_amount=serializer.validated_data.get("paid_amount"),
+                employee_id=request.user.id,
+            )
+            updated = settled or updated
             _book_sale(updated, request.user)
         return Response(_lead_payload(updated or lead, request.user))
 
@@ -4088,6 +4158,277 @@ class WorkspaceLeadCommentView(WorkspaceAPIView):
             _lead_activity_payload(activity) if activity else activity,
             status=status.HTTP_201_CREATED,
         )
+
+
+class WorkspaceLeadPaymentsView(WorkspaceAPIView):
+    """GET  /api/b2b/workspace/leads/<id>/payments/ — what has been paid.
+    POST /api/b2b/workspace/leads/<id>/payments/ — record money received.
+
+    The ledger behind "Mijozlar qarzi". Reading it is open to anybody who may
+    see the deal; writing to it is management's — see `can_take_payment` on
+    the lead payload for the one rule both sides read.
+    """
+
+    required_module = Module.SALES
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="A deal's payments",
+        responses={200: LeadPaymentSerializer(many=True)},
+    )
+    def get(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"results": repo.list_lead_payments(lead_id)})
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Record a payment against a deal",
+        request_body=LeadPaymentWriteSerializer,
+        responses={201: LeadPaymentSerializer()},
+    )
+    def post(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+        if not (_may_touch_completed(request.user) or request.user.is_manager):
+            return Response(
+                {"detail": _("Your role does not allow recording payments.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = LeadPaymentWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        payment = repo.add_lead_payment(
+            lead_id,
+            request.user.company_id,
+            amount=data["amount"],
+            author_id=request.user.id,
+            method=data.get("method"),
+            note=data.get("note") or "",
+            paid_at=data.get("paid_at"),
+        )
+        # The history is where the deal's own screen shows this, in the same
+        # feed as the calls and the stage moves — money is part of the story
+        # of a deal, not a separate log nobody opens.
+        repo.add_lead_activity(
+            lead_id,
+            kind=LeadActivityKind.PAYMENT,
+            author_id=request.user.id,
+            text=str(data["amount"]),
+        )
+        record_audit(
+            request.user.company_id, actor_employee_id=request.user.id,
+            action="lead.payment", target_type="lead", target_id=lead_id,
+            payload={"amount": str(data["amount"])},
+        )
+        return Response(payment, status=status.HTTP_201_CREATED)
+
+
+class WorkspaceLeadPaymentDetailView(WorkspaceAPIView):
+    """DELETE /api/b2b/workspace/leads/<id>/payments/<payment_id>/ — takes a
+    wrong entry back off the deal. The deal stays counted: it was sold on
+    those terms whether or not the last figure typed was right."""
+
+    required_module = Module.SALES
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Delete a payment",
+        responses={204: openapi.Response(description="Deleted")},
+    )
+    def delete(self, request, lead_id: int, payment_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+        if not (_may_touch_completed(request.user) or request.user.is_manager):
+            return Response(
+                {"detail": _("Your role does not allow recording payments.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not repo.delete_lead_payment(payment_id, lead_id, request.user.company_id):
+            return Response({"detail": _("Not found.")}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkspaceLeadDebtView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/leads/<id>/debt/ — start (or stop) counting
+    this deal as money owed.
+
+    The way to say "sotildi, puli keyin" without inventing a payment of zero:
+    the deal joins the debts screen at its full amount, and the instalments
+    come later.
+    """
+
+    required_module = Module.SALES
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Mark a deal as sold on credit",
+        request_body=LeadDebtWriteSerializer,
+        responses={200: LeadSerializer()},
+    )
+    def post(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return Response({"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND)
+        if not (_may_touch_completed(request.user) or request.user.is_manager):
+            return Response(
+                {"detail": _("Your role does not allow recording payments.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = LeadDebtWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        repo.set_lead_debt_tracked(
+            lead_id, request.user.company_id, tracked=serializer.validated_data["tracked"]
+        )
+        return Response(
+            _lead_payload(repo.get_lead(lead_id, request.user.company_id), request.user)
+        )
+
+
+class WorkspaceLeadReturnView(WorkspaceAPIView):
+    """GET  /api/b2b/workspace/leads/<id>/return/ — what can still come back.
+    POST /api/b2b/workspace/leads/<id>/return/ — send some of it back.
+
+    A return is filed as the warehouse module's own return document, which is
+    what puts the goods on the shelf, prints them on the product's ledger and
+    lists them under "Amallar" — this view only decides what a deal allows.
+    Partial by design: a customer brings back one of the three chairs.
+    """
+
+    required_module = Module.SALES
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    def _guard(self, request, lead_id: int):
+        lead = repo.get_lead(lead_id, request.user.company_id)
+        if not lead:
+            return None, Response(
+                {"detail": _("Lead not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+        if not _sale_happened(lead):
+            return None, Response(
+                {"detail": _("Nothing has been sold on this deal yet.")},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not (
+            request.user.may(Permission.STOCK_MANAGE) or _may_touch_completed(request.user)
+        ):
+            return None, Response(
+                {"detail": _("Your role does not allow returns.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return lead, None
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="The deal's lines that can still be returned",
+        responses={200: LeadReturnableSerializer(many=True)},
+    )
+    def get(self, request, lead_id: int):
+        lead, error = self._guard(request, lead_id)
+        if error:
+            return error
+        rows = []
+        for row in inventory.lead_return_lines(lead_id):
+            sold = Decimal(str(row.get("qty") or 0))
+            returned = Decimal(str(row.get("returned") or 0))
+            rows.append({
+                "lead_item_id": int(row["id"]),
+                "name": row.get("product_name") or row.get("name") or "",
+                "unit": row.get("product_unit") or row.get("unit") or "",
+                "product_id": row.get("product_id"),
+                "warehouse_id": row.get("warehouse_id"),
+                "qty": sold,
+                "returned": returned,
+                "left": max(sold - returned, Decimal(0)),
+                "amount": Decimal(str(row.get("amount") or 0)),
+            })
+        return Response({"results": rows})
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Return goods from a deal to the warehouse",
+        request_body=LeadReturnWriteSerializer,
+        responses={
+            201: openapi.Response(description="The return documents that were filed"),
+            409: openapi.Response(description="More than was sold, or nothing sold yet"),
+        },
+    )
+    def post(self, request, lead_id: int):
+        lead, error = self._guard(request, lead_id)
+        if error:
+            return error
+        serializer = LeadReturnWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            filed = inventory.record_return_for_lead(
+                lead,
+                lines=data["lines"],
+                author_id=request.user.id,
+                note=data.get("note") or "",
+            )
+        except inventory.InventoryError as exc:
+            return Response(
+                {"detail": str(exc), "code": exc.code, "details": exc.details},
+                status=status.HTTP_409_CONFLICT,
+            )
+        total = sum(
+            Decimal(str(line.get("qty") or 0)) for line in data["lines"]
+        )
+        repo.add_lead_activity(
+            lead_id,
+            kind=LeadActivityKind.RETURNED,
+            author_id=request.user.id,
+            text=", ".join(str(doc.get("number") or "") for doc in filed).strip(", "),
+        )
+        record_audit(
+            request.user.company_id, actor_employee_id=request.user.id,
+            action="lead.return", target_type="lead", target_id=lead_id,
+            payload={
+                "documents": [doc.get("number") for doc in filed],
+                "quantity": str(total),
+            },
+        )
+        return Response({"results": filed}, status=status.HTTP_201_CREATED)
+
+
+class WorkspaceCrmDebtsView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/crm/debts/ — "Mijozlar qarzi", one row per buyer.
+
+    Company-wide and management's to read: a debt is the company's money, and
+    the screen exists to be worked down by whoever chases it.
+    """
+
+    required_module = Module.SALES
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="What customers owe",
+        manual_parameters=[
+            openapi.Parameter("customer_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+        ],
+        responses={200: CustomerDebtSerializer(many=True)},
+    )
+    def get(self, request):
+        customer_id = request.query_params.get("customer_id")
+        if customer_id:
+            leads = repo.list_debtor_leads(
+                request.user.company_id, customer_id=int(customer_id)
+            )
+            return Response({
+                "results": [
+                    {**_lead_payload(lead, request.user), "last_payment_at": lead.get("last_payment_at")}
+                    for lead in leads
+                ]
+            })
+        return Response({"results": repo.customer_debts(request.user.company_id)})
 
 
 class WorkspaceLeadItemsView(WorkspaceAPIView):

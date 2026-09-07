@@ -334,10 +334,17 @@ class LeadActivityKind:
     #: nothing ever marked it done.
     TASK_CREATED = "task_created"
     TASK_DONE = "task_done"
+    #: Money came in against the deal. ``text`` is the amount, so the feed can
+    #: print it without joining the payment ledger.
+    PAYMENT = "payment"
+    #: Goods went back on the shelf. ``text`` is the return document's number
+    #: — "QT-000012" — which is how the row points at the paperwork the
+    #: warehouse module filed.
+    RETURNED = "returned"
 
     CHOICES = [
         CREATED, CLAIMED, ASSIGNED, STAGE, COMMENT, COMPLETED, DUE_DATE, QUALITY,
-        TASK_CREATED, TASK_DONE,
+        TASK_CREATED, TASK_DONE, PAYMENT, RETURNED,
     ]
 
 

@@ -563,12 +563,21 @@ def test_moving_to_won_asks_the_shelf_and_other_stages_do_not():
         with (
             patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
             patch("apps.b2b.workspace.views.repo.set_lead_stage", return_value=_lead(stage=stage)),
+            patch("apps.b2b.workspace.views.repo.settle_lead", return_value=_lead(stage=stage)),
             patch("apps.b2b.workspace.views.inventory.record_sale_for_lead", return_value=1),
             _stock(SHORT),
         ):
             response = _call(
                 WorkspaceLeadStageView,
-                factory.post("/leads/7/stage/", {"stage": stage}, format="json"), EMPLOYEE, lead_id=7,
+                # "Yutdik" endi to'lov shaklisiz o'tmaydi; javondan so'rash
+                # esa undan ham oldin turadi.
+                factory.post(
+                    "/leads/7/stage/",
+                    {"stage": stage, "payment_method": "cash"},
+                    format="json",
+                ),
+                EMPLOYEE,
+                lead_id=7,
             )
         assert response.status_code == expected, stage
 
@@ -595,6 +604,7 @@ def test_a_quick_sale_at_list_price_is_booked():
         patch("apps.b2b.workspace.views.inventory.shortages_for_lines", return_value=[]),
         patch("apps.b2b.workspace.views.repo.find_lead_by_external_id", return_value=None),
         patch("apps.b2b.workspace.views.repo.create_lead", return_value=sale) as create,
+        patch("apps.b2b.workspace.views.repo.settle_lead", return_value=sale),
         patch("apps.b2b.workspace.views.repo.list_company_recipients", return_value=[]),
         patch("apps.b2b.workspace.views.inventory.record_sale_for_lead", return_value=1) as book,
     ):
@@ -643,6 +653,7 @@ def test_a_free_price_needs_the_switch_and_the_right():
         patch("apps.b2b.workspace.views.inventory.default_warehouse", return_value=_warehouse()),
         patch("apps.b2b.workspace.views.inventory.shortages_for_lines", return_value=[]),
         patch("apps.b2b.workspace.views.repo.create_lead", return_value=sale),
+        patch("apps.b2b.workspace.views.repo.settle_lead", return_value=sale),
         patch("apps.b2b.workspace.views.repo.list_company_recipients", return_value=[]),
         patch("apps.b2b.workspace.views.inventory.record_sale_for_lead", return_value=1),
     ):

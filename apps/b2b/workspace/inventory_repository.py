@@ -1791,6 +1791,116 @@ def shortages_for_lines(
     return shortages
 
 
+def lead_return_lines(lead_id: int) -> list[dict[str, Any]]:
+    """The deal's catalogue lines, each with how much of it has already gone
+    back.
+
+    Only lines that name a product: a line somebody typed by hand ("Konsul-
+    tatsiya, 3 oy") never took anything off a shelf and has nothing to put
+    back. ``returned`` counts every live return document filed against the
+    line, so a second return can only take what the first one left.
+    """
+    return fetch_all(
+        f"""
+        SELECT i.id, i.lead_id, i.name, i.unit, i.amount, i.qty, i.product_id,
+               i.warehouse_id, p.name AS product_name, p.unit AS product_unit,
+               COALESCE((
+                   SELECT SUM(di.quantity) FROM {B2B_STOCK_DOCUMENT_ITEM_TABLE} di
+                   JOIN {B2B_STOCK_DOCUMENT_TABLE} d ON d.id = di.document_id
+                   WHERE di.lead_item_id = i.id AND d.kind = 'return'
+                     AND d.status <> 'cancelled'
+               ), 0) AS returned
+        FROM {B2B_WORKSPACE_LEAD_ITEM_TABLE} i
+        LEFT JOIN {B2B_PRODUCT_TABLE} p ON p.id = i.product_id
+        WHERE i.lead_id = %s AND i.product_id IS NOT NULL
+        ORDER BY i.position, i.id
+        """,
+        [lead_id],
+    )
+
+
+def record_return_for_lead(
+    lead: dict[str, Any],
+    *,
+    lines: Sequence[dict[str, Any]],
+    author_id: int | None,
+    note: str | None = None,
+) -> list[dict[str, Any]]:
+    """Puts goods from a sale back on the shelf, as a confirmed return
+    document per warehouse.
+
+    The mirror of [record_sale_for_lead], and deliberately built the same
+    way: the caller names lines and quantities, this decides which warehouse
+    each goes back to (the one it was sold from) and files the paperwork the
+    warehouse module already knows how to read — which is why the return
+    shows up in "Amallar" and on the product's own ledger without either of
+    them being told about deals.
+
+    Refuses to take back more than was sold and has not already come back;
+    a quantity is checked line by line, so a two-line return with one bad
+    line moves nothing.
+    """
+    from apps.b2b.workspace import inventory_documents as documents
+
+    lead_id = int(lead["id"])
+    company_id = int(lead["company_id"])
+    available = {int(row["id"]): row for row in lead_return_lines(lead_id)}
+    fallback = default_warehouse(company_id)
+    picked: list[dict[str, Any]] = []
+    for raw in lines:
+        item_id = int(raw.get("lead_item_id") or 0)
+        row = available.get(item_id)
+        if not row:
+            raise InventoryError(
+                "Bu qator sotuvda yo'q.", code="line_not_found", details={"lead_item_id": item_id}
+            )
+        qty = _q(raw.get("qty") if raw.get("qty") is not None else raw.get("quantity"))
+        left = _q(row.get("qty")) - _q(row.get("returned"))
+        if qty <= 0:
+            continue
+        if qty > left:
+            raise InventoryError(
+                f"{row.get('product_name') or row.get('name')}: "
+                f"qaytarish mumkin bo'lgan miqdor {left}.",
+                code="too_much",
+                details={"lead_item_id": item_id, "left": left},
+            )
+        amount = _q(row.get("amount"))
+        sold_qty = _q(row.get("qty"))
+        picked.append({
+            "product_id": int(row["product_id"]),
+            "quantity": qty,
+            # Valued at what the customer was actually charged for it, not at
+            # today's price list: a return is money going back, and the money
+            # that went out is on the deal's own line.
+            "unit_cost": (amount / sold_qty) if sold_qty > 0 and amount > 0 else None,
+            "lead_item_id": item_id,
+            "warehouse_id": row.get("warehouse_id") or (fallback or {}).get("id"),
+        })
+    if not picked:
+        raise InventoryError("Qaytariladigan qator tanlanmagan.", code="no_lines")
+
+    by_warehouse: dict[int, list[dict[str, Any]]] = {}
+    for item in picked:
+        warehouse_id = item.get("warehouse_id")
+        if not warehouse_id:
+            raise InventoryError("Sklad topilmadi.", code="warehouse_not_found")
+        by_warehouse.setdefault(int(warehouse_id), []).append(item)
+
+    filed: list[dict[str, Any]] = []
+    for warehouse_id, items in by_warehouse.items():
+        doc = documents.create_document(
+            company_id, kind="return", author_id=author_id, warehouse_id=warehouse_id,
+            customer_id=lead.get("customer_id"), lead_id=lead_id,
+            note=(note or "").strip() or f"Qaytarish: {lead.get('company_name') or ''}".strip(),
+            items=items,
+        )
+        filed.append(
+            documents.confirm_document(doc["id"], company_id, actor_id=author_id) or doc
+        )
+    return filed
+
+
 def record_sale_for_lead(lead: dict[str, Any], *, author_id: int | None) -> int:
     """Takes a won lead's catalogue lines off the shelf, as a sale document.
 

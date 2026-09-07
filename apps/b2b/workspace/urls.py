@@ -128,8 +128,13 @@ from apps.b2b.workspace.views import (
     WorkspaceLeadQualityView,
     WorkspaceLeadItemDetailView,
     WorkspaceLeadItemsView,
+    WorkspaceLeadPaymentDetailView,
+    WorkspaceLeadPaymentsView,
+    WorkspaceLeadDebtView,
+    WorkspaceLeadReturnView,
     WorkspaceCrmCustomerDetailView,
     WorkspaceCrmCustomerListView,
+    WorkspaceCrmDebtsView,
     WorkspaceCustomerSearchView,
     WorkspaceLeadListCreateView,
     WorkspaceLeadStageView,
@@ -496,6 +501,7 @@ urlpatterns = [
 
     path("customers/", WorkspaceCustomerSearchView.as_view(), name="ws-customers"),
     path("crm/customers/", WorkspaceCrmCustomerListView.as_view(), name="ws-crm-customers"),
+    path("crm/debts/", WorkspaceCrmDebtsView.as_view(), name="ws-crm-debts"),
     path(
         "crm/customers/<int:customer_id>/",
         WorkspaceCrmCustomerDetailView.as_view(),
@@ -517,6 +523,19 @@ urlpatterns = [
         name="ws-lead-item-detail",
     ),
     path("leads/<int:lead_id>/tasks/", WorkspaceLeadTasksView.as_view(), name="ws-lead-tasks"),
+    # The money half of a deal, and the goods coming back off it.
+    path(
+        "leads/<int:lead_id>/payments/",
+        WorkspaceLeadPaymentsView.as_view(),
+        name="ws-lead-payments",
+    ),
+    path(
+        "leads/<int:lead_id>/payments/<int:payment_id>/",
+        WorkspaceLeadPaymentDetailView.as_view(),
+        name="ws-lead-payment-detail",
+    ),
+    path("leads/<int:lead_id>/debt/", WorkspaceLeadDebtView.as_view(), name="ws-lead-debt"),
+    path("leads/<int:lead_id>/return/", WorkspaceLeadReturnView.as_view(), name="ws-lead-return"),
 
     # Stock and catalogue behind the board — see `inventory_views.py`. Every
     # name starts with `ws-inventory` so one LIVE_SECTIONS entry covers them.

@@ -48,6 +48,11 @@ B2B_WORKSPACE_LEAD_TABLE = "b2b_workspace_lead"
 # The priced lines a lead is made of, and everything that has happened to it.
 B2B_WORKSPACE_LEAD_ITEM_TABLE = "b2b_workspace_lead_item"
 B2B_WORKSPACE_LEAD_ACTIVITY_TABLE = "b2b_workspace_lead_activity"
+# What the customer has actually handed over against a deal. A deal's own
+# `paid_amount` is the sum of these rows, kept on the lead so a list of debts
+# does not join the ledger; the ledger is what says when and how each part of
+# it was paid. See `apps/b2b/workspace/repository.py`.
+B2B_LEAD_PAYMENT_TABLE = "b2b_lead_payment"
 # The company's own customer directory. A lead is raised against one of these,
 # so the second deal with the same buyer reuses the card rather than retyping it.
 B2B_WORKSPACE_CUSTOMER_TABLE = "b2b_workspace_customer"

@@ -792,6 +792,18 @@ class Command(BaseCommand):
             # yet.
             "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
             "payment_method VARCHAR(30);",
+            # What the customer has actually handed over, and whether anybody
+            # is counting. The two go together: `paid_amount` alone cannot
+            # tell a deal nobody tracks from one that has been paid nothing,
+            # and every deal filed before this column existed is the first
+            # kind. So a debt is read off `debt_tracked` only — a sale on
+            # credit, or a deal somebody has recorded a payment against —
+            # and the rest of the board stays silent about money it was
+            # never told about.
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "paid_amount NUMERIC(14, 2) NOT NULL DEFAULT 0;",
+            "ALTER TABLE b2b_workspace_lead ADD COLUMN IF NOT EXISTS "
+            "debt_tracked BOOLEAN NOT NULL DEFAULT FALSE;",
         ):
             cursor.execute(statement)
         # The board asks for `kind = 'lead'` on every load and the quick-sale
@@ -883,6 +895,35 @@ class Command(BaseCommand):
             "ON b2b_workspace_lead_activity (lead_id, created_at DESC, id DESC);"
         )
         self.stdout.write("  Created b2b_workspace_lead_activity")
+
+        # What was actually paid against a deal, instalment by instalment.
+        # The lead's own `paid_amount` is the sum of these and is kept in
+        # step by `repository.recount_lead_payments`, so "who owes us what"
+        # is one pass over the leads rather than a join per customer; this
+        # table is what answers "when, how much, and how" once somebody
+        # opens the deal.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_lead_payment (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                lead_id BIGINT NOT NULL REFERENCES b2b_workspace_lead(id) ON DELETE CASCADE,
+                author_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                amount NUMERIC(14, 2) NOT NULL,
+                method VARCHAR(30),
+                note TEXT NOT NULL DEFAULT '',
+                paid_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_lead_payment_lead_idx "
+            "ON b2b_lead_payment (lead_id, paid_at DESC, id DESC);"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS b2b_lead_payment_company_idx "
+            "ON b2b_lead_payment (company_id, paid_at DESC);"
+        )
+        self.stdout.write("  Created b2b_lead_payment")
 
         # A task raised off a lead. Nullable and ON DELETE SET NULL: the great
         # majority of tasks have nothing to do with a lead, and deleting a lead

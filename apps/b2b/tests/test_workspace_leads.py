@@ -17,6 +17,8 @@ database, so no database is needed.
 """
 from unittest.mock import patch
 
+from decimal import Decimal
+
 import pytest
 from django.conf import settings
 
@@ -261,12 +263,18 @@ def test_a_move_can_carry_a_document():
             "apps.b2b.workspace.views.repo.set_lead_stage",
             return_value=_lead(stage=LeadStage.WON, status=LeadStatus.COMPLETED),
         ) as set_stage,
+        patch("apps.b2b.workspace.views.repo.settle_lead", return_value=None),
+        patch("apps.b2b.workspace.views._book_sale"),
     ):
         response = _call(
             WorkspaceLeadStageView,
             factory.post(
                 "/leads/7/stage/",
-                {"stage": LeadStage.WON, "file": contract},
+                {
+                    "stage": LeadStage.WON,
+                    "payment_method": "transfer",
+                    "file": contract,
+                },
                 format="multipart",
             ),
             OWNER,
@@ -663,13 +671,38 @@ def test_losing_a_deal_carries_the_reason_and_the_note_through():
 
 
 def test_a_won_deal_needs_no_reason():
-    """Only the losing end is asked to explain itself."""
+    """Only the losing end is asked to explain itself — the winning end is
+    asked what it was paid with instead."""
     with (
         patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
         patch(
             "apps.b2b.workspace.views.repo.set_lead_stage",
             return_value=_lead(stage=LeadStage.WON, status=LeadStatus.COMPLETED),
         ) as set_stage,
+        patch("apps.b2b.workspace.views.repo.settle_lead", return_value=None),
+        patch("apps.b2b.workspace.views._book_sale"),
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post(
+                "/leads/7/stage/",
+                {"stage": LeadStage.WON, "payment_method": "cash"},
+                format="json",
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 200
+    assert set_stage.call_args.kwargs["lost_reason"] is None
+
+
+def test_a_won_deal_says_what_it_was_paid_with():
+    """Savdo qanday yopilganini keyin hech bir hisobot tiklab bera olmaydi,
+    shuning uchun "Yutdik" ni to'lov shaklisiz yuborib bo'lmaydi."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.repo.set_lead_stage") as set_stage,
     ):
         response = _call(
             WorkspaceLeadStageView,
@@ -678,8 +711,57 @@ def test_a_won_deal_needs_no_reason():
             lead_id=7,
         )
 
+    assert response.status_code == 400
+    set_stage.assert_not_called()
+
+
+def test_a_deal_sold_on_credit_says_how_much_came_in():
+    """Qarzga sotilgan deal "qanchasi to'landi" degan savolga javob berishi
+    kerak — nol ham javob, va u ham deal'ni qarzlar ro'yxatiga qo'yadi."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch("apps.b2b.workspace.views.repo.set_lead_stage") as set_stage,
+    ):
+        refused = _call(
+            WorkspaceLeadStageView,
+            factory.post(
+                "/leads/7/stage/",
+                {"stage": LeadStage.WON, "payment_method": "installment"},
+                format="json",
+            ),
+            OWNER,
+            lead_id=7,
+        )
+    assert refused.status_code == 400
+    set_stage.assert_not_called()
+
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_lead()),
+        patch(
+            "apps.b2b.workspace.views.repo.set_lead_stage",
+            return_value=_lead(stage=LeadStage.WON, status=LeadStatus.COMPLETED),
+        ),
+        patch("apps.b2b.workspace.views.repo.settle_lead", return_value=None) as settle,
+        patch("apps.b2b.workspace.views._book_sale"),
+    ):
+        response = _call(
+            WorkspaceLeadStageView,
+            factory.post(
+                "/leads/7/stage/",
+                {
+                    "stage": LeadStage.WON,
+                    "payment_method": "installment",
+                    "paid_amount": "0",
+                },
+                format="json",
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
     assert response.status_code == 200
-    assert set_stage.call_args.kwargs["lost_reason"] is None
+    assert settle.call_args.kwargs["method"] == "installment"
+    assert settle.call_args.kwargs["paid_amount"] == Decimal("0")
 
 
 def test_an_archived_deal_needs_no_reason_either():
@@ -1160,6 +1242,8 @@ def test_a_quick_sale_ignores_assign_to_me_and_tells_nobody():
             return_value=_lead(kind=LeadKind.QUICK_SALE),
         ) as create,
         patch("apps.b2b.workspace.views.repo.list_company_recipients") as recipients,
+        patch("apps.b2b.workspace.views.repo.settle_lead", return_value=None),
+        patch("apps.b2b.workspace.views._book_sale"),
     ):
         response = _call(
             WorkspaceLeadListCreateView,
@@ -1183,6 +1267,58 @@ def test_a_quick_sale_ignores_assign_to_me_and_tells_nobody():
     assert create.call_args.kwargs["payment_method"] == PaymentMethod.CASH
     assert create.call_args.kwargs["claim_for_author"] is True
     recipients.assert_not_called()
+
+
+def test_a_quick_sale_on_credit_says_how_much_came_in():
+    """Qarzga berilgan tezkor savdo — qanchasi to'langani so'raladi, va
+    o'sha raqam bilan deal qarzlar ro'yxatiga tushadi."""
+    with patch("apps.b2b.workspace.views.repo.create_lead") as create:
+        refused = _call(
+            WorkspaceLeadListCreateView,
+            factory.post(
+                "/leads/",
+                {
+                    "contact_full_name": "Aziz Karimov",
+                    "contact_phone": "+998 90 123 45 67",
+                    "amount": "22000000",
+                    "kind": LeadKind.QUICK_SALE,
+                    "payment_method": PaymentMethod.INSTALLMENT,
+                },
+                format="json",
+            ),
+            MANAGER,
+        )
+    assert refused.status_code == 400
+    create.assert_not_called()
+
+    with (
+        patch(
+            "apps.b2b.workspace.views.repo.create_lead",
+            return_value=_lead(kind=LeadKind.QUICK_SALE),
+        ),
+        patch("apps.b2b.workspace.views.repo.settle_lead", return_value=None) as settle,
+        patch("apps.b2b.workspace.views._book_sale"),
+    ):
+        response = _call(
+            WorkspaceLeadListCreateView,
+            factory.post(
+                "/leads/",
+                {
+                    "contact_full_name": "Aziz Karimov",
+                    "contact_phone": "+998 90 123 45 67",
+                    "amount": "22000000",
+                    "kind": LeadKind.QUICK_SALE,
+                    "payment_method": PaymentMethod.INSTALLMENT,
+                    "paid_amount": "5000000",
+                },
+                format="json",
+            ),
+            MANAGER,
+        )
+
+    assert response.status_code == 201
+    assert settle.call_args.kwargs["paid_amount"] == Decimal("5000000")
+    assert settle.call_args.kwargs["method"] == PaymentMethod.INSTALLMENT
 
 
 def test_a_quick_sale_must_say_how_it_was_paid_for():
