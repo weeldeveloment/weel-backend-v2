@@ -4256,6 +4256,11 @@
      "title": "Id",
      "type": "integer"
     },
+    "is_frozen": {
+     "default": false,
+     "title": "Is frozen",
+     "type": "boolean"
+    },
     "is_guest": {
      "default": false,
      "title": "Is guest",
@@ -4700,6 +4705,10 @@
      "title": "Message id",
      "type": "integer",
      "x-nullable": true
+    },
+    "participant_count": {
+     "title": "Participant count",
+     "type": "integer"
     },
     "provider": {
      "minLength": 1,
@@ -6775,6 +6784,18 @@
      "title": "Unit cost",
      "type": "string",
      "x-nullable": true
+    },
+    "unit_cost_usd": {
+     "format": "decimal",
+     "title": "Unit cost usd",
+     "type": "string",
+     "x-nullable": true
+    },
+    "usd_rate": {
+     "format": "decimal",
+     "title": "Usd rate",
+     "type": "string",
+     "x-nullable": true
     }
    },
    "required": [
@@ -6825,6 +6846,12 @@
     "unit_cost": {
      "format": "decimal",
      "title": "Unit cost",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unit_cost_usd": {
+     "format": "decimal",
+     "title": "Unit cost usd",
      "type": "string",
      "x-nullable": true
     }
@@ -7275,6 +7302,18 @@
      "type": "string"
     }
    },
+   "type": "object"
+  },
+  "EmployeeFreeze": {
+   "properties": {
+    "frozen": {
+     "title": "Frozen",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "frozen"
+   ],
    "type": "object"
   },
   "EmployeeMonthlyStat": {
@@ -8600,6 +8639,12 @@
      "type": "integer",
      "x-nullable": true
     },
+    "lead_name": {
+     "minLength": 1,
+     "title": "Lead name",
+     "type": "string",
+     "x-nullable": true
+    },
     "line_count": {
      "title": "Line count",
      "type": "integer"
@@ -9268,10 +9313,17 @@
       "comment",
       "completed",
       "due_date",
-      "quality"
+      "quality",
+      "task_created",
+      "task_done"
      ],
      "title": "Kind",
      "type": "string"
+    },
+    "target_id": {
+     "title": "Target id",
+     "type": "integer",
+     "x-nullable": true
     },
     "text": {
      "title": "Text",
@@ -10982,6 +11034,11 @@
      "title": "Kind",
      "type": "string"
     },
+    "lead_id": {
+     "title": "Lead id",
+     "type": "integer",
+     "x-nullable": true
+    },
     "note": {
      "maxLength": 1000,
      "title": "Note",
@@ -11022,6 +11079,12 @@
     "unit_cost": {
      "format": "decimal",
      "title": "Unit cost",
+     "type": "string",
+     "x-nullable": true
+    },
+    "unit_cost_usd": {
+     "format": "decimal",
+     "title": "Unit cost usd",
      "type": "string",
      "x-nullable": true
     },
@@ -12009,6 +12072,12 @@
      "type": "string",
      "x-nullable": true
     },
+    "purchase_price_usd": {
+     "format": "decimal",
+     "title": "Purchase price usd",
+     "type": "string",
+     "x-nullable": true
+    },
     "reserved": {
      "format": "decimal",
      "title": "Reserved",
@@ -12238,6 +12307,12 @@
      "title": "Purchase price",
      "type": "string"
     },
+    "purchase_price_usd": {
+     "format": "decimal",
+     "title": "Purchase price usd",
+     "type": "string",
+     "x-nullable": true
+    },
     "sale_price": {
      "format": "decimal",
      "title": "Sale price",
@@ -12376,6 +12451,12 @@
      "format": "decimal",
      "title": "Purchase price",
      "type": "string"
+    },
+    "purchase_price_usd": {
+     "format": "decimal",
+     "title": "Purchase price usd",
+     "type": "string",
+     "x-nullable": true
     },
     "sale_price": {
      "format": "decimal",
@@ -13729,6 +13810,11 @@
      "title": "Sku prefix",
      "type": "string"
     },
+    "usd_rate": {
+     "format": "decimal",
+     "title": "Usd rate",
+     "type": "string"
+    },
     "write_off_alert": {
      "format": "decimal",
      "title": "Write off alert",
@@ -13739,7 +13825,8 @@
     "allow_backorder",
     "base_currency",
     "sku_prefix",
-    "write_off_alert"
+    "write_off_alert",
+    "usd_rate"
    ],
    "type": "object"
   },
@@ -13758,6 +13845,11 @@
     "sku_prefix": {
      "maxLength": 10,
      "title": "Sku prefix",
+     "type": "string"
+    },
+    "usd_rate": {
+     "format": "decimal",
+     "title": "Usd rate",
      "type": "string"
     },
     "write_off_alert": {
@@ -13924,6 +14016,176 @@
     "warehouse_name",
     "quantity"
    ],
+   "type": "object"
+  },
+  "StockOrder": {
+   "properties": {
+    "author_id": {
+     "title": "Author id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "author_name": {
+     "minLength": 1,
+     "title": "Author name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "can_decide": {
+     "title": "Can decide",
+     "type": "boolean"
+    },
+    "can_delete": {
+     "title": "Can delete",
+     "type": "boolean"
+    },
+    "created_at": {
+     "format": "date-time",
+     "title": "Created at",
+     "type": "string"
+    },
+    "decided_at": {
+     "format": "date-time",
+     "title": "Decided at",
+     "type": "string",
+     "x-nullable": true
+    },
+    "decided_by": {
+     "title": "Decided by",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "decided_by_name": {
+     "minLength": 1,
+     "title": "Decided by name",
+     "type": "string",
+     "x-nullable": true
+    },
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "note": {
+     "minLength": 1,
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "product_sku": {
+     "minLength": 1,
+     "title": "Product sku",
+     "type": "string",
+     "x-nullable": true
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    },
+    "status": {
+     "enum": [
+      "new",
+      "ordered",
+      "done",
+      "rejected"
+     ],
+     "title": "Status",
+     "type": "string"
+    },
+    "title": {
+     "minLength": 1,
+     "title": "Title",
+     "type": "string"
+    },
+    "unit": {
+     "minLength": 1,
+     "title": "Unit",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "product_id",
+    "title",
+    "quantity",
+    "unit",
+    "note",
+    "status",
+    "author_id",
+    "created_at"
+   ],
+   "type": "object"
+  },
+  "StockOrderList": {
+   "properties": {
+    "open_count": {
+     "title": "Open count",
+     "type": "integer"
+    },
+    "results": {
+     "items": {
+      "$ref": "#/definitions/StockOrder"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "results",
+    "open_count"
+   ],
+   "type": "object"
+  },
+  "StockOrderStatus": {
+   "properties": {
+    "status": {
+     "enum": [
+      "new",
+      "ordered",
+      "done",
+      "rejected"
+     ],
+     "title": "Status",
+     "type": "string"
+    }
+   },
+   "required": [
+    "status"
+   ],
+   "type": "object"
+  },
+  "StockOrderWrite": {
+   "properties": {
+    "note": {
+     "title": "Note",
+     "type": "string",
+     "x-nullable": true
+    },
+    "product_id": {
+     "title": "Product id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "quantity": {
+     "format": "decimal",
+     "title": "Quantity",
+     "type": "string"
+    },
+    "title": {
+     "maxLength": 300,
+     "title": "Title",
+     "type": "string"
+    },
+    "unit": {
+     "maxLength": 30,
+     "title": "Unit",
+     "type": "string"
+    }
+   },
    "type": "object"
   },
   "StorageKindUsage": {
@@ -14431,6 +14693,17 @@
      "title": "Id",
      "type": "integer"
     },
+    "lead_id": {
+     "title": "Lead id",
+     "type": "integer",
+     "x-nullable": true
+    },
+    "lead_name": {
+     "minLength": 1,
+     "title": "Lead name",
+     "type": "string",
+     "x-nullable": true
+    },
     "priority": {
      "minLength": 1,
      "title": "Priority",
@@ -14930,6 +15203,11 @@
     "id": {
      "title": "Id",
      "type": "integer"
+    },
+    "is_frozen": {
+     "default": false,
+     "title": "Is frozen",
+     "type": "boolean"
     },
     "is_guest": {
      "default": false,
@@ -21268,6 +21546,36 @@
     ]
    }
   },
+  "/b2b/workspace/chats/{thread_id}/": {
+   "delete": {
+    "description": "DELETE /api/b2b/workspace/chats/<id>/ — suhbatni hamma uchun o'chirish.\n\nKim o'chira oladi:\n\n* shaxsiy suhbat — ikkalasidan biri. Yozishma ikkovinikidir, va uni\n  o'chirish ikkovi uchun ham o'chirish demakdir;\n* guruh — guruh admini (yoki chatni boshqarish huquqi bo'lgan odam);\n* \"Saqlangan xabarlar\" — hech kim: bu odamning o'z daftari, va u\n  ro'yxatning doimiy qatori.\n\nQator o'chadi, orqasidan xabarlar va a'zolar ham (CASCADE). Ochiq turgan\nilovalarga soket orqali aytiladi, aks holda ular yo'q xonani ochib\no'tirishardi.",
+    "operationId": "b2b_workspace_chats_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": "Deleted"
+     },
+     "403": {
+      "description": "Not allowed"
+     },
+     "404": {
+      "description": "Not found"
+     }
+    },
+    "summary": "Delete a chat for everybody",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "thread_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
   "/b2b/workspace/chats/{thread_id}/flags/": {
    "parameters": [
     {
@@ -21808,9 +22116,26 @@
    }
   },
   "/b2b/workspace/conferences/": {
+   "get": {
+    "description": "Chat ro'yxatidagi \"Konferensiya\" qatori shuni o'qiydi: qator\nbosilganda yangisi ochiladimi yoki ketayotganiga qo'shiladimi.",
+    "operationId": "b2b_workspace_conferences_list",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/Conference"
+      }
+     }
+    },
+    "summary": "The conference running right now, if any",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
    "parameters": [],
    "post": {
-    "description": "POST /conferences/ — open a conference and invite people into it.",
+    "description": "GET  /conferences/ — hozir ketayotgani, agar bo'lsa.\nPOST /conferences/ — open a conference and invite people into it.",
     "operationId": "b2b_workspace_conferences_create",
     "parameters": [
      {
@@ -22222,6 +22547,42 @@
      }
     },
     "summary": "Set one employee's role and access",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/employees/{employee_id}/freeze/": {
+   "parameters": [
+    {
+     "in": "path",
+     "name": "employee_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "post": {
+    "description": "POST /api/b2b/workspace/employees/<id>/freeze/ — akkauntni muzlatish\nyoki qaytarish.\n\nMuzlatilgan xodim ro'yxatdan yo'qolmaydi va ishlari o'zida qoladi; u\nfaqat ishchi o'ringa kira olmaydi — kirmoqchi bo'lsa \"akkauntingiz\nmuzlatilgan\" deb qaytariladi va ishchi o'rin tanlash sahifasiga\nyuboriladi. Egasi va lider uchun (TZ v2 §11).",
+    "operationId": "b2b_workspace_employees_freeze_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/EmployeeFreeze"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/EmployeeFreeze"
+      }
+     }
+    },
+    "summary": "Freeze or reactivate a member",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
@@ -23793,6 +24154,114 @@
      }
     },
     "summary": "Book a one-line stock operation",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/orders/": {
+   "get": {
+    "description": "GET  — the restock requests.\nPOST — raises one. Anybody who can see the stock room may: the person\nstanding at an empty shelf is rarely the person who buys.",
+    "operationId": "b2b_workspace_inventory_orders_list",
+    "parameters": [
+     {
+      "description": "open | new | ordered | done | rejected",
+      "in": "query",
+      "name": "status",
+      "type": "string"
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/StockOrderList"
+      }
+     }
+    },
+    "summary": "Restock requests",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [],
+   "post": {
+    "description": "GET  — the restock requests.\nPOST — raises one. Anybody who can see the stock room may: the person\nstanding at an empty shelf is rarely the person who buys.",
+    "operationId": "b2b_workspace_inventory_orders_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/StockOrderWrite"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/StockOrder"
+      }
+     }
+    },
+    "summary": "Ask for a restock",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/inventory/orders/{order_id}/": {
+   "delete": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_orders_delete",
+    "parameters": [],
+    "responses": {
+     "204": {
+      "description": ""
+     }
+    },
+    "summary": "Withdraw a restock request",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "order_id",
+     "required": true,
+     "type": "string"
+    }
+   ],
+   "patch": {
+    "description": "",
+    "operationId": "b2b_workspace_inventory_orders_partial_update",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/StockOrderStatus"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/StockOrder"
+      }
+     }
+    },
+    "summary": "Move a restock request along (manage)",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
