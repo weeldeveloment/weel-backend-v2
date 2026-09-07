@@ -110,6 +110,12 @@ class LeadStage:
     or ``ARCHIVED`` completes the lead, and nothing else changes the status.
     """
     NEW = "new"
+    #: Retired. A lead that exists *is* interest, so the rung asked every
+    #: salesperson to move a card in order to say what its existence had
+    #: already said — and it kept coming back on the board after being taken
+    #: off the clients. Kept as a value so leads filed on it still validate
+    #: and still read back; absent from ``ORDER``, so the funnel never offers
+    #: it as somewhere to move to.
     INTERESTED = "interested"
     PROPOSAL = "proposal"
     NEGOTIATION = "negotiation"
@@ -137,7 +143,7 @@ class LeadStage:
     #: later has to go on the end of the choices for the existing rows' sake.
     #: This is what "which stages come after this one" is read from.
     ORDER = [
-        NEW, INTERESTED, PROPOSAL, NEGOTIATION, CONTRACT, WON, LOST, ARCHIVED,
+        NEW, PROPOSAL, NEGOTIATION, CONTRACT, WON, LOST, ARCHIVED,
     ]
 
     #: The stages that close a lead — reaching any of these sets the status to
@@ -318,9 +324,20 @@ class LeadActivityKind:
     #: The lead was marked good or bad, or the mark was taken off. ``text`` is
     #: the new `LeadQuality`, or empty where it was cleared.
     QUALITY = "quality"
+    #: A task was raised against this lead, and later, finished. ``text`` is
+    #: the task's title; the task's own id rides in ``target_id`` so the row
+    #: can open it.
+    #:
+    #: These replace the "next step" the card used to carry. What to do next
+    #: is a task — it has an owner, a deadline and somewhere to be seen — and
+    #: writing it as a line of history meant nobody was ever told about it and
+    #: nothing ever marked it done.
+    TASK_CREATED = "task_created"
+    TASK_DONE = "task_done"
 
     CHOICES = [
         CREATED, CLAIMED, ASSIGNED, STAGE, COMMENT, COMPLETED, DUE_DATE, QUALITY,
+        TASK_CREATED, TASK_DONE,
     ]
 
 

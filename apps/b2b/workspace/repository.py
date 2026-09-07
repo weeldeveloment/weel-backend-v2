@@ -558,6 +558,22 @@ def _attach_task_children(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             by_id[row["task_id"]]["files"].append(row)
 
+    # Which deal a task was raised off, by name. The id alone left the board
+    # showing a number nobody could read, so the card can now say "Protouch —
+    # shartnoma" and open the lead behind it.
+    lead_ids = sorted({t["lead_id"] for t in tasks if t.get("lead_id")})
+    if lead_ids:
+        names = {
+            row["id"]: row["company_name"]
+            for row in fetch_all(
+                f"SELECT id, company_name FROM {B2B_WORKSPACE_LEAD_TABLE} "
+                f"WHERE id = __ANY_MARKER__(%s)",
+                [lead_ids],
+            )
+        }
+        for task in tasks:
+            task["lead_name"] = names.get(task.get("lead_id"))
+
     return tasks
 
 
@@ -692,6 +708,14 @@ def create_task(
         task["id"], company_id, task_title=title,
         kind=TaskActivityKind.CREATED, author_id=author_id,
     )
+    # A task raised against a deal shows up on the deal too. Otherwise the
+    # work is only visible to whoever it was assigned to, and the salesperson
+    # reading the lead a week later has no idea it was ever agreed.
+    if lead_id:
+        add_lead_activity(
+            lead_id, kind=LeadActivityKind.TASK_CREATED,
+            author_id=author_id, text=title, target_id=task["id"],
+        )
     return get_task(task["id"], company_id)
 
 
@@ -703,7 +727,8 @@ def update_task(
         # from, and every field-set can log against the title even when the
         # title itself is one of the fields being changed.
         current = fetch_one(
-            f"SELECT title, status FROM {B2B_TASK_TABLE} WHERE id = %s AND company_id = %s",
+            f"SELECT title, status, lead_id FROM {B2B_TASK_TABLE} "
+            f"WHERE id = %s AND company_id = %s",
             [task_id, company_id],
         )
         sets = ", ".join(f"{key} = %s" for key in fields)
@@ -721,6 +746,14 @@ def update_task(
                     kind=TaskActivityKind.STATUS, author_id=actor_id,
                     text=f"{current['status']}>{fields['status']}",
                 )
+                # Finishing it is the half worth telling the deal about — a
+                # task that moved from "todo" to "in progress" is somebody's
+                # own business, one that got done is the deal's.
+                if current.get("lead_id") and fields["status"] == "done":
+                    add_lead_activity(
+                        current["lead_id"], kind=LeadActivityKind.TASK_DONE,
+                        author_id=actor_id, text=title, target_id=task_id,
+                    )
             other_fields = [key for key in fields if key not in {"status", "completed_at"}]
             if other_fields:
                 add_task_activity(
@@ -1650,6 +1683,26 @@ def remove_thread_member(thread_id: int, employee_id: int) -> bool:
             f"DELETE FROM {B2B_CHAT_MEMBER_TABLE} "
             "WHERE thread_id = %s AND employee_id = %s RETURNING id",
             [thread_id, employee_id],
+        )
+    )
+
+
+def delete_thread(thread_id: int, company_id: int) -> bool:
+    """Suhbatni hamma uchun o'chiradi — xabarlari, a'zolari bilan birga.
+
+    Xabar o'chirish "men uchun" degan yumshoq variantga ega emas, chunki
+    suhbat ikki kishiniki: bir tomonda ko'rinib, ikkinchisida yo'q bo'lgan
+    yozishma keyinroq o'qilganda hech kimga to'g'ri kelmaydi. Kim o'chira
+    olishini `views` hal qiladi.
+
+    Xabarlar va a'zolar qatorlari `ON DELETE CASCADE` ostida turadi, shuning
+    uchun bitta DELETE yetarli.
+    """
+    return bool(
+        fetch_one(
+            f"DELETE FROM {B2B_CHAT_THREAD_TABLE} "
+            "WHERE id = %s AND company_id = %s AND kind <> %s RETURNING id",
+            [thread_id, company_id, THREAD_KIND_SAVED],
         )
     )
 
@@ -2933,15 +2986,16 @@ def add_lead_activity(
     kind: str,
     author_id: int | None = None,
     text: str = "",
+    target_id: int | None = None,
 ) -> dict[str, Any] | None:
     return fetch_one(
         f"""
         INSERT INTO {B2B_WORKSPACE_LEAD_ACTIVITY_TABLE}
-            (lead_id, author_id, kind, text, created_at)
-        VALUES (%s, %s, %s, %s, %s)
+            (lead_id, author_id, kind, text, target_id, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        [lead_id, author_id, kind, text, timezone.now()],
+        [lead_id, author_id, kind, text, target_id, timezone.now()],
     )
 
 

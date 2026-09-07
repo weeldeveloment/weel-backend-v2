@@ -41,6 +41,7 @@ from apps.b2b.workspace.inventory_repository import (
     InventoryError,
     MovementKind,
     ProductKind,
+    StockOrderStatus,
     WriteOffReason,
 )
 from apps.b2b.workspace.permissions import IsWorkspaceUser
@@ -69,7 +70,9 @@ def _require(request, permission: str) -> Response | None:
     )
 
 
-COST_FIELDS = ("purchase_price", "stock_value", "markup_percent", "cost_price")
+COST_FIELDS = (
+    "purchase_price", "purchase_price_usd", "stock_value", "markup_percent", "cost_price",
+)
 
 
 def _hide_costs(rows: Any, request) -> Any:
@@ -157,6 +160,8 @@ class SettingsSerializer(serializers.Serializer):
     base_currency = serializers.CharField()
     sku_prefix = serializers.CharField()
     write_off_alert = serializers.DecimalField(max_digits=14, decimal_places=2)
+    #: 1 USD = ... UZS, set by hand in Sozlamalar -> Moliya.
+    usd_rate = serializers.DecimalField(max_digits=14, decimal_places=4)
 
 
 class SettingsWriteSerializer(serializers.Serializer):
@@ -164,6 +169,9 @@ class SettingsWriteSerializer(serializers.Serializer):
     base_currency = serializers.CharField(max_length=3, required=False)
     sku_prefix = serializers.CharField(max_length=10, required=False, allow_blank=True)
     write_off_alert = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False)
+    usd_rate = serializers.DecimalField(
+        max_digits=14, decimal_places=4, min_value=Decimal("0.01"), required=False
+    )
 
 
 class WarehouseSerializer(serializers.Serializer):
@@ -269,6 +277,9 @@ class ProductSerializer(serializers.Serializer):
     barcode = serializers.CharField(allow_null=True)
     unit = serializers.CharField()
     purchase_price = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
+    purchase_price_usd = serializers.DecimalField(
+        max_digits=14, decimal_places=2, allow_null=True, required=False
+    )
     sale_price = serializers.DecimalField(max_digits=14, decimal_places=2)
     wholesale_price = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
     markup_percent = serializers.DecimalField(max_digits=7, decimal_places=2, allow_null=True, required=False)
@@ -313,6 +324,10 @@ class ProductWriteSerializer(serializers.Serializer):
     generate_barcode = serializers.BooleanField(required=False)
     unit = serializers.CharField(max_length=30, required=False, allow_blank=True)
     purchase_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False)
+    #: Typed in dollars; the som price is derived from it at the company rate.
+    purchase_price_usd = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True
+    )
     sale_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True)
     markup_percent = serializers.DecimalField(max_digits=7, decimal_places=2, required=False, allow_null=True)
     wholesale_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False)
@@ -394,10 +409,25 @@ class MovementWriteSerializer(serializers.Serializer):
     unit_cost = serializers.DecimalField(
         max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True
     )
+    #: A receipt typed in dollars — converted at the company's own rate.
+    unit_cost_usd = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True
+    )
     reason = serializers.ChoiceField(choices=WriteOffReason.CHOICES, required=False, allow_null=True)
     supplier_id = serializers.IntegerField(required=False, allow_null=True)
+    #: Which sale a return is a return of. Required on a return — a return
+    #: with no sale behind it is stock appearing from nowhere, and nobody
+    #: reading the document a month later could say where it came from.
+    lead_id = serializers.IntegerField(required=False, allow_null=True)
     note = serializers.CharField(max_length=1000, required=False, allow_blank=True, allow_null=True)
     idempotency_key = serializers.CharField(max_length=80, required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs):
+        if attrs.get("kind") == MovementKind.RETURN and not attrs.get("lead_id"):
+            raise serializers.ValidationError(
+                {"lead_id": _("Say which sale is being returned.")}
+            )
+        return attrs
 
 
 class DocumentItemSerializer(serializers.Serializer):
@@ -412,6 +442,13 @@ class DocumentItemSerializer(serializers.Serializer):
     counted_quantity = serializers.DecimalField(max_digits=14, decimal_places=3, allow_null=True)
     difference = serializers.DecimalField(max_digits=14, decimal_places=3, required=False)
     unit_cost = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
+    #: What a receipt line cost in dollars, and the rate it was booked at.
+    unit_cost_usd = serializers.DecimalField(
+        max_digits=14, decimal_places=2, allow_null=True, required=False
+    )
+    usd_rate = serializers.DecimalField(
+        max_digits=14, decimal_places=4, allow_null=True, required=False
+    )
     old_price = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
     new_price = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
     old_wholesale = serializers.DecimalField(max_digits=14, decimal_places=2, allow_null=True)
@@ -434,6 +471,9 @@ class InventoryDocumentSerializer(serializers.Serializer):
     customer_id = serializers.IntegerField(allow_null=True)
     customer_name = serializers.CharField(allow_null=True, required=False)
     lead_id = serializers.IntegerField(allow_null=True)
+    #: The deal this document belongs to, by name — what a return is a return
+    #: *of*, so the stock room can say which sale it is putting back.
+    lead_name = serializers.CharField(allow_null=True, required=False)
     currency = serializers.CharField()
     extra_costs = serializers.DecimalField(max_digits=14, decimal_places=2)
     reason = serializers.CharField(allow_null=True)
@@ -468,6 +508,9 @@ class DocumentItemWriteSerializer(serializers.Serializer):
     quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=0, required=False, allow_null=True)
     counted_quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=0, required=False, allow_null=True)
     unit_cost = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True)
+    #: Xarid narxi (USD) — a receipt priced in dollars. Converted at the rate
+    #: in Sozlamalar -> Moliya, and it wins over ``unit_cost`` when both come.
+    unit_cost_usd = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True)
     new_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True)
     new_wholesale = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False, allow_null=True)
 
@@ -603,6 +646,164 @@ class WorkspaceInventorySettingsView(_InventoryView):
                      "after": {k: str(v) for k, v in row.items() if k != "company_id"}},
         )
         return Response(row)
+
+
+# ─── Buyurtmalar ──────────────────────────────────────────────────────────────
+
+class StockOrderSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    product_id = serializers.IntegerField(allow_null=True)
+    product_sku = serializers.CharField(allow_null=True, required=False)
+    #: What was asked for, as it was asked for — see the note in the table's
+    #: DDL on why this is stored rather than joined.
+    title = serializers.CharField()
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=3)
+    unit = serializers.CharField()
+    note = serializers.CharField(allow_null=True)
+    status = serializers.ChoiceField(choices=StockOrderStatus.CHOICES)
+    author_id = serializers.IntegerField(allow_null=True)
+    author_name = serializers.CharField(allow_null=True, required=False)
+    decided_by = serializers.IntegerField(allow_null=True, required=False)
+    decided_by_name = serializers.CharField(allow_null=True, required=False)
+    decided_at = serializers.DateTimeField(allow_null=True, required=False)
+    created_at = serializers.DateTimeField()
+    #: Whether *this* reader may move it along, and whether they may take it
+    #: back — the app draws its buttons off these rather than re-deriving the
+    #: rule and drifting from it.
+    can_decide = serializers.BooleanField(required=False)
+    can_delete = serializers.BooleanField(required=False)
+
+
+class StockOrderListSerializer(serializers.Serializer):
+    results = StockOrderSerializer(many=True)
+    open_count = serializers.IntegerField()
+
+
+class StockOrderWriteSerializer(serializers.Serializer):
+    product_id = serializers.IntegerField(required=False, allow_null=True)
+    title = serializers.CharField(max_length=300, required=False, allow_blank=True)
+    quantity = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=0, required=False
+    )
+    unit = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    note = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs):
+        if not attrs.get("product_id") and not (attrs.get("title") or "").strip():
+            raise serializers.ValidationError(
+                {"title": _("Say what is needed.")}
+            )
+        return attrs
+
+
+class StockOrderStatusSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=StockOrderStatus.CHOICES)
+
+
+def _order_payload(order: dict, request) -> dict:
+    """One request, with the two rules the buttons read off.
+
+    Deciding is the stock room's — the same right that books a receipt.
+    Taking it back is the asker's own, and only while nobody has acted on
+    it: a request somebody has already gone out and bought against is not
+    theirs to erase.
+    """
+    decides = may(request.user, Permission.STOCK_MANAGE)
+    mine = order.get("author_id") == request.user.id
+    return {
+        **order,
+        "can_decide": decides,
+        "can_delete": decides or (mine and order["status"] == StockOrderStatus.NEW),
+    }
+
+
+class WorkspaceStockOrderListCreateView(_InventoryView):
+    """GET  — the restock requests.
+    POST — raises one. Anybody who can see the stock room may: the person
+    standing at an empty shelf is rarely the person who buys."""
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG, operation_summary="Restock requests",
+        manual_parameters=[
+            openapi.Parameter("status", openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                              description="open | new | ordered | done | rejected"),
+            openapi.Parameter("q", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+        ],
+        responses={200: StockOrderListSerializer()},
+    )
+    def get(self, request):
+        rows = inventory.list_orders(
+            request.user.company_id,
+            status=(request.query_params.get("status") or "").strip() or None,
+            search=(request.query_params.get("q") or "").strip() or None,
+        )
+        return Response({
+            "results": [_order_payload(row, request) for row in rows],
+            "open_count": inventory.count_open_orders(request.user.company_id),
+        })
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG, operation_summary="Ask for a restock",
+        request_body=StockOrderWriteSerializer,
+        responses={201: StockOrderSerializer()},
+    )
+    def post(self, request):
+        serializer = StockOrderWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            order = inventory.create_order(
+                request.user.company_id,
+                author_id=request.user.id,
+                product_id=data.get("product_id"),
+                title=data.get("title"),
+                quantity=data.get("quantity") or 0,
+                unit=data.get("unit") or None,
+                note=data.get("note"),
+            )
+        except InventoryError as exc:
+            return _refusal(exc)
+        record_audit(
+            request.user.company_id, actor_employee_id=request.user.id,
+            action="inventory.order_created", target_type="stock_order",
+            target_id=order["id"], payload={"title": order["title"]},
+        )
+        return Response(_order_payload(order, request), status=status.HTTP_201_CREATED)
+
+
+class WorkspaceStockOrderDetailView(_InventoryView):
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG, operation_summary="Move a restock request along (manage)",
+        request_body=StockOrderStatusSerializer, responses={200: StockOrderSerializer()},
+    )
+    def patch(self, request, order_id: int):
+        if refusal := _require(request, Permission.STOCK_MANAGE):
+            return refusal
+        serializer = StockOrderStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            order = inventory.set_order_status(
+                order_id, request.user.company_id,
+                status=serializer.validated_data["status"], actor_id=request.user.id,
+            )
+        except InventoryError as exc:
+            return _refusal(exc)
+        if not order:
+            return Response({"detail": _("Not found.")}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_order_payload(order, request))
+
+    @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Withdraw a restock request")
+    def delete(self, request, order_id: int):
+        order = inventory.get_order(order_id, request.user.company_id)
+        if not order:
+            return Response({"detail": _("Not found.")}, status=status.HTTP_404_NOT_FOUND)
+        if not _order_payload(order, request)["can_delete"]:
+            return Response(
+                {"detail": _("Your role does not allow this stock operation.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        inventory.delete_order(order_id, request.user.company_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ─── Warehouses ───────────────────────────────────────────────────────────────
@@ -857,6 +1058,7 @@ class WorkspaceProductListCreateView(_InventoryView):
                 generate_barcode=bool(data.get("generate_barcode")),
                 unit=data.get("unit") or "dona",
                 purchase_price=data.get("purchase_price") or 0,
+                purchase_price_usd=data.get("purchase_price_usd"),
                 sale_price=data.get("sale_price"),
                 markup_percent=data.get("markup_percent"),
                 wholesale_price=data.get("wholesale_price") or 0,
@@ -1284,7 +1486,11 @@ class WorkspaceMovementListCreateView(_InventoryView):
         }[data["kind"]]
         if refusal := _document_refusal(request, kind):
             return refusal
-        item: dict[str, Any] = {"product_id": data["product_id"], "unit_cost": data.get("unit_cost")}
+        item: dict[str, Any] = {
+            "product_id": data["product_id"],
+            "unit_cost": data.get("unit_cost"),
+            "unit_cost_usd": data.get("unit_cost_usd"),
+        }
         if kind == DocumentKind.INVENTORY:
             item["counted_quantity"] = data["quantity"]
         else:
@@ -1294,6 +1500,7 @@ class WorkspaceMovementListCreateView(_InventoryView):
                 request.user.company_id, kind=kind, author_id=request.user.id,
                 warehouse_id=data.get("warehouse_id"), to_warehouse_id=data.get("to_warehouse_id"),
                 supplier_id=data.get("supplier_id"), reason=data.get("reason"), note=data.get("note"),
+                lead_id=data.get("lead_id"),
                 idempotency_key=data.get("idempotency_key") or None, items=[item],
             )
             if doc.get("status") == DocumentStatus.DRAFT:

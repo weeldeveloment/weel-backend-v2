@@ -22,6 +22,7 @@ from apps.b2b.workspace.views import (
     WorkspaceGroupMemberView,
     WorkspaceGroupMembersView,
     WorkspaceGroupView,
+    WorkspaceThreadView,
 )
 
 factory = APIRequestFactory()
@@ -392,3 +393,48 @@ class TestRemoval:
 
         assert response.status_code == 204
         repo.promote_longest_standing_member.assert_called_once_with(3)
+
+
+class TestDeletingAChat:
+    """Suhbatni o'chirish hamma uchun o'chiradi, shuning uchun kim bosa
+    olishining o'zi butun qoida."""
+
+    def _delete(self, user, *, thread, member=None, permissions=()):
+        request = factory.delete("/chats/3/")
+        force_authenticate(request, user=user)
+        with patch("apps.b2b.workspace.views.repo") as repo, patch(
+            "apps.b2b.workspace.views.realtime"
+        ), patch("apps.b2b.workspace.views.remove_from_thread"), patch(
+            "apps.b2b.workspace.access_repository.access_for_employee",
+            return_value=(["chat"], list(permissions)),
+        ):
+            repo.THREAD_KIND_SAVED = "saved"
+            repo.get_thread_for_member.return_value = thread
+            repo.thread_member.return_value = member
+            repo.thread_member_ids.return_value = [7, 8]
+            repo.delete_thread.return_value = True
+            response = WorkspaceThreadView.as_view()(request, thread_id=3)
+            return response, repo
+
+    def test_either_side_may_delete_a_direct_chat(self):
+        response, repo = self._delete(MEMBER, thread={**DIRECT, "kind": "chat"})
+        assert response.status_code == 204
+        repo.delete_thread.assert_called_once_with(3, 55)
+
+    def test_a_plain_member_may_not_delete_a_group(self):
+        response, repo = self._delete(
+            MEMBER, thread={**GROUP, "kind": "group"}, member=_membership(8)
+        )
+        assert response.status_code == 403
+        repo.delete_thread.assert_not_called()
+
+    def test_a_group_admin_may(self):
+        response, _ = self._delete(
+            ADMIN, thread={**GROUP, "kind": "group"}, member=_membership(7, "admin")
+        )
+        assert response.status_code == 204
+
+    def test_saved_messages_are_never_deleted(self):
+        response, repo = self._delete(MEMBER, thread={**DIRECT, "kind": "saved"})
+        assert response.status_code == 403
+        repo.delete_thread.assert_not_called()

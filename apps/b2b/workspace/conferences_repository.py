@@ -153,6 +153,47 @@ def live_for_threads(thread_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
     return {row["thread_id"]: row for row in rows}
 
 
+def live_for_employee(company_id: int, employee_id: int) -> dict[str, Any] | None:
+    """Shu odam qo'shila oladigan, hozir ketayotgan konferensiya.
+
+    "Konferensiya" qatori shuni so'raydi: bosilganda yangisini ochish
+    kerakmi yoki ketayotganiga kirish kerakmi. Taklif suhbat orqali
+    yuboriladi, shuning uchun "chaqirilganmi" degan savol — "o'sha guruhning
+    a'zosimi" degan savol.
+    """
+    return fetch_one(
+        f"""
+        SELECT c.*
+          FROM {B2B_CONFERENCE_TABLE} c
+          JOIN {B2B_CHAT_MEMBER_TABLE} m
+            ON m.thread_id = c.thread_id AND m.employee_id = %s
+         WHERE c.company_id = %s AND c.status = %s
+         ORDER BY c.id DESC
+         LIMIT 1
+        """,
+        [employee_id, company_id, ConferenceStatus.LIVE],
+    )
+
+
+def participant_count(conference_id: int) -> int:
+    """Xonaga chaqirilganlar soni — taklif borgan guruhning a'zolari.
+
+    LiveKit'dan so'ralmaydi: bu backend kim kira olishini biladi, kim
+    hozir ichkarida o'tirganini esa bilmaydi va bilishi ham shart emas —
+    qator "necha kishi chaqirilgan" deb yozadi.
+    """
+    row = fetch_one(
+        f"""
+        SELECT COUNT(*) AS n
+          FROM {B2B_CHAT_MEMBER_TABLE} m
+          JOIN {B2B_CONFERENCE_TABLE} c ON c.thread_id = m.thread_id
+         WHERE c.id = %s
+        """,
+        [conference_id],
+    )
+    return int((row or {}).get("n") or 0)
+
+
 def finish(conference_id: int, *, ended_at: datetime | None = None) -> dict[str, Any] | None:
     """Close a live conference. Returns `None` when it was already closed —
     the caller then knows somebody else got there first and should not

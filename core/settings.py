@@ -272,10 +272,40 @@ ASGI_APPLICATION = "core.asgi.application"
 _db_port = os.environ.get("DB_PORT", "5432")
 if _db_port in ("", "db_port"):
     _db_port = "5432"
-# ASGI (Daphne) deployments must use CONN_MAX_AGE=0: persistent connections
-# accumulate one per thread and exhaust PostgreSQL's max_connections under load.
+# ASGI (Daphne) deployments must use CONN_MAX_AGE=0 *when they talk to
+# PostgreSQL directly*: persistent connections accumulate one per thread and
+# exhaust PostgreSQL's max_connections under load.
+#
+# That default is expensive. A fresh connection costs ~13.7 ms even to a local
+# PostgreSQL (measured 2026-09-07; a kept one answers the same query in
+# 0.2 ms), and it is paid once per request on *every* endpoint — a third of
+# what a small API call takes.
+#
+# The way out is PgBouncer, not a bigger CONN_MAX_AGE: point DB_HOST at it and
+# it hands one small pool of real connections around, so keeping the app's own
+# connection open costs the database nothing. See `pgbouncer/docker-compose.yml`
+# — it carries the cutover steps and the checks that made transaction pooling
+# safe for this codebase.
 _db_conn_max_age = int((os.environ.get("DB_CONN_MAX_AGE") or "0").strip() or "0")
 _db_conn_health_checks = bool(int((os.environ.get("DB_CONN_HEALTH_CHECKS") or "1").strip() or "1"))
+
+# Set when DB_HOST is PgBouncer in transaction mode. Two things follow.
+#
+# Server-side cursors are turned off: in transaction pooling a cursor opened
+# in one transaction is gone by the time the next statement runs, because the
+# server connection underneath has been handed to somebody else. Nothing here
+# uses `.iterator()` today — this keeps it that way rather than waiting for
+# somebody to add one and find out in production.
+#
+# It also unlocks keeping the connection open, since the thing CONN_MAX_AGE=0
+# was defending against is now PgBouncer's job.
+DB_POOLED = bool(int((os.environ.get("DB_POOLED") or "0").strip() or "0"))
+if DB_POOLED:
+    DISABLE_SERVER_SIDE_CURSORS = True
+    # An explicit DB_CONN_MAX_AGE still wins — this is only the default that
+    # makes pooling worth deploying at all.
+    if not (os.environ.get("DB_CONN_MAX_AGE") or "").strip():
+        _db_conn_max_age = 600
 
 DATABASES = {
     "default": {

@@ -158,6 +158,19 @@ class Command(BaseCommand):
             cursor.execute("""
                 ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS voip_token VARCHAR(500);
             """)
+            # Muzlatilgan akkaunt: hali ham ro'yxatda turadi, lekin ishchi
+            # o'ringa kira olmaydi. `is_active = FALSE` bilan bir narsa emas —
+            # u kompaniyadan chiqarilgan, bu esa vaqtincha to'xtatilgan va
+            # bir tugma bilan qaytariladi.
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN NOT NULL DEFAULT FALSE;
+            """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ;
+            """)
+            cursor.execute("""
+                ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS frozen_by BIGINT;
+            """)
             self.stdout.write("  Created b2b_employee")
 
             cursor.execute("""
@@ -858,6 +871,13 @@ class Command(BaseCommand):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
+        cursor.execute(
+            # What the row is about, where that is a thing with an id of its
+            # own — the task a `task_created` / `task_done` row names, so the
+            # history can open it. Null on every kind that is only words.
+            "ALTER TABLE b2b_workspace_lead_activity "
+            "ADD COLUMN IF NOT EXISTS target_id BIGINT;"
+        )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS b2b_workspace_lead_activity_lead_idx "
             "ON b2b_workspace_lead_activity (lead_id, created_at DESC, id DESC);"
@@ -2575,6 +2595,45 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_supplier")
 
+        # ── Buyurtmalar ─────────────────────────────────────────────────
+        #
+        # "Skladda mahsulot qolmadi, olish kerak" — anybody who can see the
+        # stock room raises one, and whoever runs the stock room decides. It
+        # replaced the movements list ("История") in the Ombor module: the
+        # ledger was already readable from a product's own card, and what the
+        # tab was worth to a salesperson standing at an empty shelf was a way
+        # to ask for more, not a log of what had already gone.
+        #
+        # `product_id` may be null: the thing that ran out is sometimes not in
+        # the catalogue yet, and refusing the request until somebody files a
+        # product card is how a request does not get made at all. `title` is
+        # what was actually asked for either way — a snapshot, so a renamed or
+        # deleted product does not rewrite the history of the ask.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS b2b_stock_order (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL REFERENCES b2b_company(id) ON DELETE CASCADE,
+                product_id BIGINT REFERENCES b2b_product(id) ON DELETE SET NULL,
+                title VARCHAR(300) NOT NULL,
+                quantity NUMERIC(12, 3) NOT NULL DEFAULT 0,
+                unit VARCHAR(30) NOT NULL DEFAULT 'dona',
+                note TEXT,
+                status VARCHAR(20) NOT NULL DEFAULT 'new',
+                author_id BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                decided_by BIGINT REFERENCES b2b_employee(id) ON DELETE SET NULL,
+                decided_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute(
+            # The list is always "this company, newest first", and the badge
+            # over the tab counts the open ones.
+            "CREATE INDEX IF NOT EXISTS b2b_stock_order_company_idx "
+            "ON b2b_stock_order (company_id, status, created_at DESC, id DESC);"
+        )
+        self.stdout.write("  Created b2b_stock_order")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_inventory_settings (
                 company_id BIGINT PRIMARY KEY REFERENCES b2b_company(id) ON DELETE CASCADE,
@@ -2586,6 +2645,10 @@ class Command(BaseCommand):
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
+        cursor.execute(
+            "ALTER TABLE b2b_inventory_settings ADD COLUMN IF NOT EXISTS "
+            "usd_rate NUMERIC(14, 4) NOT NULL DEFAULT 12500;"
+        )
         self.stdout.write("  Created b2b_inventory_settings")
 
         for statement in (
@@ -2593,6 +2656,10 @@ class Command(BaseCommand):
             "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS brand VARCHAR(200);",
             "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS supplier_id BIGINT REFERENCES b2b_supplier(id) ON DELETE SET NULL;",
             "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS markup_percent NUMERIC(7, 2);",
+            # Goods are bought in dollars: the dollar figure is what the buyer
+            # typed and the one that survives a change of rate, so it is stored
+            # and ``purchase_price`` is the som it converted to on the day.
+            "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS purchase_price_usd NUMERIC(14, 2);",
             "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS wholesale_price NUMERIC(14, 2) NOT NULL DEFAULT 0;",
             "ALTER TABLE b2b_product ADD COLUMN IF NOT EXISTS allow_free_price BOOLEAN NOT NULL DEFAULT FALSE;",
             # A variant is a product of its own — its own SKU, its own stock
@@ -2726,6 +2793,17 @@ class Command(BaseCommand):
         cursor.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS b2b_stock_document_item_lead_item_idx "
             "ON b2b_stock_document_item (lead_item_id) WHERE lead_item_id IS NOT NULL;"
+        )
+        # A receipt line is bought in dollars: the dollar figure and the rate
+        # it was converted at are kept on the line, so the som cost above them
+        # can still be explained a year later, when the rate has moved on.
+        cursor.execute(
+            "ALTER TABLE b2b_stock_document_item ADD COLUMN IF NOT EXISTS "
+            "unit_cost_usd NUMERIC(14, 2);"
+        )
+        cursor.execute(
+            "ALTER TABLE b2b_stock_document_item ADD COLUMN IF NOT EXISTS "
+            "usd_rate NUMERIC(14, 4);"
         )
         self.stdout.write("  Created b2b_stock_document_item")
 

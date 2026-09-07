@@ -54,6 +54,8 @@ class ConferenceSerializer(serializers.Serializer):
     server_url = serializers.CharField()
     token = serializers.CharField(allow_null=True)
     token_expires_at = serializers.DateTimeField(allow_null=True)
+    #: Faqat ro'yxatda: nechta odam chaqirilgan.
+    participant_count = serializers.IntegerField(required=False)
 
 
 def _refused(error: CallError) -> Response:
@@ -74,7 +76,27 @@ class _ConferenceView(WorkspaceAPIView):
 
 
 class WorkspaceConferenceListCreateView(_ConferenceView):
-    """POST /conferences/ — open a conference and invite people into it."""
+    """GET  /conferences/ — hozir ketayotgani, agar bo'lsa.
+    POST /conferences/ — open a conference and invite people into it."""
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="The conference running right now, if any",
+        responses={200: ConferenceSerializer()},
+    )
+    def get(self, request):
+        """Chat ro'yxatidagi "Konferensiya" qatori shuni o'qiydi: qator
+        bosilganda yangisi ochiladimi yoki ketayotganiga qo'shiladimi."""
+        live = conf_repo.live_for_employee(request.user.company_id, request.user.id)
+        if live:
+            # Muddatidan oshib ketgani hali ham "live" deb yozilgan bo'lishi
+            # mumkin — o'qishdan oldin hisoblab qo'yiladi.
+            live = conferences.settle(live)
+        if not live or live.get("status") != conf_repo.ConferenceStatus.LIVE:
+            return Response({"results": []})
+        payload = conferences.payload(live)
+        payload["participant_count"] = conf_repo.participant_count(int(live["id"]))
+        return Response({"results": [payload]})
 
     @swagger_auto_schema(
         tags=WORKSPACE_TAG,

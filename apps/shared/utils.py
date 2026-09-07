@@ -197,6 +197,12 @@ def exception_errors_format_handler(exc, context):
         else:
             # Token xato — bitta formatda va aniq yo‘riqnoma bilan qaytaramiz
             response.data = _format_token_error_response(response)
+        # Mijoz ko‘rsatib qo‘yish bilan kifoyalanmasdan, harakat qilishi kerak
+        # bo‘lgan rad javoblari o‘z kodini eng ustida olib yuradi — masalan
+        # muzlatilgan akkaunt ishchi o‘rin tanlash sahifasiga qaytariladi.
+        machine_code = getattr(exc, "machine_code", None)
+        if machine_code and isinstance(response.data, dict):
+            response.data["code"] = machine_code
     except Exception as e:
         formatter = ErrorsFormatter(exc, response.status_code)
         response.data = formatter()

@@ -104,3 +104,63 @@ class TestCounters:
         assert "AS in_progress_count" in sql
         assert counters["todo_count"] == 2
         assert counters["in_progress_count"] == 3
+
+
+# ─── A task raised off a deal ─────────────────────────────────────────────────
+
+def test_a_task_raised_off_a_lead_lands_on_the_lead_s_history():
+    """The lead card's "next step" became a real task, so the deal has to
+    hear about it — both when it is agreed and when it is done."""
+    with (
+        patch("apps.b2b.workspace.repository.fetch_one", return_value={"id": 91}),
+        patch("apps.b2b.workspace.repository.set_task_assignees"),
+        patch("apps.b2b.workspace.repository.replace_subtasks"),
+        patch("apps.b2b.workspace.repository.add_task_activity"),
+        patch("apps.b2b.workspace.repository.get_task", return_value={"id": 91}),
+        patch("apps.b2b.workspace.repository.add_lead_activity") as logged,
+    ):
+        repo.create_task(
+            company_id=55, author_id=7, title="Shartnomani yuborish", lead_id=12,
+        )
+
+    logged.assert_called_once()
+    assert logged.call_args.args[0] == 12
+    assert logged.call_args.kwargs["kind"] == "task_created"
+    assert logged.call_args.kwargs["target_id"] == 91
+    assert logged.call_args.kwargs["text"] == "Shartnomani yuborish"
+
+
+def test_an_ordinary_task_leaves_every_lead_alone():
+    with (
+        patch("apps.b2b.workspace.repository.fetch_one", return_value={"id": 91}),
+        patch("apps.b2b.workspace.repository.set_task_assignees"),
+        patch("apps.b2b.workspace.repository.replace_subtasks"),
+        patch("apps.b2b.workspace.repository.add_task_activity"),
+        patch("apps.b2b.workspace.repository.get_task", return_value={"id": 91}),
+        patch("apps.b2b.workspace.repository.add_lead_activity") as logged,
+    ):
+        repo.create_task(company_id=55, author_id=7, title="Ofisga borish")
+
+    logged.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "moved_to,expected",
+    [("done", 1), ("in_progress", 0)],
+)
+def test_only_finishing_a_lead_s_task_reaches_the_deal(moved_to, expected):
+    """Moving it along the board is the assignee's own business; finishing
+    it is the deal's."""
+    current = {"title": "Shartnomani yuborish", "status": "todo", "lead_id": 12}
+    with (
+        patch("apps.b2b.workspace.repository.fetch_one", return_value=current),
+        patch("apps.b2b.workspace.repository.add_task_activity"),
+        patch("apps.b2b.workspace.repository.get_task", return_value={"id": 91}),
+        patch("apps.b2b.workspace.repository.add_lead_activity") as logged,
+    ):
+        repo.update_task(91, 55, actor_id=7, status=moved_to)
+
+    assert logged.call_count == expected
+    if expected:
+        assert logged.call_args.kwargs["kind"] == "task_done"
+        assert logged.call_args.kwargs["target_id"] == 91

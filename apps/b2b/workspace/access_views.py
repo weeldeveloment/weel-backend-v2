@@ -124,6 +124,7 @@ _VERB_LABELS_RU = {
     "change_permissions": "Изменение прав",
     "remove_from_workspace": "Удаление из рабочей среды",
     "remove_from_company": "Удаление из компании",
+    "freeze": "Заморозка аккаунта",
     "create_workspace": "Создание рабочей среды",
     "stock_view": "Склад: просмотр каталога и остатков",
     "stock_manage": "Склад: приход, перемещение, инвентаризация",
@@ -162,6 +163,7 @@ _VERB_LABELS = {
     "change_permissions": "Huquqlarni o’zgartirish",
     "remove_from_workspace": "Ish joyidan chiqarish",
     "remove_from_company": "Kompaniyadan chiqarish",
+    "freeze": "Akkauntni muzlatish",
     "create_workspace": "Ish muhiti yaratish",
     "stock_view": "Ombor: katalog va qoldiqni ko’rish",
     "stock_manage": "Ombor: kirim, transfer, inventarizatsiya",
@@ -282,6 +284,9 @@ class WorkspaceEmployeeAccessView(WorkspaceAPIView):
             # its "По роли / Настроить" toggle in the right position.
             "module_override": employee.get("module_access"),
             "permission_override": employee.get("permission_access"),
+            # Muzlatilganmi — sahifadagi "Muzlatish / Aktivlashtirish"
+            # tugmasi qaysi tomonda turishini shu hal qiladi.
+            "is_frozen": bool(employee.get("is_frozen")),
         })
 
     @swagger_auto_schema(
@@ -476,6 +481,76 @@ class WorkspaceEmployeeRemoveView(WorkspaceAPIView):
             actor_employee_id=request.user.id,
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class EmployeeFreezeSerializer(serializers.Serializer):
+
+    #: True — muzlatish, False — qaytarish. Bitta endpoint, chunki ikkalasi
+    #: ham bir xil huquq va bir xil tekshiruvlar ustida turadi.
+    frozen = serializers.BooleanField()
+
+
+class WorkspaceEmployeeFreezeView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/employees/<id>/freeze/ — akkauntni muzlatish
+    yoki qaytarish.
+
+    Muzlatilgan xodim ro'yxatdan yo'qolmaydi va ishlari o'zida qoladi; u
+    faqat ishchi o'ringa kira olmaydi — kirmoqchi bo'lsa "akkauntingiz
+    muzlatilgan" deb qaytariladi va ishchi o'rin tanlash sahifasiga
+    yuboriladi. Egasi va lider uchun (TZ v2 §11).
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Freeze or reactivate a member",
+        request_body=EmployeeFreezeSerializer,
+    )
+    def post(self, request, employee_id: int):
+        target = repo.get_workspace_employee(employee_id)
+        if not target or target["company_id"] != request.user.company_id:
+            return Response(
+                {"detail": _("Employee not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+        if Role.clean(target.get("role")) == Role.OWNER:
+            return Response(
+                {"detail": _("The owner cannot be frozen.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if target["id"] == request.user.id:
+            # O'zini muzlatgan odam o'zini ochib ham ololmaydi.
+            return Response(
+                {"detail": _("You cannot freeze your own account.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not request.user.may(Permission.EMPLOYEE_FREEZE):
+            return Response(
+                {"detail": _("You may not freeze this member.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        # Chiqarib yuborishdagi kabi: faqat o'zidan past turgan odamga.
+        if not arepo.outranks(request.user.role, target.get("role")):
+            return Response(
+                {"detail": _("You may only freeze somebody ranked below you.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = EmployeeFreezeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        frozen = serializer.validated_data["frozen"]
+
+        updated = arepo.freeze_employee(
+            employee_id,
+            company_id=request.user.company_id,
+            frozen=frozen,
+            actor_employee_id=request.user.id,
+        )
+        if not updated:
+            return Response(
+                {"detail": _("Employee not found.")}, status=status.HTTP_404_NOT_FOUND
+            )
+        return Response({"employee_id": employee_id, "is_frozen": frozen})
 
 
 class OwnershipRequestSerializer(serializers.Serializer):

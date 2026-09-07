@@ -293,7 +293,7 @@ def list_memberships(account_id: int) -> list[dict[str, Any]]:
     """
     return fetch_all(
         f"""
-        SELECT e.id AS employee_id, e.role, e.is_guest, e.company_id,
+        SELECT e.id AS employee_id, e.role, e.is_guest, e.is_frozen, e.company_id,
                c.name AS company_name, c.slug AS company_slug, c.org_id,
                COALESCE(o.name, c.name) AS org_name
           FROM {B2B_EMPLOYEE_TABLE} e

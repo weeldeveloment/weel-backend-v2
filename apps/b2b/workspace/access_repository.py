@@ -272,6 +272,50 @@ def grant_exceeds(
     return extra_modules, extra_permissions
 
 
+def freeze_employee(
+    employee_id: int,
+    *,
+    company_id: int,
+    frozen: bool,
+    actor_employee_id: int | None,
+) -> dict[str, Any] | None:
+    """Muzlatadi yoki qaytaradi.
+
+    Chiqarib yuborishdan farqi shundaki, qator faol qolaveradi: xodim
+    ro'yxatda turadi, ishlari va tarixi o'zida, va bitta tugma bilan
+    qaytariladi. Faqat ishchi o'ringa kirish yopiladi — buni
+    `WorkspaceJWTAuthentication` har so'rovda qayta o'qiydi, shuning uchun
+    muzlatish ochiq turgan seansni ham o'sha zahoti to'xtatadi.
+    """
+    now = timezone.now()
+    updated = fetch_one(
+        f"""
+        UPDATE {B2B_EMPLOYEE_TABLE}
+           SET is_frozen = %s,
+               frozen_at = %s,
+               frozen_by = %s,
+               updated_at = %s
+         WHERE id = %s AND company_id = %s AND is_active = TRUE
+        RETURNING *
+        """,
+        [
+            bool(frozen), now if frozen else None,
+            actor_employee_id if frozen else None, now,
+            employee_id, company_id,
+        ],
+    )
+    if not updated:
+        return None
+    record_audit(
+        company_id,
+        actor_employee_id=actor_employee_id,
+        action="employee.frozen" if frozen else "employee.unfrozen",
+        target_type="employee",
+        target_id=employee_id,
+    )
+    return updated
+
+
 def remove_employee(
     employee_id: int,
     *,

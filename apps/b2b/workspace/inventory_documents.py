@@ -92,6 +92,7 @@ _DOC_SELECT = f"""
     SELECT d.*,
            w.name AS warehouse_name, t.name AS to_warehouse_name,
            s.name AS supplier_name, cu.full_name AS customer_name,
+           ld.company_name AS lead_name,
            a.full_name AS author_name, c.full_name AS confirmed_by_name,
            x.full_name AS cancelled_by_name, r.number AS reversal_of_number,
            COALESCE(i.line_count, 0) AS line_count,
@@ -102,6 +103,7 @@ _DOC_SELECT = f"""
     LEFT JOIN {B2B_WAREHOUSE_TABLE} t ON t.id = d.to_warehouse_id
     LEFT JOIN {B2B_SUPPLIER_TABLE} s ON s.id = d.supplier_id
     LEFT JOIN b2b_workspace_customer cu ON cu.id = d.customer_id
+    LEFT JOIN b2b_workspace_lead ld ON ld.id = d.lead_id
     LEFT JOIN {B2B_EMPLOYEE_TABLE} a ON a.id = d.author_id
     LEFT JOIN {B2B_EMPLOYEE_TABLE} c ON c.id = d.confirmed_by
     LEFT JOIN {B2B_EMPLOYEE_TABLE} x ON x.id = d.cancelled_by
@@ -226,6 +228,9 @@ def list_items(document_id: int) -> list[dict[str, Any]]:
 
 def _clean_items(company_id: int, kind: str, items: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     cleaned = []
+    # The rate the company set by hand in Sozlamalar -> Moliya, read once for
+    # the whole document so every line on it is converted at the same dollar.
+    rate = inventory.usd_rate(company_id) if kind == DocumentKind.RECEIPT else None
     for raw in items or ():
         product_id = raw.get("product_id")
         if not product_id:
@@ -241,6 +246,21 @@ def _clean_items(company_id: int, kind: str, items: Sequence[dict[str, Any]]) ->
             )
         qty = _q(raw.get("quantity") if raw.get("quantity") is not None else raw.get("qty"))
         unit_cost = raw.get("unit_cost")
+        unit_cost_usd = None
+        if kind == DocumentKind.RECEIPT:
+            # Goods arrive priced in dollars. Whatever the buyer typed in the
+            # dollar box wins over the som box, and a receipt that typed
+            # neither takes the card's own dollar price — which is the whole
+            # point of the rate: what comes in today comes in at today's
+            # rate, while what is already on the shelf keeps its som price.
+            unit_cost_usd = raw.get("unit_cost_usd")
+            if unit_cost_usd is None and unit_cost is None:
+                unit_cost_usd = product.get("purchase_price_usd")
+            unit_cost_usd = _q(unit_cost_usd) if unit_cost_usd is not None else None
+            if unit_cost_usd is not None and unit_cost_usd > 0:
+                unit_cost = inventory.som_from_usd(unit_cost_usd, rate)
+            else:
+                unit_cost_usd = None
         if unit_cost is None:
             unit_cost = (
                 product.get("sale_price") if kind in (DocumentKind.SALE, DocumentKind.RETURN)
@@ -250,6 +270,8 @@ def _clean_items(company_id: int, kind: str, items: Sequence[dict[str, Any]]) ->
             "product_id": int(product_id),
             "quantity": qty,
             "unit_cost": _q(unit_cost),
+            "unit_cost_usd": unit_cost_usd,
+            "usd_rate": rate if unit_cost_usd is not None else None,
             "system_quantity": None,
             "counted_quantity": None,
             "old_price": None,
@@ -373,12 +395,14 @@ def _write_items(document_id: int, lines: Sequence[dict[str, Any]]) -> None:
             f"""
             INSERT INTO {B2B_STOCK_DOCUMENT_ITEM_TABLE}
                 (document_id, product_id, quantity, system_quantity, counted_quantity, unit_cost,
-                 old_price, new_price, old_wholesale, new_wholesale, position, lead_item_id, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 unit_cost_usd, usd_rate, old_price, new_price, old_wholesale, new_wholesale,
+                 position, lead_item_id, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
                 document_id, item["product_id"], item["quantity"], item.get("system_quantity"),
-                item.get("counted_quantity"), item["unit_cost"], item.get("old_price"),
+                item.get("counted_quantity"), item["unit_cost"],
+                item.get("unit_cost_usd"), item.get("usd_rate"), item.get("old_price"),
                 item.get("new_price"), item.get("old_wholesale"), item.get("new_wholesale"),
                 position, item.get("lead_item_id"), timezone.now(),
             ],
@@ -590,18 +614,41 @@ def confirm_document(document_id: int, company_id: int, *, actor_id: int | None)
                     touched.append(int(part["id"]))
             # The receipt sets the product's purchase price to what was just
             # paid: the next sale's margin should be measured against it.
+            # This is the one place the dollar rate reaches the catalogue —
+            # the goods being received are repriced at it, and the sale price
+            # follows the markup that is already on the card. A product that
+            # nothing came in for keeps the som price it was filed at.
             if kind == DocumentKind.RECEIPT:
                 for item in doc["items"]:
                     product = inventory.get_product_raw(int(item["product_id"]), company_id)
-                    if product and _q(product.get("purchase_price")) != item["unit_cost"] and item["unit_cost"] > 0:
+                    if not product or item["unit_cost"] <= 0:
+                        continue
+                    updates: dict[str, Any] = {}
+                    if _q(product.get("purchase_price")) != item["unit_cost"]:
                         inventory.record_price_change(
                             company_id, int(item["product_id"]), field="purchase_price",
                             old_price=product.get("purchase_price"), new_price=item["unit_cost"],
                             author_id=actor_id, document_id=document_id,
                         )
+                        updates["purchase_price"] = item["unit_cost"]
+                    usd = item.get("unit_cost_usd")
+                    if usd is not None and _q(usd) > 0 and _q(product.get("purchase_price_usd")) != _q(usd):
+                        updates["purchase_price_usd"] = _q(usd)
+                    markup = product.get("markup_percent")
+                    if "purchase_price" in updates and markup is not None and item.get("new_price") is None:
+                        sale = inventory.price_from_markup(item["unit_cost"], markup)
+                        if sale is not None and sale != _q(product.get("sale_price")):
+                            inventory.record_price_change(
+                                company_id, int(item["product_id"]), field="sale_price",
+                                old_price=product.get("sale_price"), new_price=sale,
+                                author_id=actor_id, document_id=document_id,
+                            )
+                            updates["sale_price"] = sale
+                    if updates:
+                        assignments = ", ".join(f"{column} = %s" for column in updates)
                         execute(
-                            f"UPDATE {B2B_PRODUCT_TABLE} SET purchase_price = %s, updated_at = %s WHERE id = %s",
-                            [item["unit_cost"], now, item["product_id"]],
+                            f"UPDATE {B2B_PRODUCT_TABLE} SET {assignments}, updated_at = %s WHERE id = %s",
+                            [*updates.values(), now, item["product_id"]],
                         )
         stamps = {"confirmed_by": actor_id, "confirmed_at": now}
         if kind == DocumentKind.TRANSFER:

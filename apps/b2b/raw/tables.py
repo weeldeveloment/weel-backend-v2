@@ -72,6 +72,8 @@ B2B_SUPPLIER_TABLE = "b2b_supplier"
 B2B_PRODUCT_COMPONENT_TABLE = "b2b_product_component"
 B2B_PRICE_HISTORY_TABLE = "b2b_price_history"
 B2B_INVENTORY_SETTINGS_TABLE = "b2b_inventory_settings"
+#: "Olish kerak" — a restock request anybody in the stock room can raise.
+B2B_STOCK_ORDER_TABLE = "b2b_stock_order"
 # Outside services plugged into the workspace. `b2b_integration` is the
 # connection a workspace made — one row per (company, provider) — and
 # `b2b_integration_page` is what that connection actually watches: a Facebook

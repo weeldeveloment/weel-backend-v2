@@ -36,6 +36,7 @@ from apps.b2b.workspace.access_views import (
     WorkspaceDeleteRequestDecideView,
     WorkspaceDeleteRequestView,
     WorkspaceEmployeeAccessView,
+    WorkspaceEmployeeFreezeView,
     WorkspaceEmployeeRemoveView,
     WorkspaceRoleDetailView,
     WorkspaceRoleListView,
@@ -713,6 +714,13 @@ LEGACY_FLAGS = {
         # «Hisobotlar»: the screen and the file. Reading it is the manager's
         # too; taking the figures off the phone stops here.
         "can_view_reports", "can_export_reports",
+        # The stock room's settings sheet, the USD rate included — the same
+        # right that books a receipt.
+        "can_manage_stock",
+        # Roster ustidagi uchta tugma: muzlatish, ish joyidan chiqarish va
+        # kompaniyadan chiqarish. TZ v2 §11 — egasi va lider.
+        "can_freeze_employee",
+        "can_remove_from_workspace", "can_remove_from_company",
     },
 
     # The roster calls this one `performer`; the app calls it "Manager".
@@ -737,6 +745,12 @@ LEGACY_FLAGS = {
         # The report screen opens to a manager; exporting it does not, by
         # default — the role editor can widen that.
         "can_view_reports",
+        # The stock room's settings sheet, the USD rate included — the same
+        # right that books a receipt.
+        "can_manage_stock",
+        # Rahbar o'z ish joyidan chiqara oladi; muzlatish va kompaniyadan
+        # chiqarish esa yuqorida qoladi.
+        "can_remove_from_workspace",
     },
 
     # `can_post_lead` is a deliberate widening, not a drift: raising a lead is
@@ -922,6 +936,80 @@ def test_removing_from_the_company_needs_the_wider_permission():
         )
 
     assert response.status_code == 403
+
+
+# ─── Muzlatish (egasi va lider) ───────────────────────────────────────────────
+
+def test_a_manager_may_not_freeze_anybody():
+    """Muzlatish rahbarning ro'yxatida yo'q — egasi va lider uchun."""
+    from apps.b2b.workspace.roles import capabilities_for
+
+    assert capabilities_for(Role.MANAGER)["can_freeze_employee"] is False
+    assert capabilities_for(Role.OWNER)["can_freeze_employee"] is True
+    assert capabilities_for(Role.ADMIN)["can_freeze_employee"] is True
+
+
+def test_the_owner_cannot_be_frozen():
+    with patch(
+        "apps.b2b.workspace.access_views.repo.get_workspace_employee",
+        return_value=_employee(role=Role.OWNER),
+    ), _granting(Permission.EMPLOYEE_FREEZE):
+        response = _call(
+            WorkspaceEmployeeFreezeView,
+            factory.post("/employees/5/freeze/", {"frozen": True}, format="json"),
+            _user(Role.ADMIN),
+            employee_id=5,
+        )
+
+    assert response.status_code == 403
+
+
+def test_freezing_needs_the_permission_even_for_an_admin():
+    with patch(
+        "apps.b2b.workspace.access_views.repo.get_workspace_employee",
+        return_value=_employee(role=Role.EMPLOYEE),
+    ), _granting(Permission.EMPLOYEE_REMOVE_WORKSPACE):
+        response = _call(
+            WorkspaceEmployeeFreezeView,
+            factory.post("/employees/5/freeze/", {"frozen": True}, format="json"),
+            _user(Role.ADMIN),
+            employee_id=5,
+        )
+
+    assert response.status_code == 403
+
+
+def test_an_admin_freezes_and_reactivates_an_employee():
+    for frozen in (True, False):
+        with patch(
+            "apps.b2b.workspace.access_views.repo.get_workspace_employee",
+            return_value=_employee(role=Role.EMPLOYEE),
+        ), _granting(Permission.EMPLOYEE_FREEZE), patch(
+            "apps.b2b.workspace.access_views.arepo.freeze_employee",
+            return_value=_employee(role=Role.EMPLOYEE, is_frozen=frozen),
+        ) as write:
+            response = _call(
+                WorkspaceEmployeeFreezeView,
+                factory.post("/employees/5/freeze/", {"frozen": frozen}, format="json"),
+                _user(Role.ADMIN),
+                employee_id=5,
+            )
+
+        assert response.status_code == 200
+        assert response.data == {"employee_id": 5, "is_frozen": frozen}
+        assert write.call_args.kwargs["frozen"] is frozen
+
+
+def test_a_frozen_employee_is_refused_with_a_code_the_app_acts_on():
+    """401 emas: token yaroqli, seans yaroqsiz — ilova odamni ishchi o'rin
+    tanlash sahifasiga qaytaradi, akkauntdan chiqarib yubormaydi."""
+    from apps.b2b.workspace.authentication import AccountFrozen, refuse_if_frozen
+
+    refuse_if_frozen({"id": 5, "is_frozen": False})
+    with pytest.raises(AccountFrozen) as raised:
+        refuse_if_frozen({"id": 5, "is_frozen": True})
+    assert raised.value.status_code == 403
+    assert raised.value.machine_code == "account_frozen"
 
 
 # ─── Deleting a workspace (TZ §4) ──────────────────────────────────────────────

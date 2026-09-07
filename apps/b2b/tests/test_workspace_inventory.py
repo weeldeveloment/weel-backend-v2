@@ -42,6 +42,8 @@ from apps.b2b.workspace.inventory_views import (
     WorkspaceMovementListCreateView,
     WorkspaceProductDetailView,
     WorkspaceProductListCreateView,
+    WorkspaceStockOrderDetailView,
+    WorkspaceStockOrderListCreateView,
     WorkspaceWarehouseDetailView,
     WorkspaceWarehouseListCreateView,
 )
@@ -270,7 +272,9 @@ def test_a_one_line_movement_becomes_a_confirmed_document():
         )
     assert response.status_code == 201
     assert create.call_args.kwargs["kind"] == "inventory"
-    assert create.call_args.kwargs["items"] == [{"product_id": 10, "unit_cost": None, "counted_quantity": Decimal("9")}]
+    assert create.call_args.kwargs["items"] == [
+        {"product_id": 10, "unit_cost": None, "unit_cost_usd": None, "counted_quantity": Decimal("9")}
+    ]
     confirm.assert_called_once()
 
 
@@ -445,8 +449,8 @@ def test_a_bundle_unfolds_into_its_parts_and_a_service_into_nothing():
 
 
 def test_the_sale_price_follows_the_markup():
-    assert inventory._price_from_markup(1000, 50) == Decimal("1500.00")
-    assert inventory._price_from_markup(None, 50) is None
+    assert inventory.price_from_markup(1000, 50) == Decimal("1500.00")
+    assert inventory.price_from_markup(None, 50) is None
 
 
 def test_document_numbers_carry_their_kind():
@@ -742,3 +746,230 @@ def test_a_bare_to_date_means_the_whole_day():
     request.query_params = request.GET
     exact = _datetime_param(request, "to", end=True)
     assert (exact.day, exact.hour, exact.minute) == (5, 13, 30)
+
+
+# ─── Dollars on the shelf ─────────────────────────────────────────────────────
+
+def test_a_dollar_purchase_price_becomes_the_sale_price_in_som():
+    """The card's own worked example: 700 USD at 12 500, plus 30%."""
+    from apps.b2b.workspace import inventory_repository as inventory_repo
+
+    som = inventory_repo.som_from_usd(Decimal("700"), Decimal("12500"))
+    assert som == Decimal("8750000.00")
+    assert inventory_repo.price_from_markup(som, Decimal("30")) == Decimal("11375000.00")
+
+
+def test_the_settings_fall_back_to_a_usable_rate():
+    """A company that never opened the finance sheet still prices at
+    something — a zero rate would put every shelf at nothing."""
+    from apps.b2b.workspace import inventory_repository as inventory_repo
+
+    with patch("apps.b2b.workspace.inventory_repository.fetch_one", return_value=None):
+        assert inventory_repo.usd_rate(COMPANY_ID) == inventory_repo.DEFAULT_USD_RATE
+
+
+def test_a_receipt_is_priced_at_todays_rate_and_the_shelf_is_not():
+    """The rate reaches the catalogue through the receipt and nowhere else:
+    goods coming in are converted at what the settings say today, while a
+    product nothing arrived for keeps the som price it was filed at."""
+    product = {
+        "id": 7, "kind": "product", "name": "Muzlatgich",
+        "purchase_price": Decimal("8750000.00"), "purchase_price_usd": Decimal("700"),
+        "sale_price": Decimal("11375000.00"), "markup_percent": Decimal("30"),
+    }
+    with (
+        patch("apps.b2b.workspace.inventory_repository.get_product_raw", return_value=product),
+        patch("apps.b2b.workspace.inventory_repository.usd_rate", return_value=Decimal("13000")),
+    ):
+        [line] = documents._clean_items(
+            COMPANY_ID, documents.DocumentKind.RECEIPT, [{"product_id": 7, "quantity": 2}]
+        )
+    assert line["unit_cost_usd"] == Decimal("700")
+    assert line["usd_rate"] == Decimal("13000")
+    assert line["unit_cost"] == Decimal("9100000.00")
+
+
+def test_a_receipt_typed_in_som_stays_in_som():
+    """Not everything is bought in dollars. A som figure on the line is what
+    was paid, and the rate has no say over it."""
+    product = {
+        "id": 7, "kind": "product", "name": "Qop", "purchase_price": Decimal("50000"),
+        "purchase_price_usd": Decimal("4"), "sale_price": Decimal("60000"),
+        "markup_percent": Decimal("20"),
+    }
+    with (
+        patch("apps.b2b.workspace.inventory_repository.get_product_raw", return_value=product),
+        patch("apps.b2b.workspace.inventory_repository.usd_rate", return_value=Decimal("13000")),
+    ):
+        [line] = documents._clean_items(
+            COMPANY_ID, documents.DocumentKind.RECEIPT,
+            [{"product_id": 7, "quantity": 1, "unit_cost": Decimal("55000")}],
+        )
+    assert line["unit_cost"] == Decimal("55000")
+    assert line["unit_cost_usd"] is None
+
+
+# ─── A return is a return of something ────────────────────────────────────────
+
+def test_a_return_must_say_which_sale_it_undoes():
+    """Otherwise the stock room shows goods coming back from nowhere, and
+    nobody reading the document a month later can say where from."""
+    response = _call(
+        WorkspaceMovementListCreateView,
+        factory.post(
+            "/inventory/movements/",
+            {"kind": "return", "product_id": 10, "quantity": "2"},
+            format="json",
+        ),
+        MANAGER,
+    )
+    assert response.status_code == 400
+    assert response.data["errors"][0]["field"] == "lead_id"
+
+
+def test_a_return_with_its_sale_is_booked_against_that_lead():
+    booked = {}
+
+    def _create(company_id, **kwargs):
+        booked.update(kwargs)
+        return {"id": 5, "status": "confirmed", "kind": "return"}
+
+    with (
+        patch("apps.b2b.workspace.inventory_views.documents.create_document", _create),
+    ):
+        response = _call(
+            WorkspaceMovementListCreateView,
+            factory.post(
+                "/inventory/movements/",
+                {"kind": "return", "product_id": 10, "quantity": "2", "lead_id": 77},
+                format="json",
+            ),
+            MANAGER,
+        )
+
+    assert response.status_code == 201
+    assert booked["lead_id"] == 77
+
+
+# ─── Buyurtmalar ──────────────────────────────────────────────────────────────
+#
+# "Skladda mahsulot qolmadi, olish kerak." Raised by anybody standing at the
+# empty shelf, decided by whoever runs the stock room. These pin the two rules
+# that separate the halves.
+
+def _order(**overrides):
+    row = {
+        "id": 4, "company_id": COMPANY_ID, "product_id": 10,
+        "title": "Sement M400", "quantity": Decimal("30"), "unit": "qop",
+        "note": None, "status": "new", "author_id": EMPLOYEE_ID,
+        "author_name": "Xodim", "decided_by": None, "decided_by_name": None,
+        "decided_at": None, "created_at": "2026-09-07T10:00:00Z",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_an_ordinary_employee_may_ask_for_a_restock():
+    """The person who notices the shelf is empty is rarely the person who
+    buys, so asking is not gated behind the buying right."""
+    with patch(
+        "apps.b2b.workspace.inventory_views.inventory.create_order",
+        return_value=_order(),
+    ):
+        response = _call(
+            WorkspaceStockOrderListCreateView,
+            factory.post("/inventory/orders/", {"product_id": 10, "quantity": "30"},
+                         format="json"),
+            EMPLOYEE,
+        )
+    assert response.status_code == 201
+    assert response.data["title"] == "Sement M400"
+    # Asking is not deciding.
+    assert response.data["can_decide"] is False
+    # But it is theirs to take back while nobody has acted on it.
+    assert response.data["can_delete"] is True
+
+
+def test_an_employee_cannot_decide_a_restock_request():
+    response = _call(
+        WorkspaceStockOrderDetailView,
+        factory.patch("/inventory/orders/4/", {"status": "ordered"}, format="json"),
+        EMPLOYEE,
+        order_id=4,
+    )
+    assert response.status_code == 403
+    assert response.data["permission"] == "sales.stock_manage"
+
+
+def test_the_stock_room_moves_a_request_along():
+    with patch(
+        "apps.b2b.workspace.inventory_views.inventory.set_order_status",
+        return_value=_order(status="ordered", decided_by=MANAGER_ID),
+    ) as moved:
+        response = _call(
+            WorkspaceStockOrderDetailView,
+            factory.patch("/inventory/orders/4/", {"status": "ordered"}, format="json"),
+            MANAGER,
+            order_id=4,
+        )
+    assert response.status_code == 200
+    assert response.data["status"] == "ordered"
+    assert moved.call_args.kwargs["status"] == "ordered"
+    assert moved.call_args.kwargs["actor_id"] == MANAGER_ID
+
+
+def test_somebody_elses_request_is_not_yours_to_withdraw():
+    with patch(
+        "apps.b2b.workspace.inventory_views.inventory.get_order",
+        return_value=_order(author_id=OWNER_ID),
+    ):
+        response = _call(
+            WorkspaceStockOrderDetailView,
+            factory.delete("/inventory/orders/4/"),
+            EMPLOYEE,
+            order_id=4,
+        )
+    assert response.status_code == 403
+
+
+def test_a_request_already_being_bought_is_not_withdrawn_by_its_author():
+    """Somebody has gone out and ordered against it — erasing it now leaves
+    the goods arriving against nothing."""
+    with patch(
+        "apps.b2b.workspace.inventory_views.inventory.get_order",
+        return_value=_order(status="ordered"),
+    ):
+        response = _call(
+            WorkspaceStockOrderDetailView,
+            factory.delete("/inventory/orders/4/"),
+            EMPLOYEE,
+            order_id=4,
+        )
+    assert response.status_code == 403
+
+
+def test_a_request_needs_to_say_what_is_needed():
+    response = _call(
+        WorkspaceStockOrderListCreateView,
+        factory.post("/inventory/orders/", {"quantity": "5"}, format="json"),
+        EMPLOYEE,
+    )
+    assert response.status_code == 400
+    assert response.data["errors"][0]["field"] == "title"
+
+
+def test_the_list_carries_the_count_the_tab_badges():
+    with (
+        patch("apps.b2b.workspace.inventory_views.inventory.list_orders",
+              return_value=[_order()]),
+        patch("apps.b2b.workspace.inventory_views.inventory.count_open_orders",
+              return_value=3),
+    ):
+        response = _call(
+            WorkspaceStockOrderListCreateView,
+            factory.get("/inventory/orders/?status=open"),
+            EMPLOYEE,
+        )
+    assert response.status_code == 200
+    assert response.data["open_count"] == 3
+    assert len(response.data["results"]) == 1

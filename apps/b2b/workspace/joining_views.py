@@ -473,6 +473,16 @@ class AccountOpenWorkspaceView(AccountAPIView):
                 {"detail": _("That workspace access has ended.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        if employee.get("is_frozen"):
+            # Kirishga urinilgan joyda aytiladi, chunki odam sababini shu
+            # yerda so'raydi. Ilova ham shu kod bo'yicha ekranda ushlab qoladi.
+            return Response(
+                {
+                    "detail": _("Sizning akkauntingiz muzlatilgan."),
+                    "code": "account_frozen",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
         tokens = create_workspace_tokens(employee)
         return Response({
             "access": tokens["access"],
@@ -516,6 +526,9 @@ def _workspaces(account_id: int) -> list[dict]:
             "role": Role.clean(row.get("role")),
             "role_label": Role.label(row.get("role")),
             "is_guest": bool(row.get("is_guest")),
+            # Muzlatilgan ish joyi ro'yxatda ko'rinib turadi — yo'qolib
+            # qolgani odamga hech narsa tushuntirmaydi. Bosilsa esa ochilmaydi.
+            "is_frozen": bool(row.get("is_frozen")),
         }
         for row in accounts.list_memberships(account_id)
     ]

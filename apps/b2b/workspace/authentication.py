@@ -18,6 +18,28 @@ from apps.b2b.workspace.tokens import WORKSPACE_ACCOUNT_TYPE, WORKSPACE_USER_TYP
 DASHBOARD_USER_TYPE = "b2b"
 
 
+class AccountFrozen(exceptions.PermissionDenied):
+    """Muzlatilgan akkaunt ishchi o'ringa kirmoqchi bo'lganda.
+
+    401 emas, 403: token yaroqli, seans esa yaroqsiz. Ilova buni ko'rib
+    odamni ishchi o'rin tanlash sahifasiga qaytaradi — akkauntdan butunlay
+    chiqarib yubormaydi, chunki uning boshqa ish joyi bo'lishi mumkin.
+    `machine_code` javobning eng ustiga chiqadi (`shared.utils`), shuning
+    uchun ilova matnni emas, kodni o'qiydi.
+    """
+
+    default_detail = _("Sizning akkauntingiz muzlatilgan.")
+    default_code = "account_frozen"
+    machine_code = "account_frozen"
+
+
+def refuse_if_frozen(employee: dict) -> None:
+    """Har so'rovda qayta o'qiladi, shuning uchun muzlatish ochiq turgan
+    seansni ham o'sha zahoti to'xtatadi."""
+    if employee.get("is_frozen"):
+        raise AccountFrozen()
+
+
 class WorkspaceUser:
     """The signed-in employee, as seen by permissions and views."""
 
@@ -217,6 +239,7 @@ class WorkspaceJWTAuthentication(DenylistCheckedJWTAuthentication):
             raise exceptions.AuthenticationFailed(
                 _("Employee not found or deactivated"), code="employee_not_found"
             )
+        refuse_if_frozen(employee)
 
         return WorkspaceUser(employee, resolve_membership(employee)), validated_token
 
@@ -276,6 +299,7 @@ class DashboardWorkspaceAuthentication(DenylistCheckedJWTAuthentication):
             raise exceptions.AuthenticationFailed(
                 _("No workspace employee for this account"), code="employee_not_found"
             )
+        refuse_if_frozen(employee)
 
         # `ensure_workspace_employee` resolves to a permanent row, so this is
         # None in practice — passed anyway so the two authenticators cannot

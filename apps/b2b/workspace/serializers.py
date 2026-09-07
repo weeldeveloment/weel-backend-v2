@@ -75,6 +75,9 @@ class TeamMemberSerializer(serializers.Serializer):
     # Somebody lent to this workspace by another one. The app marks the row so
     # it is clear who is here for a while and who was hired here.
     is_guest = serializers.BooleanField(required=False, default=False)
+    # Akkaunti muzlatilgan xodim ro'yxatda qoladi — belgisi bilan, chunki
+    # uni qaytaradigan odam avval uni ko'ra olishi kerak.
+    is_frozen = serializers.BooleanField(required=False, default=False)
     # Whether they are holding a socket open right now, and when they last
     # were. Not the same thing as `status`, which is available/on_trip/blocked
     # and is a manager's account of where somebody is for days at a time —
@@ -188,6 +191,12 @@ class TaskSerializer(serializers.Serializer):
     due_date = serializers.DateTimeField(allow_null=True, required=False)
     author_id = serializers.IntegerField()
     created_at = serializers.DateTimeField()
+    #: The deal this task was raised off, and its name — null on an ordinary
+    #: task. Raising one against a lead is what the lead card's "next step"
+    #: became: it lands on the board like any other task and shows on the
+    #: deal's history, both when it is created and when it is finished.
+    lead_id = serializers.IntegerField(allow_null=True, required=False)
+    lead_name = serializers.CharField(allow_null=True, required=False)
     assignee_ids = serializers.ListField(child=serializers.IntegerField())
     subtasks = SubtaskSerializer(many=True)
     comments = TaskCommentSerializer(many=True)
@@ -406,8 +415,12 @@ class LeadActivitySerializer(serializers.Serializer):
     id = serializers.IntegerField()
     kind = serializers.ChoiceField(choices=LEAD_ACTIVITY_KINDS)
     #: The employee's note for a `comment`; for a `stage` move the two stage
-    #: names as `from>to`; empty otherwise.
+    #: names as `from>to`; the task's title on `task_created` / `task_done`;
+    #: empty otherwise.
     text = serializers.CharField(allow_blank=True)
+    #: The task a `task_created` / `task_done` row names, so it can be
+    #: opened from the history. Null on every other kind.
+    target_id = serializers.IntegerField(allow_null=True, required=False)
     author_id = serializers.IntegerField(allow_null=True)
     author_name = serializers.CharField(allow_null=True, required=False)
     author_photo = serializers.CharField(allow_null=True, required=False)

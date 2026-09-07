@@ -263,6 +263,10 @@ class WorkspaceConsumer(AsyncWebsocketConsumer):
         employee = repo.get_workspace_employee(employee_id)
         if not employee:
             return None
+        # Muzlatilgan akkaunt soketda ham turmaydi: aks holda ochiq turgan
+        # ilova xabarlarni olishda davom etardi.
+        if employee.get("is_frozen"):
+            return None
         return {"employee_id": employee_id, "company_id": employee["company_id"]}
 
     @database_sync_to_async

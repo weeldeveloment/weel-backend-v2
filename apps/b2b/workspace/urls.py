@@ -8,6 +8,7 @@ from apps.b2b.workspace.access_views import (
     WorkspaceDeleteRequestDecideView,
     WorkspaceDeleteRequestView,
     WorkspaceEmployeeAccessView,
+    WorkspaceEmployeeFreezeView,
     WorkspaceEmployeeRemoveView,
     WorkspaceOwnershipRequestView,
     WorkspaceRoleDetailView,
@@ -45,6 +46,8 @@ from apps.b2b.workspace.inventory_views import (
     WorkspaceInventoryImportCommitView,
     WorkspaceInventoryImportPreviewView,
     WorkspaceInventorySettingsView,
+    WorkspaceStockOrderDetailView,
+    WorkspaceStockOrderListCreateView,
     WorkspaceInventorySummaryView,
     WorkspaceMovementListCreateView,
     WorkspacePendingSalesView,
@@ -167,6 +170,7 @@ from apps.b2b.workspace.views import (
     WorkspaceThreadFlagsView,
     WorkspaceThreadListCreateView,
     WorkspaceThreadReadView,
+    WorkspaceThreadView,
     WorkspaceTokenRefreshView,
 )
 
@@ -206,6 +210,11 @@ urlpatterns = [
         "employees/<int:employee_id>/remove/",
         WorkspaceEmployeeRemoveView.as_view(),
         name="ws-employee-remove",
+    ),
+    path(
+        "employees/<int:employee_id>/freeze/",
+        WorkspaceEmployeeFreezeView.as_view(),
+        name="ws-employee-freeze",
     ),
     path("audit/", WorkspaceAuditView.as_view(), name="ws-audit"),
     path("archive/", WorkspaceArchiveView.as_view(), name="ws-archive"),
@@ -466,6 +475,7 @@ urlpatterns = [
         WorkspaceMessageReactionView.as_view(),
         name="ws-chat-message-reactions",
     ),
+    path("chats/<int:thread_id>/", WorkspaceThreadView.as_view(), name="ws-chat-detail"),
     path("chats/<int:thread_id>/read/", WorkspaceThreadReadView.as_view(), name="ws-chat-read"),
     path("chats/<int:thread_id>/flags/", WorkspaceThreadFlagsView.as_view(), name="ws-chat-flags"),
     # The group's own screen. Under "group/" rather than at the thread root so
@@ -556,6 +566,9 @@ urlpatterns = [
         name="ws-inventory-summary",
     ),
     path("inventory/settings/", WorkspaceInventorySettingsView.as_view(), name="ws-inventory-settings"),
+    # "Olish kerak" — the tab that replaced the movements list in Ombor.
+    path("inventory/orders/", WorkspaceStockOrderListCreateView.as_view(), name="ws-stock-orders"),
+    path("inventory/orders/<int:order_id>/", WorkspaceStockOrderDetailView.as_view(), name="ws-stock-order"),
     path("inventory/generate/", WorkspaceGenerateCodeView.as_view(), name="ws-inventory-generate"),
     path("inventory/suppliers/", WorkspaceSupplierListCreateView.as_view(), name="ws-inventory-suppliers"),
     path(

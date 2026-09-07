@@ -304,6 +304,11 @@ class Permission:
     EMPLOYEE_CHANGE_PERMISSIONS = "employees.change_permissions"
     EMPLOYEE_REMOVE_WORKSPACE = "employees.remove_from_workspace"
     EMPLOYEE_REMOVE_COMPANY = "employees.remove_from_company"
+    #: Muzlatish va qaytarish. Chiqarib yuborishdan alohida turadi: muzlatilgan
+    #: xodim ro'yxatda qoladi, ishlari va tarixi o'zida, faqat ishchi o'ringa
+    #: kira olmaydi. TZ v2 §11 ning "faqat egasi va lider" qatori — shuning
+    #: uchun rahbarning ro'yxatida yo'q, va rol muharriri orqali beriladi.
+    EMPLOYEE_FREEZE = "employees.freeze"
     #: Opening a new workspace under this company. TZ v2 §11: the owner and
     #: the administrator may; a manager or an employee only if handed this;
     #: a guest never, whatever they were handed — see `Role.assignable`.
@@ -347,6 +352,7 @@ class Permission:
             EMPLOYEE_VIEW, EMPLOYEE_INVITE, EMPLOYEE_CHANGE_ROLE,
             EMPLOYEE_CHANGE_MODULES, EMPLOYEE_CHANGE_PERMISSIONS,
             EMPLOYEE_REMOVE_WORKSPACE, EMPLOYEE_REMOVE_COMPANY,
+            EMPLOYEE_FREEZE,
             WORKSPACE_CREATE,
         ),
 
@@ -633,6 +639,16 @@ CAPABILITY_PERMISSIONS: dict[str, str] = {
     # default (TZ v2: no reports module); the role editor can grant both.
     "can_view_reports": Permission.REPORT_VIEW,
     "can_export_reports": Permission.REPORT_EXPORT,
+    # The stock room's own settings — the SKU prefix, the write-off alert,
+    # and the USD rate the shelf is priced at. The same right that runs a
+    # receipt: whoever books goods in is who says what the dollar is worth.
+    "can_manage_stock": Permission.STOCK_MANAGE,
+    # Xodim akkauntini muzlatish va qaytarish — egasi va lider uchun.
+    "can_freeze_employee": Permission.EMPLOYEE_FREEZE,
+    # Kompaniyadan chiqarish tugmasi shu bayroq ostida ko'rinadi; ish joyidan
+    # chiqarish esa `can_manage_team` bilan bir qatorda turadi.
+    "can_remove_from_company": Permission.EMPLOYEE_REMOVE_COMPANY,
+    "can_remove_from_workspace": Permission.EMPLOYEE_REMOVE_WORKSPACE,
 }
 
 

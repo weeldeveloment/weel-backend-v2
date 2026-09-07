@@ -57,6 +57,11 @@ scrape_configs:
     static_configs: [{ targets: [redis-exporter:9121] }]
   - job_name: celery-exporter
     static_configs: [{ targets: [celery-exporter:9808] }]
+  # PgBouncer stack'i deploy qilinmagan bo'lsa bu target shunchaki "down"
+  # bo'lib turadi — Prometheus'ni buzmaydi. Eng muhim metrika:
+  # pgbouncer_pools_client_waiting_connections > 0 = pool yetmayapti.
+  - job_name: pgbouncer-exporter
+    static_configs: [{ targets: [pgbouncer-exporter:9127] }]
 
   # ── Weel backend (django-prometheus) ──
   # Ichki tarmoq orqali. core/middleware/metrics_guard.py tashqi IP'larga

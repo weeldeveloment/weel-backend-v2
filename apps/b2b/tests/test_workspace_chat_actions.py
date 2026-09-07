@@ -327,3 +327,71 @@ class TestDelete:
             )
         assert response.status_code == 404
         repo.get_message.assert_not_called()
+
+
+# ─── One serializer for the page ──────────────────────────────────────────────
+
+def test_a_page_of_bubbles_reads_the_same_as_one_bubble_at_a_time():
+    """Opening a room serializes the whole page through a single
+    ``many=True`` instance instead of one serializer per message — it is
+    about eight times faster on a fifty-message page, which is what a busy
+    room opens with. This pins the two paths to the same output, so the fast
+    one cannot quietly start sending a different shape.
+    """
+    from django.utils import timezone
+
+    from apps.b2b.workspace.views import _message_page, _message_payload
+
+    now = timezone.now()
+    messages = [
+        {
+            "id": 1, "thread_id": 9, "sender_id": 7, "text": "Salom",
+            "reply_to_id": None, "created_at": now, "edited_at": None,
+            "forwarded_from_id": None, "pinned_at": None,
+        },
+        {
+            # A message carrying every extra at once: an attachment, a quote
+            # of the first, a reaction, and a forward label.
+            "id": 2, "thread_id": 9, "sender_id": 8, "text": "Mana fayl",
+            "reply_to_id": 1, "created_at": now, "edited_at": now,
+            "forwarded_from_id": 12, "pinned_at": now,
+        },
+    ]
+    attachments = {
+        2: {"id": 5, "name": "hisobot.pdf", "size": 120, "path": "b2b/chat/5.pdf",
+            "content_type": "application/pdf", "duration_ms": None},
+    }
+    quoted = {1: messages[0]}
+    reactions = {2: [{"employee_id": 7, "emoji": "👍"}]}
+    names = {12: "Sardor"}
+
+    one_at_a_time = [
+        _message_payload(
+            m,
+            attachments.get(m["id"]),
+            quoted.get(m.get("reply_to_id")),
+            attachments.get(m.get("reply_to_id")),
+            reactions.get(m["id"]),
+            7,
+            names,
+        )
+        for m in messages
+    ]
+    whole_page = _message_page(
+        messages, attachments=attachments, quoted=quoted,
+        reactions=reactions, viewer_id=7, names=names,
+    )
+
+    assert whole_page == one_at_a_time
+    # And the extras really are on there — an assertion that two empty lists
+    # match would pass whatever the code did.
+    assert whole_page[1]["attachment"]["name"] == "hisobot.pdf"
+    assert whole_page[1]["reply_to"] is not None
+    assert whole_page[1]["forwarded_from_name"] == "Sardor"
+    assert whole_page[1]["reactions"][0]["emoji"] == "👍"
+
+
+def test_an_empty_page_is_an_empty_list_not_a_crash():
+    from apps.b2b.workspace.views import _message_page
+
+    assert _message_page([], viewer_id=7) == []

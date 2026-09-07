@@ -21,6 +21,19 @@ _schema_ctx = threading.local()
 
 
 def push_schema_context(schema_name: str) -> None:
+    """Runs every following query against `schema_name` on this thread.
+
+    Nothing calls this today, and there is a reason to keep it that way. The
+    schema is applied as a bare `SET search_path` immediately before each
+    query — see [_apply_schema_context] — and when the database is reached
+    through PgBouncer in transaction mode (`DB_POOLED=1`), a `SET` outside a
+    transaction lands on a server connection that is handed to the next client
+    before the query using it runs. The schema would then leak to somebody
+    else's query and be missing from this one.
+
+    If this is ever needed, wrap the `SET` and its query in one
+    `transaction.atomic()` block, or turn transaction pooling off.
+    """
     stack = getattr(_schema_ctx, 'stack', None)
     if stack is None:
         stack = []

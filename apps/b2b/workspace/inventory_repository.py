@@ -28,6 +28,7 @@ from django.utils import timezone
 from shared.raw.db import execute, fetch_all, fetch_one
 from apps.b2b.raw.tables import (
     B2B_EMPLOYEE_TABLE,
+    B2B_STOCK_ORDER_TABLE,
     B2B_INVENTORY_SETTINGS_TABLE,
     B2B_PRICE_HISTORY_TABLE,
     B2B_PRODUCT_CATEGORY_TABLE,
@@ -95,6 +96,23 @@ class WriteOffReason:
     CHOICES = [DEFECT, LOSS, DAMAGE, INTERNAL_USE, OTHER]
 
 
+class StockOrderStatus:
+    """Where a restock request has got to.
+
+    Four states and no more: somebody asked, somebody is buying it, it
+    arrived — or it was turned down. A request with a longer life than that
+    is a purchase order, which this deliberately is not.
+    """
+    NEW = "new"
+    ORDERED = "ordered"
+    DONE = "done"
+    REJECTED = "rejected"
+
+    CHOICES = [NEW, ORDERED, DONE, REJECTED]
+    #: Still waiting on somebody — what the tab's badge counts.
+    OPEN = (NEW, ORDERED)
+
+
 class InventoryError(Exception):
     """A movement the ledger refuses — said in words the sheet can print."""
 
@@ -105,6 +123,9 @@ class InventoryError(Exception):
 
 
 DEFAULT_WAREHOUSE_NAME = "Asosiy sklad"
+
+#: The USD rate a company that never opened the finance settings prices at.
+DEFAULT_USD_RATE = Decimal("12500")
 
 
 def _q(value: Any) -> Decimal:
@@ -136,34 +157,190 @@ def get_settings(company_id: int) -> dict[str, Any]:
         "sku_prefix": "P",
         "next_sku": 1,
         "write_off_alert": Decimal("500000"),
+        "usd_rate": DEFAULT_USD_RATE,
     }
 
 
+def usd_rate(company_id: int) -> Decimal:
+    """The dollar the company prices against. Hand-set in the settings and
+    read from there on every calculation — no ticker, no bank feed: the rate
+    the accountant agreed is the rate the shelf is priced at."""
+    rate = _q(get_settings(company_id).get("usd_rate"))
+    return rate if rate > 0 else DEFAULT_USD_RATE
+
+
+def som_from_usd(amount_usd, rate) -> Decimal:
+    """Xarid narxi (UZS) = xarid narxi (USD) x kurs."""
+    return (_q(amount_usd) * _q(rate)).quantize(Decimal("0.01"))
+
+
 def update_settings(company_id: int, **fields: Any) -> dict[str, Any]:
-    allowed = {"allow_backorder", "base_currency", "sku_prefix", "write_off_alert"}
+    allowed = {"allow_backorder", "base_currency", "sku_prefix", "write_off_alert", "usd_rate"}
     changes = {k: v for k, v in fields.items() if k in allowed and v is not None}
     current = get_settings(company_id)
     merged = {**current, **changes}
     execute(
         f"""
         INSERT INTO {B2B_INVENTORY_SETTINGS_TABLE}
-            (company_id, allow_backorder, base_currency, sku_prefix, next_sku, write_off_alert, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (company_id, allow_backorder, base_currency, sku_prefix, next_sku, write_off_alert,
+             usd_rate, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (company_id) DO UPDATE SET
             allow_backorder = EXCLUDED.allow_backorder,
             base_currency = EXCLUDED.base_currency,
             sku_prefix = EXCLUDED.sku_prefix,
             write_off_alert = EXCLUDED.write_off_alert,
+            usd_rate = EXCLUDED.usd_rate,
             updated_at = EXCLUDED.updated_at
         """,
         [
             company_id, bool(merged["allow_backorder"]),
             (merged["base_currency"] or "UZS")[:3].upper(),
             (merged["sku_prefix"] or "P")[:10], int(merged.get("next_sku") or 1),
-            _q(merged.get("write_off_alert")), timezone.now(),
+            _q(merged.get("write_off_alert")),
+            # A rate of zero would price every shelf at nothing, so a cleared
+            # field falls back to the default rather than to nought.
+            _q(merged.get("usd_rate")) or DEFAULT_USD_RATE, timezone.now(),
         ],
     )
     return get_settings(company_id)
+
+
+# ─── Buyurtmalar ──────────────────────────────────────────────────────────────
+
+_ORDER_SELECT = f"""
+    SELECT o.*,
+           e.full_name AS author_name,
+           d.full_name AS decided_by_name,
+           p.sku AS product_sku,
+           p.unit AS product_unit
+    FROM {B2B_STOCK_ORDER_TABLE} o
+    LEFT JOIN {B2B_EMPLOYEE_TABLE} e ON e.id = o.author_id
+    LEFT JOIN {B2B_EMPLOYEE_TABLE} d ON d.id = o.decided_by
+    LEFT JOIN {B2B_PRODUCT_TABLE} p ON p.id = o.product_id
+"""
+
+
+def list_orders(
+    company_id: int,
+    *,
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """The restock requests, newest first.
+
+    ``status`` of "open" is the one the screen opens on — what somebody still
+    has to do something about.
+    """
+    where = ["o.company_id = %s"]
+    params: list[Any] = [company_id]
+    if status == "open":
+        where.append("o.status = __ANY_MARKER__(%s)")
+        params.append(list(StockOrderStatus.OPEN))
+    elif status in StockOrderStatus.CHOICES:
+        where.append("o.status = %s")
+        params.append(status)
+    if search:
+        where.append("(o.title ILIKE %s OR o.note ILIKE %s)")
+        params.extend([f"%{search}%", f"%{search}%"])
+    params.append(max(1, min(int(limit), 500)))
+    return fetch_all(
+        f"{_ORDER_SELECT} WHERE {' AND '.join(where)} "
+        "ORDER BY o.created_at DESC, o.id DESC LIMIT %s",
+        params,
+    )
+
+
+def get_order(order_id: int, company_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        f"{_ORDER_SELECT} WHERE o.id = %s AND o.company_id = %s",
+        [order_id, company_id],
+    )
+
+
+def count_open_orders(company_id: int) -> int:
+    row = fetch_one(
+        f"SELECT COUNT(*) AS n FROM {B2B_STOCK_ORDER_TABLE} "
+        "WHERE company_id = %s AND status = __ANY_MARKER__(%s)",
+        [company_id, list(StockOrderStatus.OPEN)],
+    )
+    return int((row or {}).get("n") or 0)
+
+
+def create_order(
+    company_id: int,
+    *,
+    author_id: int,
+    title: str | None = None,
+    product_id: int | None = None,
+    quantity=0,
+    unit: str | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Raises "this ran out, we need more".
+
+    The title is taken from the product when one was picked, so the request
+    reads the same whether it was raised from a card or typed by hand — and
+    it is stored rather than joined, so renaming the product later does not
+    rewrite what was asked for.
+    """
+    product = get_product_raw(product_id, company_id) if product_id else None
+    if product_id and not product:
+        raise InventoryError("Tovar topilmadi.", code="product_not_found")
+    name = (title or "").strip() or (product or {}).get("name") or ""
+    if not name:
+        raise InventoryError("Nima kerakligini yozing.", code="title_required")
+    now = timezone.now()
+    row = fetch_one(
+        f"""
+        INSERT INTO {B2B_STOCK_ORDER_TABLE}
+            (company_id, product_id, title, quantity, unit, note, status,
+             author_id, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        [
+            company_id, product_id, name[:300], _q(quantity),
+            ((unit or (product or {}).get("unit") or "dona").strip() or "dona")[:30],
+            (note or "").strip() or None, StockOrderStatus.NEW,
+            author_id, now, now,
+        ],
+    )
+    return get_order(row["id"], company_id)
+
+
+def set_order_status(
+    order_id: int, company_id: int, *, status: str, actor_id: int | None = None
+) -> dict[str, Any] | None:
+    """Moves a request along. Only the four states exist, and only forward or
+    to "rejected" — a request that has already arrived is not reopened, it is
+    asked for again."""
+    if status not in StockOrderStatus.CHOICES:
+        raise InventoryError("Noma'lum holat.", code="bad_status")
+    current = get_order(order_id, company_id)
+    if not current:
+        return None
+    if current["status"] == status:
+        return current
+    if current["status"] == StockOrderStatus.DONE:
+        raise InventoryError(
+            "Yopilgan buyurtmani o'zgartirib bo'lmaydi.", code="order_closed"
+        )
+    now = timezone.now()
+    execute(
+        f"UPDATE {B2B_STOCK_ORDER_TABLE} SET status = %s, decided_by = %s, "
+        "decided_at = %s, updated_at = %s WHERE id = %s AND company_id = %s",
+        [status, actor_id, now, now, order_id, company_id],
+    )
+    return get_order(order_id, company_id)
+
+
+def delete_order(order_id: int, company_id: int) -> bool:
+    return execute(
+        f"DELETE FROM {B2B_STOCK_ORDER_TABLE} WHERE id = %s AND company_id = %s",
+        [order_id, company_id],
+    ) > 0
 
 
 def next_sku(company_id: int) -> str:
@@ -755,7 +932,7 @@ def _sku_taken(company_id: int, column: str, value: str | None, *, exclude_id: i
     return bool(row)
 
 
-def _price_from_markup(purchase, markup) -> Decimal | None:
+def price_from_markup(purchase, markup) -> Decimal | None:
     """Sale price = purchase price + markup — the card's own arithmetic."""
     if purchase is None or markup is None:
         return None
@@ -777,6 +954,7 @@ def create_product(
     generate_barcode: bool = False,
     unit: str = "dona",
     purchase_price=0,
+    purchase_price_usd=None,
     sale_price=None,
     markup_percent=None,
     wholesale_price=0,
@@ -800,8 +978,12 @@ def create_product(
         raise InventoryError("Bu artikul allaqachon mavjud.", code="sku_taken")
     if _sku_taken(company_id, "barcode", barcode, exclude_id=None):
         raise InventoryError("Bu shtrix-kod allaqachon mavjud.", code="barcode_taken")
+    if purchase_price_usd is not None:
+        # The dollar figure wins: the som price is what it converts to at the
+        # rate in the settings, so the two never disagree on the card.
+        purchase_price = som_from_usd(purchase_price_usd, usd_rate(company_id))
     if sale_price is None:
-        sale_price = _price_from_markup(purchase_price, markup_percent) or 0
+        sale_price = price_from_markup(purchase_price, markup_percent) or 0
     if parent_id and not get_product_raw(parent_id, company_id):
         raise InventoryError("Asosiy tovar topilmadi.", code="product_not_found")
     now = timezone.now()
@@ -814,17 +996,19 @@ def create_product(
             f"""
             INSERT INTO {B2B_PRODUCT_TABLE}
                 (company_id, kind, category_id, supplier_id, brand, name, sku, barcode, unit,
-                 purchase_price, sale_price, markup_percent, wholesale_price, allow_free_price,
-                 min_stock, description, attributes, parent_id, variant_label, currency,
-                 is_active, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb,
+                 purchase_price, purchase_price_usd, sale_price, markup_percent, wholesale_price,
+                 allow_free_price, min_stock, description, attributes, parent_id, variant_label,
+                 currency, is_active, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb,
                     %s, %s, %s, TRUE, %s, %s)
             RETURNING *
             """,
             [
                 company_id, kind, category_id, supplier_id, (brand or "").strip() or None,
                 name.strip(), sku, barcode, (unit or "dona").strip(),
-                _q(purchase_price), _q(sale_price),
+                _q(purchase_price),
+                _q(purchase_price_usd) if purchase_price_usd is not None else None,
+                _q(sale_price),
                 _q(markup_percent) if markup_percent is not None else None,
                 _q(wholesale_price), bool(allow_free_price), _q(min_stock),
                 (description or "").strip() or None,
@@ -863,7 +1047,7 @@ def update_product(
 ) -> dict[str, Any] | None:
     allowed = {
         "name", "kind", "category_id", "supplier_id", "brand", "sku", "barcode", "unit",
-        "purchase_price", "sale_price", "markup_percent", "wholesale_price",
+        "purchase_price", "purchase_price_usd", "sale_price", "markup_percent", "wholesale_price",
         "allow_free_price", "min_stock", "description", "attributes", "is_active",
         "parent_id", "variant_label", "currency", "photo",
     }
@@ -885,14 +1069,24 @@ def update_product(
                 )
     if changes.get("parent_id") == product_id:
         raise InventoryError("Tovar o'zining varianti bo'la olmaydi.")
-    # Markup edited, sale price not: the price follows.
-    if "markup_percent" in changes and "sale_price" not in changes and changes["markup_percent"] is not None:
-        derived = _price_from_markup(
-            changes.get("purchase_price", current.get("purchase_price")), changes["markup_percent"]
+    # Dollar price edited: the som price follows it at today's rate, unless
+    # the sheet sent a som figure of its own in the same breath.
+    if changes.get("purchase_price_usd") is not None and "purchase_price" not in changes:
+        changes["purchase_price"] = som_from_usd(
+            changes["purchase_price_usd"], usd_rate(company_id)
+        )
+    # Markup edited, sale price not: the price follows. So does a purchase
+    # price that moved on its own — the markup on the card still holds.
+    markup = changes.get("markup_percent", current.get("markup_percent"))
+    if "sale_price" not in changes and markup is not None and (
+        "markup_percent" in changes or "purchase_price" in changes
+    ):
+        derived = price_from_markup(
+            changes.get("purchase_price", current.get("purchase_price")), markup
         )
         if derived is not None:
             changes["sale_price"] = derived
-    for column in ("purchase_price", "sale_price", "wholesale_price", "min_stock"):
+    for column in ("purchase_price", "purchase_price_usd", "sale_price", "wholesale_price", "min_stock"):
         if column in changes and changes[column] is not None:
             changes[column] = _q(changes[column])
     if "markup_percent" in changes and changes["markup_percent"] is not None:

@@ -1,0 +1,120 @@
+# PgBouncer — Dokploy'da ALOHIDA "Compose" ilova sifatida deploy qilinadi.
+#
+# Nima uchun kerak: backend `CONN_MAX_AGE=0` bilan ishlaydi, ya'ni HAR BIR
+# so'rovda PostgreSQL'ga yangi ulanish ochiladi. O'lchandi (2026-09-07):
+# ulanish ochib "SELECT 1" — 13,7 ms, saqlangan ulanishda — 0,2 ms. Bu faqat
+# chatga emas, har bir endpointga tushadi.
+#
+# `CONN_MAX_AGE` ni shundoq ko'tarib bo'lmaydi: ASGI/Daphne har bir ish
+# oqimida bittadan ulanish to'playdi va Postgres'ning `max_connections` ini
+# tugatadi (`core/settings.py` dagi izohga qarang). PgBouncer aynan shu
+# muammoni yechadi — backend unga arzon ulanadi, u esa bazaga oz sonli
+# haqiqiy ulanishni ko'pchilikka bo'lib beradi.
+#
+# Tarmoq: backend va Postgres turgan `dokploy-network` da bo'lishi shart.
+# Tashqariga hech narsa chiqmaydi — faqat ichki tarmoqda `pgbouncer:6432`.
+#
+# ┌──────────────────────────────────────────────────────────────────────┐
+# │ POOL_MODE=transaction xavfsiz ekani tekshirilgan (2026-09-07):        │
+# │  • server-side kursorlar ishlatilmaydi (`.iterator()` yo'q) va        │
+# │    `DISABLE_SERVER_SIDE_CURSORS` settings'da yoqiladi;                │
+# │  • advisory lock, LISTEN/NOTIFY yo'q;                                 │
+# │  • psycopg2 — prepared statement'larni o'zi ishlatmaydi;              │
+# │  • `SET search_path` faqat `push_schema_context()` chaqirilganda      │
+# │    yuboriladi, u esa hech qayerdan chaqirilmaydi. AGAR kelajakda      │
+# │    chaqirilsa — transaction pooling'ni O'CHIRING yoki SET ni          │
+# │    tranzaksiya ichiga oling, aks holda search_path boshqa clientga    │
+# │    oqib ketadi.                                                       │
+# └──────────────────────────────────────────────────────────────────────┘
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      # Orqadagi haqiqiy Postgres — backend hozir ishlatayotgan qiymatlar.
+      DB_HOST: ${DB_HOST:?DB_HOST kerak}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:?DB_USER kerak}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD kerak}
+      # Bitta baza emas, hammasi: backend `weel`, Grafana esa `grafana` ga
+      # boradi. `*` — kelgan ulanish qaysi bazani so'rasa, o'shanga ulaydi.
+      DB_NAME: "*"
+
+      # Image'ning o'zi 5432 ga quloq soladi — PgBouncer'ning odatiy 6432
+      # portiga ko'chiramiz, aks holda healthcheck ham, exporter ham,
+      # backend ham noto'g'ri portga uriladi.
+      LISTEN_PORT: 6432
+      POOL_MODE: transaction
+      # Backend, Celery va Daphne'dan kelayotgan ulanishlar soni. Arzon —
+      # bular PgBouncer'gacha, bazagacha emas.
+      MAX_CLIENT_CONN: ${PGB_MAX_CLIENT_CONN:-1000}
+      # Bazaga ochiladigan HAQIQIY ulanishlar (har (baza, foydalanuvchi)
+      # juftligi uchun).
+      #
+      # 20 — `max_connections = 100` uchun tanlangan (README dagi hisobga
+      # qarang). Transaction rejimida ulanish faqat tranzaksiya davomida
+      # band bo'ladi, shuning uchun 20 ta slot yuzlab ilova ulanishiga
+      # xizmat qiladi: chat so'rovi 7 ta so'rov yuboradi, har biri ~1 ms.
+      DEFAULT_POOL_SIZE: ${PGB_DEFAULT_POOL_SIZE:-20}
+      MIN_POOL_SIZE: ${PGB_MIN_POOL_SIZE:-5}
+      RESERVE_POOL_SIZE: ${PGB_RESERVE_POOL_SIZE:-5}
+      RESERVE_POOL_TIMEOUT: 3
+      # Barcha bazalar bo'yicha QAT'IY shift. Bu son PgBouncer bazadan
+      # oladigan eng ko'p ulanish — 100 dan 70 tasi boshqalarga
+      # (exporter, Grafana, psql, deploy paytidagi eski konteynerlar)
+      # qolishi uchun 30 qilingan.
+      MAX_DB_CONNECTIONS: ${PGB_MAX_DB_CONNECTIONS:-30}
+
+      # Bo'sh ulanishni cheksiz ushlab turmaydi.
+      SERVER_IDLE_TIMEOUT: 240
+      # Navbatda 15 soniyadan ortiq kutgan so'rov xato oladi — bu yerda
+      # osilib qolgandan ko'ra tez xato qaytargan ma'qul, aks holda
+      # Daphne'ning ish oqimlari to'lib, butun API javob bermay qoladi.
+      QUERY_WAIT_TIMEOUT: 15
+      # `ignore_startup_parameters` — psycopg2/Django yuboradigan, PgBouncer
+      # tanimaydigan parametrlar. Busiz ulanish "unsupported startup
+      # parameter" bilan rad etiladi.
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,options,search_path
+      # Statistika uchun `pgbouncer` bazasiga kim kira oladi — exporter shu
+      # foydalanuvchi bilan ulanadi.
+      ADMIN_USERS: ${DB_USER}
+      STATS_USERS: ${DB_USER}
+      AUTH_TYPE: ${PGB_AUTH_TYPE:-scram-sha-256}
+      TZ: ${TZ:-Asia/Tashkent}
+    healthcheck:
+      # `pg_isready` PgBouncer'ning o'z portini so'roqlaydi: javob bersa,
+      # u tirik va bazaga ulana olyapti.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U ${DB_USER} || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [shared]
+
+  # Pool to'lib qolganini KO'RISH uchun. Bu stack'ning yagona haqiqiy
+  # xavfi — `DEFAULT_POOL_SIZE` yetmay qolsa, so'rovlar navbatda kutadi.
+  # Grafana'da `pgbouncer_pools_client_waiting_connections` ni kuzating.
+  pgbouncer-exporter:
+    image: prometheuscommunity/pgbouncer-exporter:v0.12.1
+    restart: unless-stopped
+    logging: *default-logging
+    command:
+      - --pgBouncer.connectionString=postgres://${DB_USER}:${DB_PASSWORD}@pgbouncer:6432/pgbouncer?sslmode=disable
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    networks: [shared]
+
+networks:
+  # Backend, Postgres va Redis turgan Dokploy tarmog'i (mavjud bo'lishi shart).
+  shared:
+    name: ${DOKPLOY_NETWORK:-dokploy-network}
+    external: true

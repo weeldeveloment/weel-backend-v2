@@ -1,0 +1,43 @@
+groups:
+  - name: weel-pgbouncer
+    rules:
+      # PgBouncer stack'i hali deploy qilinmagan bo'lsa bu qoidalar hech
+      # narsa chiqarmaydi — metrikalar umuman bo'lmaydi. `PgBouncerDown`
+      # ham `pgbouncer_up == 0` ni tekshiradi, `absent()` ni emas, aynan
+      # shuning uchun: deploy qilinmagan narsa "yiqilgan" emas.
+      - alert: PgBouncerDown
+        expr: pgbouncer_up == 0
+        for: 2m
+        labels: { severity: critical, service: pgbouncer }
+        annotations:
+          summary: "PgBouncer javob bermayapti"
+          description: "Backend DB_HOST=pgbouncer bo'lsa, butun API yiqiladi. Orqaga qaytarish: backend env'ida DB_HOST/DB_PORT ni to'g'ridan-to'g'ri Postgres'ga, DB_POOLED=0 ga qaytaring (pgbouncer/README.md)."
+          dashboard: weel-postgres
+
+      # Bu stack'ning yagona haqiqiy xavfi. Navbatda kutayotgan client bor
+      # degani — pool tugagan, so'rovlar sekinlashyapti va query_wait_timeout
+      # (15s) ga yetsa xato qaytaradi.
+      - alert: PgBouncerClientsWaiting
+        expr: sum(pgbouncer_pools_client_waiting_connections) by (database) > 0
+        for: 3m
+        labels: { severity: warning, service: pgbouncer }
+        annotations:
+          summary: "PgBouncer navbatida {{ $value | printf \"%.0f\" }} ta client kutyapti ({{ $labels.database }})"
+          description: "Pool yetmayapti. PGB_DEFAULT_POOL_SIZE 20→30 va PGB_MAX_DB_CONNECTIONS 30→40 qiling — max_connections=100 da bunga joy bor (pgbouncer/README.md dagi sig'im jadvali)."
+          dashboard: weel-postgres
+
+      # Shiftga tegib turibdi: pool kattalashtirilmasa, keyingi qadam
+      # navbatda kutish.
+      - alert: PgBouncerPoolSaturated
+        expr: |
+          sum(pgbouncer_pools_server_active_connections) by (database)
+          /
+          clamp_min(sum(pgbouncer_pools_server_active_connections
+                      + pgbouncer_pools_server_idle_connections) by (database), 1)
+          > 0.9
+        for: 10m
+        labels: { severity: warning, service: pgbouncer }
+        annotations:
+          summary: "PgBouncer pool'i to'lay deb qoldi ({{ $labels.database }})"
+          description: "Server ulanishlarining 90% i band. Hali navbat yo'q, lekin yuk oshsa PgBouncerClientsWaiting keladi."
+          dashboard: weel-postgres
