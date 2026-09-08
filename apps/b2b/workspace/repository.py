@@ -1407,12 +1407,22 @@ def list_threads(company_id: int, employee_id: int) -> list[dict[str, Any]]:
         WHERE t.company_id = %s
         -- The saved room is the first row whatever else is going on, the way
         -- Telegram keeps Saved Messages at the top: it is the one thread the
-        -- reader can rely on finding without scrolling.
+        -- reader can rely on finding without scrolling. The conference room
+        -- sits under it for the same reason — it is where every meeting is
+        -- called from, and a room somebody has to search for is one they will
+        -- not think to open when a conference is running.
         ORDER BY (t.kind = %s) DESC,
+                 (t.kind = %s) DESC,
                  m.is_pinned DESC,
                  COALESCE(t.last_message_at, t.created_at) DESC
         """,
-        [employee_id, employee_id, company_id, THREAD_KIND_SAVED],
+        [
+            employee_id,
+            employee_id,
+            company_id,
+            THREAD_KIND_SAVED,
+            THREAD_KIND_CONFERENCE,
+        ],
     )
     return _attach_thread_members(threads, employee_id)
 
@@ -1476,6 +1486,9 @@ def get_thread_for_member(thread_id: int, company_id: int, employee_id: int) -> 
 #: thread at all (it lives in `b2b_ai_conversation`, see `assistant.py`).
 THREAD_KIND_CHAT = "chat"
 THREAD_KIND_SAVED = "saved"
+#: The one room per company that every conference is announced in and talked
+#: in — see `ensure_conference_thread`.
+THREAD_KIND_CONFERENCE = "conference"
 
 
 def ensure_saved_thread(company_id: int, employee_id: int) -> dict[str, Any]:
@@ -1505,6 +1518,72 @@ def ensure_saved_thread(company_id: int, employee_id: int) -> dict[str, Any]:
         [thread["id"], employee_id, now, now],
     )
     return thread
+
+
+#: What the conference room is called in the chat list. A group name rather
+#: than a blank one: the list draws a nameless thread as the person you are
+#: talking to, and this thread is not a person.
+CONFERENCE_THREAD_NAME = "Konferensiya"
+
+
+def ensure_conference_thread(company_id: int, created_by: int) -> dict[str, Any] | None:
+    """The company's one conference room, made on first ask and kept in step
+    with the roster.
+
+    Every conference — whoever calls it, whoever is invited — is announced in
+    this thread and talked in from inside the room. It used to be a group per
+    set of invitees, reused when the same set met again; in practice that
+    scattered the invitations across a dozen groups that looked alike, and the
+    card for the meeting starting right now was in whichever of them nobody
+    had open.
+
+    Everybody in the company is a member, and the membership is reconciled on
+    every call rather than at hire time: joining a company is not a moment
+    this module hears about, and a person who cannot see the room cannot be
+    let into a conference (`join` reads thread membership as the access rule).
+    Nobody is ever removed here — somebody who left the company stops being
+    `is_active` and so stops being added, but taking them out of a room is the
+    roster's business, not a conference's.
+    """
+    now = timezone.now()
+    thread = fetch_one(
+        f"""
+        INSERT INTO {B2B_CHAT_THREAD_TABLE}
+            (company_id, kind, group_name, created_by, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (company_id) WHERE kind = 'conference'
+        DO UPDATE SET updated_at = {B2B_CHAT_THREAD_TABLE}.updated_at
+        RETURNING *
+        """,
+        [company_id, THREAD_KIND_CONFERENCE, CONFERENCE_THREAD_NAME, created_by, now, now],
+    )
+    if not thread:
+        return None
+    # One statement, not one per employee: this runs on every read of the
+    # chat list, and a company of two hundred would otherwise pay two hundred
+    # round trips for a row that changes when somebody is hired.
+    execute(
+        f"""
+        INSERT INTO {B2B_CHAT_MEMBER_TABLE}
+            (thread_id, employee_id, role, created_at, updated_at)
+        SELECT %s, e.id, 'member', %s, %s
+        FROM {B2B_EMPLOYEE_TABLE} e
+        WHERE e.company_id = %s AND e.is_active = TRUE AND e.is_hidden = FALSE
+        ON CONFLICT (thread_id, employee_id) DO NOTHING
+        """,
+        [thread["id"], now, now, company_id],
+    )
+    # And the caller, whether or not they pass that filter. A hidden employee
+    # still opens the chat list, and a room they cannot read is worse than a
+    # row they were not expecting.
+    execute(
+        f"INSERT INTO {B2B_CHAT_MEMBER_TABLE} "
+        f"(thread_id, employee_id, role, created_at, updated_at) "
+        f"VALUES (%s, %s, 'member', %s, %s) "
+        f"ON CONFLICT (thread_id, employee_id) DO NOTHING",
+        [thread["id"], created_by, now, now],
+    )
+    return get_thread_for_member(thread["id"], company_id, created_by)
 
 
 def find_direct_thread(company_id: int, a: int, b: int) -> dict[str, Any] | None:

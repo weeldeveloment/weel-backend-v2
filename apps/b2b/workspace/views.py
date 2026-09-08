@@ -2151,6 +2151,12 @@ class WorkspaceThreadListCreateView(WorkspaceAPIView):
         # open the list — made here rather than at hiring, so an employee row
         # that predates the feature gets one too.
         repo.ensure_saved_thread(request.user.company_id, request.user.id)
+        # And the company's single "Konferensiya" room, for the same reason
+        # and one more: it has to be there *before* the first conference, or
+        # the row people are told to call meetings from would not exist until
+        # somebody had already called one. This is also where a newly hired
+        # employee is put into it — the reconciliation runs on every read.
+        repo.ensure_conference_thread(request.user.company_id, request.user.id)
         threads = repo.list_threads(request.user.company_id, request.user.id)
         return Response({
             "results": [_thread_payload(thread) for thread in threads],
@@ -3207,6 +3213,15 @@ class WorkspaceThreadView(WorkspaceAPIView):
         if thread.get("kind") == repo.THREAD_KIND_SAVED:
             return Response(
                 {"detail": _("Saved messages cannot be deleted.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        # The company's one conference room. Deleting it would take every
+        # invitation card with it — including the one for a meeting running
+        # right now — and the next chat-list read would silently make a new,
+        # empty one. There is nothing here for one person to decide.
+        if thread.get("kind") == repo.THREAD_KIND_CONFERENCE:
+            return Response(
+                {"detail": _("The conference chat cannot be deleted.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
         if thread.get("kind") == "group":

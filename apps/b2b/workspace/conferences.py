@@ -23,9 +23,10 @@ The flow, end to end:
 Why the invitation is an ordinary chat message rather than a notification of
 its own: the thread is where the people already are, it survives being
 missed, and it gives the conference a place to be talked about afterwards.
-The group is reused — a second conference for the same people lands in the
-same room instead of opening another, and if one is still running there it is
-joined rather than doubled. See `_group_for`.
+There is exactly one such thread per company — "Konferensiya", holding
+everybody — so every meeting is called from the same place and talked about in
+the same place, and two running at once are two cards in one room rather than
+two rooms to go looking for. See `_group_for`.
 
 The media server is the one `calls.py` is pointed at, and the token layout is
 that module's `sign_token` unchanged: a conference room is a room like any
@@ -152,32 +153,24 @@ def resolve_members(
     return members
 
 
-def _group_for(user, *, member_ids: Sequence[int], title: str) -> dict[str, Any] | None:
-    """The group this conference is announced in — the one these people
-    already have, or a new one.
+def _group_for(user) -> dict[str, Any] | None:
+    """The one room every conference in this company is announced in.
 
-    One set of people, one group. Opening a fresh group per conference buried
-    the chat list under a row for every meeting ever called, and each of them
-    held exactly one message; worse, the conversation that follows a meeting
-    ended up somewhere different from the conversation that followed the last
-    one with the same people.
+    It used to be a group per set of invitees, reused when the same set met
+    again. Two things were wrong with that. A dozen groups came to look alike
+    in the chat list — same faces, different order — so the card for the
+    meeting starting *now* was in whichever of them nobody had open. And the
+    conversation during a conference had nowhere fixed to go: it followed
+    whichever group this particular set of people happened to land in.
 
-    The group keeps the name it was opened with rather than taking this
-    conference's title: it is the room these people meet in, not this
-    meeting, and somebody may well have renamed it on purpose. The title
-    still travels — it is what the invitation card says.
+    One room instead, holding the whole company, sitting under "Saqlangan
+    xabarlar" in the list. Every invitation card is written there and every
+    word typed inside a room lands there. Who is *rung* is still the
+    organiser's list — that is the invitation, not the room.
+
+    The group keeps its own name; the meeting's title travels on the card.
     """
-    existing = conf_repo.thread_for_members(user.company_id, member_ids)
-    if existing:
-        thread = repo.get_thread_for_member(existing, user.company_id, user.id)
-        if thread:
-            return thread
-    return repo.create_thread(
-        company_id=user.company_id,
-        created_by=user.id,
-        member_ids=[i for i in member_ids if i != user.id],
-        group_name=title,
-    )
+    return repo.ensure_conference_thread(user.company_id, user.id)
 
 
 def create(
@@ -207,21 +200,16 @@ def create(
     if not others:
         raise CallError("O’zingizdan boshqa hech kim tanlanmadi.", status=400)
 
-    thread = _group_for(user, member_ids=[user.id, *others], title=title)
+    thread = _group_for(user)
     if not thread:
         raise CallError("Konferensiya xonasi ochilmadi.", status=500)
 
-    # The same people already talking in that group may already be *in* a
-    # conference there. Opening a second one would post a second card and
-    # split them across two rooms, each half wondering where everybody is —
-    # so the answer to "yangi konferensiya" here is the running one.
-    running = conf_repo.live_for_thread(thread["id"])
-    if running:
-        running = settle(running)
-        if running["status"] == ConferenceStatus.LIVE:
-            joined = join(running, user)
-            joined["thread"] = thread
-            return joined
+    # No "join the one already running" here any more. It made sense while a
+    # thread meant one set of people: a second conference in the same group
+    # would have split them across two rooms. The thread is now the whole
+    # company, and two teams holding two meetings at once is ordinary — the
+    # cards simply sit one above the other in the room they are both called
+    # from.
 
     conference = conf_repo.create_conference(
         company_id=user.company_id,

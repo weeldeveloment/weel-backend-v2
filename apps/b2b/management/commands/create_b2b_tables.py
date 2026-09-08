@@ -1187,6 +1187,17 @@ class Command(BaseCommand):
             "CREATE UNIQUE INDEX IF NOT EXISTS b2b_chat_thread_saved_idx "
             "ON b2b_chat_thread (company_id, created_by) WHERE kind = 'saved';"
         )
+        # And one conference room per *company*: the single chat every
+        # conference is announced in and talked in, whoever called it. It used
+        # to be a group per set of invitees, which meant the invitation to a
+        # meeting landed in whichever of a dozen near-identical groups happened
+        # to match — and nobody could find the one they were looking for. The
+        # index is what makes `ensure_conference_thread` idempotent under two
+        # people pressing "Konferensiya" at the same moment.
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_chat_thread_conference_idx "
+            "ON b2b_chat_thread (company_id) WHERE kind = 'conference';"
+        )
 
         # Weel AI: the built-in analyst's reports over the company. One row
         # per (company, period, window start) — a rerun for the same window

@@ -120,16 +120,18 @@ def mocks():
         conf_repo.finish.side_effect = lambda cid, **kw: _conference(
             status=ConferenceStatus.ENDED, ended_at=timezone.now()
         )
-        # By default these people have no conference group yet and nothing is
-        # running — the tests that care say otherwise. A bare MagicMock would
-        # be truthy here, which is exactly the "reuse" branch, so both are
-        # pinned rather than left to the mock's default.
-        conf_repo.thread_for_members.return_value = None
-        conf_repo.live_for_thread.return_value = None
-        repo.create_thread.return_value = {"id": THREAD_ID, "group_name": "Haftalik yig’ilish"}
+        # The company's one conference room. Pinned rather than left to the
+        # mock's default: a bare MagicMock is truthy *and* subscriptable, so a
+        # `create` that had stopped calling this at all would still pass.
+        repo.ensure_conference_thread.return_value = {
+            "id": THREAD_ID,
+            "kind": "conference",
+            "group_name": "Konferensiya",
+        }
         repo.get_thread_for_member.return_value = {
             "id": THREAD_ID,
-            "group_name": "Haftalik yig’ilish",
+            "kind": "conference",
+            "group_name": "Konferensiya",
         }
         # Bound to the real signature: a mock that accepts any arguments is a
         # mock that agrees with calls the database layer would reject.
@@ -217,17 +219,17 @@ class TestScope:
 
 
 class TestCreate:
-    def test_opens_a_group_a_room_and_a_card(self, mocks):
+    def test_opens_a_room_and_a_card_in_the_company_conference_chat(self, mocks):
         payload = conferences.create(
             AZIZ, title="Haftalik yig’ilish", scope=ConferenceScope.ALL
         )
 
-        # The group holds everybody but its creator, who is added by
-        # `create_thread` itself.
-        _, kwargs = mocks["repo"].create_thread.call_args
-        assert kwargs["created_by"] == AZIZ_ID
-        assert sorted(kwargs["member_ids"]) == [BEK_ID, DILNOZA_ID]
-        assert kwargs["group_name"] == "Haftalik yig’ilish"
+        # Not a group of its own: the one "Konferensiya" room, asked for by
+        # company. No group is opened for a meeting any more.
+        mocks["repo"].ensure_conference_thread.assert_called_once_with(
+            COMPANY_ID, AZIZ_ID
+        )
+        mocks["repo"].create_thread.assert_not_called()
 
         # The room is unguessable and belongs to this conference alone.
         assert payload["room_name"].startswith("weel-")
@@ -266,54 +268,50 @@ class TestCreate:
         payload = conferences.create(AZIZ, title="  ", scope=ConferenceScope.ALL)
         assert payload["title"] == "Konferensiya"
 
-    def test_the_same_people_keep_one_group(self, mocks):
-        """A second conference for the same people lands in the group they
-        already have, instead of adding another one-message row to everybody's
-        chat list."""
-        mocks["conf_repo"].thread_for_members.return_value = THREAD_ID
+    def test_every_conference_lands_in_the_same_chat(self, mocks):
+        """Two meetings, two organisers, one room to read them in. This is the
+        whole of the change: the invitation used to go to whichever group
+        matched the invitees, so nobody knew which of a dozen lookalike groups
+        to open when a meeting started."""
+        first = conferences.create(AZIZ, title="Sotuv brifingi", scope=ConferenceScope.ALL)
+        second = conferences.create(BEK, title="Haftalik", scope=ConferenceScope.ALL)
 
-        payload = conferences.create(AZIZ, title="Sotuv brifingi", scope=ConferenceScope.ALL)
-
+        assert first["thread_id"] == second["thread_id"] == THREAD_ID
         mocks["repo"].create_thread.assert_not_called()
-        mocks["conf_repo"].thread_for_members.assert_called_once_with(
-            COMPANY_ID, [AZIZ_ID, BEK_ID, DILNOZA_ID]
-        )
-        assert payload["thread_id"] == THREAD_ID
-        # A new room all the same: reusing the group is not reusing the
-        # meeting.
-        assert payload["status"] == ConferenceStatus.LIVE
-        assert mocks["conf_repo"].create_conference.called
+        # Two rooms, though: one chat is not one meeting.
+        assert mocks["conf_repo"].create_conference.call_count == 2
+        assert [call[0][0] for call in mocks["repo"].send_message.call_args_list] == [
+            THREAD_ID,
+            THREAD_ID,
+        ]
 
-    def test_a_group_that_vanished_is_opened_again(self, mocks):
-        """The lookup found a thread this person can no longer read — deleted,
-        or they were removed from it. Falling back to a new group beats
-        failing the request."""
-        mocks["conf_repo"].thread_for_members.return_value = THREAD_ID
-        mocks["repo"].get_thread_for_member.return_value = None
-
-        conferences.create(AZIZ, title="Yig’ilish", scope=ConferenceScope.ALL)
-
-        assert mocks["repo"].create_thread.called
-
-    def test_a_conference_already_running_there_is_joined_not_doubled(self, mocks):
-        """Two organisers pressing "Yangi konferensiya" for the same people
-        must end up in one room, not in two halves of a meeting."""
-        mocks["conf_repo"].thread_for_members.return_value = THREAD_ID
+    def test_a_conference_already_running_does_not_stop_another(self, mocks):
+        """Two teams may meet at once. While a thread meant one set of people a
+        second conference in it would have split them across two rooms; the
+        thread is now the whole company, and the cards simply stack."""
         mocks["conf_repo"].live_for_thread.return_value = _conference()
 
         payload = conferences.create(BEK, title="Yig’ilish", scope=ConferenceScope.ALL)
 
+        assert mocks["conf_repo"].create_conference.called
+        assert payload["id"] != CONFERENCE_ID or payload["room_name"].startswith("weel-")
+        assert mocks["repo"].send_message.called
+
+    def test_a_room_that_cannot_be_opened_is_an_error_not_a_silent_group(self, mocks):
+        """`ensure_conference_thread` answering None means the room could not
+        be written. There is nowhere to announce the meeting, so the request
+        fails rather than quietly opening a group of its own."""
+        mocks["repo"].ensure_conference_thread.return_value = None
+
+        with pytest.raises(CallError) as caught:
+            conferences.create(AZIZ, title="Yig’ilish", scope=ConferenceScope.ALL)
+
+        assert caught.value.status == 500
         mocks["conf_repo"].create_conference.assert_not_called()
-        mocks["repo"].send_message.assert_not_called()
-        assert payload["id"] == CONFERENCE_ID
-        assert payload["room_name"] == "weel-conf-abc"
-        assert payload["token"]
-        assert payload["thread"]["id"] == THREAD_ID
 
     def test_a_conference_that_outlived_its_clock_does_not_block_a_new_one(self, mocks):
         """The row says live, but it started four hours ago. `settle` closes
         it, and the new conference opens as if nothing had been running."""
-        mocks["conf_repo"].thread_for_members.return_value = THREAD_ID
         mocks["conf_repo"].live_for_thread.return_value = _conference(
             started_at=timezone.now() - timedelta(hours=5)
         )
