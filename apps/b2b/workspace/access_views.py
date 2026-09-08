@@ -752,11 +752,25 @@ class WorkspaceTrashView(WorkspaceAPIView):
                 {"detail": _("You may not see deleted objects.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        # The rest of what the screen calls "Amallar": a chat deleted for
+        # everybody, a colleague frozen or removed, a product taken off the
+        # catalogue. None of them can be put back from here — they are read,
+        # not undone — and they are administrative facts, so they are behind
+        # the same door as the audit they are cut from: an owner or an
+        # administrator. `None`, not `[]`, for everybody else, so the app can
+        # tell "nothing has happened" from "not yours to read" and leave the
+        # tab off rather than drawing an empty one.
+        administrative = Role.clean(request.user.role) in Role.ADMINISTRATIVE
         return Response({
             # Each half is gated on its own: somebody who may delete tasks and
             # not deals sees the tasks and not the deals.
             "tasks": repo.list_deleted_tasks(request.user.company_id) if may_tasks else [],
             "leads": repo.list_deleted_leads(request.user.company_id) if may_leads else [],
+            "events": (
+                arepo.list_action_events(request.user.company_id)
+                if administrative
+                else None
+            ),
         })
 
 

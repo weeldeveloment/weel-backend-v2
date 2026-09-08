@@ -442,6 +442,58 @@ def record_audit(
         )
 
 
+#: What the "Amallar" screen shows besides the deleted rows and the returns.
+#:
+#: A hand-written list rather than the whole audit: the log also carries role
+#: and access changes, invitations, ownership requests and every warehouse
+#: document — a feed of all of it is a compliance report, not the screen
+#: somebody opens because a chat, a colleague or a product has gone. These are
+#: the actions that take something away from the workspace, which is the
+#: question that screen answers.
+#:
+#: Deleted tasks and deals are deliberately absent: they are on the same
+#: screen already, as rows that can be put back, and listing them twice would
+#: read as two deletions. Returns are absent for the same reason — they have
+#: their own tab, drawn from the warehouse documents themselves.
+ACTION_EVENTS = (
+    "chat.deleted",
+    "employee.frozen",
+    "employee.unfrozen",
+    "employee.removed_from_workspace",
+    "employee.removed_from_company",
+    "inventory.product_deleted",
+)
+
+
+def list_action_events(
+    company_id: int, *, limit: int = 100
+) -> list[dict[str, Any]]:
+    """The audit, cut down to what the "Amallar" screen draws.
+
+    Two names come back with each row: who did it, and — where the target is
+    a colleague — who it was done to. The employee row survives both freezing
+    and removal (see [freeze_employee] and [remove_employee]), so that name is
+    a join. A chat or a product does not survive, which is why those two write
+    their name into the payload at the moment they are deleted.
+    """
+    placeholders = ", ".join(["%s"] * len(ACTION_EVENTS))
+    return fetch_all(
+        f"""
+        SELECT a.*,
+               actor.full_name  AS actor_name,
+               target.full_name AS target_name
+          FROM {B2B_AUDIT_EVENT_TABLE} a
+          LEFT JOIN {B2B_EMPLOYEE_TABLE} actor  ON actor.id = a.actor_employee_id
+          LEFT JOIN {B2B_EMPLOYEE_TABLE} target ON target.id = a.target_id
+                                              AND a.target_type = 'employee'
+         WHERE a.company_id = %s AND a.action IN ({placeholders})
+         ORDER BY a.created_at DESC
+         LIMIT %s
+        """,
+        [company_id, *ACTION_EVENTS, limit],
+    )
+
+
 def list_audit(company_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
     return fetch_all(
         f"""

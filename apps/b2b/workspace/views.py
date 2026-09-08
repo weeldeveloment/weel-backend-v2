@@ -3236,6 +3236,21 @@ class WorkspaceThreadView(WorkspaceAPIView):
         members = repo.thread_member_ids(thread_id)
         if not repo.delete_thread(thread_id, request.user.company_id):
             return Response({"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND)
+        # Written on the way past, with the chat's name in the row: this is a
+        # deletion for everybody in it and the thread is gone a line later, so
+        # the audit is the only place left that can say which chat it was.
+        record_audit(
+            request.user.company_id,
+            actor_employee_id=request.user.id,
+            action="chat.deleted",
+            target_type="chat",
+            target_id=thread_id,
+            payload={
+                "title": thread.get("title") or "",
+                "kind": thread.get("kind") or "",
+                "members": len(members),
+            },
+        )
         _announce_group(thread_id, "deleted")
         realtime.publish_employees(
             members, realtime.EVENT_THREAD, action="deleted", thread_id=thread_id

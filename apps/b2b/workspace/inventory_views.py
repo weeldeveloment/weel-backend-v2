@@ -1147,8 +1147,20 @@ class WorkspaceProductDetailView(_InventoryView):
     def delete(self, request, product_id: int):
         if refusal := _require(request, Permission.STOCK_MANAGE):
             return refusal
+        # Read before it goes, so the audit row can name the product. After
+        # the delete there is nothing left to look the name up from, and
+        # "product #412 was deleted" answers nobody's question.
+        product = inventory.get_product(product_id, request.user.company_id)
         if not inventory.delete_product(product_id, request.user.company_id):
             return Response({"detail": _("Product not found.")}, status=status.HTTP_404_NOT_FOUND)
+        record_audit(
+            request.user.company_id,
+            actor_employee_id=request.user.id,
+            action="inventory.product_deleted",
+            target_type="product",
+            target_id=product_id,
+            payload={"name": (product or {}).get("name") or ""},
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
