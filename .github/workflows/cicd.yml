@@ -134,10 +134,18 @@ jobs:
       # upgrade happen, then restart the server so it loads the new core —
       # the container (and its port mapping) survives a restart, so the
       # service's own health check still applies once it's back up.
+      #
+      # `Acquire::Check-Valid-Until=false`: this image is Debian bullseye, and
+      # bullseye's LTS ended on 2026-08-31. The security suite's Release file
+      # is still served but is no longer refreshed, so apt now rejects it as
+      # expired ("invalid since ...") and `update` exits 100 — which took the
+      # whole pipeline, and every deploy with it, on 2026-09-08. The archive
+      # is frozen, not wrong; the check is what has to go.
       - name: Install pgvector into the database container
         run: |
           docker exec ${{ job.services.postgres.id }} sh -c \
-            "apt-get update -qq && apt-get install -y -qq postgresql-16-pgvector"
+            "apt-get -o Acquire::Check-Valid-Until=false update -qq && \
+             apt-get install -y -qq postgresql-16-pgvector"
           docker restart ${{ job.services.postgres.id }}
           for i in $(seq 1 30); do
             docker exec ${{ job.services.postgres.id }} pg_isready -U weel && break
