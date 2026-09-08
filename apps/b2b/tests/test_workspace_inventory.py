@@ -38,6 +38,7 @@ from apps.b2b.workspace.authentication import WorkspaceUser
 from apps.b2b.workspace.inventory_repository import InventoryError, MovementKind
 from apps.b2b.workspace.inventory_views import (
     WorkspaceDocumentListCreateView,
+    WorkspaceInventorySettingsView,
     WorkspaceInventorySummaryView,
     WorkspaceMovementListCreateView,
     WorkspaceProductDetailView,
@@ -852,7 +853,10 @@ def test_a_return_with_its_sale_is_booked_against_that_lead():
             WorkspaceMovementListCreateView,
             factory.post(
                 "/inventory/movements/",
-                {"kind": "return", "product_id": 10, "quantity": "2", "lead_id": 77},
+                {
+                    "kind": "return", "product_id": 10, "quantity": "2",
+                    "lead_id": 77, "note": "Rangi noto'g'ri",
+                },
                 format="json",
             ),
             MANAGER,
@@ -860,6 +864,23 @@ def test_a_return_with_its_sale_is_booked_against_that_lead():
 
     assert response.status_code == 201
     assert booked["lead_id"] == 77
+
+
+def test_a_return_must_also_say_why():
+    """The rule the deal's own return sheet enforces, at the stock room's
+    door too — two ways in to one act, and a reason asked for at only one of
+    them is a reason nobody writes."""
+    response = _call(
+        WorkspaceMovementListCreateView,
+        factory.post(
+            "/inventory/movements/",
+            {"kind": "return", "product_id": 10, "quantity": "2", "lead_id": 77},
+            format="json",
+        ),
+        MANAGER,
+    )
+    assert response.status_code == 400
+    assert response.data["errors"][0]["field"] == "note"
 
 
 # ─── Buyurtmalar ──────────────────────────────────────────────────────────────
@@ -984,3 +1005,120 @@ def test_the_list_carries_the_count_the_tab_badges():
     assert response.status_code == 200
     assert response.data["open_count"] == 3
     assert len(response.data["results"]) == 1
+
+
+# ─── The dollar rate is not the stock room's ──────────────────────────────────
+#
+# Who may say what a dollar is worth. It sat behind `stock_manage` when it
+# shipped, which put it in the hands of whoever books receipts and out of the
+# hands of a manager whose workspace had narrowed that right. The rate is what
+# the company prices against, so it follows the three ranks that answer for
+# that — and nothing else on the settings row moved with it.
+
+#: A manager whose workspace took the stock room's write rights off them. They
+#: still run the funnel, and still price it.
+MANAGER_NO_STOCK = WorkspaceUser({
+    "id": 9,
+    "company_id": COMPANY_ID,
+    "role": "manager",
+    "full_name": "Rahbar",
+    "phone": "+998900000009",
+    "permission_access": ["sales.view", "sales.stock_view", "crm.view"],
+})
+
+#: The other side of the same line: a warehouse keeper handed the stock room's
+#: write rights, who is not one of the three ranks.
+STOCK_KEEPER = WorkspaceUser({
+    "id": 10,
+    "company_id": COMPANY_ID,
+    "role": "employee",
+    "full_name": "Omborchi",
+    "phone": "+998900000010",
+    "permission_access": ["sales.view", "sales.stock_view", "sales.stock_manage"],
+})
+
+
+def _patch_settings(**overrides):
+    row = {
+        "company_id": COMPANY_ID, "allow_backorder": False, "base_currency": "UZS",
+        "sku_prefix": "WL", "write_off_alert": Decimal("0"),
+        "usd_rate": Decimal("12500"),
+    }
+    row.update(overrides)
+    return row
+
+
+def test_a_manager_without_the_warehouse_still_sets_the_rate():
+    with (
+        patch("apps.b2b.workspace.inventory_views.inventory.get_settings",
+              return_value=_patch_settings()),
+        patch("apps.b2b.workspace.inventory_views.inventory.update_settings",
+              return_value=_patch_settings(usd_rate=Decimal("13000"))) as write,
+        patch("apps.b2b.workspace.inventory_views.record_audit"),
+    ):
+        response = _call(
+            WorkspaceInventorySettingsView,
+            factory.patch("/inventory/settings/", {"usd_rate": "13000"}, format="json"),
+            MANAGER_NO_STOCK,
+        )
+    assert response.status_code == 200
+    assert write.call_args.kwargs["usd_rate"] == Decimal("13000")
+
+
+def test_the_rest_of_the_settings_row_is_still_the_warehouse_s():
+    """Only the rate walked out. The SKU prefix and the write-off alert are
+    the stock room's own configuration and stayed behind its right."""
+    with patch("apps.b2b.workspace.inventory_views.inventory.update_settings") as write:
+        response = _call(
+            WorkspaceInventorySettingsView,
+            factory.patch("/inventory/settings/", {"sku_prefix": "AB"}, format="json"),
+            MANAGER_NO_STOCK,
+        )
+    assert response.status_code == 403
+    write.assert_not_called()
+
+
+def test_a_rate_smuggled_in_beside_a_warehouse_setting_does_not_open_the_row():
+    """The exemption is for a request that changes the rate and nothing
+    else — otherwise it would be a way to edit the prefix without the right."""
+    with patch("apps.b2b.workspace.inventory_views.inventory.update_settings") as write:
+        response = _call(
+            WorkspaceInventorySettingsView,
+            factory.patch(
+                "/inventory/settings/",
+                {"usd_rate": "13000", "sku_prefix": "AB"},
+                format="json",
+            ),
+            MANAGER_NO_STOCK,
+        )
+    assert response.status_code == 403
+    write.assert_not_called()
+
+
+def test_the_warehouse_keeper_keeps_the_whole_row():
+    """Nobody lost anything: the right that books a receipt still opens every
+    field on this sheet, the rate included."""
+    with (
+        patch("apps.b2b.workspace.inventory_views.inventory.get_settings",
+              return_value=_patch_settings()),
+        patch("apps.b2b.workspace.inventory_views.inventory.update_settings",
+              return_value=_patch_settings(sku_prefix="AB")),
+        patch("apps.b2b.workspace.inventory_views.record_audit"),
+    ):
+        response = _call(
+            WorkspaceInventorySettingsView,
+            factory.patch("/inventory/settings/", {"sku_prefix": "AB"}, format="json"),
+            STOCK_KEEPER,
+        )
+    assert response.status_code == 200
+
+
+def test_an_employee_with_neither_sets_nothing():
+    with patch("apps.b2b.workspace.inventory_views.inventory.update_settings") as write:
+        response = _call(
+            WorkspaceInventorySettingsView,
+            factory.patch("/inventory/settings/", {"usd_rate": "13000"}, format="json"),
+            EMPLOYEE,
+        )
+    assert response.status_code == 403
+    write.assert_not_called()

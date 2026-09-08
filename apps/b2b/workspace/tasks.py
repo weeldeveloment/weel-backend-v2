@@ -643,6 +643,15 @@ def notify_missed_call(
     return 1
 
 
+#: How long a conference invitation rings before the phone gives up on it.
+#:
+#: Longer than a one-to-one call's window: a call is one person waiting and
+#: gives up on their own, while a room stays open and the people already in it
+#: are not watching the clock. Short enough that a phone which was offline
+#: does not ring for a meeting that finished.
+CONFERENCE_RING_SECONDS = 90
+
+
 @app.task(name="b2b.workspace.notify_conference_invite")
 def notify_conference_invite(
     conference_id: int,
@@ -664,13 +673,28 @@ def notify_conference_invite(
     sent = 0
     push_title = push_text.CONFERENCE_TITLE
     body = push_text.conference_invite_body(organiser_name, title)
+    # Shaped like a ring, because that is what it now is on the phone.
+    #
+    # A conference used to arrive as an ordinary banner: a line at the top of
+    # whatever somebody was looking at, which they saw a minute later or not
+    # at all. It is a call — somebody is waiting in a room right now — so it
+    # rings like one, on the phone's own full-screen call screen with a green
+    # button and a red one. `type: call` is what the app's background handler
+    # dispatches on; `call_kind` is what tells the two apart on the other
+    # side, because a conference id and a call id are different id spaces and
+    # neither is safe to read as the other.
     data = {
-        "type": "conference",
-        "action": "invited",
+        "type": "call",
+        "action": "ringing",
+        "call_kind": "conference",
         "conference_id": str(conference_id),
         "thread_id": str(thread_id),
+        "caller_name": organiser_name,
+        "call_type": "video",
+        "conference_title": title or "",
+        "ring_ms": str(CONFERENCE_RING_SECONDS * 1000),
     }
-    recipients = []
+    tokens = []
     for employee_id in employee_ids:
         employee = repo.get_workspace_employee(employee_id)
         if not employee:
@@ -683,14 +707,59 @@ def notify_conference_invite(
             body=body,
             payload={"conference_id": conference_id, "thread_id": thread_id},
         )
-        recipients.append({
-            "employee_id": employee["id"],
-            "company_id": employee["company_id"],
-            "fcm_token": employee.get("fcm_token"),
-        })
+        if employee.get("fcm_token"):
+            tokens.append(employee["fcm_token"])
         sent += 1
-    _push(recipients, title=push_title, body=body, data=data)
+    # Data-only on Android for the same reason a call is: a system-drawn
+    # banner is exactly what this stopped being. iOS still gets the alert —
+    # there is no PushKit token for a conference, so the tray is what an
+    # iPhone with the app closed has.
+    _push_call(
+        tokens,
+        title=push_title,
+        body=body,
+        data=data,
+        ttl_seconds=CONFERENCE_RING_SECONDS,
+        android_data_only=True,
+    )
     return sent
+
+
+@app.task(name="b2b.workspace.dismiss_conference_ring")
+def dismiss_conference_ring(
+    conference_id: int, company_id: int, employee_ids: list[int]
+) -> int:
+    """Takes the ringing screen down on every phone that is still ringing.
+
+    A conference invitation rings for [CONFERENCE_RING_SECONDS]; the organiser
+    ending the room ten seconds in must not leave the rest of the company
+    ringing for the remaining eighty. Same shape as a cancelled call, which is
+    what the app's background handler already knows how to dismiss.
+
+    No feed row and no banner: nothing happened that anybody needs to read
+    about — the invitation card in the group already says the room is closed.
+    """
+    tokens = []
+    for employee_id in employee_ids:
+        employee = repo.get_workspace_employee(employee_id)
+        if employee and employee.get("fcm_token"):
+            tokens.append(employee["fcm_token"])
+    if not tokens:
+        return 0
+    _push_call(
+        tokens,
+        title="",
+        body="",
+        data={
+            "type": "call",
+            "action": "ended",
+            "call_kind": "conference",
+            "conference_id": str(conference_id),
+        },
+        ttl_seconds=CONFERENCE_RING_SECONDS,
+        android_data_only=True,
+    )
+    return len(tokens)
 
 
 @app.task(name="b2b.workspace.send_call_guest_link")

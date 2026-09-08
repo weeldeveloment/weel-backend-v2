@@ -20,6 +20,7 @@ that is a legitimate state rather than a broken login.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -145,20 +146,41 @@ def split_full_name(full_name: str | None) -> tuple[str, str]:
     return " ".join(parts[1:]), parts[0]
 
 
+#: Columns holding a JSON document rather than a scalar, so [update_account]
+#: hands psycopg the text form rather than a Python list.
+_JSON_FIELDS = {"reaction_emojis"}
+
+
 def update_account(account_id: int, **fields) -> dict[str, Any] | None:
     allowed = {
         key: value
         for key, value in fields.items()
-        if key in {"first_name", "last_name", "photo", "username"}
+        if key in {"first_name", "last_name", "photo", "username", "reaction_emojis"}
     }
     if not allowed:
         return get_account(account_id)
     sets = ", ".join(f"{key} = %s" for key in allowed)
+    params = [
+        json.dumps(value) if key in _JSON_FIELDS and value is not None else value
+        for key, value in allowed.items()
+    ]
     execute(
         f"UPDATE {B2B_ACCOUNT_TABLE} SET {sets}, updated_at = %s WHERE id = %s",
-        [*allowed.values(), timezone.now(), account_id],
+        [*params, timezone.now(), account_id],
     )
     return get_account(account_id)
+
+
+#: What the reaction row offers when nobody has said otherwise — the six the
+#: app has always shown, and what a person who empties their own list goes
+#: back to. Kept on the server as well as in the app so that a reaction row
+#: rendered from `/me/` is never empty, whatever the client does.
+DEFAULT_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
+
+#: How many a person may keep. Six is the width of the row, and the row is the
+#: whole point: a reaction is a one-tap answer, so the choice has to be one
+#: that fits on screen at once rather than a keyboard to search through.
+MAX_REACTIONS = 6
 
 
 #: What a handle may look like — 3–50 characters, lowercase, starting with

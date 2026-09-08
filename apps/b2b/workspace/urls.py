@@ -168,6 +168,7 @@ from apps.b2b.workspace.views import (
     WorkspaceReportView,
     WorkspaceTeamView,
     WorkspaceProfileView,
+    WorkspaceReactionsView,
     WorkspaceUsernameView,
     WorkspaceGroupMemberView,
     WorkspaceGroupMembersView,
@@ -191,6 +192,9 @@ urlpatterns = [
     path("me/", WorkspaceMeView.as_view(), name="ws-me"),
     path("me/device-token/", WorkspaceDeviceTokenView.as_view(), name="ws-device-token"),
     path("me/profile/", WorkspaceProfileView.as_view(), name="ws-profile"),
+    # The six stickers on your own reaction row. Beside the profile it belongs
+    # to, and open to everybody — see [WorkspaceReactionsView].
+    path("me/reactions/", WorkspaceReactionsView.as_view(), name="ws-reactions"),
     path("me/photo/", WorkspaceProfilePhotoView.as_view(), name="ws-profile-photo"),
     path("me/username/", WorkspaceUsernameView.as_view(), name="ws-username"),
 

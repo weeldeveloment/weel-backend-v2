@@ -687,6 +687,17 @@ def capabilities_from(
     # roster. See `apps/b2b/integrations/permissions.py`.
     flags["can_manage_integrations"] = role in Role.INTEGRATION_ROLES
 
+    # "1 USD = ... so'm", set by hand in Profil -> Moliya. Deliberately not
+    # `STOCK_MANAGE`, which is where it started: the rate is not a fact about
+    # the stock room but the figure the company agreed to price against, and
+    # the people who answer for that are the ones who run the workspace — the
+    # owner, the administrator ("lider") and the manager ("rahbar"). A
+    # warehouse keeper handed `STOCK_MANAGE` books goods in at whatever rate
+    # they were told; they do not decide it. See
+    # `inventory_views.WorkspaceInventorySettingsView.patch`, which lets these
+    # three through for `usd_rate` and nothing else on that row.
+    flags["can_set_usd_rate"] = manager
+
     flags["can_view_attendance"] = True
     flags["can_manage_attendance"] = manager
     flags["can_manage_attendance_location"] = owner

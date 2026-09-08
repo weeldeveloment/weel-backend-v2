@@ -244,7 +244,10 @@ def test_a_return_files_a_document_and_a_history_row():
             WorkspaceLeadReturnView,
             factory.post(
                 "/leads/7/return/",
-                {"lines": [{"lead_item_id": 31, "qty": "2"}]},
+                {
+                    "lines": [{"lead_item_id": 31, "qty": "2"}],
+                    "note": "Rangi noto'g'ri",
+                },
                 format="json",
             ),
             OWNER,
@@ -254,9 +257,36 @@ def test_a_return_files_a_document_and_a_history_row():
     assert response.status_code == 201
     assert response.data["results"] == filed
     assert book.call_args.kwargs["lines"][0]["lead_item_id"] == 31
-    # The row names the paperwork, so the deal's history can point at it.
+    assert book.call_args.kwargs["note"] == "Rangi noto'g'ri"
+    # The row carries the reason first and the paperwork after it, so the
+    # history answers "why did these come back" and still points at the
+    # document that moved them.
     assert activity.call_args.kwargs["kind"] == "returned"
-    assert activity.call_args.kwargs["text"] == "QT-000088"
+    assert activity.call_args.kwargs["text"] == "Rangi noto'g'ri · QT-000088"
+
+
+def test_a_return_without_a_reason_is_refused():
+    """The note is the point of the row. A return with no reason files a
+    document nobody can read six months later, so the field is required and
+    a blank one is not a reason."""
+    with (
+        patch("apps.b2b.workspace.views.repo.get_lead", return_value=_sale()),
+        patch("apps.b2b.workspace.views.inventory.record_return_for_lead") as book,
+    ):
+        response = _call(
+            WorkspaceLeadReturnView,
+            factory.post(
+                "/leads/7/return/",
+                {"lines": [{"lead_item_id": 31, "qty": "2"}], "note": "   "},
+                format="json",
+            ),
+            OWNER,
+            lead_id=7,
+        )
+
+    assert response.status_code == 400
+    assert response.data["errors"][0]["field"] == "note"
+    book.assert_not_called()
 
 
 def test_returning_more_than_was_sold_is_refused():
@@ -272,7 +302,10 @@ def test_returning_more_than_was_sold_is_refused():
             WorkspaceLeadReturnView,
             factory.post(
                 "/leads/7/return/",
-                {"lines": [{"lead_item_id": 31, "qty": "9"}]},
+                {
+                    "lines": [{"lead_item_id": 31, "qty": "9"}],
+                    "note": "Hammasi qaytdi",
+                },
                 format="json",
             ),
             OWNER,

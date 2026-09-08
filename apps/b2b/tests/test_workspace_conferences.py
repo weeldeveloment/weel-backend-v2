@@ -508,3 +508,94 @@ class TestViews:
                 conference_id=CONFERENCE_ID,
             )
         assert response.status_code == 403
+
+
+# ─── A conference rings ───────────────────────────────────────────────────────
+#
+# It used to arrive as an ordinary banner — a line at the top of whatever
+# somebody was looking at, seen a minute later or not at all. An invitation to
+# a room people are already sitting in is a call, so it rings like one, and
+# the two rules worth pinning are the shape of that push and the fact that
+# closing the room stops it.
+
+class TestRinging:
+    def test_the_invitation_is_shaped_like_a_ring(self):
+        """`type: call` is what the app's background handler dispatches on;
+        `call_kind` is what keeps a conference id from being read as a call
+        id, which are different id spaces."""
+        from apps.b2b.workspace import tasks
+
+        sent = {}
+        employee = {"id": AZIZ_ID, "company_id": COMPANY_ID, "fcm_token": "tok"}
+        with patch.object(tasks.repo, "get_workspace_employee", return_value=employee), \
+             patch.object(tasks, "create_notification"), \
+             patch.object(tasks, "_push_call", side_effect=lambda tokens, **kw: sent.update(kw, tokens=tokens)):
+            count = tasks.notify_conference_invite(
+                CONFERENCE_ID, COMPANY_ID, THREAD_ID, "Haftalik yig'ilish",
+                "Aziz Karimov", [AZIZ_ID],
+            )
+
+        assert count == 1
+        assert sent["tokens"] == ["tok"]
+        data = sent["data"]
+        assert data["type"] == "call"
+        assert data["action"] == "ringing"
+        assert data["call_kind"] == "conference"
+        assert data["conference_id"] == str(CONFERENCE_ID)
+        assert data["caller_name"] == "Aziz Karimov"
+        assert data["conference_title"] == "Haftalik yig'ilish"
+        # Data-only, or Android draws the banner this stopped being.
+        assert sent["android_data_only"] is True
+
+    def test_the_feed_row_is_still_written(self):
+        """The ring is not a record. "Konferensiya · Aziz Karimov" still has
+        to be readable afterwards by somebody who missed it."""
+        from apps.b2b.workspace import tasks
+
+        employee = {"id": AZIZ_ID, "company_id": COMPANY_ID, "fcm_token": None}
+        with patch.object(tasks.repo, "get_workspace_employee", return_value=employee), \
+             patch.object(tasks, "create_notification") as row, \
+             patch.object(tasks, "_push_call") as push:
+            tasks.notify_conference_invite(
+                CONFERENCE_ID, COMPANY_ID, THREAD_ID, "Haftalik yig'ilish",
+                "Aziz Karimov", [AZIZ_ID],
+            )
+
+        assert row.call_args.kwargs["employee_id"] == AZIZ_ID
+        # No token, so nothing to push to — and no empty Firebase call.
+        push.assert_called_once()
+        assert push.call_args.args[0] == []
+
+    def test_closing_the_room_stops_the_phones_that_are_still_ringing(self):
+        """The ring gives up on its own after ninety seconds; an organiser who
+        ends the room ten seconds in must not leave everybody ringing for the
+        remaining eighty."""
+        from apps.b2b.workspace import conferences
+
+        with patch.object(conferences, "conf_repo") as conf_repo, \
+             patch.object(conferences, "repo") as repo_mock, \
+             patch.object(conferences, "_rewrite_invite"), \
+             patch.object(conferences, "_publish"), \
+             patch("apps.b2b.workspace.tasks.dismiss_conference_ring") as stop:
+            conf_repo.finish.return_value = {
+                "id": CONFERENCE_ID, "company_id": COMPANY_ID,
+                "thread_id": THREAD_ID,
+            }
+            repo_mock.thread_member_ids.return_value = [AZIZ_ID, BEK_ID]
+            conferences._close({"id": CONFERENCE_ID})
+
+        assert stop.delay.call_args.args[0] == CONFERENCE_ID
+        assert stop.delay.call_args.args[2] == [AZIZ_ID, BEK_ID]
+
+    def test_the_stop_push_is_the_dismiss_the_app_already_understands(self):
+        from apps.b2b.workspace import tasks
+
+        sent = {}
+        employee = {"id": AZIZ_ID, "company_id": COMPANY_ID, "fcm_token": "tok"}
+        with patch.object(tasks.repo, "get_workspace_employee", return_value=employee), \
+             patch.object(tasks, "_push_call", side_effect=lambda tokens, **kw: sent.update(kw)):
+            tasks.dismiss_conference_ring(CONFERENCE_ID, COMPANY_ID, [AZIZ_ID])
+
+        assert sent["data"]["action"] == "ended"
+        assert sent["data"]["call_kind"] == "conference"
+        assert sent["data"]["conference_id"] == str(CONFERENCE_ID)

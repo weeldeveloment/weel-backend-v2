@@ -2091,6 +2091,17 @@ class Command(BaseCommand):
         cursor.execute("""
             ALTER TABLE b2b_account ADD COLUMN IF NOT EXISTS fcm_token VARCHAR(500);
         """)
+        # The six stickers this person reacts with, in the order they picked
+        # them. NULL means "the app's own six", which is what almost everybody
+        # will have.
+        #
+        # On the account rather than on `b2b_employee`, for the same reason
+        # the username is: this is a fact about a human, not about one of
+        # their memberships, and somebody working in two workspaces should not
+        # have to choose their stickers twice.
+        cursor.execute("""
+            ALTER TABLE b2b_account ADD COLUMN IF NOT EXISTS reaction_emojis JSONB;
+        """)
         cursor.execute("""
             ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS account_id
                 BIGINT REFERENCES b2b_account(id) ON DELETE SET NULL;

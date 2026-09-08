@@ -332,7 +332,9 @@ def _close(conference: dict[str, Any]) -> dict[str, Any] | None:
     if not closed:
         return None
     _rewrite_invite(closed)
-    _publish(closed, "ended", repo.thread_member_ids(closed["thread_id"]))
+    members = repo.thread_member_ids(closed["thread_id"])
+    _publish(closed, "ended", members)
+    _dismiss_ring(closed, members)
     return closed
 
 
@@ -430,6 +432,25 @@ def _push_invite(conference: dict[str, Any], user, employee_ids: Sequence[int]) 
         )
     except Exception:  # noqa: BLE001
         logger.exception("Could not push conference %s", conference["id"])
+
+
+def _dismiss_ring(conference: dict[str, Any], employee_ids: Sequence[int]) -> None:
+    """Stops the phones that are still ringing for a room that has closed.
+
+    Best effort, like [_push_invite], and for the stronger reason: the ring
+    gives up on its own after ninety seconds either way, so a Firebase that
+    is down costs a phone that rings a little longer, not a wrong outcome.
+    """
+    try:
+        from apps.b2b.workspace.tasks import dismiss_conference_ring
+
+        dismiss_conference_ring.delay(
+            conference["id"],
+            conference["company_id"],
+            [int(i) for i in employee_ids],
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not stop the ring for conference %s", conference["id"])
 
 
 def _cards(employee_ids: Sequence[int]) -> dict[int, dict[str, Any]]:

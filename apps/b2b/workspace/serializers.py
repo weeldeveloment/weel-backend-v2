@@ -13,6 +13,7 @@ from apps.b2b.models import (
     LeadStatus,
     PaymentMethod,
 )
+from apps.b2b.workspace import accounts
 from apps.b2b.workspace.repository import (
     EVENT_TYPES,
     LEAD_KINDS,
@@ -157,6 +158,43 @@ class MeSerializer(serializers.Serializer):
         child=serializers.CharField(), allow_null=True, required=False
     )
     guest_until = serializers.DateTimeField(allow_null=True, required=False)
+    #: The six stickers this person reacts with. Always six long — the
+    #: server fills in its own defaults for anybody who has not chosen — so
+    #: the app can draw the row straight from it without a fallback of its
+    #: own to keep in step.
+    reactions = serializers.ListField(child=serializers.CharField(), required=False)
+
+
+class OwnReactionsSerializer(serializers.Serializer):
+    """The stickers somebody keeps on their reaction row.
+
+    Anybody may set their own: reacting is a reader's remark rather than an
+    edit of anything, so which six they react *with* is nobody else's
+    business either.
+
+    Not checked against a catalogue. The app offers a few hundred to pick
+    from, but the column holds whatever was sent and the reaction endpoints
+    have always accepted any short string — a list the server polices would
+    have to be redeployed before the app could offer a new face, and would
+    still not stop anybody posting one directly.
+    """
+
+    reactions = serializers.ListField(
+        child=serializers.CharField(max_length=16, allow_blank=False),
+        allow_empty=True,
+        max_length=accounts.MAX_REACTIONS,
+    )
+
+    def validate_reactions(self, value: list[str]) -> list[str]:
+        # Trimmed, and each one kept once: a row with the same face twice is
+        # two buttons that do the same thing, and the picker cannot produce
+        # it — but a client that has not been updated could.
+        seen: list[str] = []
+        for raw in value:
+            emoji = (raw or "").strip()
+            if emoji and emoji not in seen:
+                seen.append(emoji)
+        return seen
 
 
 class SubtaskSerializer(serializers.Serializer):
@@ -879,7 +917,24 @@ class LeadReturnLineSerializer(serializers.Serializer):
 
 class LeadReturnWriteSerializer(serializers.Serializer):
     lines = LeadReturnLineSerializer(many=True)
-    note = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+    #: Why the goods came back — required, and the one field on this
+    #: serializer that a person has to think about.
+    #:
+    #: A return moves stock and unwinds a sale, and the document it files is
+    #: read months later by somebody who was not there. "Three chairs came
+    #: back" answers nothing; "wrong colour, customer swapped them" answers
+    #: it. Asked for here rather than left optional because a field that may
+    #: be skipped is skipped, and the document is then a number with no story.
+    #:
+    #: Whitespace is not a reason: `CharField` trims first, so "   " lands on
+    #: the blank message below rather than being stored as a note.
+    note = serializers.CharField(
+        max_length=2000,
+        error_messages={
+            "blank": _("Say why the goods are coming back."),
+            "required": _("Say why the goods are coming back."),
+        },
+    )
 
 
 class LeadReturnableSerializer(serializers.Serializer):

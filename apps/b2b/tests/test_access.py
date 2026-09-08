@@ -714,9 +714,13 @@ LEGACY_FLAGS = {
         # «Hisobotlar»: the screen and the file. Reading it is the manager's
         # too; taking the figures off the phone stops here.
         "can_view_reports", "can_export_reports",
-        # The stock room's settings sheet, the USD rate included — the same
-        # right that books a receipt.
+        # The stock room's settings sheet — the same right that books a
+        # receipt.
         "can_manage_stock",
+        # "1 USD = ... so'm", from Profil -> Moliya. Role-derived, and held by
+        # the three who run the workspace: the rate is what the company
+        # prices against, not a fact about the shelf.
+        "can_set_usd_rate",
         # Roster ustidagi uchta tugma: muzlatish, ish joyidan chiqarish va
         # kompaniyadan chiqarish. TZ v2 §11 — egasi va lider.
         "can_freeze_employee",
@@ -745,9 +749,12 @@ LEGACY_FLAGS = {
         # The report screen opens to a manager; exporting it does not, by
         # default — the role editor can widen that.
         "can_view_reports",
-        # The stock room's settings sheet, the USD rate included — the same
-        # right that books a receipt.
+        # The stock room's settings sheet — the same right that books a
+        # receipt.
         "can_manage_stock",
+        # The dollar rate, from Profil -> Moliya: the manager runs the funnel
+        # the leads are priced in, so they set what a dollar is worth.
+        "can_set_usd_rate",
         # Rahbar o'z ish joyidan chiqara oladi; muzlatish va kompaniyadan
         # chiqarish esa yuqorida qoladi.
         "can_remove_from_workspace",
@@ -819,6 +826,9 @@ def test_every_flag_the_app_reads_is_still_answered():
         # modules are parts of a workspace, and connecting an outside service
         # is a company-level commitment with no module to hang off.
         "can_manage_integrations",
+        # Same shape: the price the company agreed to convert at is not one of
+        # the stock room's own settings — see `capabilities_from`.
+        "can_set_usd_rate",
         "sees_all_company_data",
         # Role-and-permission derived — see `access.may_create_workspace`.
         "can_create_workspace",

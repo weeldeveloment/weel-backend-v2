@@ -160,7 +160,7 @@ class SettingsSerializer(serializers.Serializer):
     base_currency = serializers.CharField()
     sku_prefix = serializers.CharField()
     write_off_alert = serializers.DecimalField(max_digits=14, decimal_places=2)
-    #: 1 USD = ... UZS, set by hand in Sozlamalar -> Moliya.
+    #: 1 USD = ... UZS, set by hand in Profil -> Moliya.
     usd_rate = serializers.DecimalField(max_digits=14, decimal_places=4)
 
 
@@ -423,10 +423,18 @@ class MovementWriteSerializer(serializers.Serializer):
     idempotency_key = serializers.CharField(max_length=80, required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs):
-        if attrs.get("kind") == MovementKind.RETURN and not attrs.get("lead_id"):
-            raise serializers.ValidationError(
-                {"lead_id": _("Say which sale is being returned.")}
-            )
+        if attrs.get("kind") == MovementKind.RETURN:
+            if not attrs.get("lead_id"):
+                raise serializers.ValidationError(
+                    {"lead_id": _("Say which sale is being returned.")}
+                )
+            # The same rule the deal's own return sheet enforces — see
+            # `LeadReturnWriteSerializer.note`. Two doors onto one act, and a
+            # reason demanded at only one of them is a reason nobody writes.
+            if not (attrs.get("note") or "").strip():
+                raise serializers.ValidationError(
+                    {"note": _("Say why the goods are coming back.")}
+                )
         return attrs
 
 
@@ -633,10 +641,19 @@ class WorkspaceInventorySettingsView(_InventoryView):
     @swagger_auto_schema(tags=WORKSPACE_TAG, operation_summary="Change stock-room settings (manage)",
                          request_body=SettingsWriteSerializer, responses={200: SettingsSerializer()})
     def patch(self, request):
-        if refusal := _require(request, Permission.STOCK_MANAGE):
-            return refusal
         serializer = SettingsWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        # The dollar rate is the one field on this row that is not the stock
+        # room's own setting, so it is not behind the stock room's right: it
+        # is what the company prices against, and the owner, the administrator
+        # and the manager set it from Profil -> Moliya without also being
+        # handed receipts, transfers and counts. Everything else here — the
+        # SKU prefix, the write-off alert, the base currency — stays where it
+        # was. A request that touches both needs the warehouse right as before.
+        rate_only = set(serializer.validated_data) == {"usd_rate"}
+        if not (rate_only and getattr(request.user, "is_manager", False)):
+            if refusal := _require(request, Permission.STOCK_MANAGE):
+                return refusal
         before = inventory.get_settings(request.user.company_id)
         row = inventory.update_settings(request.user.company_id, **serializer.validated_data)
         record_audit(

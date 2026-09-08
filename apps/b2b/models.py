@@ -337,9 +337,10 @@ class LeadActivityKind:
     #: Money came in against the deal. ``text`` is the amount, so the feed can
     #: print it without joining the payment ledger.
     PAYMENT = "payment"
-    #: Goods went back on the shelf. ``text`` is the return document's number
-    #: — "QT-000012" — which is how the row points at the paperwork the
-    #: warehouse module filed.
+    #: Goods went back on the shelf. ``text`` is why they came back, then the
+    #: return document's number — "Rangi noto'g'ri · QT-000012". The reason
+    #: leads because that is what the row is read for; the number follows so
+    #: it still points at the paperwork the warehouse module filed.
     RETURNED = "returned"
 
     CHOICES = [

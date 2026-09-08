@@ -93,6 +93,7 @@ from apps.b2b.workspace.serializers import (
     EmployeeStatsSerializer,
     MeSerializer,
     OwnProfileSerializer,
+    OwnReactionsSerializer,
     MessageEditSerializer,
     MessageReactionSerializer,
     MessageWriteSerializer,
@@ -557,6 +558,12 @@ def _me_payload(employee: dict, membership=None) -> dict:
         "is_guest": bool(membership),
         "modules": modules,
         "guest_until": membership.ends_at if membership else None,
+        # The stickers on this person's reaction row. Six of them, always:
+        # the account's own if they picked any, the app's otherwise. Sent
+        # from here rather than fetched by the screen that needs it — the
+        # picker opens on a long-press and must be drawn in that frame.
+        "reactions": ((account or {}).get("reaction_emojis")
+                      or accounts.DEFAULT_REACTIONS),
     }
 
 
@@ -625,6 +632,49 @@ class WorkspaceProfileView(WorkspaceAPIView):
             )
 
         return Response(_me_payload(updated, request.user.membership))
+
+
+class WorkspaceReactionsView(WorkspaceAPIView):
+    """PUT /api/b2b/workspace/me/reactions/ — the six stickers you react with.
+
+    Open to everybody, with no capability behind it. Reacting to a task is a
+    reader's remark rather than an edit of the record — the reaction endpoint
+    itself says so — and which faces somebody keeps on their own row is a
+    smaller question still.
+
+    Stored on the account, not on the roster row: one human, one set,
+    whichever workspace they are signed into. An empty list is a real request
+    and means "back to the app's own six" — it clears the column rather than
+    storing six blanks, so somebody who picked in March still gets whatever
+    the defaults are in December.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Choose the stickers on your reaction row",
+        request_body=OwnReactionsSerializer,
+        responses={200: MeSerializer()},
+    )
+    def put(self, request):
+        serializer = OwnReactionsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        chosen = serializer.validated_data["reactions"]
+
+        employee = repo.get_workspace_employee(request.user.id)
+        account_id = (employee or {}).get("account_id")
+        if not account_id:
+            # A roster row written before the account table existed and never
+            # backfilled. Nothing to hang a personal choice on, and inventing
+            # one here would make this endpoint the thing that creates
+            # accounts.
+            return Response(
+                {"detail": _("This login has no account yet.")},
+                status=status.HTTP_409_CONFLICT,
+            )
+        accounts.update_account(account_id, reaction_emojis=chosen or None)
+        return Response(_me_payload(employee, request.user.membership))
 
 
 class WorkspaceProfilePhotoView(WorkspaceAPIView):
@@ -4381,11 +4431,18 @@ class WorkspaceLeadReturnView(WorkspaceAPIView):
         total = sum(
             Decimal(str(line.get("qty") or 0)) for line in data["lines"]
         )
+        # The reason first, then the paperwork it produced: "rangi noto'g'ri ·
+        # QT-000088". The history row is read by somebody asking why three
+        # chairs came back, and a document number on its own never answered
+        # that — which is why the note is now required.
+        numbers = ", ".join(
+            str(doc.get("number") or "") for doc in filed if doc.get("number")
+        )
         repo.add_lead_activity(
             lead_id,
             kind=LeadActivityKind.RETURNED,
             author_id=request.user.id,
-            text=", ".join(str(doc.get("number") or "") for doc in filed).strip(", "),
+            text=" · ".join(part for part in (data["note"], numbers) if part),
         )
         record_audit(
             request.user.company_id, actor_employee_id=request.user.id,
