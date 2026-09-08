@@ -98,6 +98,48 @@ def test_a_dead_token_is_reported_once_and_the_push_counts_as_not_sent():
     assert dropped == ["dead"]
 
 
+def test_a_token_from_the_other_environment_is_retried_there_and_kept():
+    """An Xcode build's token is sandbox, a TestFlight build's is production,
+    and both are on real phones at once. APNs answers `BadDeviceToken` to the
+    wrong one — which is not a dead token, and deleting it used to stop that
+    iPhone ringing for good."""
+    private, _ = _p8()
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url.host))
+        if "sandbox" in str(request.url.host):
+            return httpx.Response(400, json={"reason": "BadDeviceToken"})
+        return httpx.Response(200)
+
+    apns_voip.use_client_for_tests(httpx.Client(transport=httpx.MockTransport(handler)))
+    dropped = []
+    with override_settings(
+        APNS_TEAM_ID="T", APNS_KEY_ID="K", APNS_AUTH_KEY=private, APNS_USE_SANDBOX=True
+    ):
+        ok = apns_voip.send("prod", {}, ttl_seconds=60, on_dead_token=dropped.append)
+
+    assert ok is True
+    assert dropped == []
+    assert seen == ["api.sandbox.push.apple.com", "api.push.apple.com"]
+
+
+def test_a_token_neither_environment_knows_is_finally_dropped():
+    private, _ = _p8()
+    apns_voip.use_client_for_tests(
+        httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(400, json={"reason": "BadDeviceToken"})
+            )
+        )
+    )
+    dropped = []
+    with override_settings(APNS_TEAM_ID="T", APNS_KEY_ID="K", APNS_AUTH_KEY=private):
+        ok = apns_voip.send("junk", {}, ttl_seconds=60, on_dead_token=dropped.append)
+    assert ok is False
+    assert dropped == ["junk"]
+
+
 def test_a_network_failure_is_not_sent_and_does_not_raise():
     private, _ = _p8()
 
@@ -154,3 +196,60 @@ class TestRingChoosesTheRoad:
         ):
             calls._ring(self.CALL, self._cards(None))
         assert fcm.delay.called and not voip.delay.called
+
+
+class TestTheRingIsTakenDown:
+    """The caller giving up has to reach the phone that is ringing.
+
+    Android reads the `action: missed` data push in its background isolate
+    and dismisses. An iPhone cannot: the screen up there was drawn by CallKit
+    out of a PushKit push, and an ordinary data push does not wake a closed
+    iPhone at all — so the same news goes out over VoIP as well. Without it
+    the caller hangs up and the iPhone rings on for the rest of the window.
+    """
+
+    def test_a_missed_call_stops_the_iphone_ringing(self):
+        from apps.b2b.workspace import tasks
+
+        employee = {
+            "id": 2, "company_id": 7,
+            "fcm_token": "f2", "voip_token": "v2",
+        }
+        with patch.object(tasks.repo, "get_workspace_employee", return_value=employee), \
+             patch.object(tasks, "create_notification"), \
+             patch.object(tasks, "_push_voip", return_value=True) as voip, \
+             patch.object(tasks, "_push"):
+            tasks.notify_missed_call(9, 7, 2, "Aziz", "audio", None)
+
+        assert voip.call_args.args[0] == "v2"
+        assert voip.call_args.args[1] == {
+            "type": "call", "action": "missed", "call_id": "9", "call_type": "audio",
+        }
+
+    def test_the_tray_row_still_goes_out_alongside_it(self):
+        """The dismiss is not the notification. "Javobsiz qo'ng'iroq" has to
+        be readable afterwards by somebody who was not holding the phone."""
+        from apps.b2b.workspace import tasks
+
+        employee = {
+            "id": 2, "company_id": 7,
+            "fcm_token": "f2", "voip_token": "v2",
+        }
+        with patch.object(tasks.repo, "get_workspace_employee", return_value=employee), \
+             patch.object(tasks, "create_notification") as row, \
+             patch.object(tasks, "_push_voip", return_value=True), \
+             patch.object(tasks, "_push") as push:
+            tasks.notify_missed_call(9, 7, 2, "Aziz", "audio", None)
+
+        assert row.called and push.called
+
+    def test_an_android_only_phone_is_not_asked_of_apple(self):
+        from apps.b2b.workspace import tasks
+
+        employee = {"id": 2, "company_id": 7, "fcm_token": "f2", "voip_token": None}
+        with patch.object(tasks.repo, "get_workspace_employee", return_value=employee), \
+             patch.object(tasks, "create_notification"), \
+             patch.object(tasks, "_push") as push:
+            tasks.notify_missed_call(9, 7, 2, "Aziz", "audio", None)
+
+        assert push.called

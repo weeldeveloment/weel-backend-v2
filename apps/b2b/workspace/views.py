@@ -3507,11 +3507,15 @@ class WorkspaceDeviceTokenView(WorkspaceAPIView):
     def post(self, request):
         token = (request.data.get("fcm_token") or "").strip() or None
         repo.set_employee_fcm_token(request.user.id, token)
-        # The iPhone's PushKit token rides the same request when the app has
-        # one. Only touched when the key is present: an Android phone, or an
-        # older build, registers its FCM token without saying anything about
-        # VoIP, and must not wipe a token another device of the same person
-        # registered.
+        # The iPhone's PushKit token rides the same request. The app sends the
+        # key every time now, blank on an Android, because the row holds **one**
+        # phone: `fcm_token` is overwritten on every registration, so leaving
+        # `voip_token` behind left the row describing two different handsets —
+        # and the ring prefers PushKit, so it went to the iPhone somebody had
+        # stopped carrying while the Android in their hand stayed silent.
+        #
+        # Still only touched when the key is present, for the builds already
+        # installed that do not send it.
         if "voip_token" in request.data:
             voip = (request.data.get("voip_token") or "").strip() or None
             repo.set_employee_voip_token(request.user.id, voip)
