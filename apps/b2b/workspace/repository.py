@@ -1402,7 +1402,10 @@ def list_threads(company_id: int, employee_id: int) -> list[dict[str, Any]]:
             last_msg.id         AS last_message_id,
             last_msg.sender_id  AS last_message_sender_id,
             last_msg.text       AS last_message_text,
-            last_msg.created_at AS last_message_created_at
+            last_msg.created_at AS last_message_created_at,
+            last_att.name         AS last_message_attachment_name,
+            last_att.content_type AS last_message_attachment_type,
+            last_att.duration_ms  AS last_message_attachment_duration_ms
         FROM {B2B_CHAT_THREAD_TABLE} t
         JOIN {B2B_CHAT_MEMBER_TABLE} m
           ON m.thread_id = t.id AND m.employee_id = %s
@@ -1413,6 +1416,17 @@ def list_threads(company_id: int, employee_id: int) -> list[dict[str, Any]]:
             ORDER BY id DESC
             LIMIT 1
         ) last_msg ON TRUE
+        -- What the last message carried, if it carried something: a voice
+        -- clip, a photo, a file. The list draws a row's last line from
+        -- `text`, and a message that is only an attachment has none — the
+        -- row went blank under a room whose latest word was a voice note.
+        LEFT JOIN LATERAL (
+            SELECT name, content_type, duration_ms
+            FROM {B2B_WORKSPACE_FILE_TABLE}
+            WHERE message_id = last_msg.id
+            ORDER BY id
+            LIMIT 1
+        ) last_att ON TRUE
         WHERE t.company_id = %s
         -- The saved room is the first row whatever else is going on, the way
         -- Telegram keeps Saved Messages at the top: it is the one thread the
@@ -1471,7 +1485,10 @@ def get_thread_for_member(thread_id: int, company_id: int, employee_id: int) -> 
             last_msg.id         AS last_message_id,
             last_msg.sender_id  AS last_message_sender_id,
             last_msg.text       AS last_message_text,
-            last_msg.created_at AS last_message_created_at
+            last_msg.created_at AS last_message_created_at,
+            last_att.name         AS last_message_attachment_name,
+            last_att.content_type AS last_message_attachment_type,
+            last_att.duration_ms  AS last_message_attachment_duration_ms
         FROM {B2B_CHAT_THREAD_TABLE} t
         JOIN {B2B_CHAT_MEMBER_TABLE} m ON m.thread_id = t.id AND m.employee_id = %s
         LEFT JOIN LATERAL (
@@ -1481,6 +1498,17 @@ def get_thread_for_member(thread_id: int, company_id: int, employee_id: int) -> 
             ORDER BY id DESC
             LIMIT 1
         ) last_msg ON TRUE
+        -- What the last message carried, if it carried something: a voice
+        -- clip, a photo, a file. The list draws a row's last line from
+        -- `text`, and a message that is only an attachment has none — the
+        -- row went blank under a room whose latest word was a voice note.
+        LEFT JOIN LATERAL (
+            SELECT name, content_type, duration_ms
+            FROM {B2B_WORKSPACE_FILE_TABLE}
+            WHERE message_id = last_msg.id
+            ORDER BY id
+            LIMIT 1
+        ) last_att ON TRUE
         WHERE t.id = %s AND t.company_id = %s
         """,
         [employee_id, employee_id, thread_id, company_id],

@@ -2095,6 +2095,14 @@ def _thread_payload(thread: dict) -> dict:
             "sender_id": thread.get("last_message_sender_id"),
             "text": thread.get("last_message_text"),
             "created_at": thread.get("last_message_created_at"),
+            # The same three fields a message's own `attachment` carries, so
+            # the app names a voice note or a photo on the list the way it
+            # does in the room. None when the message was words alone.
+            "attachment": {
+                "name": thread.get("last_message_attachment_name"),
+                "content_type": thread.get("last_message_attachment_type"),
+                "duration_ms": thread.get("last_message_attachment_duration_ms"),
+            } if thread.get("last_message_attachment_name") else None,
         } if last_id else None,
     }
 
