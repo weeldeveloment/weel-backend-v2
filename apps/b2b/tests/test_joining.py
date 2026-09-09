@@ -130,7 +130,9 @@ def test_the_at_sign_is_dropped_because_it_is_not_part_of_the_handle():
                       "first_name": "Nodir"},
     ) as write, patch(
         "apps.b2b.workspace.joining_views.accounts.list_memberships", return_value=[]
-    ):
+    ), patch(
+        "apps.b2b.workspace.joining_views.repo.sync_username_across_memberships"
+    ) as fanout:
         response = _call(
             AccountMeView,
             factory.put("/account/me/", {"first_name": "Nodir", "username": "@Nodir"},
@@ -140,6 +142,9 @@ def test_the_at_sign_is_dropped_because_it_is_not_part_of_the_handle():
 
     assert response.status_code == 200
     assert write.call_args.kwargs["username"] == "nodir"
+    # And down onto every roster row the account owns — see
+    # `test_account_handle_fanout`.
+    assert fanout.call_args.args[1] == "nodir"
 
 
 def test_a_username_somebody_else_holds_is_refused():

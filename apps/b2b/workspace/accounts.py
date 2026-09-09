@@ -29,13 +29,12 @@ from django.utils import timezone
 from shared.raw.db import execute, fetch_all, fetch_one
 
 from apps.b2b.raw.tables import (
+    B2B_ACCOUNT_TABLE,
     B2B_COMPANY_TABLE,
     B2B_EMPLOYEE_TABLE,
     B2B_USER_SESSION_TABLE,
     B2B_USER_TABLE,
 )
-
-B2B_ACCOUNT_TABLE = "b2b_account"
 
 
 def digits(phone: str | None) -> str:

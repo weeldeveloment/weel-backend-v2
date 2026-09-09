@@ -144,6 +144,14 @@ class AccountMeView(AccountAPIView):
                 {"username": [_("This name is taken.")]},
                 status=status.HTTP_409_CONFLICT,
             )
+
+        # Every roster row this account owns keeps its own copy of the handle.
+        # This screen is where most people first set one — during registration,
+        # and again from "Profilni tahrirlash" — and it used to write only the
+        # account, so the copies stayed empty or went stale. The searches read
+        # the account now either way; this keeps the two from disagreeing.
+        repo.sync_username_across_memberships(request.user.id, data["username"] or None)
+
         return Response(_account_payload(WorkspaceAccount(updated)))
 
 

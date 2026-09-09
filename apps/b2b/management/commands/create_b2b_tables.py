@@ -2102,6 +2102,19 @@ class Command(BaseCommand):
         cursor.execute("""
             ALTER TABLE b2b_account ADD COLUMN IF NOT EXISTS fcm_token VARCHAR(500);
         """)
+        # The roster keeps its own copy of the handle so listing needs no join,
+        # but only `create_membership` ever wrote it: anybody who picked a
+        # handle after joining left their roster rows empty, and searching by
+        # "@name" found nobody. The reads coalesce onto the account now; this
+        # brings the copies up to date so they agree with what is read.
+        cursor.execute("""
+            UPDATE b2b_employee e
+               SET username = a.username, updated_at = NOW()
+              FROM b2b_account a
+             WHERE a.id = e.account_id
+               AND a.username IS NOT NULL
+               AND e.username IS DISTINCT FROM a.username;
+        """)
         # No `reaction_emojis` here. The reaction row was a personal choice
         # for one day in September 2026 and is the same seven for everybody
         # again; a database that was migrated in between still carries the

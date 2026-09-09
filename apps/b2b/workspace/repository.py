@@ -32,6 +32,7 @@ from apps.b2b.raw.tables import (
     B2B_CALENDAR_EVENT_TABLE,
     B2B_CALENDAR_PARTICIPANT_TABLE,
     B2B_CALENDAR_REMINDER_TABLE,
+    B2B_ACCOUNT_TABLE,
     B2B_CHAT_MEMBER_TABLE,
     B2B_CHAT_MESSAGE_TABLE,
     B2B_CHAT_REACTION_TABLE,
@@ -415,10 +416,17 @@ def get_workspace_employee(employee_id: int) -> dict[str, Any] | None:
 
 
 def list_team(company_id: int, *, search: str | None = None) -> list[dict[str, Any]]:
+    # `a.username` overrides the roster row's own copy: the copy is written
+    # when the membership is created, and it is empty for everybody who picked
+    # a handle afterwards — see `accounts.create_membership`. Reading it here
+    # is what keeps the roster, the "@handle" search and the chat's own handle
+    # links agreeing with the profile screen.
     sql = f"""
-        SELECT e.*, d.name AS department_name, d.color AS department_color
+        SELECT e.*, COALESCE(a.username, e.username) AS username,
+               d.name AS department_name, d.color AS department_color
         FROM {B2B_EMPLOYEE_TABLE} e
         LEFT JOIN {B2B_DEPARTMENT_TABLE} d ON d.id = e.department_id
+        LEFT JOIN {B2B_ACCOUNT_TABLE} a ON a.id = e.account_id
         WHERE e.company_id = %s AND e.is_active = TRUE AND e.is_hidden = FALSE
     """
     params: list[Any] = [company_id]
@@ -433,7 +441,8 @@ def list_team(company_id: int, *, search: str | None = None) -> list[dict[str, A
         needle = f"%{search.lstrip('@')}%"
         sql += (
             " AND (e.full_name ILIKE %s OR e.position ILIKE %s"
-            " OR e.phone ILIKE %s OR e.username ILIKE %s)"
+            " OR e.phone ILIKE %s"
+            " OR COALESCE(a.username, e.username) ILIKE %s)"
         )
         params += [needle, needle, needle, needle]
     sql += " ORDER BY e.full_name ASC"

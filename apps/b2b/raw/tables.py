@@ -11,6 +11,10 @@ B2B_USER_TABLE = "b2b_user"
 B2B_USER_SESSION_TABLE = "b2b_user_session"
 B2B_DEPARTMENT_TABLE = "b2b_department"
 B2B_EMPLOYEE_TABLE = "b2b_employee"
+# One person, across every workspace they work in. The handle and the
+# name live here; each roster row keeps a copy so ordinary listing needs
+# no join. See `accounts.create_membership`.
+B2B_ACCOUNT_TABLE = "b2b_account"
 B2B_BUSINESS_TRIP_TABLE = "b2b_business_trip"
 B2B_TRIP_EMPLOYEE_TABLE = "b2b_trip_employee"
 B2B_TRAVEL_POLICY_TABLE = "b2b_travel_policy"

@@ -17,6 +17,7 @@ from django.utils import timezone
 from shared.raw.db import execute, fetch_all, fetch_one
 
 from apps.b2b.raw.tables import (
+    B2B_ACCOUNT_TABLE,
     B2B_COMPANY_TABLE,
     B2B_EMPLOYEE_TABLE,
     B2B_WORKSPACE_MEMBERSHIP_TABLE,
@@ -73,11 +74,21 @@ def search_org_people(
     """
     if org_id is None:
         return []
+    # The handle is read off the account, not off the roster row. Each row
+    # keeps a copy of it so ordinary listing needs no join, but that copy is
+    # written when the membership is created and is empty for everybody who
+    # picked their handle after joining — which is most people, since
+    # registration is `phone → OTP → name → username` and a workspace can be
+    # created or joined at any point in it. Searching the copy is what made
+    # "@aziz" find nobody while the picker's own placeholder invited it.
     sql = f"""
-        SELECT e.id, e.full_name, e.username, e.position, e.phone, e.photo,
+        SELECT e.id, e.full_name,
+               COALESCE(a.username, e.username) AS username,
+               e.position, e.phone, e.photo,
                e.role, e.company_id, c.name AS company_name
           FROM {B2B_EMPLOYEE_TABLE} e
           JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
+          LEFT JOIN {B2B_ACCOUNT_TABLE} a ON a.id = e.account_id
          WHERE c.org_id = %s
            AND e.is_active = TRUE
            AND e.is_guest = FALSE
@@ -93,7 +104,8 @@ def search_org_people(
         needle = f"%{search.lstrip('@')}%"
         sql += (
             " AND (e.full_name ILIKE %s OR e.position ILIKE %s"
-            " OR e.phone ILIKE %s OR e.username ILIKE %s)"
+            " OR e.phone ILIKE %s"
+            " OR COALESCE(a.username, e.username) ILIKE %s)"
         )
         params += [needle, needle, needle, needle]
     sql += " ORDER BY e.full_name ASC LIMIT %s"
