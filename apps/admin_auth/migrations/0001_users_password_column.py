@@ -19,6 +19,14 @@ def add_password_column_to_users(apps, schema_editor):
         return
 
     with connection.cursor() as cursor:
+        # `users` is raw SQL owned by the (not yet committed) schema baseline, and
+        # bootstrap_schema runs migrations *before* that baseline. On an empty
+        # database — CI, a fresh environment — the table is not there yet, and
+        # whatever creates it later (the baseline, the conftest scaffold) already
+        # carries the column. Only an existing table needs the ALTER.
+        cursor.execute("SELECT to_regclass('public.users')")
+        if cursor.fetchone()[0] is None:
+            return
         cursor.execute("""
             ALTER TABLE public.users
             ADD COLUMN IF NOT EXISTS password varchar(128) NULL;
@@ -31,6 +39,9 @@ def remove_password_column_from_users(apps, schema_editor):
         return
 
     with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('public.users')")
+        if cursor.fetchone()[0] is None:
+            return
         cursor.execute("ALTER TABLE public.users DROP COLUMN IF EXISTS password;")
 
 
