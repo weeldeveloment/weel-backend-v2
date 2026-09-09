@@ -29,6 +29,8 @@ is already committed and the phone is waiting for its token.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 import time
@@ -547,12 +549,26 @@ def end(call: dict[str, Any], user) -> dict[str, Any]:
     """
     if not is_participant(call, user.id):
         raise CallError("Bu qo’ng’iroq sizga emas.", status=403)
+    updated = _hang_up(call, user.id)
+    if not updated:
+        # Already over — the other side hung up a moment earlier. That is the
+        # answer the phone wanted anyway.
+        return payload(calls_repo.get_call(call["id"], call["company_id"]) or call)
+    return _settled(updated)
+
+
+def _hang_up(call: dict[str, Any], employee_id: int) -> dict[str, Any] | None:
+    """The state change of a hang-up, by whichever road it arrived — `/end`
+    from a phone, or the media server saying that phone left the room (see
+    [livekit_event]). [employee_id] is who hung up, already known to be a
+    participant. The moved row, or None when somebody else settled the call
+    first — the caller decides what to say then."""
     now = timezone.now()
 
     if call["status"] == CallStatus.RINGING:
-        to = CallStatus.CANCELLED if call["initiator_id"] == user.id else CallStatus.DECLINED
+        to = CallStatus.CANCELLED if call["initiator_id"] == employee_id else CallStatus.DECLINED
         updated = calls_repo.transition(
-            call["id"], to=to, only_from=[CallStatus.RINGING], ended_at=now, ended_by=user.id
+            call["id"], to=to, only_from=[CallStatus.RINGING], ended_at=now, ended_by=employee_id
         )
     else:
         answered = call.get("answered_at") or now
@@ -563,14 +579,16 @@ def end(call: dict[str, Any], user) -> dict[str, Any]:
             only_from=[CallStatus.ACCEPTED],
             ended_at=now,
             duration_seconds=seconds,
-            ended_by=user.id,
+            ended_by=employee_id,
         )
 
-    if not updated:
-        # Already over — the other side hung up a moment earlier. That is the
-        # answer the phone wanted anyway.
-        return payload(calls_repo.get_call(call["id"], call["company_id"]) or call)
+    return updated
 
+
+def _settled(updated: dict[str, Any]) -> dict[str, Any]:
+    """What follows a hang-up that moved the row: both sockets hear "ended",
+    the chat gets its line, and a caller who gave up leaves a missed-call
+    push behind for the person who never picked up."""
     cards = calls_repo.employee_cards(_participants(updated))
     _announce(updated, "ended", cards)
     _log_to_chat(updated)
@@ -867,3 +885,118 @@ def _send_guest_link(call: dict[str, Any], card: dict[str, Any] | None) -> str |
     except Exception:  # noqa: BLE001
         logger.exception("Could not queue the guest link SMS for call %s", call["id"])
     return link
+
+
+# ─── The media server's word ──────────────────────────────────────────────────
+#
+# `/end` is the request most likely to be lost — the network is worst at the
+# moment a call drops, and an app killed mid-call never sends it. A row that
+# nobody closed stayed `accepted`, and was written down later with whatever
+# duration the clock had reached by then: the next call this person placed
+# closed it from `start`, or the four-hour sweep did. That is the "5 daqiqa"
+# in the history for a conversation that lasted one — and the reason both
+# sides did not always end on ENDED.
+#
+# LiveKit sees the same hang-up from the other end: the phone leaves the
+# room. Its webhook is therefore the second road to `_hang_up`, and one no
+# phone has to be alive for. Rooms are `weel-<uuid4>`, which is how an event
+# finds its row.
+
+#: Every call room's name starts with this — see [new_room_name].
+LIVEKIT_ROOM_PREFIX = "weel-"
+
+
+def verify_livekit_webhook(body: bytes, authorization: str | None) -> dict[str, Any] | None:
+    """The event inside a LiveKit webhook, or None when it is not LiveKit's.
+
+    LiveKit signs every webhook with the key pair the tokens are signed
+    with: `Authorization` carries an HS256 JWT whose `iss` is the API key and
+    whose `sha256` claim is the base64 digest of the exact body. No header,
+    another key, a body that has been touched — none of it is acted on.
+    """
+    if not authorization or not _livekit_configured():
+        return None
+    token = authorization.strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    try:
+        claims = jwt.decode(
+            token,
+            settings.LIVEKIT_API_SECRET,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
+    except jwt.PyJWTError:
+        return None
+    if claims.get("iss") != settings.LIVEKIT_API_KEY:
+        return None
+    digest = base64.b64encode(hashlib.sha256(body).digest()).decode()
+    if claims.get("sha256") != digest:
+        return None
+    try:
+        event = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return event if isinstance(event, dict) else None
+
+
+def _employee_identity(identity: str | None) -> int | None:
+    """The employee behind a LiveKit identity. Employees join as their id
+    (`sign_token(user_id=…)`); a guest joins as `guest-<call id>`, which is
+    nobody here."""
+    text = (identity or "").strip()
+    return int(text) if text.isdigit() else None
+
+
+def livekit_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Settles a call from what happened in its room. Returns the call as it
+    now stands when something changed, None otherwise.
+
+    * `participant_left` by an employee on the call is that employee hanging
+      up: the row goes to `ended` with its true duration, both sockets hear
+      "ended", the chat gets its line — exactly as if their `/end` had
+      arrived. The other phone already treats a peer leaving the room as the
+      end of the call, so this only makes the server say what the phones
+      already do. A guest leaving is left alone: the manager's phone waits
+      for them to come back and hangs up itself if they do not.
+    * `room_finished` is the safety net for a `participant_left` that was
+      itself lost: an answered call whose room has closed is over, and is
+      written down now rather than by the four-hour sweep. The room closes
+      `empty_timeout` after the last person leaves, so the duration is late
+      by up to that much — still minutes, not hours.
+
+    Anything about a room that is not a call's, or a call already settled, is
+    nothing to do.
+    """
+    kind = event.get("event")
+    room = (event.get("room") or {}).get("name") or ""
+    if not room.startswith(LIVEKIT_ROOM_PREFIX):
+        return None
+    if kind not in ("participant_left", "room_finished"):
+        return None
+    call = calls_repo.get_call_by_room(room)
+    if not call or call["status"] not in CallStatus.LIVE:
+        return None
+
+    if kind == "participant_left":
+        employee_id = _employee_identity((event.get("participant") or {}).get("identity"))
+        if employee_id is None or not is_participant(call, employee_id):
+            return None
+        if call["status"] == CallStatus.RINGING and call.get("target_employee_id"):
+            # Nobody is in a colleague's room before the call is answered;
+            # an employee leaving a *ringing* room is an event about an
+            # earlier attempt, arriving late.
+            return None
+        updated = _hang_up(call, employee_id)
+        return _settled(updated) if updated else None
+
+    # room_finished
+    if call["status"] == CallStatus.ACCEPTED:
+        updated = abandon(call)
+        return payload(updated) if updated else None
+    if not call.get("target_employee_id"):
+        # A guest call whose room has closed: the manager left it long
+        # enough ago for the room to shut, and never said so.
+        updated = _hang_up(call, call["initiator_id"])
+        return _settled(updated) if updated else None
+    return None

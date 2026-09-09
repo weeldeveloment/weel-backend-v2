@@ -133,7 +133,8 @@ class TestMessagesCarryReadState:
         ), patch(
             "apps.b2b.workspace.repository.attachments_for_messages", return_value={}
         ), patch(
-            "apps.b2b.workspace.repository.mark_thread_read", return_value="2026-01-01T09:00:00+00:00"
+            "apps.b2b.workspace.repository.mark_thread_read",
+            return_value=("2026-01-01T09:00:00+00:00", True),
         ), patch(
             "apps.b2b.workspace.repository.reactions_for_messages", return_value={}
         ), patch(
@@ -151,6 +152,42 @@ class TestMessagesCarryReadState:
         assert response.data["read_at"] == "2026-01-01T10:00:00+00:00"
         # Opening the room is what tells the sender their message was seen.
         assert publish.called
+
+    def test_a_room_with_nothing_new_is_opened_without_a_receipt(self):
+        # A browser tab polls the room it is on every few seconds, and a phone
+        # re-reads a thread on every return to it. Each of those used to be a
+        # `read` frame to the whole room — telling the sender what their
+        # double ticks already said, and sending every member's phone back to
+        # the server for its chat list. The marker did not move, so nothing
+        # is announced.
+        request = factory.get("/api/b2b/workspace/chats/3/messages/")
+        force_authenticate(request, user=ALIYA)
+
+        with patch(
+            "apps.b2b.workspace.repository.get_thread_for_member", return_value=THREAD
+        ), patch(
+            "apps.b2b.workspace.repository.list_messages", return_value=[]
+        ), patch(
+            "apps.b2b.workspace.repository.messages_by_ids", return_value={}
+        ), patch(
+            "apps.b2b.workspace.repository.attachments_for_messages", return_value={}
+        ), patch(
+            "apps.b2b.workspace.repository.mark_thread_read",
+            return_value=("2026-01-01T09:00:00+00:00", False),
+        ), patch(
+            "apps.b2b.workspace.repository.reactions_for_messages", return_value={}
+        ), patch(
+            "apps.b2b.workspace.repository.list_pinned_messages", return_value=[]
+        ), patch(
+            "apps.b2b.workspace.repository.thread_read_state",
+            return_value={8: "2026-01-01T10:00:00+00:00"},
+        ), patch(
+            "apps.b2b.workspace.realtime.publish_thread"
+        ) as publish:
+            response = WorkspaceMessageView.as_view()(request, thread_id=3)
+
+        assert response.status_code == 200
+        assert not publish.called
 
 
 class TestLiveSections:

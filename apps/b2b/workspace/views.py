@@ -93,7 +93,6 @@ from apps.b2b.workspace.serializers import (
     EmployeeStatsSerializer,
     MeSerializer,
     OwnProfileSerializer,
-    OwnReactionsSerializer,
     MessageEditSerializer,
     MessageReactionSerializer,
     MessageWriteSerializer,
@@ -558,12 +557,12 @@ def _me_payload(employee: dict, membership=None) -> dict:
         "is_guest": bool(membership),
         "modules": modules,
         "guest_until": membership.ends_at if membership else None,
-        # The stickers on this person's reaction row. Six of them, always:
-        # the account's own if they picked any, the app's otherwise. Sent
-        # from here rather than fetched by the screen that needs it — the
-        # picker opens on a long-press and must be drawn in that frame.
-        "reactions": ((account or {}).get("reaction_emojis")
-                      or accounts.DEFAULT_REACTIONS),
+        # The stickers a reaction is picked from. The same seven for
+        # everybody since 2026-09-09: the personal row is gone, and an
+        # account that still carries an older choice is not asked for it.
+        # Sent from here rather than fetched by the screen that needs it —
+        # the picker opens on a long-press and must be drawn in that frame.
+        "reactions": list(accounts.DEFAULT_REACTIONS),
     }
 
 
@@ -632,49 +631,6 @@ class WorkspaceProfileView(WorkspaceAPIView):
             )
 
         return Response(_me_payload(updated, request.user.membership))
-
-
-class WorkspaceReactionsView(WorkspaceAPIView):
-    """PUT /api/b2b/workspace/me/reactions/ — the six stickers you react with.
-
-    Open to everybody, with no capability behind it. Reacting to a task is a
-    reader's remark rather than an edit of the record — the reaction endpoint
-    itself says so — and which faces somebody keeps on their own row is a
-    smaller question still.
-
-    Stored on the account, not on the roster row: one human, one set,
-    whichever workspace they are signed into. An empty list is a real request
-    and means "back to the app's own six" — it clears the column rather than
-    storing six blanks, so somebody who picked in March still gets whatever
-    the defaults are in December.
-    """
-
-    permission_classes = [IsAuthenticated, IsWorkspaceUser]
-
-    @swagger_auto_schema(
-        tags=WORKSPACE_TAG,
-        operation_summary="Choose the stickers on your reaction row",
-        request_body=OwnReactionsSerializer,
-        responses={200: MeSerializer()},
-    )
-    def put(self, request):
-        serializer = OwnReactionsSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        chosen = serializer.validated_data["reactions"]
-
-        employee = repo.get_workspace_employee(request.user.id)
-        account_id = (employee or {}).get("account_id")
-        if not account_id:
-            # A roster row written before the account table existed and never
-            # backfilled. Nothing to hang a personal choice on, and inventing
-            # one here would make this endpoint the thing that creates
-            # accounts.
-            return Response(
-                {"detail": _("This login has no account yet.")},
-                status=status.HTTP_409_CONFLICT,
-            )
-        accounts.update_account(account_id, reaction_emojis=chosen or None)
-        return Response(_me_payload(employee, request.user.membership))
 
 
 class WorkspaceProfilePhotoView(WorkspaceAPIView):
@@ -2790,19 +2746,25 @@ class WorkspaceMessageView(WorkspaceAPIView):
         # A search is a look through history, not a visit to the room. Marking
         # it read would clear a backlog somebody was searching *for*.
         if before_id is None and search is None:
-            read_at = repo.mark_thread_read(thread_id, request.user.id)
+            read_at, moved = repo.mark_thread_read(thread_id, request.user.id)
             # The other side's ticks move on this, not only on the socket's
             # own `read` frame: opening the room over HTTP is the commonest
             # way a thread gets read, and a sender whose app is open should
             # not have to wait for the reader to type something before their
             # message stops looking undelivered.
-            realtime.publish_thread(
-                thread_id,
-                realtime.EVENT_READ,
-                employee_id=request.user.id,
-                read_at=read_at,
-                last_message_id=messages[-1]["id"] if messages else None,
-            )
+            #
+            # Only when the marker moved. A room re-opened with nothing new in
+            # it — which a browser tab does every few seconds — has nothing
+            # to tell the room, and every phone in it used to re-read its
+            # chat list on the frame anyway.
+            if moved:
+                realtime.publish_thread(
+                    thread_id,
+                    realtime.EVENT_READ,
+                    employee_id=request.user.id,
+                    read_at=read_at,
+                    last_message_id=messages[-1]["id"] if messages else None,
+                )
 
         # Whose ticks are whose: when each *other* member last read the room.
         # The client turns this into one or two ticks per bubble by comparing
@@ -3236,6 +3198,21 @@ class WorkspaceThreadView(WorkspaceAPIView):
         members = repo.thread_member_ids(thread_id)
         if not repo.delete_thread(thread_id, request.user.company_id):
             return Response({"detail": _("Chat not found.")}, status=status.HTTP_404_NOT_FOUND)
+        # Written on the way past, with the chat's name in the row: this is a
+        # deletion for everybody in it and the thread is gone a line later, so
+        # the audit is the only place left that can say which chat it was.
+        record_audit(
+            request.user.company_id,
+            actor_employee_id=request.user.id,
+            action="chat.deleted",
+            target_type="chat",
+            target_id=thread_id,
+            payload={
+                "title": thread.get("title") or "",
+                "kind": thread.get("kind") or "",
+                "members": len(members),
+            },
+        )
         _announce_group(thread_id, "deleted")
         realtime.publish_employees(
             members, realtime.EVENT_THREAD, action="deleted", thread_id=thread_id
@@ -3417,6 +3394,34 @@ def _sale_happened(lead: dict) -> bool:
     )
 
 
+def _may_return_lead(lead: dict, user) -> bool:
+    """Whether this person may send goods from this deal back to the shelf.
+
+    Something has to have been sold first — see [_sale_happened] — and then
+    three kinds of person may undo it: whoever keeps the warehouse
+    (`STOCK_MANAGE`), the owner or administrator TZ v2 §8 leaves in charge of
+    a finished deal, and — since the sales team asked on 2026-09-09 — the
+    salesperson whose deal it is.
+
+    That last one is a deliberate hole in §8, which otherwise closes a
+    completed deal to its claimant. The customer walks back to the person
+    they bought from, and that person was being sent to find an administrator
+    to press a button on a sale they made themselves. Returning is not
+    editing the deal: it files a warehouse document with a reason on it, both
+    of which name their author, so the trail §8 protects stays intact.
+
+    A colleague's deal is still none of their business — [_works_lead] is the
+    claimant alone, not "anybody in sales".
+    """
+    if not _sale_happened(lead):
+        return False
+    return (
+        user.may(Permission.STOCK_MANAGE)
+        or _may_touch_completed(user)
+        or _works_lead(lead, user)
+    )
+
+
 def _lead_debt(lead: dict) -> Decimal | None:
     """What is left to pay, or None where this deal is not counted.
 
@@ -3474,12 +3479,8 @@ def _lead_payload(lead: dict, user) -> dict:
         # the fact the debts screen is read from, and a completed deal is
         # closed to everybody else by TZ v2 §8 anyway.
         "can_take_payment": _may_touch_completed(user) or user.is_manager,
-        # Goods going back on the shelf. Whoever keeps the warehouse, and the
-        # owner or administrator who may still touch a finished deal.
-        "can_return": (
-            _sale_happened(lead)
-            and (user.may(Permission.STOCK_MANAGE) or _may_touch_completed(user))
-        ),
+        # Goods going back on the shelf — see [_may_return_lead].
+        "can_return": _may_return_lead(lead, user),
     }
     if not can_view_details:
         # The whole contact card, not just the two original fields: an address
@@ -3507,11 +3508,15 @@ class WorkspaceDeviceTokenView(WorkspaceAPIView):
     def post(self, request):
         token = (request.data.get("fcm_token") or "").strip() or None
         repo.set_employee_fcm_token(request.user.id, token)
-        # The iPhone's PushKit token rides the same request when the app has
-        # one. Only touched when the key is present: an Android phone, or an
-        # older build, registers its FCM token without saying anything about
-        # VoIP, and must not wipe a token another device of the same person
-        # registered.
+        # The iPhone's PushKit token rides the same request. The app sends the
+        # key every time now, blank on an Android, because the row holds **one**
+        # phone: `fcm_token` is overwritten on every registration, so leaving
+        # `voip_token` behind left the row describing two different handsets —
+        # and the ring prefers PushKit, so it went to the iPhone somebody had
+        # stopped carrying while the Android in their hand stayed silent.
+        #
+        # Still only touched when the key is present, for the builds already
+        # installed that do not send it.
         if "voip_token" in request.data:
             voip = (request.data.get("voip_token") or "").strip() or None
             repo.set_employee_voip_token(request.user.id, voip)
@@ -4380,9 +4385,10 @@ class WorkspaceLeadReturnView(WorkspaceAPIView):
                 {"detail": _("Nothing has been sold on this deal yet.")},
                 status=status.HTTP_409_CONFLICT,
             )
-        if not (
-            request.user.may(Permission.STOCK_MANAGE) or _may_touch_completed(request.user)
-        ):
+        # One rule, written once — see [_may_return_lead]; the card's
+        # `can_return` is the same call, so the button and the endpoint cannot
+        # drift apart.
+        if not _may_return_lead(lead, request.user):
             return None, Response(
                 {"detail": _("Your role does not allow returns.")},
                 status=status.HTTP_403_FORBIDDEN,

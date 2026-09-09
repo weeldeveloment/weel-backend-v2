@@ -2024,21 +2024,42 @@ def delete_message(message_id: int, thread_id: int) -> bool:
     ) > 0
 
 
-def mark_thread_read(thread_id: int, employee_id: int) -> str | None:
-    """Marks everything in the room read for one member, and says when.
+def mark_thread_read(thread_id: int, employee_id: int) -> tuple[str | None, bool]:
+    """Marks everything in the room read for one member — the marker, and
+    whether marking moved it.
 
     The timestamp goes back to the caller because the other side needs it: a
     read receipt is only useful to the person who *sent* the messages, and
     "everything up to this moment" is what turns their single ticks into
     double ones without either client having to guess which bubbles it covers.
+
+    The second value is what the caller decides a broadcast on. A room is
+    marked read every time it is opened, and it is opened far more often than
+    it has news — every poll of a browser tab left on it, every return to a
+    thread on a phone. A receipt for those told nobody anything (the sender's
+    ticks were already double) and cost everybody: every member's phone
+    re-read its whole chat list on each one, several times a second across a
+    busy workspace. So the marker moves only past a message from somebody
+    else, and only a marker that moved is worth announcing.
     """
     now = timezone.now()
-    execute(
+    moved = execute(
         f"UPDATE {B2B_CHAT_MEMBER_TABLE} SET last_read_at = %s, updated_at = %s "
+        f"WHERE thread_id = %s AND employee_id = %s "
+        f"AND (last_read_at IS NULL OR last_read_at < ("
+        f"SELECT MAX(created_at) FROM {B2B_CHAT_MESSAGE_TABLE} "
+        f"WHERE thread_id = %s AND sender_id <> %s))",
+        [now, now, thread_id, employee_id, thread_id, employee_id],
+    ) > 0
+    if moved:
+        return now.isoformat(), True
+    row = fetch_one(
+        f"SELECT last_read_at FROM {B2B_CHAT_MEMBER_TABLE} "
         f"WHERE thread_id = %s AND employee_id = %s",
-        [now, now, thread_id, employee_id],
+        [thread_id, employee_id],
     )
-    return now.isoformat()
+    marker = row["last_read_at"] if row else None
+    return (marker.isoformat() if marker else None), False
 
 
 def last_message_id(thread_id: int) -> int | None:

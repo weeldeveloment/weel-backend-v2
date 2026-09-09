@@ -466,6 +466,13 @@ def notify_join_request_decided(request_id: int) -> int:
 #: system's notification settings.
 CALLS_ANDROID_CHANNEL = "weel_calls"
 
+#: How long APNs may hold a push whose only job is to take a ringing screen
+#: down. As long as the longest ring window and no longer: the ring push it
+#: chases can itself have been held, so a shorter life here is how a phone
+#: that came back late is left ringing for a call already written off — and a
+#: longer one is a phone woken to dismiss a screen it never had.
+CALL_DISMISS_TTL_SECONDS = 90
+
 
 def _push_call(
     tokens: list[str],
@@ -495,6 +502,70 @@ def _push_call(
         )
     except Exception:  # noqa: BLE001
         logger.exception("Call push failed for %s", data)
+
+
+def _push_voip(
+    token: str | None,
+    payload: dict[str, str],
+    *,
+    ttl_seconds: int,
+) -> bool:
+    """The same ring to an iPhone, through Apple's VoIP push.
+
+    True when APNs took it, which is the caller's signal to leave that phone
+    out of the FCM send: an alert push behind a CallKit screen is the banner
+    the screen exists to replace.
+
+    False for a phone with no token, a backend with no .p8 configured and an
+    APNs that refused — all three mean "fall back to the tray", which is the
+    most an iPhone can be given without PushKit.
+    """
+    from apps.b2b.workspace import apns_voip
+
+    if not token or not apns_voip.is_configured():
+        return False
+    try:
+        return apns_voip.send(
+            token,
+            payload,
+            ttl_seconds=ttl_seconds,
+            on_dead_token=lambda dead: repo.clear_employee_voip_tokens([dead]),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("VoIP push failed for %s", payload)
+        return False
+
+
+def _ring_window(call: dict, fallback_seconds: int | None) -> tuple[int, int] | None:
+    """How much of this ring is left — `(seconds, ends_at)`, the second an
+    epoch in milliseconds — or None once it is over.
+
+    Counted from the row's `started_at`, not from the moment this task runs:
+    the worker can pick it up seconds late, and a push that then says "ring
+    for sixty seconds" has the phone ringing that much past the moment the
+    server writes the call down as missed. The phone is told *when* the ring
+    ends rather than *how long* it lasts, so a push FCM held back — a phone
+    out of coverage, a dozing Android — rings for what is left, and one that
+    arrives after the end does not ring at all. That late push was the
+    "otlozhenniy zvonok" that interrupted a conversation: the callee had
+    rung the caller back in the meantime, and the stale ring landed on top
+    of the call they were now on.
+
+    `fallback_seconds` is the caller's window for a row with no
+    `started_at` — nothing in production, but the tests build calls by hand.
+    """
+    started = call.get("started_at")
+    if started is None:
+        seconds = int(fallback_seconds or 60)
+        ends = timezone.now() + timedelta(seconds=seconds)
+        return seconds, int(ends.timestamp() * 1000)
+    from apps.b2b.workspace import calls
+
+    ends = started + calls.ring_timeout() + calls.ring_grace()
+    remaining = (ends - timezone.now()).total_seconds()
+    if remaining <= 0:
+        return None
+    return max(1, int(remaining + 0.999)), int(ends.timestamp() * 1000)
 
 
 @app.task(name="b2b.workspace.notify_incoming_call")
@@ -530,6 +601,12 @@ def notify_incoming_call(
     call = calls_repo.get_call(call_id, company_id)
     if not call or call["status"] != calls_repo.CallStatus.RINGING:
         return 0
+    window = _ring_window(call, ttl_seconds)
+    if window is None:
+        # The ring is over by the server's own clock; the sweep will write
+        # it down as missed and send that push instead.
+        return 0
+    remaining, ends_at = window
     data = {
         "type": "call",
         "action": "ringing",
@@ -537,20 +614,24 @@ def notify_incoming_call(
         "call_type": call_type,
         "caller_name": caller_name,
         "caller_id": str(call["initiator_id"]),
+        # How long the ringing screen shows before giving up on its own —
+        # what is *left* of the window, for a build that only reads this —
+        # and the moment it ends, for one that can count from there.
+        "ring_ms": str(remaining * 1000),
+        "ring_ends_at": str(ends_at),
     }
     if thread_id:
         data["thread_id"] = str(thread_id)
     if avatar:
         data["avatar"] = avatar
-    if ttl_seconds:
-        # How long the ringing screen shows before giving up on its own.
-        data["ring_ms"] = str(int(ttl_seconds) * 1000)
     _push_call(
         [fcm_token],
         title=push_text.CALL_INCOMING_TITLE,
         body=push_text.call_incoming_body(caller_name, call_type),
         data=data,
-        ttl_seconds=ttl_seconds,
+        # FCM may hold it exactly as long as the ring lasts and not a second
+        # more — see `_ring_window`.
+        ttl_seconds=remaining,
         android_data_only=True,
     )
     return 1
@@ -573,13 +654,15 @@ def notify_incoming_call_voip(
     Falls back to the ordinary push when APNs will not take it, so a phone
     with a stale VoIP token is still told something.
     """
-    from apps.b2b.workspace import apns_voip
     from apps.b2b.workspace import calls_repository as calls_repo
 
     call = calls_repo.get_call(call_id, company_id)
     if not call or call["status"] != calls_repo.CallStatus.RINGING:
         return 0
-    window = int(ttl_seconds or 60)
+    ring = _ring_window(call, ttl_seconds)
+    if ring is None:
+        return 0
+    window, ends_at = ring
     payload: dict[str, str] = {
         "type": "call",
         "action": "ringing",
@@ -588,17 +671,13 @@ def notify_incoming_call_voip(
         "caller_name": caller_name,
         "caller_id": str(call["initiator_id"]),
         "ring_ms": str(window * 1000),
+        "ring_ends_at": str(ends_at),
     }
     if thread_id:
         payload["thread_id"] = str(thread_id)
     if avatar:
         payload["avatar"] = avatar
-    if apns_voip.send(
-        voip_token,
-        payload,
-        ttl_seconds=window,
-        on_dead_token=lambda token: repo.clear_employee_voip_tokens([token]),
-    ):
+    if _push_voip(voip_token, payload, ttl_seconds=window):
         return 1
     if fcm_token:
         return notify_incoming_call(
@@ -617,10 +696,30 @@ def notify_missed_call(
     thread_id: int | None = None,
 ) -> int:
     """"Javobsiz qo'ng'iroq" — a feed row and a push that opens the chat, so
-    the person finds the missed-call line the thread now carries."""
+    the person finds the missed-call line the thread now carries.
+
+    It is also what takes the ringing screen down. Android reads the
+    `action: missed` data push in its background isolate and dismisses; an
+    iPhone cannot — the screen up there was drawn by CallKit from a PushKit
+    push, and only another PushKit push reaches it — so the same news goes
+    out over VoIP as well. Without it the caller gives up and the iPhone
+    carries on ringing for the rest of the window.
+    """
     employee = repo.get_workspace_employee(employee_id)
     if not employee:
         return 0
+    _push_voip(
+        employee.get("voip_token"),
+        {
+            "type": "call",
+            "action": "missed",
+            "call_id": str(call_id),
+            "call_type": call_type,
+        },
+        # Worthless the moment the ring is over: a phone that was out of
+        # reach must not be woken to dismiss a screen it never had.
+        ttl_seconds=CALL_DISMISS_TTL_SECONDS,
+    )
     title = push_text.CALL_MISSED_TITLE
     body = push_text.call_missed_body(caller_name, call_type)
     create_notification(
@@ -693,6 +792,12 @@ def notify_conference_invite(
         "call_type": "video",
         "conference_title": title or "",
         "ring_ms": str(CONFERENCE_RING_SECONDS * 1000),
+        # When the ring is over, so a phone the push reached late rings for
+        # what is left of the ninety seconds and not for ninety more — and a
+        # phone it reached after the end does not ring at all.
+        "ring_ends_at": str(
+            int((timezone.now() + timedelta(seconds=CONFERENCE_RING_SECONDS)).timestamp() * 1000)
+        ),
     }
     tokens = []
     for employee_id in employee_ids:
@@ -707,13 +812,22 @@ def notify_conference_invite(
             body=body,
             payload={"conference_id": conference_id, "thread_id": thread_id},
         )
+        sent += 1
+        # An iPhone rings through PushKit, exactly as it does for a call:
+        # CallKit's own screen over whatever the person is doing, and over a
+        # locked phone. Taken, that phone is left out of the FCM send below —
+        # an alert push behind the CallKit screen would be the banner this
+        # replaces, said twice.
+        if _push_voip(
+            employee.get("voip_token"), data, ttl_seconds=CONFERENCE_RING_SECONDS
+        ):
+            continue
         if employee.get("fcm_token"):
             tokens.append(employee["fcm_token"])
-        sent += 1
     # Data-only on Android for the same reason a call is: a system-drawn
-    # banner is exactly what this stopped being. iOS still gets the alert —
-    # there is no PushKit token for a conference, so the tray is what an
-    # iPhone with the app closed has.
+    # banner is exactly what this stopped being. An iPhone with no PushKit
+    # token — or a backend with no .p8 — still gets the alert, which is the
+    # most the tray can do.
     _push_call(
         tokens,
         title=push_title,
@@ -739,27 +853,38 @@ def dismiss_conference_ring(
     No feed row and no banner: nothing happened that anybody needs to read
     about — the invitation card in the group already says the room is closed.
     """
+    data = {
+        "type": "call",
+        "action": "ended",
+        "call_kind": "conference",
+        "conference_id": str(conference_id),
+    }
     tokens = []
+    stopped = 0
     for employee_id in employee_ids:
         employee = repo.get_workspace_employee(employee_id)
-        if employee and employee.get("fcm_token"):
+        if not employee:
+            continue
+        # The iPhone's screen was drawn by CallKit from a PushKit push and
+        # only another PushKit push reaches it — an FCM data message does not
+        # wake a closed iPhone at all.
+        if _push_voip(
+            employee.get("voip_token"), data, ttl_seconds=CONFERENCE_RING_SECONDS
+        ):
+            stopped += 1
+            continue
+        if employee.get("fcm_token"):
             tokens.append(employee["fcm_token"])
-    if not tokens:
-        return 0
-    _push_call(
-        tokens,
-        title="",
-        body="",
-        data={
-            "type": "call",
-            "action": "ended",
-            "call_kind": "conference",
-            "conference_id": str(conference_id),
-        },
-        ttl_seconds=CONFERENCE_RING_SECONDS,
-        android_data_only=True,
-    )
-    return len(tokens)
+    if tokens:
+        _push_call(
+            tokens,
+            title="",
+            body="",
+            data=data,
+            ttl_seconds=CONFERENCE_RING_SECONDS,
+            android_data_only=True,
+        )
+    return len(tokens) + stopped
 
 
 @app.task(name="b2b.workspace.send_call_guest_link")

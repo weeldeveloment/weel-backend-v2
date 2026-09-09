@@ -1185,39 +1185,30 @@ def test_received_is_ordered_newest_first_across_both_kinds():
     kinds = [row["kind"] for row in response.data["received"]]
     assert kinds == ["join", "message"]
 
-
-# ─── The stickers on your own reaction row ────────────────────────────────────
+# ─── The stickers a reaction is picked from ───────────────────────────────────
 #
-# Six faces, picked from the app's catalogue in Profil → Stikerlar. What is
-# worth pinning here is where they live and who may set them: on the account,
-# so somebody working in two workspaces picks once, and behind no capability
-# at all, because reacting is a reader's remark rather than an edit.
-
-def _set_reactions(user, body):
-    from apps.b2b.workspace.views import WorkspaceReactionsView
-
-    return _call(
-        WorkspaceReactionsView,
-        factory.put("/me/reactions/", body, format="json"),
-        user,
-    )
-
+# Seven of them, and the same seven for everybody since 2026-09-09. There is
+# no endpoint for choosing any more — the catalogue and the profile screen
+# behind it are gone — so what is left worth pinning is that the row still
+# rides on `/me/`, because the picker opens on a tap and has to be drawn in
+# that frame, and that an account which kept a personal six while the choice
+# existed is not asked for it.
 
 @contextmanager
-def _reaction_write(account_id=ACCOUNT_ID, stored=None):
+def _session_of(stored=None):
+    """A `/me/` with one account behind it, optionally still carrying the six
+    somebody picked on the day the choice existed."""
     row = {
         "id": AZIZ_ID,
         "company_id": HOME_COMPANY,
         "role": "employee",
-        "account_id": account_id,
+        "account_id": ACCOUNT_ID,
     }
     with patch(
         "apps.b2b.workspace.views.repo.get_workspace_employee", return_value=row
     ), patch(
-        "apps.b2b.workspace.views.accounts.update_account"
-    ) as write, patch(
         "apps.b2b.workspace.views.accounts.get_account",
-        return_value={"id": account_id, "reaction_emojis": stored},
+        return_value={"id": ACCOUNT_ID, "reaction_emojis": stored},
     ), patch(
         "apps.b2b.workspace.views.get_company", return_value={}
     ), patch(
@@ -1226,62 +1217,39 @@ def _reaction_write(account_id=ACCOUNT_ID, stored=None):
         "apps.b2b.workspace.access_repository.access_for_employee",
         return_value=([], []),
     ):
-        yield write
+        yield
 
 
-def test_an_ordinary_employee_picks_their_own_stickers():
-    """No capability behind it, deliberately: reacting is a reader's remark,
-    and which faces somebody reacts *with* is smaller still."""
-    with _reaction_write() as write:
-        response = _set_reactions(AZIZ, {"reactions": ["🔥", "🎉", "👀"]})
+def _me(user):
+    from apps.b2b.workspace.views import WorkspaceMeView
 
-    assert response.status_code == 200
-    assert write.call_args.args[0] == ACCOUNT_ID
-    assert write.call_args.kwargs["reaction_emojis"] == ["🔥", "🎉", "👀"]
+    return _call(WorkspaceMeView, factory.get("/me/"), user)
 
 
-def test_the_same_sticker_twice_is_one_sticker():
-    """Two buttons doing the same thing. The picker cannot produce it; an
-    older client could."""
-    with _reaction_write() as write:
-        _set_reactions(AZIZ, {"reactions": ["🔥", " 🔥 ", "🎉"]})
-
-    assert write.call_args.kwargs["reaction_emojis"] == ["🔥", "🎉"]
-
-
-def test_more_than_six_is_refused():
-    """Six is the width of the row, and the row is the whole point — a
-    reaction has to be answerable in one tap."""
-    response = _set_reactions(AZIZ, {"reactions": list("🔥🎉👀💯🙌🚀✨")})
-    assert response.status_code == 400
-
-
-def test_emptying_the_list_goes_back_to_the_apps_own_six():
-    """Cleared rather than stored as six blanks, so somebody who picked in
-    March follows whatever the defaults are in December."""
+def test_the_reaction_row_rides_on_every_session():
     from apps.b2b.workspace import accounts as acc
 
-    with _reaction_write(stored=None) as write:
-        response = _set_reactions(AZIZ, {"reactions": []})
+    with _session_of():
+        response = _me(AZIZ)
 
-    assert write.call_args.kwargs["reaction_emojis"] is None
+    assert response.data["reactions"] == acc.DEFAULT_REACTIONS
+    # The one face the change was asked for: disagreeing in a tap.
+    assert "👎" in response.data["reactions"]
+
+
+def test_a_six_kept_from_the_old_picker_is_not_read_back():
+    """The column outlived the screen that filled it. Reading it would leave a
+    handful of people on a row nobody else has and no way to change it."""
+    from apps.b2b.workspace import accounts as acc
+
+    with _session_of(stored=["🔥", "🎉", "👀", "💯", "🙌", "🚀"]):
+        response = _me(AZIZ)
+
     assert response.data["reactions"] == acc.DEFAULT_REACTIONS
 
 
-def test_the_row_is_sent_with_every_session():
-    """The picker opens on a tap and has to be drawn in that frame, so the
-    six ride on `/me/` rather than being fetched when it opens."""
-    with _reaction_write(stored=["🔥", "🎉"]):
-        response = _set_reactions(AZIZ, {"reactions": ["🔥", "🎉"]})
+def test_choosing_your_own_row_is_no_longer_an_endpoint():
+    """Removed rather than left accepting writes nothing reads back."""
+    from apps.b2b.workspace import views
 
-    assert response.data["reactions"] == ["🔥", "🎉"]
-
-
-def test_a_login_with_no_account_behind_it_has_nowhere_to_keep_them():
-    """A roster row imported from a spreadsheet and never registered. The
-    endpoint says so rather than quietly creating an account."""
-    with _reaction_write(account_id=None) as write:
-        response = _set_reactions(AZIZ, {"reactions": ["🔥"]})
-
-    assert response.status_code == 409
-    write.assert_not_called()
+    assert not hasattr(views, "WorkspaceReactionsView")

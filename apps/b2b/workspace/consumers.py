@@ -168,7 +168,12 @@ class WorkspaceConsumer(AsyncWebsocketConsumer):
             "employee_id": self.employee_id,
         }
         if event == EVENT_READ:
-            read_at = await self._mark_read(thread_id, self.employee_id)
+            read_at, moved = await self._mark_read(thread_id, self.employee_id)
+            # Nothing was waiting, so nothing changed hands: the sender's
+            # ticks were already double, and a frame here would only send
+            # every phone in the room back to the server for its chat list.
+            if not moved:
+                return
             # What the other side needs to tick its own bubbles: everything it
             # sent up to this moment has been seen. Sending the timestamp
             # rather than a message id means a client that was mid-scroll does
@@ -274,7 +279,7 @@ class WorkspaceConsumer(AsyncWebsocketConsumer):
         return repo.list_threads(company_id, employee_id)
 
     @database_sync_to_async
-    def _mark_read(self, thread_id: int, employee_id: int) -> str | None:
+    def _mark_read(self, thread_id: int, employee_id: int) -> tuple[str | None, bool]:
         return repo.mark_thread_read(thread_id, employee_id)
 
     @database_sync_to_async

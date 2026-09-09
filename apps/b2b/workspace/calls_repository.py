@@ -95,6 +95,18 @@ def get_call(call_id: int, company_id: int) -> dict[str, Any] | None:
     )
 
 
+def get_call_by_room(room_name: str) -> dict[str, Any] | None:
+    """The call a media-server room belongs to — how a LiveKit webhook, which
+    knows only the room name, finds its way back to the row. Room names are
+    `weel-<uuid4>`, so there is at most one."""
+    if not room_name:
+        return None
+    return fetch_one(
+        f"SELECT * FROM {B2B_CALL_TABLE} WHERE room_name = %s ORDER BY id DESC LIMIT 1",
+        [room_name],
+    )
+
+
 def transition(
     call_id: int,
     *,

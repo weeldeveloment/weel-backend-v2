@@ -11,8 +11,9 @@ from django.utils.translation import gettext_lazy as _
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import serializers, status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.b2b.workspace import calls
 from apps.b2b.workspace import calls_repository as calls_repo
@@ -244,3 +245,25 @@ class WorkspaceCallHistoryView(_CallView):
             "results": [calls.payload(calls.settle(r), cards=cards) for r in rows],
             "has_more": len(rows) == limit,
         })
+
+
+class WorkspaceCallLiveKitWebhookView(APIView):
+    """POST /calls/livekit-webhook/ — LiveKit telling us what happened in a
+    room. Not for any app: the caller is the media server, and it proves so
+    with the signature `calls.verify_livekit_webhook` checks. Kept out of the
+    published schema for the same reason."""
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+    swagger_schema = None
+
+    def post(self, request):
+        event = calls.verify_livekit_webhook(
+            request.body, request.headers.get("Authorization")
+        )
+        if event is None:
+            return Response(
+                {"detail": "Not a LiveKit webhook."}, status=status.HTTP_401_UNAUTHORIZED
+            )
+        updated = calls.livekit_event(event)
+        return Response({"handled": updated is not None})

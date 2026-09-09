@@ -519,6 +519,105 @@ def test_each_half_of_the_trash_is_gated_on_its_own():
     assert response.data["leads"] == []
 
 
+def test_the_actions_screen_carries_what_cannot_be_restored():
+    """"Amallar" is not only the bin: a chat deleted for everybody, a frozen
+    or removed colleague and a deleted product are things that happened and
+    are read there, even though none of them can be put back."""
+    from apps.b2b.workspace.access_views import WorkspaceTrashView
+
+    events = [{"id": 9, "action": "chat.deleted", "payload": {"title": "Sotuv"}}]
+    with _granting(Permission.TASK_DELETE, Permission.DEAL_DELETE), patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_tasks", return_value=[]
+    ), patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_leads", return_value=[]
+    ), patch(
+        "apps.b2b.workspace.access_views.arepo.list_action_events",
+        return_value=events,
+    ):
+        response = _call(WorkspaceTrashView, factory.get("/trash/"), _user(Role.OWNER))
+
+    assert response.status_code == 200
+    assert response.data["events"] == events
+
+
+def test_the_actions_a_manager_may_not_read_are_absent_rather_than_empty():
+    """Who froze whom is administrative. A manager still gets the bin — and
+    `None` rather than `[]`, so the app leaves the tab off instead of drawing
+    an empty one over a list it is not allowed to see."""
+    from apps.b2b.workspace.access_views import WorkspaceTrashView
+
+    with _granting(Permission.TASK_DELETE, Permission.DEAL_DELETE), patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_tasks", return_value=[]
+    ), patch(
+        "apps.b2b.workspace.access_views.repo.list_deleted_leads", return_value=[]
+    ), patch(
+        "apps.b2b.workspace.access_views.arepo.list_action_events"
+    ) as events:
+        response = _call(
+            WorkspaceTrashView, factory.get("/trash/"), _user(Role.MANAGER)
+        )
+
+    assert response.status_code == 200
+    assert response.data["events"] is None
+    events.assert_not_called()
+
+
+def test_deleting_a_chat_says_which_chat_it_was():
+    """The thread is gone a line later, so the audit row is the only place
+    left that can name it."""
+    from apps.b2b.workspace.views import WorkspaceThreadView
+
+    thread = {"id": 7, "kind": "group", "title": "Sotuv bo‘limi"}
+    with patch(
+        "apps.b2b.workspace.views.repo.get_thread_for_member", return_value=thread
+    ), patch(
+        "apps.b2b.workspace.views.repo.thread_member", return_value={"role": "admin"}
+    ), patch(
+        "apps.b2b.workspace.views.repo.thread_member_ids", return_value=[1, 2]
+    ), patch(
+        "apps.b2b.workspace.views.repo.delete_thread", return_value=True
+    ), patch("apps.b2b.workspace.views._announce_group"), patch(
+        "apps.b2b.workspace.views.realtime.publish_employees"
+    ), patch("apps.b2b.workspace.views.remove_from_thread"), patch(
+        "apps.b2b.workspace.views.record_audit"
+    ) as audit:
+        response = _call(
+            WorkspaceThreadView,
+            factory.delete("/chats/7/"),
+            _user(Role.OWNER),
+            thread_id=7,
+        )
+
+    assert response.status_code == 204
+    audit.assert_called_once()
+    assert audit.call_args.kwargs["action"] == "chat.deleted"
+    assert audit.call_args.kwargs["payload"]["title"] == "Sotuv bo‘limi"
+
+
+def test_deleting_a_product_keeps_its_name_in_the_audit():
+    from apps.b2b.workspace.inventory_views import WorkspaceProductDetailView
+
+    with patch(
+        "apps.b2b.workspace.inventory_views.inventory.get_product",
+        return_value={"id": 4, "name": "Ofis stuli"},
+    ), patch(
+        "apps.b2b.workspace.inventory_views.inventory.delete_product",
+        return_value=True,
+    ), patch(
+        "apps.b2b.workspace.inventory_views.record_audit"
+    ) as audit:
+        response = _call(
+            WorkspaceProductDetailView,
+            factory.delete("/inventory/products/4/"),
+            _user(Role.OWNER),
+            product_id=4,
+        )
+
+    assert response.status_code == 204
+    assert audit.call_args.kwargs["action"] == "inventory.product_deleted"
+    assert audit.call_args.kwargs["payload"]["name"] == "Ofis stuli"
+
+
 def test_restoring_takes_the_same_authority_as_deleting():
     """Otherwise somebody who cannot remove a deal could put back one that was
     removed deliberately."""
@@ -1071,6 +1170,9 @@ def test_the_archive_shows_completed_and_deleted_separately():
         "apps.b2b.workspace.access_views.repo.list_deleted_tasks", return_value=[{"id": 3}]
     ), patch(
         "apps.b2b.workspace.access_views.repo.list_deleted_leads", return_value=[{"id": 4}]
+    ), patch(
+        "apps.b2b.workspace.access_views.arepo.list_action_events",
+        return_value=[{"id": 9, "action": "chat.deleted"}],
     ):
         response = _call(
             WorkspaceArchiveView, factory.get("/archive/"), _user(Role.OWNER)
@@ -1081,6 +1183,9 @@ def test_the_archive_shows_completed_and_deleted_separately():
     assert response.data["completed"]["leads"] == [{"id": 2}]
     assert response.data["deleted"]["tasks"] == [{"id": 3}]
     assert response.data["deleted"]["leads"] == [{"id": 4}]
+    # The phone draws deletions, stock returns and these on one screen, and
+    # this is the door everybody reaches it through — see the trash view.
+    assert response.data["events"] == [{"id": 9, "action": "chat.deleted"}]
     assert response.data["can_restore_tasks"] is True
     list_tasks.assert_called_once_with(COMPANY, status="done")
     list_leads.assert_called_once()
@@ -1120,6 +1225,9 @@ def test_the_archive_shows_an_employee_their_own_slice():
     # Seeing a deleted record is not the right to bring it back (§11).
     assert response.data["can_restore_tasks"] is False
     assert response.data["can_restore_leads"] is False
+    # Who froze whom is administrative. `None`, not `[]`, so the app leaves
+    # the tab off rather than drawing an empty one.
+    assert response.data["events"] is None
 
 
 def test_the_archive_hides_a_module_that_is_closed_to_the_viewer():
@@ -1136,6 +1244,8 @@ def test_the_archive_hides_a_module_that_is_closed_to_the_viewer():
     ), patch(
         "apps.b2b.workspace.access_repository.access_for_employee",
         return_value=([Module.TASKS], [Permission.TASK_VIEW, Permission.DEAL_VIEW]),
+    ), patch(
+        "apps.b2b.workspace.access_views.arepo.list_action_events", return_value=[]
     ):
 
         response = _call(

@@ -152,6 +152,8 @@ class TestReply:
         force_authenticate(request, user=EMPLOYEE)
 
         with patch("apps.b2b.workspace.views.repo") as repo:
+            # A room opened with nothing new in it — see `mark_thread_read`.
+            repo.mark_thread_read.return_value = ("2026-01-01T09:00:00+00:00", False)
             repo.get_thread_for_member.return_value = THREAD
             repo.list_messages.return_value = [_message(id=101, reply_to_id=100)]
             repo.messages_by_ids.return_value = {100: _message(text="")}

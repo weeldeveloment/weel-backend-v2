@@ -146,41 +146,38 @@ def split_full_name(full_name: str | None) -> tuple[str, str]:
     return " ".join(parts[1:]), parts[0]
 
 
-#: Columns holding a JSON document rather than a scalar, so [update_account]
-#: hands psycopg the text form rather than a Python list.
-_JSON_FIELDS = {"reaction_emojis"}
-
-
 def update_account(account_id: int, **fields) -> dict[str, Any] | None:
     allowed = {
         key: value
         for key, value in fields.items()
-        if key in {"first_name", "last_name", "photo", "username", "reaction_emojis"}
+        if key in {"first_name", "last_name", "photo", "username"}
     }
     if not allowed:
         return get_account(account_id)
     sets = ", ".join(f"{key} = %s" for key in allowed)
-    params = [
-        json.dumps(value) if key in _JSON_FIELDS and value is not None else value
-        for key, value in allowed.items()
-    ]
     execute(
         f"UPDATE {B2B_ACCOUNT_TABLE} SET {sets}, updated_at = %s WHERE id = %s",
-        [*params, timezone.now(), account_id],
+        [*allowed.values(), timezone.now(), account_id],
     )
     return get_account(account_id)
 
 
-#: What the reaction row offers when nobody has said otherwise — the six the
-#: app has always shown, and what a person who empties their own list goes
-#: back to. Kept on the server as well as in the app so that a reaction row
-#: rendered from `/me/` is never empty, whatever the client does.
-DEFAULT_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
-
-#: How many a person may keep. Six is the width of the row, and the row is the
-#: whole point: a reaction is a one-tap answer, so the choice has to be one
-#: that fits on screen at once rather than a keyboard to search through.
-MAX_REACTIONS = 6
+#: The stickers a task or a message is answered with: seven, and the same
+#: seven for everybody.
+#:
+#: Personal until 2026-09-09 — each account kept its own six, picked from a
+#: catalogue on the profile screen — and one shared row again since. The
+#: choice is gone, and the column it was kept in is no longer read: an account
+#: that still carries an older six is not asked.
+#:
+#: 👎 is the addition, and it goes last: the six that were already there keep
+#: the order people aim at without looking, and the new face is the seventh.
+#:
+#: Sent on `/me/` all the same rather than left to the app alone. A row of
+#: emoji is exactly the sort of thing worth being able to change on every
+#: phone at once, without waiting on a store release; the app holds the same
+#: seven only as a fallback for a backend too old to send them.
+DEFAULT_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "👎"]
 
 
 #: What a handle may look like — 3–50 characters, lowercase, starting with
@@ -357,8 +354,6 @@ def create_membership(
     later change to the name or the handle is propagated back down to every
     membership (see `set_own_profile` and `sync_username_across_memberships`).
     """
-    import json
-
     from apps.b2b.workspace.access import Module, Permission, Role
 
     now = timezone.now()

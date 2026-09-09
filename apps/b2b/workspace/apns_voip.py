@@ -110,6 +110,34 @@ def use_client_for_tests(client: httpx.Client | None) -> None:
     _forget_provider_token()
 
 
+def _other_gateway() -> str:
+    """The environment `gateway` is not. See [send] for what it is for."""
+    return (
+        "https://api.push.apple.com"
+        if settings.APNS_USE_SANDBOX
+        else "https://api.sandbox.push.apple.com"
+    )
+
+
+def _attempt(
+    host: str, device_token: str, payload: dict[str, Any], headers: dict[str, str]
+) -> tuple[int, str | None] | None:
+    """One POST. `(status, reason)`, or None when it never left the machine."""
+    try:
+        response = _http().post(
+            f"{host}/3/device/{device_token}", json=payload, headers=headers
+        )
+    except httpx.HTTPError as error:
+        logger.warning("APNs VoIP push did not go out: %s", error)
+        return None
+    reason = None
+    try:
+        reason = response.json().get("reason")
+    except ValueError:
+        pass
+    return response.status_code, reason
+
+
 def send(
     device_token: str,
     payload: dict[str, Any],
@@ -127,26 +155,38 @@ def send(
         "apns-priority": "10",
         "apns-expiration": str(int(time.time()) + max(1, int(ttl_seconds))),
     }
-    try:
-        response = _http().post(
-            f"{gateway()}/3/device/{device_token}", json=payload, headers=headers
-        )
-    except httpx.HTTPError as error:
-        logger.warning("APNs VoIP push did not go out: %s", error)
+    attempt = _attempt(gateway(), device_token, payload, headers)
+    if attempt is None:
         return False
-    if response.status_code == 200:
+    status, reason = attempt
+    if status == 200:
         return True
 
-    reason = None
-    try:
-        reason = response.json().get("reason")
-    except ValueError:
-        pass
-    if response.status_code in (400, 410) and reason in DEAD_TOKEN_REASONS:
+    # `BadDeviceToken` is what APNs says to a **sandbox** token offered to the
+    # production gateway, and to a production token offered to sandbox — the
+    # token itself is fine, it was minted in the other environment. Which one
+    # a given phone is in depends on how the app reached it: an Xcode build is
+    # sandbox, TestFlight and the App Store are production, and both are
+    # installed on real phones at the same time here.
+    #
+    # `APNS_USE_SANDBOX` can only name one of them, so the other used to be
+    # read as a dead token and **deleted** — one TestFlight install and that
+    # employee's iPhone stopped ringing for good, with the tray banner as the
+    # only symptom. So the other environment is tried before believing it.
+    if status == 400 and reason == "BadDeviceToken":
+        other = _attempt(_other_gateway(), device_token, payload, headers)
+        if other is None:
+            return False
+        status, reason = other
+        if status == 200:
+            logger.info("APNs VoIP push went through the other environment")
+            return True
+
+    if status in (400, 410) and reason in DEAD_TOKEN_REASONS:
         if on_dead_token:
             on_dead_token(device_token)
-    elif response.status_code == 403:
+    elif status == 403:
         # A provider token APNs no longer likes: minted afresh next time.
         _forget_provider_token()
-    logger.warning("APNs VoIP push refused: %s %s", response.status_code, reason)
+    logger.warning("APNs VoIP push refused: %s %s", status, reason)
     return False

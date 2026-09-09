@@ -69,6 +69,7 @@ from apps.b2b.workspace.calls_views import (
     WorkspaceCallHistoryView,
     WorkspaceCallIncomingView,
     WorkspaceCallListCreateView,
+    WorkspaceCallLiveKitWebhookView,
     WorkspaceCallTokenView,
 )
 from apps.b2b.workspace.conferences_views import (
@@ -168,7 +169,6 @@ from apps.b2b.workspace.views import (
     WorkspaceReportView,
     WorkspaceTeamView,
     WorkspaceProfileView,
-    WorkspaceReactionsView,
     WorkspaceUsernameView,
     WorkspaceGroupMemberView,
     WorkspaceGroupMembersView,
@@ -192,9 +192,6 @@ urlpatterns = [
     path("me/", WorkspaceMeView.as_view(), name="ws-me"),
     path("me/device-token/", WorkspaceDeviceTokenView.as_view(), name="ws-device-token"),
     path("me/profile/", WorkspaceProfileView.as_view(), name="ws-profile"),
-    # The six stickers on your own reaction row. Beside the profile it belongs
-    # to, and open to everybody — see [WorkspaceReactionsView].
-    path("me/reactions/", WorkspaceReactionsView.as_view(), name="ws-reactions"),
     path("me/photo/", WorkspaceProfilePhotoView.as_view(), name="ws-profile-photo"),
     path("me/username/", WorkspaceUsernameView.as_view(), name="ws-username"),
 
@@ -427,6 +424,12 @@ urlpatterns = [
     path("calls/<int:call_id>/decline/", WorkspaceCallDeclineView.as_view(), name="ws-call-decline"),
     path("calls/<int:call_id>/end/", WorkspaceCallEndView.as_view(), name="ws-call-end"),
     path("calls/<int:call_id>/token/", WorkspaceCallTokenView.as_view(), name="ws-call-token"),
+    # The media server's own road in — signed by LiveKit, not by a session.
+    path(
+        "calls/livekit-webhook/",
+        WorkspaceCallLiveKitWebhookView.as_view(),
+        name="ws-calls-livekit-webhook",
+    ),
     # Conferences — a room many people are invited into at once, off the group
     # thread that carries the invitation card. See `conferences.py`.
     path("conferences/", WorkspaceConferenceListCreateView.as_view(), name="ws-conferences"),

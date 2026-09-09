@@ -69,6 +69,16 @@ services:
           # ham kamroq.
           max_participants: 0
           auto_create: true
+        # Xona hodisalari backend'ga. Ishtirokchi xonadan chiqsa server
+        # qo'ng'iroqni o'zi ENDED qiladi — telefon `/end` yubora olmagan
+        # (tarmoq ketgan, ilova o'ldirilgan) bo'lsa ham; aks holda yozuv
+        # `accepted`da qolib, keyin soxta davomiylik bilan yopilardi.
+        # Imzo — LIVEKIT_KEYS'dagi o'sha juftlik; backend shu secret bilan
+        # tekshiradi (`calls.verify_livekit_webhook`).
+        webhook:
+          api_key: ${LIVEKIT_API_KEY}
+          urls:
+            - ${LIVEKIT_WEBHOOK_URL:-https://dev.weel.uz/api/b2b/workspace/calls/livekit-webhook/}
         turn:
           enabled: false
     labels:

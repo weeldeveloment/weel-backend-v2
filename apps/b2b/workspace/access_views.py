@@ -752,11 +752,25 @@ class WorkspaceTrashView(WorkspaceAPIView):
                 {"detail": _("You may not see deleted objects.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        # The rest of what the screen calls "Amallar": a chat deleted for
+        # everybody, a colleague frozen or removed, a product taken off the
+        # catalogue. None of them can be put back from here — they are read,
+        # not undone — and they are administrative facts, so they are behind
+        # the same door as the audit they are cut from: an owner or an
+        # administrator. `None`, not `[]`, for everybody else, so the app can
+        # tell "nothing has happened" from "not yours to read" and leave the
+        # tab off rather than drawing an empty one.
+        administrative = Role.clean(request.user.role) in Role.ADMINISTRATIVE
         return Response({
             # Each half is gated on its own: somebody who may delete tasks and
             # not deals sees the tasks and not the deals.
             "tasks": repo.list_deleted_tasks(request.user.company_id) if may_tasks else [],
             "leads": repo.list_deleted_leads(request.user.company_id) if may_leads else [],
+            "events": (
+                arepo.list_action_events(request.user.company_id)
+                if administrative
+                else None
+            ),
         })
 
 
@@ -867,6 +881,10 @@ class WorkspaceArchiveView(WorkspaceAPIView):
     finished work still on the board (``completed``) and work somebody took
     off it (``deleted``) — different facts, so the response keeps them apart
     rather than merging into one list a screen would have to re-split.
+
+    ``events`` rides along for an owner or an administrator: the phone shows
+    the deletions, the stock returns and these on one screen, and this is the
+    door everybody reaches it through.
     """
 
     permission_classes = [IsAuthenticated, IsWorkspaceUser]
@@ -919,9 +937,22 @@ class WorkspaceArchiveView(WorkspaceAPIView):
             [lead for lead in repo.list_deleted_leads(company_id) if _mine_lead(lead)]
             if show_leads else []
         )
+        # The other half of "Amallar", through this door too: a chat deleted
+        # for everybody, a colleague frozen or removed, a product taken off
+        # the catalogue. Same rule as [WorkspaceTrashView] — administrative
+        # facts, so an owner or an administrator, and `None` rather than `[]`
+        # for everybody else so the app can tell "nothing happened" from "not
+        # yours to read" and leave the tab off. Answered here as well because
+        # this is the door the whole company comes through: the screen is one
+        # screen, and an administrator without the delete permission would
+        # otherwise reach it and find the events missing.
+        administrative = Role.clean(user.role) in Role.ADMINISTRATIVE
         return Response({
             "completed": {"tasks": completed_tasks, "leads": completed_leads},
             "deleted": {"tasks": deleted_tasks, "leads": deleted_leads},
+            "events": (
+                arepo.list_action_events(company_id) if administrative else None
+            ),
             # What the viewer may do from here. Restoring takes the authority
             # to delete (§11), and it is `WorkspaceRestoreView` that enforces
             # it; the flags only tell the screen whether to draw the button.

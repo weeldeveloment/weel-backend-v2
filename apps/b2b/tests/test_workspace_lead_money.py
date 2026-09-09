@@ -332,10 +332,29 @@ def test_a_deal_that_has_sold_nothing_cannot_be_returned():
     assert response.status_code == 409
 
 
-def test_a_salesperson_without_the_warehouse_does_not_file_returns():
-    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=_sale()):
+def test_the_salesperson_may_return_their_own_sale():
+    """A deliberate hole in TZ v2 §8, asked for on 2026-09-09: the customer
+    walks back to the person they bought from, and that person was being sent
+    to find an administrator to undo a sale they made themselves."""
+    with patch(
+        "apps.b2b.workspace.views.repo.get_lead", return_value=_sale()
+    ), patch(
+        "apps.b2b.workspace.views.inventory.lead_return_lines",
+        return_value=_returnable(),
+    ):
         response = _call(
             WorkspaceLeadReturnView, factory.get("/leads/7/return/"), SELLER, lead_id=7
+        )
+    assert response.status_code == 200
+
+
+def test_a_salesperson_does_not_return_somebody_else_s_sale():
+    """The hole above is the claimant's alone, not "anybody in sales": a
+    colleague's deal is still none of their business."""
+    other = _user("employee", SELLER_ID + 1)
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=_sale()):
+        response = _call(
+            WorkspaceLeadReturnView, factory.get("/leads/7/return/"), other, lead_id=7
         )
     assert response.status_code == 403
 

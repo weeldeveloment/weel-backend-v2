@@ -597,3 +597,65 @@ class TestRinging:
         assert sent["data"]["action"] == "ended"
         assert sent["data"]["call_kind"] == "conference"
         assert sent["data"]["conference_id"] == str(CONFERENCE_ID)
+
+    def test_an_iphone_is_rung_through_pushkit_and_left_out_of_the_tray(self):
+        """CallKit's own screen, the same one a call gets. The alert push is
+        *not* also sent to that phone: it would be the banner the screen
+        exists to replace, said a second time behind it."""
+        from apps.b2b.workspace import tasks
+
+        employee = {
+            "id": AZIZ_ID, "company_id": COMPANY_ID,
+            "fcm_token": "tok", "voip_token": "voip",
+        }
+        with patch.object(tasks.repo, "get_workspace_employee", return_value=employee), \
+             patch.object(tasks, "create_notification"), \
+             patch.object(tasks, "_push_voip", return_value=True) as voip, \
+             patch.object(tasks, "_push_call") as push:
+            tasks.notify_conference_invite(
+                CONFERENCE_ID, COMPANY_ID, THREAD_ID, "Haftalik yig'ilish",
+                "Aziz Karimov", [AZIZ_ID],
+            )
+
+        assert voip.call_args.args[0] == "voip"
+        assert voip.call_args.args[1]["call_kind"] == "conference"
+        assert voip.call_args.args[1]["conference_id"] == str(CONFERENCE_ID)
+        assert push.call_args.args[0] == []
+
+    def test_an_iphone_apns_will_not_take_falls_back_to_the_tray(self):
+        """A backend with no .p8, or a token Apple has retired. The tray is
+        the most that phone can be given, and it is better than silence."""
+        from apps.b2b.workspace import tasks
+
+        employee = {
+            "id": AZIZ_ID, "company_id": COMPANY_ID,
+            "fcm_token": "tok", "voip_token": "voip",
+        }
+        with patch.object(tasks.repo, "get_workspace_employee", return_value=employee), \
+             patch.object(tasks, "create_notification"), \
+             patch.object(tasks, "_push_voip", return_value=False), \
+             patch.object(tasks, "_push_call") as push:
+            tasks.notify_conference_invite(
+                CONFERENCE_ID, COMPANY_ID, THREAD_ID, "Haftalik yig'ilish",
+                "Aziz Karimov", [AZIZ_ID],
+            )
+
+        assert push.call_args.args[0] == ["tok"]
+
+    def test_closing_the_room_reaches_the_iphone_too(self):
+        """An FCM data message does not wake a closed iPhone at all, so the
+        screen CallKit drew can only be taken down by another VoIP push."""
+        from apps.b2b.workspace import tasks
+
+        employee = {
+            "id": AZIZ_ID, "company_id": COMPANY_ID,
+            "fcm_token": "tok", "voip_token": "voip",
+        }
+        with patch.object(tasks.repo, "get_workspace_employee", return_value=employee), \
+             patch.object(tasks, "_push_voip", return_value=True) as voip, \
+             patch.object(tasks, "_push_call") as push:
+            tasks.dismiss_conference_ring(CONFERENCE_ID, COMPANY_ID, [AZIZ_ID])
+
+        assert voip.call_args.args[1]["action"] == "ended"
+        assert voip.call_args.args[1]["call_kind"] == "conference"
+        push.assert_not_called()

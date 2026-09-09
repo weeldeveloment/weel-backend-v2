@@ -30,6 +30,23 @@ CALL_GUEST_BASE_URL=https://business.weel.uz   # mijozga SMS bilan ketadigan hav
 
 Jitsi o'zgaruvchilari qolaveradi — `CALL_PROVIDER=jitsi` bilan orqaga qaytish mumkin.
 
+## Webhook — xonadan chiqish qo'ng'iroqni yopadi (2026-09-09)
+
+`LIVEKIT_CONFIG`dagi `webhook:` bo'limi xona hodisalarini backend'ga POST
+qiladi (`LIVEKIT_WEBHOOK_URL`, standart — dev.weel.uz). Backend
+(`calls.livekit_event`) `participant_left`da xodim xonadan chiqsa qo'ng'iroqni
+haqiqiy davomiyligi bilan **ENDED** qiladi va ikkala tomonga socket orqali
+aytadi; `room_finished` — zaxira. Shu tufayli telefon `/end` yubora olmasa ham
+(tarmoq ketgan, ilova o'ldirilgan) yozuv `accepted`da qolib ketmaydi va
+tarixda soxta «5 daqiqa» chiqmaydi. Imzo — LiveKit'ning o'z JWT'si
+(`Authorization`, `sha256` claim), o'sha `LIVEKIT_API_KEY/SECRET` bilan.
+
+Tekshiruv (compose qayta deploy qilingach): ikki telefon gaplashib, biri
+ilovani o'ldirsin — 20–30 soniyada `b2b_call` qatori `ended` bo'lishi va
+ikkinchi telefon ekrani yopilishi kerak. Backend logida
+`POST /api/b2b/workspace/calls/livekit-webhook/ 200` ko'rinadi; 401 bo'lsa —
+kalit juftligi stack va backend'da farq qiladi.
+
 ## Tokenni tekshirish
 
 Backend tokeni LiveKit'ning o'z formati: HS256 JWT, `iss` = API kaliti,
