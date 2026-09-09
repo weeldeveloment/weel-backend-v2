@@ -525,6 +525,12 @@ def _me_payload(employee: dict, membership=None) -> dict:
         "id": employee["id"],
         "company_id": employee["company_id"],
         "company_name": company.get("name"),
+        # The workspace's own handle — "@sotuv" — unique across every
+        # workspace there is, and the string a join request names. The app
+        # shows it as *this* workspace's code, which the org's join code
+        # cannot be: that one is the same on every workspace under the
+        # company, so it never changed when somebody switched.
+        "company_slug": company.get("slug"),
         # The organisation this workspace belongs to — see the naming note in
         # `create_b2b_tables.py`. The profile screen's company switcher groups
         # by this, not by `company_id`.

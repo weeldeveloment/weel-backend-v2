@@ -2241,6 +2241,20 @@ class Command(BaseCommand):
             CREATE UNIQUE INDEX IF NOT EXISTS b2b_company_slug_idx
             ON b2b_company (LOWER(slug)) WHERE slug IS NOT NULL;
         """)
+        # Every workspace made before this column, and every one made outside
+        # `accounts.create_workspace`, had none — and a workspace with no
+        # handle has no code of its own to show or to be found by. "w<id>" is
+        # unique because the id is, and the NOT EXISTS keeps a workspace that
+        # somebody has already named "w12" from colliding with number 12.
+        cursor.execute("""
+            UPDATE b2b_company c
+               SET slug = 'w' || c.id
+             WHERE c.slug IS NULL
+               AND NOT EXISTS (
+                     SELECT 1 FROM b2b_company o
+                      WHERE LOWER(o.slug) = 'w' || c.id
+                   );
+        """)
 
         # ─── Chat-only membership ────────────────────────────────────────────
         #

@@ -136,6 +136,7 @@ class MeSerializer(serializers.Serializer):
     username = serializers.CharField(allow_null=True, required=False)
     company_id = serializers.IntegerField()
     company_name = serializers.CharField(allow_null=True, required=False)
+    company_slug = serializers.CharField(allow_null=True, required=False)
     org_id = serializers.IntegerField(allow_null=True, required=False)
     org_name = serializers.CharField(allow_null=True, required=False)
     org_join_code = serializers.CharField(allow_null=True, required=False)
