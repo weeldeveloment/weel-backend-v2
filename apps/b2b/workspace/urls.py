@@ -84,6 +84,7 @@ from apps.b2b.workspace.joining_views import (
     AccountJoinRequestView,
     AccountMeView,
     AccountOpenWorkspaceView,
+    AccountOrgPeopleView,
     AccountOrgWorkspacesView,
     AccountUsernameCheckView,
     AccountUsernameSuggestionView,
@@ -94,6 +95,8 @@ from apps.b2b.workspace.joining_views import (
     WorkspaceInviteRevokeView,
     WorkspaceJoinRequestDecideView,
     WorkspaceJoinRequestListView,
+    WorkspaceMemberCandidatesView,
+    WorkspaceMembersAddView,
     WorkspaceSearchView,
 )
 from apps.b2b.workspace.secondment_views import (
@@ -294,6 +297,11 @@ urlpatterns = [
         name="ws-account-org-workspaces",
     ),
     path(
+        "account/orgs/<int:org_id>/people/",
+        AccountOrgPeopleView.as_view(),
+        name="ws-account-org-people",
+    ),
+    path(
         "account/join-code/",
         JoinCodeView.as_view(),
         name="ws-account-join-code",
@@ -316,6 +324,18 @@ urlpatterns = [
 
     # The three doors into a workspace, from the workspace's side.
     path("invites/", WorkspaceInviteListCreateView.as_view(), name="ws-invites"),
+    # The other way in for somebody who is already in the company: picked
+    # off a list and seated, no link to accept.
+    path(
+        "employees/candidates/",
+        WorkspaceMemberCandidatesView.as_view(),
+        name="ws-employee-candidates",
+    ),
+    path(
+        "employees/add/",
+        WorkspaceMembersAddView.as_view(),
+        name="ws-employees-add",
+    ),
     path(
         "invites/<int:invite_id>/revoke/",
         WorkspaceInviteRevokeView.as_view(),

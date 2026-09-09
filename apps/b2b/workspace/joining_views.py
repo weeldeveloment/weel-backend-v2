@@ -26,6 +26,7 @@ from apps.b2b.workspace import access_repository as arepo
 from apps.b2b.workspace import accounts
 from apps.b2b.workspace import joining_repository as jrepo
 from apps.b2b.workspace import repository as repo
+from apps.b2b.workspace import secondment_repository as srepo
 from apps.b2b.workspace import storage
 from apps.b2b.workspace.access import Module, Permission, Role
 from apps.b2b.workspace.authentication import (
@@ -34,6 +35,7 @@ from apps.b2b.workspace.authentication import (
 )
 from apps.b2b.workspace.joining_repository import JoinStatus
 from apps.b2b.workspace.permissions import IsWorkspaceUser
+from apps.b2b.workspace.serializers import OrgPersonSerializer
 from apps.b2b.workspace.tokens import create_workspace_tokens
 from apps.b2b.workspace.views import WORKSPACE_TAG, WorkspaceAPIView
 
@@ -249,6 +251,100 @@ class AccountUsernameCheckView(AccountAPIView):
         })
 
 
+class MemberAddSerializer(serializers.Serializer):
+    """One colleague to put on a roster, picked from elsewhere in the company.
+
+    `employee_id` is the seat they were picked from — what
+    `/account/orgs/<id>/people/` and `/employees/candidates/` list — not a
+    row on the roster being added to, which does not exist yet.
+    """
+
+    employee_id = serializers.IntegerField(min_value=1)
+    role = serializers.ChoiceField(choices=Role.CHOICES, default=Role.EMPLOYEE)
+    #: Null is "by role"; a list is "configure" and replaces it — the same
+    #: two meanings an invite link carries.
+    modules = serializers.ListField(
+        child=serializers.CharField(), required=False, allow_null=True
+    )
+    permissions = serializers.ListField(
+        child=serializers.CharField(), required=False, allow_null=True
+    )
+
+    def validate_role(self, value: str) -> str:
+        if value == Role.OWNER:
+            # A company has one owner, and it is not a standing handed out
+            # by putting somebody on a roster.
+            raise serializers.ValidationError(_("An owner cannot be added this way."))
+        return value
+
+
+class MembersAddSerializer(serializers.Serializer):
+    members = MemberAddSerializer(many=True, allow_empty=False)
+
+
+def _member_over_the_line(actor_role: str | None, members: list[dict]) -> dict | None:
+    """The first member whose role the actor may not hand out, or None.
+
+    TZ v2 §5.2 / §12 read the same way here as on a join request: strictly
+    below one's own standing, and never an owner.
+    """
+    for member in members:
+        if not Role.assignable(actor_role, member.get("role")):
+            return member
+    return None
+
+
+def _add_members(
+    company_id: int,
+    members: list[dict],
+    *,
+    actor_employee_id: int | None,
+) -> tuple[list[dict], list[dict]]:
+    """Put each picked colleague on the roster, and say who was not.
+
+    One at a time rather than all-or-nothing: the picker offered people who
+    were addable when it was drawn, and one of them having joined through a
+    link in the meantime is no reason to refuse the other four.
+    """
+    added: list[dict] = []
+    skipped: list[dict] = []
+    for member in members:
+        employee, problem = accounts.add_org_member(
+            source_employee_id=member["employee_id"],
+            company_id=company_id,
+            role=member.get("role") or Role.EMPLOYEE,
+            modules=member.get("modules"),
+            permissions=member.get("permissions"),
+        )
+        if not employee or problem:
+            skipped.append({"employee_id": member["employee_id"], "problem": problem or "failed"})
+            continue
+        added.append(employee)
+        arepo.record_audit(
+            company_id,
+            actor_employee_id=actor_employee_id,
+            action="employee.added_from_company",
+            target_type="employee",
+            target_id=employee["id"],
+            payload={
+                "source_employee_id": member["employee_id"],
+                "role": member.get("role") or Role.EMPLOYEE,
+                "modules": member.get("modules"),
+            },
+        )
+    return added, skipped
+
+
+def _added_payload(employee: dict) -> dict:
+    return {
+        "id": employee["id"],
+        "full_name": employee.get("full_name"),
+        "role": employee.get("role"),
+        "role_label": Role.label(employee.get("role")),
+        "photo": employee.get("photo"),
+    }
+
+
 class WorkspaceCreateSerializer(serializers.Serializer):
     """Opening a new workspace.
 
@@ -282,11 +378,22 @@ class WorkspaceCreateSerializer(serializers.Serializer):
     tax_id = serializers.CharField(
         max_length=20, required=False, allow_blank=True, trim_whitespace=True
     )
+    #: People already in the company to put on the new roster straight away,
+    #: each with the standing they get there. Only meaningful with `org_id`:
+    #: a brand-new company has nobody in it yet to pick from.
+    members = MemberAddSerializer(many=True, required=False)
 
     def validate_name(self, value: str) -> str:
         if len(value.strip()) < 2:
             raise serializers.ValidationError(_("Please give it a name."))
         return value.strip()
+
+    def validate(self, attrs: dict) -> dict:
+        if attrs.get("members") and attrs.get("org_id") is None:
+            raise serializers.ValidationError(
+                {"members": [_("Pick people once the company exists.")]}
+            )
+        return attrs
 
 
 def _may_create_workspace_in(account_id: int, org_id: int) -> bool:
@@ -359,6 +466,26 @@ class AccountWorkspacesView(AccountAPIView):
             )
 
 
+        members = data.get("members") or []
+        if members:
+            # The standing the creator will hold in the new room decides what
+            # they may hand out in it — an owner opening a room seats admins,
+            # an admin seats managers and below. Decided here the same way
+            # `create_workspace` decides it, before anything is created.
+            creator_role = (
+                Role.OWNER
+                if any(
+                    o["id"] == request.user.id
+                    for o in accounts.org_owner_accounts(org_id)
+                )
+                else Role.ADMIN
+            )
+            if _member_over_the_line(creator_role, members):
+                return Response(
+                    {"detail": _("You may only assign roles below your own.")},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         try:
             created = accounts.create_workspace(
                 account=request.user._data,
@@ -407,6 +534,11 @@ class AccountWorkspacesView(AccountAPIView):
             target_id=company["id"],
             payload={"name": company.get("name"), "role": created["role"]},
         )
+        added, skipped = (
+            _add_members(company["id"], members, actor_employee_id=employee["id"])
+            if members
+            else ([], [])
+        )
         org = created.get("org") or {}
         tokens = create_workspace_tokens(employee)
         return Response(
@@ -415,6 +547,11 @@ class AccountWorkspacesView(AccountAPIView):
                 "refresh": tokens["refresh"],
                 "employee_id": employee["id"],
                 "company_id": company["id"],
+                # Who was seated alongside the creator, and who could not be
+                # — so the screen that confirms the room can say so rather
+                # than leaving it to be discovered on the roster.
+                "members_added": [_added_payload(e) for e in added],
+                "members_skipped": skipped,
                 # `company_name` is the *workspace* — see the naming note in
                 # `create_b2b_tables`. The screen that confirms this shows both
                 # lines, so both are named here rather than left to be guessed.
@@ -480,6 +617,157 @@ class AccountOrgWorkspacesView(AccountAPIView):
                 )
             ],
         })
+
+
+class AccountOrgPeopleView(AccountAPIView):
+    """GET /api/b2b/workspace/account/orgs/<org_id>/people/?search=&for_company_id=
+
+    Who in the company could be seated in a workspace — what the
+    "Xodimlarni tanlash" step on the create screen searches. Account-level
+    because at that moment there is no workspace session to ask from: the
+    room is not made yet.
+
+    Gated like the company's workspace list: holding any active seat in the
+    company. Everyone on one of its rosters already sees the rest of the
+    company through `WorkspaceOrgPeopleView`, so this shows nothing new — it
+    only makes it reachable from the screen that needs it. The caller is left
+    out: they are seated by creating the room.
+
+    `for_company_id` narrows the list to people not yet on that workspace's
+    roster, for the same picker used inside an existing room.
+    """
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="People in the company who can be added to a workspace",
+        manual_parameters=[
+            openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter(
+                "for_company_id",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description="Leave out people already on this workspace's roster.",
+            ),
+        ],
+        responses={200: OrgPersonSerializer(many=True)},
+    )
+    def get(self, request, org_id: int):
+        if org_id not in accounts.org_ids_for_account(request.user.id):
+            return Response(
+                {"detail": _("You do not belong to that company.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        raw = (request.query_params.get("for_company_id") or "").strip()
+        for_company_id: int | None = None
+        if raw:
+            try:
+                for_company_id = int(raw)
+            except ValueError:
+                return Response(
+                    {"for_company_id": [_("Must be a number.")]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if srepo.org_id_for_company(for_company_id) != org_id:
+                return Response(
+                    {"for_company_id": [_("That workspace is not in this company.")]},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        people = accounts.list_org_people_to_add(
+            org_id,
+            for_company_id=for_company_id,
+            exclude_account_id=request.user.id,
+            search=(request.query_params.get("search") or "").strip() or None,
+        )
+        return Response({"results": OrgPersonSerializer(people, many=True).data})
+
+
+class WorkspaceMemberCandidatesView(WorkspaceAPIView):
+    """GET /api/b2b/workspace/employees/candidates/?search=
+
+    People elsewhere in the company who are not on this roster — the
+    "Kompaniyadan qo'shish" picker. The same right as minting a link: this is
+    the other way of letting somebody in, and the one that needs no link at
+    all when the person is a colleague already.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+    required_permission = Permission.EMPLOYEE_INVITE
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Colleagues who could be added to this workspace",
+        manual_parameters=[
+            openapi.Parameter("search", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+        ],
+        responses={200: OrgPersonSerializer(many=True)},
+    )
+    def get(self, request):
+        people = accounts.list_org_people_to_add(
+            srepo.org_id_for_company(request.user.company_id),
+            for_company_id=request.user.company_id,
+            search=(request.query_params.get("search") or "").strip() or None,
+        )
+        return Response({"results": OrgPersonSerializer(people, many=True).data})
+
+
+class WorkspaceMembersAddView(WorkspaceAPIView):
+    """POST /api/b2b/workspace/employees/add/ — seat colleagues here.
+
+    Body: `{"members": [{"employee_id", "role", "modules"?, "permissions"?}]}`.
+    Each becomes a permanent member with the standing chosen, immediately —
+    no link to accept, no request to wait on: they are the company's people
+    already. Two rules carried over from accepting a join request (§5.2,
+    §12): a role strictly below the adder's own, and no module or permission
+    the adder does not hold.
+
+    Answers who was added and who was not, with why — somebody the picker
+    listed may have joined through a link in the meantime.
+    """
+
+    permission_classes = [IsAuthenticated, IsWorkspaceUser]
+    required_permission = Permission.EMPLOYEE_INVITE
+
+    @swagger_auto_schema(
+        tags=WORKSPACE_TAG,
+        operation_summary="Add colleagues from the company to this workspace",
+        request_body=MembersAddSerializer,
+    )
+    def post(self, request):
+        serializer = MembersAddSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        members = serializer.validated_data["members"]
+
+        if _member_over_the_line(request.user.role, members):
+            return Response(
+                {"detail": _("You may only assign roles below your own.")},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        for member in members:
+            extra_modules, extra_permissions = arepo.grant_exceeds(
+                request.user,
+                modules=member.get("modules"),
+                permissions=member.get("permissions"),
+            )
+            if extra_modules or extra_permissions:
+                return Response(
+                    {
+                        "detail": _("You cannot grant access you do not hold yourself."),
+                        "modules": extra_modules,
+                        "permissions": extra_permissions,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        added, skipped = _add_members(
+            request.user.company_id, members, actor_employee_id=request.user.id
+        )
+        return Response(
+            {
+                "added": [_added_payload(e) for e in added],
+                "skipped": skipped,
+            },
+            status=status.HTTP_201_CREATED if added else status.HTTP_200_OK,
+        )
 
 
 class AccountOpenWorkspaceView(AccountAPIView):

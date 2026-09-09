@@ -1413,3 +1413,271 @@ def test_a_workspace_an_admin_opens_still_has_the_owner_on_it():
 
     assert created["role"] == Role.ADMIN
     assert made == [(2, Role.ADMIN), (1, Role.OWNER)]
+
+
+# ─── Seating colleagues who are already in the company ───────────────────────
+#
+# The third way onto a roster, next to a link and a request: somebody who is
+# in one of the company's rooms already is picked off a list and seated, with
+# nothing to accept. The rules are the ones accepting a request has — a role
+# strictly below the adder's own, no module the adder does not hold — and the
+# same right, `employees.invite`.
+
+def _seated(employee_id, role="employee", **overrides):
+    row = {
+        "id": 100 + employee_id,
+        "company_id": COMPANY,
+        "full_name": f"Xodim {employee_id}",
+        "role": role,
+        "photo": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def _adding(user, body, *, outcomes=None):
+    """POST /employees/add/ with `add_org_member` answering from `outcomes`,
+    keyed by the seat picked."""
+    from apps.b2b.workspace.joining_views import WorkspaceMembersAddView
+
+    outcomes = outcomes or {}
+
+    def _add(*, source_employee_id, company_id, role, modules=None, permissions=None):
+        return outcomes.get(source_employee_id, (_seated(source_employee_id, role), None))
+
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.add_org_member", side_effect=_add
+    ) as add, patch(
+        "apps.b2b.workspace.joining_views.arepo.record_audit"
+    ) as audit:
+        response = _call(
+            WorkspaceMembersAddView,
+            factory.post("/employees/add/", body, format="json"),
+            user,
+        )
+    return response, add, audit
+
+
+def test_seating_a_colleague_needs_the_right_to_invite():
+    with _granting():
+        response, add, _ = _adding(_manager(), {"members": [{"employee_id": 7}]})
+    assert response.status_code == 403
+    add.assert_not_called()
+
+
+def test_a_colleague_is_seated_with_a_role_below_the_adders_own():
+    with _granting(Permission.EMPLOYEE_INVITE):
+        response, add, _ = _adding(
+            _admin(), {"members": [{"employee_id": 7, "role": "admin"}]}
+        )
+    assert response.status_code == 403
+    add.assert_not_called()
+
+    with _granting(Permission.EMPLOYEE_INVITE):
+        response, add, audit = _adding(
+            _admin(), {"members": [{"employee_id": 7, "role": "manager"}]}
+        )
+    assert response.status_code == 201, response.data
+    assert add.call_args.kwargs["role"] == "manager"
+    assert add.call_args.kwargs["company_id"] == COMPANY
+    assert [row["id"] for row in response.data["added"]] == [107]
+    assert audit.call_args.kwargs["action"] == "employee.added_from_company"
+
+
+def test_nobody_is_seated_as_the_owner():
+    with _granting(Permission.EMPLOYEE_INVITE):
+        response, add, _ = _adding(
+            _admin(), {"members": [{"employee_id": 7, "role": "owner"}]}
+        )
+    assert response.status_code == 400
+    add.assert_not_called()
+
+
+def test_the_adder_cannot_open_a_module_they_do_not_hold():
+    with patch(
+        "apps.b2b.workspace.access_repository.access_for_employee",
+        return_value=([Module.CHAT, Module.EMPLOYEES], [Permission.EMPLOYEE_INVITE]),
+    ):
+        response, add, _ = _adding(
+            _manager(),
+            {"members": [{"employee_id": 7, "role": "employee", "modules": ["chat", "sales"]}]},
+        )
+    assert response.status_code == 403
+    assert response.data["modules"] == ["sales"]
+    add.assert_not_called()
+
+
+def test_the_ones_who_could_not_be_seated_are_named_not_hidden():
+    """One of the five having joined by link since the picker was drawn is
+    no reason to refuse the other four — and no reason to pretend all five
+    landed."""
+    with _granting(Permission.EMPLOYEE_INVITE):
+        response, add, audit = _adding(
+            _admin(),
+            {"members": [{"employee_id": 7}, {"employee_id": 8}, {"employee_id": 9}]},
+            outcomes={8: (_seated(8), "already_member"), 9: (None, "guest")},
+        )
+    assert response.status_code == 201, response.data
+    assert [row["id"] for row in response.data["added"]] == [107]
+    assert response.data["skipped"] == [
+        {"employee_id": 8, "problem": "already_member"},
+        {"employee_id": 9, "problem": "guest"},
+    ]
+    assert add.call_count == 3
+    assert audit.call_count == 1
+
+
+def test_seating_nobody_new_is_not_a_creation():
+    with _granting(Permission.EMPLOYEE_INVITE):
+        response, _, _ = _adding(
+            _admin(),
+            {"members": [{"employee_id": 8}]},
+            outcomes={8: (_seated(8), "already_member")},
+        )
+    assert response.status_code == 200
+    assert response.data["added"] == []
+
+
+# ─── Picking people while opening the room ───────────────────────────────────
+
+def _opening_with(account, body, *, owners=(), created=None):
+    from apps.b2b.workspace.joining_views import AccountWorkspacesView
+
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.org_ids_for_account",
+        return_value=[7],
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.list_memberships",
+        return_value=[_seat("admin")],
+    ), patch(
+        "apps.b2b.workspace.joining_views.repo.get_workspace_employee",
+        return_value={"id": 11, "company_id": 3, "role": "admin",
+                      "module_access": None, "permission_access": None},
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.org_owner_accounts",
+        return_value=[{"id": o} for o in owners],
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.create_workspace",
+        return_value=created,
+    ) as create, patch(
+        "apps.b2b.workspace.joining_views.accounts.add_org_member",
+        side_effect=lambda **kw: (_seated(kw["source_employee_id"], kw["role"], company_id=50), None),
+    ) as add, patch(
+        "apps.b2b.workspace.joining_views.arepo.record_audit"
+    ), patch(
+        "apps.b2b.workspace.joining_views.create_workspace_tokens",
+        return_value={"access": "a", "refresh": "r"},
+    ):
+        response = _call(
+            AccountWorkspacesView,
+            factory.post("/account/workspaces/", body, format="json"),
+            account,
+        )
+    return response, create, add
+
+
+def _created_room():
+    return {
+        "company": {"id": 50, "name": "Marketing", "slug": "marketing"},
+        "employee": {"id": 60, "company_id": 50, "role": "admin"},
+        "role": "admin",
+        "org": {"id": 7, "name": "Weel", "join_code": "ABCDE"},
+    }
+
+
+def test_the_people_picked_are_seated_as_the_room_opens():
+    response, create, add = _opening_with(
+        _account(),
+        {
+            "name": "Marketing",
+            "org_id": 7,
+            "members": [
+                {"employee_id": 7, "role": "manager"},
+                {"employee_id": 8},
+            ],
+        },
+        created=_created_room(),
+    )
+    assert response.status_code == 201, response.data
+    create.assert_called_once()
+    assert [c.kwargs["company_id"] for c in add.call_args_list] == [50, 50]
+    assert [c.kwargs["role"] for c in add.call_args_list] == ["manager", "employee"]
+    assert [row["id"] for row in response.data["members_added"]] == [107, 108]
+    assert response.data["members_skipped"] == []
+
+
+def test_an_admin_opening_a_room_does_not_seat_another_admin():
+    """The creator is the room's admin (§3) and hands out roles below that.
+    Refused before the room exists, so a refusal leaves nothing behind."""
+    response, create, add = _opening_with(
+        _account(),
+        {"name": "Marketing", "org_id": 7,
+         "members": [{"employee_id": 7, "role": "admin"}]},
+        created=_created_room(),
+    )
+    assert response.status_code == 403, response.data
+    create.assert_not_called()
+    add.assert_not_called()
+
+
+def test_the_companys_owner_opening_a_room_may_seat_an_admin_in_it():
+    response, create, add = _opening_with(
+        _account(),
+        {"name": "Marketing", "org_id": 7,
+         "members": [{"employee_id": 7, "role": "admin"}]},
+        owners=(1,),
+        created={**_created_room(), "role": "owner"},
+    )
+    assert response.status_code == 201, response.data
+    assert add.call_args.kwargs["role"] == "admin"
+
+
+def test_people_cannot_be_picked_for_a_company_that_does_not_exist_yet():
+    from apps.b2b.workspace.joining_views import AccountWorkspacesView
+
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.create_workspace"
+    ) as create:
+        response = _call(
+            AccountWorkspacesView,
+            factory.post(
+                "/account/workspaces/",
+                {"name": "Weel", "members": [{"employee_id": 7}]},
+                format="json",
+            ),
+            _account(),
+        )
+    assert response.status_code == 400
+    assert [e["field"] for e in response.data["errors"]] == ["members"]
+    create.assert_not_called()
+
+
+def test_the_companys_people_are_listed_only_to_its_members():
+    from apps.b2b.workspace.joining_views import AccountOrgPeopleView
+
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.org_ids_for_account",
+        return_value=[7],
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.list_org_people_to_add",
+        return_value=[{"id": 7, "full_name": "Aziz", "company_id": 3,
+                       "company_name": "Toshkent"}],
+    ) as listing:
+        forbidden = _call(
+            AccountOrgPeopleView,
+            factory.get("/account/orgs/9/people/"),
+            _account(),
+            org_id=9,
+        )
+        allowed = _call(
+            AccountOrgPeopleView,
+            factory.get("/account/orgs/7/people/", {"search": "@az"}),
+            _account(),
+            org_id=7,
+        )
+    assert forbidden.status_code == 403
+    assert allowed.status_code == 200
+    assert [p["full_name"] for p in allowed.data["results"]] == ["Aziz"]
+    # The one asking is left out — they are seated by opening the room.
+    assert listing.call_args.kwargs["exclude_account_id"] == 1
+    assert listing.call_args.kwargs["search"] == "@az"

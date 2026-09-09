@@ -512,6 +512,206 @@ def _insert_membership(
     )
 
 
+# ─── Adding people who are already in the company ────────────────────────────
+
+def list_org_people_to_add(
+    org_id: int | None,
+    *,
+    for_company_id: int | None = None,
+    exclude_account_id: int | None = None,
+    search: str | None = None,
+    limit: int = 30,
+) -> list[dict[str, Any]]:
+    """Who in the company could be put on a workspace's roster.
+
+    One row per *person*, not per seat: somebody who sits in three of the
+    company's workspaces is one colleague to pick, and listing them three
+    times would make the picker ask which copy — a question with no answer.
+    The row handed back is their lowest-numbered seat; its id is what
+    [add_org_member] takes, and the account behind it is what actually gets
+    the membership.
+
+    With [for_company_id], people already on that roster are left out —
+    offering somebody who is there already is the "already a member" error
+    one screen later. Guests and chat-only rows are left out too: a person
+    lent into one of the company's rooms, or let into one conversation, is
+    not the company's to hand around.
+    """
+    if org_id is None:
+        return []
+    params: list[Any] = [org_id]
+    where = ""
+    if exclude_account_id is not None:
+        where += " AND (e.account_id IS NULL OR e.account_id <> %s)"
+        params.append(exclude_account_id)
+    if search:
+        # The same search every other people picker has — a phone typed with
+        # spaces, a name in either order (see `people_search`).
+        from apps.b2b.workspace.people_search import people_search_clause
+
+        clause, clause_params = people_search_clause(search)
+        where += clause
+        params += clause_params
+    not_on = ""
+    if for_company_id is not None:
+        not_on = f"""
+         WHERE NOT EXISTS (
+                 SELECT 1 FROM {B2B_EMPLOYEE_TABLE} m
+                  WHERE m.company_id = %s
+                    AND m.is_active = TRUE
+                    AND m.is_chat_only = FALSE
+                    AND (
+                          (p.account_id IS NOT NULL AND m.account_id = p.account_id)
+                       OR (p.account_id IS NULL AND m.phone = p.phone)
+                    )
+               )
+        """
+        params.append(for_company_id)
+    params.append(limit)
+    return fetch_all(
+        f"""
+        SELECT p.id, p.account_id, p.full_name, p.username, p.position,
+               p.phone, p.photo, p.role, p.company_id, p.company_name
+          FROM (
+            SELECT DISTINCT ON (person)
+                   e.id, e.account_id, e.full_name, e.username, e.position,
+                   e.phone, e.photo, e.role, e.company_id,
+                   c.name AS company_name,
+                   COALESCE(
+                       'a:' || e.account_id::text,
+                       'p:' || e.phone,
+                       'e:' || e.id::text
+                   ) AS person
+              FROM {B2B_EMPLOYEE_TABLE} e
+              JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
+              LEFT JOIN {B2B_ACCOUNT_TABLE} a ON a.id = e.account_id
+             WHERE c.org_id = %s
+               AND c.is_active = TRUE
+               AND e.is_active = TRUE
+               AND e.is_guest = FALSE
+               AND e.is_chat_only = FALSE
+               AND e.is_hidden = FALSE
+               {where}
+             ORDER BY person, e.id ASC
+          ) p
+        {not_on}
+         ORDER BY p.full_name ASC
+         LIMIT %s
+        """,
+        params,
+    )
+
+
+def add_org_member(
+    *,
+    source_employee_id: int,
+    company_id: int,
+    role: str,
+    modules=None,
+    permissions=None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Put a colleague from elsewhere in the company on this workspace's roster.
+
+    Answers `(employee, problem)`: the new roster row and `None`, or what
+    stopped it — `not_found` (no such seat, or one in another company),
+    `guest` (a lent or chat-only row, which is not the company's to add) or
+    `already_member` (with the row that is already there).
+
+    The person is added by the *account* behind the seat they were picked
+    from, so what lands here is a membership of their own with the role and
+    modules chosen for this room — never a copy of the standing they hold
+    elsewhere. A hire the dashboard entered by hand, with no account yet, has
+    nothing but the seat to go by and is copied by name and number, the way
+    `ensure_workspace_employee` does for a login.
+    """
+    from apps.b2b.workspace.access import Module, Permission, Role
+
+    source = fetch_one(
+        f"""
+        SELECT e.*, c.org_id
+          FROM {B2B_EMPLOYEE_TABLE} e
+          JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
+         WHERE e.id = %s AND e.is_active = TRUE
+        """,
+        [source_employee_id],
+    )
+    target = fetch_one(
+        f"SELECT id, org_id FROM {B2B_COMPANY_TABLE} WHERE id = %s AND is_active = TRUE",
+        [company_id],
+    )
+    if (
+        not source
+        or not target
+        or source.get("org_id") is None
+        or source["org_id"] != target["org_id"]
+    ):
+        return None, "not_found"
+    if source.get("is_guest") or source.get("is_chat_only"):
+        return None, "guest"
+
+    account_id = source.get("account_id")
+    if account_id is not None:
+        existing = employee_in_company(account_id, company_id)
+        if existing and not existing.get("is_chat_only"):
+            return existing, "already_member"
+        account = get_account(account_id)
+        if not account:
+            return None, "not_found"
+        employee = create_membership(
+            account=account,
+            company_id=company_id,
+            role=role,
+            modules=modules,
+            permissions=permissions,
+        )
+        return employee, None
+
+    # No account behind the seat: the dashboard entered this person by hand.
+    # The phone is the only thing that says who they are across rooms.
+    existing = fetch_one(
+        f"""
+        SELECT * FROM {B2B_EMPLOYEE_TABLE}
+         WHERE company_id = %s AND is_active = TRUE AND is_chat_only = FALSE
+           AND phone IS NOT NULL AND phone = %s
+         ORDER BY id ASC LIMIT 1
+        """,
+        [company_id, source.get("phone")],
+    ) if source.get("phone") else None
+    if existing:
+        return existing, "already_member"
+    now = timezone.now()
+    employee = fetch_one(
+        f"""
+        INSERT INTO {B2B_EMPLOYEE_TABLE}
+            (company_id, full_name, phone, email, position, photo, role,
+             module_access, permission_access, is_active, is_chat_only,
+             created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, FALSE, %s, %s)
+        __RETURNING_MARKER__
+        """,
+        [
+            company_id,
+            source.get("full_name"),
+            source.get("phone"),
+            source.get("email"),
+            source.get("position"),
+            source.get("photo"),
+            Role.clean(role),
+            json.dumps(Module.clean(modules)) if modules is not None else None,
+            json.dumps(Permission.clean(permissions)) if permissions is not None else None,
+            now,
+            now,
+        ],
+    )
+    if not employee:
+        employee = fetch_one(
+            f"SELECT * FROM {B2B_EMPLOYEE_TABLE} WHERE company_id = %s "
+            f"ORDER BY id DESC LIMIT 1",
+            [company_id],
+        )
+    return employee, None
+
+
 # ─── Creating one ─────────────────────────────────────────────────────────────
 
 def slugify_workspace(name: str) -> str:

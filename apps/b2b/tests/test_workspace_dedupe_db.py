@@ -375,3 +375,47 @@ def test_the_command_that_runs_on_every_start_up_does_the_cleanup(db):
     call_command("create_b2b_tables", verbosity=0)
 
     assert _switcher(aziz["id"]) == [created["company"]["id"]]
+
+
+# ─── Seating a colleague from the company ─────────────────────────────────────
+
+def test_a_colleague_is_found_by_a_spaced_phone_and_seated_once(db):
+    """`list_org_people_to_add` searches the way every other people picker
+    does, and `add_org_member` on somebody already there hands back their
+    seat rather than a second one."""
+    from apps.b2b.workspace import accounts
+
+    owner = _account("Nodir")
+    home = accounts.create_workspace(account=owner, name="Bosh ofis")
+    org_id = home["org"]["id"]
+    room = accounts.create_workspace(account=owner, name="Filial", org_id=org_id)
+    aziz = _account("Aziz")
+    seat = accounts.create_membership(
+        account=aziz, company_id=home["company"]["id"], role="employee"
+    )
+    spaced = f"{aziz['phone'][4:6]} {aziz['phone'][6:9]} {aziz['phone'][9:]}"
+
+    found = accounts.list_org_people_to_add(
+        org_id, for_company_id=room["company"]["id"], search=spaced
+    )
+    assert [p["id"] for p in found] == [seat["id"]]
+    assert accounts.list_org_people_to_add(
+        org_id, for_company_id=room["company"]["id"], search="Karimov Aziz"
+    )
+
+    added, problem = accounts.add_org_member(
+        source_employee_id=seat["id"], company_id=room["company"]["id"], role="employee"
+    )
+    again, problem_again = accounts.add_org_member(
+        source_employee_id=seat["id"], company_id=room["company"]["id"], role="manager"
+    )
+
+    assert problem is None
+    assert problem_again == "already_member"
+    assert again["id"] == added["id"]
+    assert sorted(_switcher(aziz["id"])) == sorted(
+        [home["company"]["id"], room["company"]["id"]]
+    )
+    assert accounts.list_org_people_to_add(
+        org_id, for_company_id=room["company"]["id"], search=spaced
+    ) == []
