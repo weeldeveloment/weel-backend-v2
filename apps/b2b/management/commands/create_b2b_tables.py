@@ -2102,19 +2102,6 @@ class Command(BaseCommand):
         cursor.execute("""
             ALTER TABLE b2b_account ADD COLUMN IF NOT EXISTS fcm_token VARCHAR(500);
         """)
-        # The roster keeps its own copy of the handle so listing needs no join,
-        # but only `create_membership` ever wrote it: anybody who picked a
-        # handle after joining left their roster rows empty, and searching by
-        # "@name" found nobody. The reads coalesce onto the account now; this
-        # brings the copies up to date so they agree with what is read.
-        cursor.execute("""
-            UPDATE b2b_employee e
-               SET username = a.username, updated_at = NOW()
-              FROM b2b_account a
-             WHERE a.id = e.account_id
-               AND a.username IS NOT NULL
-               AND e.username IS DISTINCT FROM a.username;
-        """)
         # No `reaction_emojis` here. The reaction row was a personal choice
         # for one day in September 2026 and is the same seven for everybody
         # again; a database that was migrated in between still carries the
@@ -2178,6 +2165,21 @@ class Command(BaseCommand):
         # employed by two workspaces holds one handle and would collide with
         # themselves.
         cursor.execute("DROP INDEX IF EXISTS b2b_employee_username_idx;")
+        # The roster keeps its own copy of the handle so listing needs no join,
+        # but only `create_membership` ever wrote it: anybody who picked a
+        # handle after joining left their roster rows empty, and searching by
+        # "@name" found nobody. The reads coalesce onto the account now; this
+        # brings the copies up to date so they agree with what is read. After
+        # the link and the handles moving up, so it runs on a database where
+        # `account_id` already exists — a fresh one included.
+        cursor.execute("""
+            UPDATE b2b_employee e
+               SET username = a.username, updated_at = NOW()
+              FROM b2b_account a
+             WHERE a.id = e.account_id
+               AND a.username IS NOT NULL
+               AND e.username IS DISTINCT FROM a.username;
+        """)
         self.stdout.write("  Created b2b_account and linked the roster to it")
 
         # ─── Invitations, and asking to join ─────────────────────────────────
@@ -2628,8 +2630,25 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_stock_movement_product_idx "
             "ON b2b_stock_movement (product_id, created_at DESC);"
         )
+        # Plain, not unique: a return puts a sold line back and names the
+        # same `lead_item_id` as the sale did, and a bundle line moves one
+        # part at a time under one lead line. The index used to be unique
+        # (databases created before 2026-09-09 still carry that one), which
+        # made every return an IntegrityError — hence the drop first.
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_indexes
+                     WHERE indexname = 'b2b_stock_movement_lead_item_idx'
+                       AND indexdef LIKE 'CREATE UNIQUE INDEX%'
+                ) THEN
+                    DROP INDEX b2b_stock_movement_lead_item_idx;
+                END IF;
+            END $$;
+        """)
         cursor.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_stock_movement_lead_item_idx "
+            "CREATE INDEX IF NOT EXISTS b2b_stock_movement_lead_item_idx "
             "ON b2b_stock_movement (lead_item_id) WHERE lead_item_id IS NOT NULL;"
         )
         self.stdout.write("  Created b2b_stock_movement")
@@ -2848,9 +2867,8 @@ class Command(BaseCommand):
         # A document's lines. `quantity` is what the line asks to move;
         # `system_quantity`/`counted_quantity` are a count's two columns;
         # `old_price`/`new_price` (and the wholesale pair) are a repricing's.
-        # `lead_item_id` ties a sale line to the lead line it came from, and
-        # the unique index on it is what stops a won lead selling the same
-        # line twice.
+        # `lead_item_id` ties a sale line — and the return line that later
+        # undoes it — to the lead line it came from.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS b2b_stock_document_item (
                 id BIGSERIAL PRIMARY KEY,
@@ -2873,8 +2891,24 @@ class Command(BaseCommand):
             "CREATE INDEX IF NOT EXISTS b2b_stock_document_item_doc_idx "
             "ON b2b_stock_document_item (document_id, position, id);"
         )
+        # Plain, not unique — see the movement index above. "A won lead does
+        # not sell the same line twice" is `lead_lines_to_book`'s NOT EXISTS,
+        # which skips a line with a live sale document; a return document
+        # names the same lead line and has to be allowed to.
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_indexes
+                     WHERE indexname = 'b2b_stock_document_item_lead_item_idx'
+                       AND indexdef LIKE 'CREATE UNIQUE INDEX%'
+                ) THEN
+                    DROP INDEX b2b_stock_document_item_lead_item_idx;
+                END IF;
+            END $$;
+        """)
         cursor.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS b2b_stock_document_item_lead_item_idx "
+            "CREATE INDEX IF NOT EXISTS b2b_stock_document_item_lead_item_idx "
             "ON b2b_stock_document_item (lead_item_id) WHERE lead_item_id IS NOT NULL;"
         )
         # A receipt line is bought in dollars: the dollar figure and the rate

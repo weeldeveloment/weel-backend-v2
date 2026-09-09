@@ -3404,10 +3404,9 @@ def _may_return_lead(lead: dict, user) -> bool:
     """Whether this person may send goods from this deal back to the shelf.
 
     Something has to have been sold first — see [_sale_happened] — and then
-    three kinds of person may undo it: whoever keeps the warehouse
-    (`STOCK_MANAGE`), the owner or administrator TZ v2 §8 leaves in charge of
-    a finished deal, and — since the sales team asked on 2026-09-09 — the
-    salesperson whose deal it is.
+    two kinds of person may undo it: the owner or administrator TZ v2 §8
+    leaves in charge of a finished deal, and — since the sales team asked on
+    2026-09-09 — the salesperson whose deal it is.
 
     That last one is a deliberate hole in §8, which otherwise closes a
     completed deal to its claimant. The customer walks back to the person
@@ -3416,16 +3415,16 @@ def _may_return_lead(lead: dict, user) -> bool:
     editing the deal: it files a warehouse document with a reason on it, both
     of which name their author, so the trail §8 protects stays intact.
 
-    A colleague's deal is still none of their business — [_works_lead] is the
-    claimant alone, not "anybody in sales".
+    Nobody else's deal is theirs to undo — not a colleague's, and not a
+    manager's or a warehouse keeper's over the claimant's head: the rule the
+    owner set on 2026-09-09 is "everyone their own, the owner and the
+    administrator anyone's". `STOCK_MANAGE` used to open every deal here and
+    no longer does; a manager holds it by default, and that made "only the
+    owner and the lider" untrue. [_works_lead] is the claimant alone.
     """
     if not _sale_happened(lead):
         return False
-    return (
-        user.may(Permission.STOCK_MANAGE)
-        or _may_touch_completed(user)
-        or _works_lead(lead, user)
-    )
+    return _may_touch_completed(user) or _works_lead(lead, user)
 
 
 def _lead_debt(lead: dict) -> Decimal | None:

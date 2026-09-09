@@ -359,6 +359,32 @@ def test_a_salesperson_does_not_return_somebody_else_s_sale():
     assert response.status_code == 403
 
 
+def test_a_manager_does_not_return_somebody_else_s_sale_either():
+    """A manager ("performer") holds STOCK_MANAGE by default, and that used to
+    open every sale to them. The owner's rule is narrower: everyone undoes
+    their own, and only the owner and the administrator undo anyone's."""
+    manager = _user("performer", SELLER_ID + 2)
+    with patch("apps.b2b.workspace.views.repo.get_lead", return_value=_sale()):
+        response = _call(
+            WorkspaceLeadReturnView, factory.get("/leads/7/return/"), manager, lead_id=7
+        )
+    assert response.status_code == 403
+
+
+def test_the_administrator_returns_anybody_s_sale():
+    lider = _user("lider", SELLER_ID + 3)
+    with patch(
+        "apps.b2b.workspace.views.repo.get_lead", return_value=_sale()
+    ), patch(
+        "apps.b2b.workspace.views.inventory.lead_return_lines",
+        return_value=_returnable(),
+    ):
+        response = _call(
+            WorkspaceLeadReturnView, factory.get("/leads/7/return/"), lider, lead_id=7
+        )
+    assert response.status_code == 200
+
+
 # ─── The debts screen ─────────────────────────────────────────────────────────
 
 def test_debts_are_grouped_per_customer():
