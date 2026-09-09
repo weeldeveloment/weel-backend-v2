@@ -10801,6 +10801,12 @@
      "type": "string",
      "x-nullable": true
     },
+    "company_slug": {
+     "minLength": 1,
+     "title": "Company slug",
+     "type": "string",
+     "x-nullable": true
+    },
     "completed_this_month": {
      "title": "Completed this month",
      "type": "integer"
@@ -11746,23 +11752,6 @@
    },
    "required": [
     "first_name"
-   ],
-   "type": "object"
-  },
-  "OwnReactions": {
-   "properties": {
-    "reactions": {
-     "items": {
-      "maxLength": 16,
-      "minLength": 1,
-      "type": "string"
-     },
-     "maxItems": 6,
-     "type": "array"
-    }
-   },
-   "required": [
-    "reactions"
    ],
    "type": "object"
   },
@@ -26643,35 +26632,6 @@
      }
     },
     "summary": "Edit your own profile",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   }
-  },
-  "/b2b/workspace/me/reactions/": {
-   "parameters": [],
-   "put": {
-    "description": "PUT /api/b2b/workspace/me/reactions/ — the six stickers you react with.\n\nOpen to everybody, with no capability behind it. Reacting to a task is a\nreader's remark rather than an edit of the record — the reaction endpoint\nitself says so — and which faces somebody keeps on their own row is a\nsmaller question still.\n\nStored on the account, not on the roster row: one human, one set,\nwhichever workspace they are signed into. An empty list is a real request\nand means \"back to the app's own six\" — it clears the column rather than\nstoring six blanks, so somebody who picked in March still gets whatever\nthe defaults are in December.",
-    "operationId": "b2b_workspace_me_reactions_update",
-    "parameters": [
-     {
-      "in": "body",
-      "name": "data",
-      "required": true,
-      "schema": {
-       "$ref": "#/definitions/OwnReactions"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "",
-      "schema": {
-       "$ref": "#/definitions/Me"
-      }
-     }
-    },
-    "summary": "Choose the stickers on your reaction row",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
