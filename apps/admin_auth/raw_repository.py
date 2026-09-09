@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from uuid import uuid4
 
 from django.contrib.auth.hashers import make_password
 from django.utils import timezone
@@ -139,6 +140,7 @@ def create_admin_user(
     row = fetch_one(
         f"""
         INSERT INTO {USER_TABLE} (
+            guid,
             role,
             email,
             phone_number,
@@ -150,6 +152,7 @@ def create_admin_user(
             created_at,
             updated_at
         ) VALUES (
+            %s,
             'admin',
             %s,
             NULL,
@@ -163,7 +166,7 @@ def create_admin_user(
         )
         {"RETURNING *" if return_star() else ""}
         """,
-        [email, first_name, last_name, username, now, now],
+        [uuid4(), email, first_name, last_name, username, now, now],
     )
     if row is None and not return_star():
         row = fetch_one(
