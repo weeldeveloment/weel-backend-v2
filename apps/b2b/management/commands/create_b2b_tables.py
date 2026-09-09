@@ -106,15 +106,16 @@ class Command(BaseCommand):
             cursor.execute("""
                 ALTER TABLE b2b_employee ADD COLUMN IF NOT EXISTS username VARCHAR(50);
             """)
-            # Unique per company rather than globally: two companies are
-            # separate address books, and "@aziz" in one has nothing to do
-            # with "@aziz" in the other. Partial, so the many rows with no
-            # handle at all do not collide with each other.
-            cursor.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS b2b_employee_username_idx
-                ON b2b_employee (company_id, LOWER(username))
-                WHERE username IS NOT NULL;
-            """)
+            # No unique index on it any more. The handle belongs to the
+            # account (`b2b_account_username_idx`, further down) and every
+            # roster row of one person carries a copy of it — a person who is
+            # in one company twice (seconded and permanent, say) has two rows
+            # with the same handle, which is exactly what the old per-company
+            # index refused. Creating it here and dropping it at the end of
+            # this command was how the 2026-09-09 deploy died on start-up:
+            # the previous run had dropped it, the copies had since been made
+            # equal, and the re-creation hit the duplicate. It is dropped
+            # below, where the account is linked.
             cursor.execute("""
                 DO $$
                 BEGIN
