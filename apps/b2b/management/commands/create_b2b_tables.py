@@ -2324,6 +2324,51 @@ class Command(BaseCommand):
         )
         self.stdout.write("  Created b2b_audit_event")
 
+        # ─── `calendar.invite` for employees who were configured before it ────
+        #
+        # Since 2026-09-10 an employee may put colleagues on their own event
+        # (`access.DEFAULT_PERMISSIONS`, `can_invite_to_event`). A default only
+        # reaches a workspace that never saved the role editor: a stored
+        # `employee` row — or a person's own "configure" list — was written
+        # while the permission gated nothing, so it lacks it, and the owner saw
+        # the people row stay missing after the fix went out. Its absence there
+        # says nothing about anybody's intent, so it is added.
+        #
+        # Only rows last written before the cutoff: from then on the role
+        # editor has offered the permission, and a list saved without it is
+        # somebody taking it away. That also makes a second run a no-op.
+        invite_cutoff = "2026-09-10 09:00:00+00"
+        cursor.execute(
+            """
+            UPDATE b2b_workspace_role
+               SET permissions = permissions || '["calendar.invite"]'::jsonb
+             WHERE code = 'employee'
+               AND permissions ? 'calendar.create_own'
+               AND NOT permissions ? 'calendar.invite'
+               AND updated_at < %s::timestamptz
+            """,
+            [invite_cutoff],
+        )
+        cursor.execute(
+            """
+            UPDATE b2b_employee e
+               SET permission_access = e.permission_access || '["calendar.invite"]'::jsonb
+             WHERE e.role = 'employee'
+               AND jsonb_typeof(e.permission_access) = 'array'
+               AND e.permission_access ? 'calendar.create_own'
+               AND NOT e.permission_access ? 'calendar.invite'
+               AND e.created_at < %s::timestamptz
+               AND NOT EXISTS (
+                   SELECT 1 FROM b2b_audit_event a
+                    WHERE a.action = 'employee.access_changed'
+                      AND a.target_id = e.id
+                      AND a.created_at >= %s::timestamptz
+               )
+            """,
+            [invite_cutoff, invite_cutoff],
+        )
+        self.stdout.write("  Gave configured employees calendar.invite")
+
         # ─── Handing over or closing a company ─────────────────────────────────
         #
         # The owner holds the Company outright — see the note on `Role.OWNER`
