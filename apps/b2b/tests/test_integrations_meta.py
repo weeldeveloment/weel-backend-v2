@@ -10,8 +10,9 @@ Three things are worth pinning down and none of them is SQL:
   * **The signature.** The webhook puts rows on somebody's sales board and
     carries no login, so an unsigned or wrongly signed delivery must be
     dropped rather than logged and processed — before anything is looked up.
-  * **Who may connect.** Owner, administrator and manager — not an employee,
-    and not a guest.
+  * **Who may connect.** Everybody but a guest. Taking it away — unplugging,
+    pausing a page, and the AI keys — stays with the owner, administrator and
+    manager, plus whoever connected it.
   * **Whose pages.** Thousands of companies connect through Weel's one
     Facebook app. The callback attaches pages only to the company its `state`
     was issued to, and never takes a page another company already has. The
@@ -30,7 +31,11 @@ if not settings.configured:
 from apps.b2b.integrations import meta
 from apps.b2b.integrations.credentials import MetaCredentials
 from apps.b2b.integrations.ingest import _clean_phone, _map_fields
-from apps.b2b.integrations.permissions import may_manage_integrations
+from apps.b2b.integrations.permissions import (
+    may_connect_meta,
+    may_manage_integrations,
+    may_unplug_meta,
+)
 from apps.b2b.models import LeadSource
 from apps.b2b.workspace.roles import capabilities_for
 
@@ -153,29 +158,50 @@ def test_a_server_with_no_app_secret_verifies_nothing():
 
 # ─── Who may connect it ───────────────────────────────────────────────────────
 
-def test_the_owner_the_administrator_and_the_manager_may_manage_integrations():
-    assert may_manage_integrations("owner")
-    # "lider" is the roster's older word for the workspace administrator.
-    assert may_manage_integrations("lider")
-    assert may_manage_integrations("admin")
-    # The manager runs the funnel the leads land in, so the source is theirs
-    # to plug in. "performer" is the column's older word for the same role.
-    assert may_manage_integrations("manager")
-    assert may_manage_integrations("performer")
-    # And it stops there: connecting hands us a token to the company's
-    # Facebook account.
+def test_everybody_but_a_guest_may_connect_meta():
+    # The owner's call, 2026-09-11: owner, manager, lider and employee.
+    # "lider" and "performer" are the roster's older words for the
+    # administrator and the manager.
+    for role in ("owner", "admin", "lider", "manager", "performer", "employee"):
+        assert may_connect_meta(role), role
+    assert not may_connect_meta("guest")
+    # An unreadable role resolves to `employee`, never to more.
+    assert may_connect_meta(None) is may_connect_meta("employee")
+
+
+def test_the_managing_roles_alone_manage_the_rest():
+    """The AI keys, and unplugging somebody else's Meta connection."""
+    for role in ("owner", "lider", "admin", "manager", "performer"):
+        assert may_manage_integrations(role), role
     assert not may_manage_integrations("employee")
     assert not may_manage_integrations("guest")
-    # An unreadable role resolves to `employee`, not to the benefit of the doubt.
     assert not may_manage_integrations(None)
     assert not may_manage_integrations("wat")
+
+
+class _Viewer:
+    def __init__(self, id, role):
+        self.id, self.role = id, role
+
+
+def test_whoever_connected_meta_may_unplug_it_and_nobody_else_below_a_manager():
+    integration = {"id": 1, "connected_by_id": 7}
+    assert may_unplug_meta(_Viewer(7, "employee"), integration)
+    assert not may_unplug_meta(_Viewer(8, "employee"), integration)
+    assert may_unplug_meta(_Viewer(8, "manager"), integration)
+    assert may_unplug_meta(_Viewer(8, "owner"), integration)
+    # A guest who once connected it (as an employee, since demoted) does not
+    # keep the switch.
+    assert not may_unplug_meta(_Viewer(7, "guest"), integration)
+    assert not may_unplug_meta(_Viewer(7, "employee"), None)
+    assert not may_unplug_meta(_Viewer(7, "employee"), {"connected_by_id": None})
 
 
 def test_the_capability_the_app_draws_its_row_from_agrees():
     assert capabilities_for("owner")["can_manage_integrations"]
     assert capabilities_for("lider")["can_manage_integrations"]
     assert capabilities_for("performer")["can_manage_integrations"]
-    assert not capabilities_for("employee")["can_manage_integrations"]
+    assert capabilities_for("employee")["can_manage_integrations"]
     assert not capabilities_for("guest")["can_manage_integrations"]
 
 
@@ -218,7 +244,8 @@ def test_nobody_is_asked_for_an_app_id_a_secret_or_a_token():
     assert payload["available"] is True
 
 
-def _callback(query, *, state_holder, pages, held_elsewhere=(), upsert=None):
+def _callback(query, *, state_holder, pages, held_elsewhere=(), upsert=None,
+              existing=None, account=None):
     """Run the OAuth callback with Meta, the cache and the database faked.
 
     Answers the response and the calls the repository saw, so a test can say
@@ -250,10 +277,12 @@ def _callback(query, *, state_holder, pages, held_elsewhere=(), upsert=None):
          patch.object(public_views.credentials, "global_credentials", return_value=_creds()), \
          patch.object(public_views.meta, "exchange_code", return_value={"access_token": "s"}), \
          patch.object(public_views.meta, "long_lived_token", return_value={"access_token": "l"}), \
-         patch.object(public_views.meta, "me", return_value={"id": "u1", "name": "Aziz"}), \
+         patch.object(public_views.meta, "me",
+                      return_value=account or {"id": "u1", "name": "Aziz"}), \
          patch.object(public_views.meta, "list_pages", return_value=pages), \
          patch.object(public_views.meta, "subscribe_page") as subscribe, \
          patch.object(public_views.crypto, "encrypt", side_effect=lambda v: f"enc:{v}"), \
+         patch.object(public_views.int_repo, "get_integration", return_value=existing), \
          patch.object(public_views.int_repo, "upsert_integration",
                       side_effect=lambda **kw: {"id": 500 + kw["company_id"], **kw}) as upsert_integration, \
          patch.object(public_views.int_repo, "page_held_elsewhere",
@@ -325,6 +354,62 @@ def test_losing_the_race_for_a_page_is_reported_the_same_way():
     assert "Alfa do‘koni" in run["html"]
     assert run["delete_except"].args == (510, [])
     assert run["status"].args[1] == "error"
+
+
+_LIVE = {"id": 510, "company_id": 10, "account_id": "u1", "access_token_enc": "enc:l",
+         "connected_by_id": 7}
+
+
+def test_a_second_account_adds_its_pages_and_takes_nothing_away():
+    """An employee signs in with their own Facebook to a company the owner
+    has already connected. Their page joins the owner's connection; the
+    owner's pages, account and token stay exactly as they were."""
+    run = _callback(
+        {"code": "c", "state": "st"},
+        state_holder={"company_id": 10, "employee_id": 9},
+        pages=[_page("P9", "Filial sahifasi")],
+        existing=_LIVE,
+        account={"id": "u9", "name": "Dilshod"},
+    )
+    assert "1 ta sahifa qo‘shildi" in run["html"]
+    assert run["integration"] is None  # the connection was not taken over
+    assert run["delete_except"] is None  # and nothing was dropped
+    assert run["status"] is None  # nor was its status touched
+    assert [(p["integration_id"], p["page_id"]) for p in run["stored"]] == [(510, "P9")]
+    assert run["subscribed"] == ["P9"]
+
+
+def test_a_login_with_no_usable_page_leaves_a_working_connection_alone():
+    """Before this, a Facebook account administering no page (or only other
+    companies') reconnected the company with an empty list and wiped every
+    page it had."""
+    for account, pages, held in (
+        ({"id": "u9", "name": "Dilshod"}, [], ()),
+        ({"id": "u1", "name": "Aziz"}, [], ()),
+        ({"id": "u9", "name": "Dilshod"}, [_page("P2", "Beta klinikasi")], {"P2"}),
+    ):
+        run = _callback(
+            {"code": "c", "state": "st"},
+            state_holder={"company_id": 10, "employee_id": 9},
+            pages=pages, held_elsewhere=held, existing=_LIVE, account=account,
+        )
+        assert "Sahifa ulanmadi" in run["html"]
+        assert run["integration"] is None
+        assert run["delete_except"] is None
+        assert run["status"] is None
+        assert run["stored"] == []
+
+
+def test_the_same_account_reconnecting_rewrites_its_list():
+    run = _callback(
+        {"code": "c", "state": "st"},
+        state_holder={"company_id": 10, "employee_id": 7},
+        pages=[_page("P1", "Alfa do‘koni")],
+        existing=_LIVE,
+    )
+    assert "1 ta sahifa ulandi" in run["html"]
+    assert run["integration"].kwargs["account_id"] == "u1"
+    assert run["delete_except"].args == (510, ["P1"])
 
 
 def test_a_state_is_good_for_one_callback_only():
@@ -414,3 +499,77 @@ def test_meta_is_not_a_source_a_person_can_pick():
     ingest path."""
     assert LeadSource.META in LeadSource.CHOICES
     assert LeadSource.META not in LeadSource.MANUAL_CHOICES
+
+
+# ─── The screen, as each role gets it ─────────────────────────────────────────
+
+def _as(role, *, employee_id=8, method="get", view=None, integration=None, **kwargs):
+    """Call an integrations view as `role`, with the database faked."""
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    from apps.b2b.integrations import views
+    from apps.b2b.workspace.authentication import WorkspaceUser
+
+    user = WorkspaceUser({"id": employee_id, "company_id": 10, "role": role})
+    request = getattr(APIRequestFactory(), method)("/x/", format="json")
+    force_authenticate(request, user=user)
+    with patch.object(views.int_repo, "get_integration", return_value=integration), \
+         patch.object(views.int_repo, "list_pages", return_value=[]), \
+         patch.object(views.int_repo, "delete_pages") as delete_pages, \
+         patch.object(views.int_repo, "disconnect") as disconnect, \
+         patch.object(views.b2b_repo, "get_employee", return_value=None), \
+         patch.object(views.credentials, "is_available", return_value=True), \
+         patch("apps.b2b.integrations.ai_views.ai_payload",
+               side_effect=lambda company_id, provider: {"provider": provider}):
+        response = view.as_view()(request, **kwargs)
+    return response, disconnect
+
+
+def test_an_employee_s_screen_is_meta_alone():
+    from apps.b2b.integrations import views
+
+    response, _ = _as("employee", view=views.IntegrationListView)
+    assert response.status_code == 200
+    assert [row["provider"] for row in response.data["results"]] == ["meta"]
+    assert response.data["can_manage"] is False
+
+    response, _ = _as("manager", view=views.IntegrationListView)
+    assert len(response.data["results"]) > 1
+    assert response.data["can_manage"] is True
+
+
+def test_a_guest_is_refused_the_screen():
+    from apps.b2b.integrations import views
+
+    response, _ = _as("guest", view=views.IntegrationListView)
+    assert response.status_code == 403
+
+
+def test_an_employee_cannot_unplug_the_owner_s_connection():
+    from apps.b2b.integrations import views
+
+    response, disconnect = _as(
+        "employee", method="delete", view=views.MetaDisconnectView,
+        integration=_LIVE,  # connected by employee 7
+    )
+    assert response.status_code == 403
+    disconnect.assert_not_called()
+
+    response, disconnect = _as(
+        "employee", employee_id=7, method="delete", view=views.MetaDisconnectView,
+        integration=_LIVE,
+    )
+    assert response.status_code == 200
+    disconnect.assert_called_once()
+
+
+def test_the_row_says_who_may_disconnect():
+    from apps.b2b.integrations import views
+
+    response, _ = _as("employee", view=views.MetaDisconnectView, integration=_LIVE)
+    assert response.data["can_disconnect"] is False
+    response, _ = _as("employee", employee_id=7, view=views.MetaDisconnectView,
+                      integration=_LIVE)
+    assert response.data["can_disconnect"] is True
+    response, _ = _as("lider", view=views.MetaDisconnectView, integration=_LIVE)
+    assert response.data["can_disconnect"] is True

@@ -57,13 +57,18 @@ class Role:
     #: what a role may do.
     ADMINISTRATIVE = frozenset({OWNER, ADMIN})
 
-    #: Who may plug an outside service into the workspace — the owner, the
-    #: administrator ("lider") and the manager ("rahbar"). Wider than
-    #: [ADMINISTRATIVE] because connecting Meta is a decision about where the
-    #: funnel's leads come from, and the manager is who answers for the funnel;
-    #: still not the whole roster, because it hands us a token to the company's
-    #: Facebook account. See `apps/b2b/integrations/permissions.py`.
+    #: Who may manage the workspace's outside services — the owner, the
+    #: administrator ("lider") and the manager ("rahbar"): the AI assistants'
+    #: keys, and unplugging a Meta connection somebody else made. See
+    #: `apps/b2b/integrations/permissions.py`.
     INTEGRATION_ROLES = frozenset({OWNER, ADMIN, MANAGER})
+
+    #: Who may connect Meta's lead ads — everybody on the roster but a guest.
+    #: The owner's call (2026-09-11): whoever runs the company's ads may be an
+    #: ordinary employee, and connecting only ever *adds* that person's pages
+    #: to the funnel; taking them away stays with [INTEGRATION_ROLES] and the
+    #: person who connected them.
+    META_ROLES = frozenset({OWNER, ADMIN, MANAGER, EMPLOYEE})
 
     LABELS = {
         OWNER: "Egasi",
@@ -690,14 +695,14 @@ def capabilities_from(
     # scope flags answer "how much of the company do you see", which is a
     # different question from "what may you do" and is not something the role
     # editor offers.
-    # Plugging an outside service into the funnel. Not a permission in the
-    # catalogue: the TZ's modules are parts of the workspace and this is a
-    # company-level commitment — a token to the company's Facebook account,
-    # and every lead that account produces landing on this board. The owner,
-    # the administrator ("lider") and the manager ("rahbar"), who is the one
-    # answering for the funnel those leads land in — but no further down the
-    # roster. See `apps/b2b/integrations/permissions.py`.
-    flags["can_manage_integrations"] = role in Role.INTEGRATION_ROLES
+    # The Integratsiya screen. Not a permission in the catalogue: the TZ's
+    # modules are parts of the workspace and this is a company-level hook-up.
+    # Everybody but a guest opens it, because everybody but a guest may
+    # connect Meta; what else the screen lists (the AI assistants' keys) is
+    # decided by the server's list, which shows those rows to the owner, the
+    # administrator and the manager only. See
+    # `apps/b2b/integrations/permissions.py`.
+    flags["can_manage_integrations"] = role in Role.META_ROLES
 
     # "1 USD = ... so'm", set by hand in Profil -> Moliya. Deliberately not
     # `STOCK_MANAGE`, which is where it started: the rate is not a fact about

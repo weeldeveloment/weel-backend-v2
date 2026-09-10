@@ -60,6 +60,9 @@ class IntegrationSerializer(serializers.Serializer):
     #: Always null — see [MetaSetupSerializer].
     setup = MetaSetupSerializer(allow_null=True)
     pages = IntegrationPageSerializer(many=True)
+    #: Meta only: whether the viewer may unplug it or pause a page — the
+    #: owner, the administrator, the manager, or whoever connected it.
+    can_disconnect = serializers.BooleanField(required=False)
     #: Claude / ChatGPT only; null for Meta.
     ai = serializers.SerializerMethodField()
 

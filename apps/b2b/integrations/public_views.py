@@ -128,48 +128,79 @@ class MetaOAuthCallbackView(APIView):
             logger.exception("Meta OAuth failed for company %s", company_id)
             return _result_page("Ulanmadi", str(exc), ok=False)
 
-        integration = int_repo.upsert_integration(
-            company_id=company_id,
-            provider=IntegrationProvider.META,
-            account_id=str(account.get("id") or "") or None,
-            account_name=(account.get("name") or "") or None,
-            access_token_enc=crypto.encrypt(long_lived["access_token"]),
-            token_expires_at=long_lived.get("expires_at"),
-            scopes=",".join(meta.SCOPES),
-            connected_by_id=employee_id,
-        )
-        if not integration:
-            return _result_page("Ulanmadi", "Ulanish saqlanmadi.", ok=False)
+        account_id = str(account.get("id") or "") or None
+        existing = int_repo.get_integration(company_id, IntegrationProvider.META)
+        live = bool(existing and existing.get("access_token_enc"))
+        # Anybody on the roster may connect (see `permissions`), so a company
+        # already connected will see a second Facebook account sign in — an
+        # employee who runs another of its pages, say. That login *adds* its
+        # pages to the connection. It does not take the connection over, and
+        # it does not drop the pages the first account brought: only that same
+        # account, re-picking its pages on Meta's screen, rewrites the list.
+        adding = live and existing.get("account_id") != account_id
 
-        stored, failed, taken, kept = 0, [], [], []
+        # Sorted before anything is written, so a login that brings nothing
+        # usable can leave a working connection exactly as it found it.
+        usable, taken = [], []
         for page in pages:
             page_id = str(page.get("id") or "")
-            page_token = page.get("access_token")
-            if not page_id or not page_token:
+            if not page_id or not page.get("access_token"):
                 continue
-            name = page.get("name") or page_id
             # Somebody who administers pages for several companies grants us
             # all of them in one login. A page another workspace already has
             # stays with that workspace — its leads are its customers.
             if int_repo.page_held_elsewhere(page_id, company_id):
-                taken.append(name)
+                taken.append(page.get("name") or page_id)
                 continue
+            usable.append(page)
+
+        no_pages = (
+            "Bu Facebook hisobida siz boshqaradigan sahifa yo‘q. Sahifa "
+            "administratori bo‘lgan hisob bilan kiring."
+        )
+        if not usable and live:
+            # Nothing to add, and a connection that works: touch nothing. The
+            # pages the company already has keep arriving.
+            return _result_page(
+                "Sahifa ulanmadi", _taken_note(taken) or no_pages, ok=False,
+            )
+
+        if adding:
+            integration = existing
+        else:
+            integration = int_repo.upsert_integration(
+                company_id=company_id,
+                provider=IntegrationProvider.META,
+                account_id=account_id,
+                account_name=(account.get("name") or "") or None,
+                access_token_enc=crypto.encrypt(long_lived["access_token"]),
+                token_expires_at=long_lived.get("expires_at"),
+                scopes=",".join(meta.SCOPES),
+                connected_by_id=employee_id,
+            )
+            if not integration:
+                return _result_page("Ulanmadi", "Ulanish saqlanmadi.", ok=False)
+
+        stored, failed, kept = 0, [], []
+        for page in usable:
+            page_id = str(page["id"])
+            name = page.get("name") or page_id
             subscribed = True
             try:
-                meta.subscribe_page(page_id, page_token)
+                meta.subscribe_page(page_id, page["access_token"])
             except meta.MetaError as exc:
                 # Worth storing anyway. A page we could not subscribe is one
                 # the catch-up sync can still read, and a half-connected
                 # account the owner can see is more useful than a page that
                 # vanished from the list with no explanation.
                 subscribed = False
-                failed.append(f"{page.get('name') or page_id}: {exc}")
+                failed.append(f"{name}: {exc}")
             row = int_repo.upsert_page(
                 integration_id=integration["id"],
                 company_id=company_id,
                 page_id=page_id,
                 page_name=(page.get("name") or "")[:300],
-                access_token_enc=crypto.encrypt(page_token),
+                access_token_enc=crypto.encrypt(page["access_token"]),
                 subscribed=subscribed,
             )
             if row:
@@ -179,31 +210,30 @@ class MetaOAuthCallbackView(APIView):
                 # Lost the race to another company connecting it this second.
                 taken.append(name)
 
-        # What the owner ticked on Meta's screen this time is the whole list.
-        # A page from an earlier login that is not in it any more leaves.
-        int_repo.delete_pages_except(integration["id"], kept)
+        taken_note = _taken_note(taken)
 
-        taken_note = (
-            "Bu sahifalar boshqa Weel kompaniyasiga ulangan, shu sababli "
-            "qo‘shilmadi: " + ", ".join(taken) + ". Ularni avval o‘sha "
-            "kompaniyada uzing."
-        ) if taken else ""
+        if not adding:
+            # What the owner ticked on Meta's screen this time is the whole
+            # list. A page from an earlier login that is not in it any more
+            # leaves.
+            int_repo.delete_pages_except(integration["id"], kept)
 
         if not stored:
-            error = taken_note or "Bu hisobda boshqariladigan sahifa topilmadi."
-            int_repo.set_integration_status(
-                integration["id"], IntegrationStatus.ERROR, error=error[:1000],
-            )
+            if not adding:
+                int_repo.set_integration_status(
+                    integration["id"], IntegrationStatus.ERROR,
+                    error=(taken_note or no_pages)[:1000],
+                )
             return _result_page(
-                "Sahifa ulanmadi",
-                taken_note or (
-                    "Bu Facebook hisobida siz boshqaradigan sahifa yo‘q. Sahifa "
-                    "administratori bo‘lgan hisob bilan kiring."
-                ),
-                ok=False,
+                "Sahifa ulanmadi", taken_note or no_pages, ok=False,
             )
 
-        if failed:
+        # The connection's own status is its account's. An added page that
+        # failed to subscribe says so on its own row and on the page below,
+        # not by turning the whole connection red.
+        if adding:
+            pass
+        elif failed:
             int_repo.set_integration_status(
                 integration["id"], IntegrationStatus.ERROR,
                 error="; ".join([*failed, taken_note] if taken_note else failed)[:1000],
@@ -226,12 +256,26 @@ class MetaOAuthCallbackView(APIView):
         except Exception:  # noqa: BLE001
             logger.exception("Could not queue the first Meta sync for %s", company_id)
 
+        notes = [taken_note] if taken_note else []
+        if adding and failed:
+            notes.append("Obuna bo‘lmadi: " + "; ".join(failed))
         return _result_page(
             "Meta ulandi",
-            f"{stored} ta sahifa ulandi. Ilovaga qayting — yangi leadlar "
-            f"savdo varonkasida paydo bo‘ladi.",
-            note=taken_note,
+            (f"{stored} ta sahifa qo‘shildi." if adding
+             else f"{stored} ta sahifa ulandi.")
+            + " Ilovaga qayting — yangi leadlar savdo varonkasida paydo bo‘ladi.",
+            note=" ".join(notes),
         )
+
+
+def _taken_note(taken: list[str]) -> str:
+    if not taken:
+        return ""
+    return (
+        "Bu sahifalar boshqa Weel kompaniyasiga ulangan, shu sababli "
+        "qo‘shilmadi: " + ", ".join(taken) + ". Ularni avval o‘sha "
+        "kompaniyada uzing."
+    )
 
 
 # ─── Where the leads arrive ───────────────────────────────────────────────────

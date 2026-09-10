@@ -4,14 +4,23 @@ A company connects its own Facebook pages; the lead-ad forms on them fill the
 sales funnel. Every lead that arrives this way is marked `source = meta` and
 shows a "Meta’dan" badge in the app.
 
-Only the workspace **owner** and **administrator** ("lider" in the roster's
-vocabulary) can connect or disconnect it. That is enforced on the server —
+**Anybody on the roster but a guest** — owner, administrator ("lider"),
+manager and employee — can connect it (the owner's call, 2026-09-11).
+Unplugging it and pausing a page stay with the owner, the administrator, the
+manager and whoever made the connection; the AI assistants' keys on the same
+screen are the first three's only. That is enforced on the server —
 `apps/b2b/integrations/permissions.py` — and reported to the app as the
-`can_manage_integrations` capability so the profile row and the endpoint agree.
+`can_manage_integrations` capability (opens the screen) and `can_disconnect`
+on Meta's row (draws the button).
+
+A second Facebook account signing in to a company that is already connected
+**adds** its pages; it never takes the connection over or drops the pages the
+first account brought. Only the same account reconnecting rewrites its list,
+and a login that brings no usable page leaves a working connection untouched.
 
 ## The flow, end to end
 
-1. The owner opens **Profil → Integratsiya → Meta** (or the dashboard's
+1. Somebody in the workspace opens **Profil → Integratsiya → Meta** (or the dashboard's
    Integratsiyalar page) and taps "Ulash".
    `POST /api/b2b/workspace/integrations/meta/connect/` answers with an
    `authorize_url`; the phone opens it in its browser.

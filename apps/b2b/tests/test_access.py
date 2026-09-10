@@ -798,11 +798,8 @@ LEGACY_FLAGS = {
         "can_create_task", "can_delete_task", "can_edit_any_event",
         "can_invite_to_event",
         "can_edit_task", "can_manage_attendance", "can_manage_attendance_location",
-        # Plugging an outside service into the funnel — Meta's lead ads. Held
-        # by the owner, the administrator and the manager: connecting one
-        # commits the whole company's board to somebody's advertising account
-        # and hands the server a token to their Facebook, which is why it stops
-        # above the ordinary employee. See `apps/b2b/integrations`.
+        # The Integratsiya screen — Meta's lead ads, which everybody but a
+        # guest may connect. See `apps/b2b/integrations`.
         "can_manage_integrations",
         "can_manage_team", "can_pick_employee_of_month", "can_post_lead",
         "can_request_help", "can_update_task_status", "can_use_mail",
@@ -881,6 +878,10 @@ LEGACY_FLAGS = {
         # may have colleagues on it. Not `can_create_event` — the shared
         # calendar is still the manager's.
         "can_invite_to_event",
+        # Added 2026-09-11 at the owner's request: an employee may connect
+        # Meta's lead ads, so the Integratsiya screen opens to them. The AI
+        # keys on it do not — the server leaves those rows out.
+        "can_manage_integrations",
         "can_post_lead", "can_update_task_status", "can_use_mail",
         "can_view_attendance", "can_view_hotels", "can_view_team",
     },

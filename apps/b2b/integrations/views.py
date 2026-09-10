@@ -1,7 +1,8 @@
 """The workspace's own integrations screen.
 
-Every endpoint here is the owner's or the administrator's — see
-`permissions.CanManageIntegrations`. The two *public* halves of the flow (the
+Anybody on the roster but a guest may open it and connect Meta; unplugging
+and pausing are the managing roles' and the connector's — see
+`permissions`. The two *public* halves of the flow (the
 OAuth callback Meta redirects the browser to, and the webhook Meta posts leads
 to) are in `public_views`, because neither carries a workspace login.
 """
@@ -21,7 +22,11 @@ from rest_framework.response import Response
 
 from apps.b2b.integrations import credentials, crypto, meta
 from apps.b2b.integrations import repository as int_repo
-from apps.b2b.integrations.permissions import CanManageIntegrations
+from apps.b2b.integrations.permissions import (
+    CanConnectMeta,
+    may_manage_integrations,
+    may_unplug_meta,
+)
 from apps.b2b.integrations.serializers import (
     IntegrationListSerializer,
     IntegrationSerializer,
@@ -65,8 +70,8 @@ def _page_payload(page: dict) -> dict:
     }
 
 
-def meta_payload(company_id: int) -> dict:
-    """Meta's row on the screen, connected or not."""
+def meta_payload(company_id: int, viewer=None) -> dict:
+    """Meta's row on the screen, connected or not, as `viewer` may act on it."""
     integration = int_repo.get_integration(company_id, IntegrationProvider.META)
     pages = int_repo.list_pages(company_id) if integration else []
 
@@ -103,16 +108,31 @@ def meta_payload(company_id: int) -> dict:
         # Nothing to paste anywhere any more; null for older app builds.
         "setup": None,
         "pages": [_page_payload(page) for page in pages],
+        # Whether this viewer may unplug it or pause its pages — the managing
+        # roles, or whoever connected it. See `permissions.may_unplug_meta`.
+        "can_disconnect": bool(
+            viewer is not None and may_unplug_meta(viewer, integration)
+        ),
         "ai": None,
     }
+
+
+def _refuse_unplug():
+    return Response(
+        {"detail": _(
+            "Only the owner, an administrator, a manager or the person "
+            "who connected Meta can do this."
+        )},
+        status=status.HTTP_403_FORBIDDEN,
+    )
 
 
 # ─── Views ────────────────────────────────────────────────────────────────────
 
 class IntegrationsAPIView(WorkspaceAPIView):
-    """Signed in, and holding the owner's or administrator's role."""
+    """Signed in, and on the roster as anything but a guest."""
 
-    permission_classes = [IsAuthenticated, IsWorkspaceUser, CanManageIntegrations]
+    permission_classes = [IsAuthenticated, IsWorkspaceUser, CanConnectMeta]
 
 
 class IntegrationListView(IntegrationsAPIView):
@@ -120,19 +140,24 @@ class IntegrationListView(IntegrationsAPIView):
 
     @swagger_auto_schema(
         tags=INTEGRATIONS_TAG,
-        operation_summary="List integrations (owner/administrator only)",
+        operation_summary="List integrations (anybody but a guest)",
         responses={200: IntegrationListSerializer()},
     )
     def get(self, request):
         from apps.b2b.integrations.ai_views import ai_payload
 
         company_id = request.user.company_id
+        # The AI assistants' rows only for the roles whose keys they are: an
+        # employee's screen is Meta alone, and the app draws whatever rows
+        # come back.
+        manages = may_manage_integrations(request.user.role)
         return Response({
             "results": [
-                meta_payload(company_id),
-                *[ai_payload(company_id, provider) for provider in IntegrationProvider.AI],
+                meta_payload(company_id, request.user),
+                *([ai_payload(company_id, provider) for provider in IntegrationProvider.AI]
+                  if manages else []),
             ],
-            "can_manage": True,
+            "can_manage": manages,
         })
 
 
@@ -192,7 +217,7 @@ class MetaDisconnectView(IntegrationsAPIView):
                          operation_summary="The Meta connection",
                          responses={200: IntegrationSerializer()})
     def get(self, request):
-        return Response(meta_payload(request.user.company_id))
+        return Response(meta_payload(request.user.company_id, request.user))
 
     @swagger_auto_schema(
         tags=INTEGRATIONS_TAG,
@@ -202,6 +227,8 @@ class MetaDisconnectView(IntegrationsAPIView):
     def delete(self, request):
         company_id = request.user.company_id
         integration = int_repo.get_integration(company_id, IntegrationProvider.META)
+        if integration and not may_unplug_meta(request.user, integration):
+            return _refuse_unplug()
         if integration:
             # Tell Meta to stop sending, then forget the tokens. In that order:
             # unsubscribing needs the page token, and a failure here must not
@@ -220,7 +247,7 @@ class MetaDisconnectView(IntegrationsAPIView):
         # The leads already on the board stay exactly as they are, marked
         # "Meta". They are real deals somebody may be working; unplugging the
         # source is not a reason to take them away.
-        return Response(meta_payload(company_id))
+        return Response(meta_payload(company_id, request.user))
 
 
 class MetaPageView(IntegrationsAPIView):
@@ -240,11 +267,15 @@ class MetaPageView(IntegrationsAPIView):
         if not page:
             return Response({"detail": _("Page not found.")},
                             status=status.HTTP_404_NOT_FOUND)
+        # Pausing a page stops its leads as surely as unplugging does.
+        integration = int_repo.get_integration_by_id(page["integration_id"])
+        if not may_unplug_meta(request.user, integration):
+            return _refuse_unplug()
         int_repo.set_page_active(
             page_row_id, request.user.company_id,
             serializer.validated_data["is_active"],
         )
-        return Response(meta_payload(request.user.company_id))
+        return Response(meta_payload(request.user.company_id, request.user))
 
 
 class MetaSyncView(IntegrationsAPIView):
