@@ -70,6 +70,18 @@ def _call(view_class, request, user, **kwargs):
     return view_class.as_view()(request, **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def _nobody_is_seated_twice():
+    """The person asked for is not in the asking workspace through any other
+    row of theirs — the case every test here is about, unless it says
+    otherwise by patching this itself."""
+    with patch(
+        "apps.b2b.workspace.secondment_views.accounts.person_seated_in",
+        return_value=False,
+    ) as seated:
+        yield seated
+
+
 def _person(employee_id=AZIZ_ID, company_id=HOME_COMPANY):
     return {
         "id": employee_id,
@@ -378,6 +390,61 @@ def test_accepting_creates_a_guest_row_and_a_membership():
     # No start named means it begins now: they said yes and the workspace
     # asking is short-handed today.
     assert membership.call_args.kwargs["starts_at"] is not None
+
+
+def test_somebody_already_on_the_staff_there_is_not_lent_to_it(_nobody_is_seated_twice):
+    """One account, a row in each workspace it works in: asked for as "the
+    row in Toshkent" by a workspace they are already staff of, accepting
+    stood a guest copy of them beside their own seat — the same workspace
+    twice in their switcher."""
+    _nobody_is_seated_twice.return_value = True
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.get_request", return_value=_ask()
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.close_request", return_value=1
+    ) as close, patch(
+        "apps.b2b.workspace.secondment_views.srepo.create_guest_employee"
+    ) as guest, patch(
+        "apps.b2b.workspace.secondment_views.srepo.create_membership"
+    ) as membership:
+        response = _call(
+            WorkspaceRequestRespondView,
+            factory.post("/requests/7/accept/"),
+            AZIZ,
+            request_id=7,
+            action="accept",
+        )
+
+    assert response.status_code == 409
+    assert response.data["code"] == "already_in_workspace"
+    assert close.call_args.kwargs["status"] == RequestStatus.DECLINED
+    guest.assert_not_called()
+    membership.assert_not_called()
+
+
+def test_asking_for_somebody_already_on_the_staff_is_refused(_nobody_is_seated_twice):
+    _nobody_is_seated_twice.return_value = True
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.org_id_for_company", return_value=5
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.search_org_people",
+        return_value=[_person()],
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.create_request"
+    ) as create:
+        response = _call(
+            WorkspaceRequestListCreateView,
+            factory.post(
+                "/requests/",
+                {"to_employee_id": AZIZ_ID, "role": "manager"},
+                format="json",
+            ),
+            LIDER,
+        )
+
+    assert response.status_code == 400
+    assert "to_employee_id" in response.data
+    create.assert_not_called()
 
 
 def test_declining_requires_a_reason():

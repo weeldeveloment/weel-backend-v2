@@ -303,7 +303,28 @@ class Command(BaseCommand):
             self._create_workspace_tables(cursor)
             self._create_mail_tables(cursor)
 
+        self._merge_duplicates()
         self.stdout.write(self.style.SUCCESS("B2B tables created successfully."))
+
+    def _merge_duplicates(self):
+        """One person seated twice in a workspace, and empty copies of a
+        workspace or a company — see `apps.b2b.workspace.dedupe`. After the
+        roster is linked to accounts above, which is what makes two rows
+        recognisably one person. Never allowed to stop a start-up: a failure
+        here is a line in the log and a container that still comes up."""
+        from apps.b2b.workspace import dedupe
+
+        try:
+            report = dedupe.run(log=self.stdout.write)
+        except Exception as exc:  # noqa: BLE001 — see above
+            self.stderr.write(f"  Duplicate workspace cleanup skipped: {exc!r}")
+            return
+        if any(report.values()):
+            self.stdout.write(
+                "  Duplicates: {seats_merged} seat(s) merged, {workspaces_retired} "
+                "workspace(s) and {companies_retired} company(ies) retired, "
+                "{left_for_a_person} left for a person to decide".format(**report)
+            )
 
     def _create_workspace_tables(self, cursor):
         """Tables behind the B2B mobile workspace (`/api/b2b/workspace/`).

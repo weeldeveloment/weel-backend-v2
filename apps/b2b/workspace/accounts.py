@@ -352,10 +352,137 @@ def create_membership(
     is a cost with nothing to show for it. The account stays the author — a
     later change to the name or the handle is propagated back down to every
     membership (see `set_own_profile` and `sync_username_across_memberships`).
+
+    One seat per person per workspace. Somebody already on the roster is
+    handed the seat they have — every door into a workspace (a link, a
+    request, the owners seated on a new room) can reach a person who came in
+    through another one, and a second row was a second copy of the
+    workspace in their switcher. A chat-only or a borrowed (guest) seat is
+    the exception: a real membership promotes that row rather than standing
+    a second one beside it, so what they wrote there stays theirs.
+
+    Checked under a lock on this person and this workspace, not by a unique
+    index: the roster is linked to accounts by phone on every start-up
+    (`create_b2b_tables`), and an index there would turn one old duplicate
+    number into a container that never comes up.
     """
+    from django.db import transaction
+
     from apps.b2b.workspace.access import Module, Permission, Role
 
     now = timezone.now()
+    module_json = json.dumps(Module.clean(modules)) if modules is not None else None
+    permission_json = (
+        json.dumps(Permission.clean(permissions)) if permissions is not None else None
+    )
+
+    with transaction.atomic():
+        _hold_lock(SEAT_LOCK_NAMESPACE, company_id, account["id"])
+        existing = employee_in_company(account["id"], company_id)
+        if existing:
+            if is_chat_only or not (existing.get("is_chat_only") or existing.get("is_guest")):
+                return existing
+            if existing.get("is_guest"):
+                # The secondment it came from is over the moment they are
+                # staff here: ended the way `end_membership` ends one, minus
+                # the part that retires the row.
+                execute(
+                    "UPDATE b2b_workspace_membership "
+                    "SET is_active = FALSE, ended_at = %s, updated_at = %s "
+                    "WHERE employee_id = %s AND is_active = TRUE",
+                    [now, now, existing["id"]],
+                )
+            execute(
+                f"""
+                UPDATE {B2B_EMPLOYEE_TABLE}
+                   SET is_chat_only = FALSE, is_guest = FALSE, is_hidden = FALSE,
+                       home_employee_id = NULL, role = %s,
+                       module_access = %s, permission_access = %s, updated_at = %s
+                 WHERE id = %s
+                """,
+                [Role.clean(role), module_json, permission_json, now, existing["id"]],
+            )
+            return employee_in_company(account["id"], company_id)
+
+        _insert_membership(
+            account=account,
+            company_id=company_id,
+            role=Role.clean(role),
+            module_json=module_json,
+            permission_json=permission_json,
+            is_chat_only=is_chat_only,
+            now=now,
+        )
+    return employee_in_company(account["id"], company_id)
+
+
+def person_seated_in(company_id: int, employee_id: int) -> bool:
+    """Whether the person behind this roster row already has a seat in that
+    workspace — through any row of theirs, not only this one.
+
+    One account holds a row per workspace, so "is this row in B" says
+    nothing about whether the *person* is: somebody hired into A and also
+    on B's staff is asked for from B as "the A row", and lending them to B
+    stood a guest copy of them beside their own seat there.
+    """
+    return bool(
+        fetch_one(
+            f"""
+            WITH mine AS (
+                SELECT x.id FROM {B2B_EMPLOYEE_TABLE} x WHERE x.id = %s
+                UNION
+                SELECT o.id
+                  FROM {B2B_EMPLOYEE_TABLE} x
+                  JOIN {B2B_EMPLOYEE_TABLE} o ON o.account_id = x.account_id
+                 WHERE x.id = %s AND x.account_id IS NOT NULL
+            )
+            SELECT 1 AS seated
+              FROM {B2B_EMPLOYEE_TABLE} seat
+             WHERE seat.company_id = %s
+               AND seat.is_active = TRUE
+               AND seat.is_chat_only = FALSE
+               AND (seat.id IN (SELECT id FROM mine)
+                    OR seat.home_employee_id IN (SELECT id FROM mine))
+             LIMIT 1
+            """,
+            [employee_id, employee_id, company_id],
+        )
+    )
+
+
+#: First key of the advisory lock `create_membership` takes, so its locks
+#: cannot collide with anybody else's two-key locks on the same numbers.
+SEAT_LOCK_NAMESPACE = 710_000_000
+
+#: The same for the lock `create_workspace` takes on the account opening one.
+CREATE_LOCK_NAMESPACE = 720_000_000
+
+
+def _hold_lock(namespace: int, scope: int | None, subject: int) -> None:
+    """Serialise, until this transaction ends, everything else that takes
+    the same lock — the check-then-insert of two taps a moment apart. A
+    no-op outside PostgreSQL, which has no advisory locks and no second
+    connection to race with."""
+    from shared.raw.compat import is_postgresql
+
+    if not is_postgresql():
+        return
+    execute(
+        "SELECT pg_advisory_xact_lock(%s, %s)",
+        [namespace + int(scope or 0) % 1_000_000, int(subject)],
+    )
+
+
+def _insert_membership(
+    *,
+    account: dict[str, Any],
+    company_id: int,
+    role: str,
+    module_json: str | None,
+    permission_json: str | None,
+    is_chat_only: bool,
+    now,
+) -> None:
     full_name = full_name_from(
         account.get("first_name"), account.get("last_name"), account.get("phone")
     )
@@ -375,15 +502,14 @@ def create_membership(
             account.get("phone"),
             account.get("photo"),
             account.get("username"),
-            Role.clean(role),
-            json.dumps(Module.clean(modules)) if modules is not None else None,
-            json.dumps(Permission.clean(permissions)) if permissions is not None else None,
+            role,
+            module_json,
+            permission_json,
             is_chat_only,
             now,
             now,
         ],
     )
-    return employee_in_company(account["id"], company_id)
 
 
 # ─── Creating one ─────────────────────────────────────────────────────────────
@@ -772,6 +898,62 @@ def list_org_workspaces(org_id: int, *, account_id: int | None = None) -> list[d
     )
 
 
+#: The apostrophes an Uzbek name is spelled with. "Sotuv bo'limi" and
+#: "Sotuv boʻlimi" are one name typed on two keyboards.
+_APOSTROPHES = str.maketrans({ch: "'" for ch in "‘’ʻʼ`"})
+
+
+def name_key(name: str | None) -> str:
+    """What two workspace (or company) names are compared by: case, the
+    spacing and the apostrophe people happened to type all ignored."""
+    return " ".join((name or "").translate(_APOSTROPHES).lower().split())
+
+
+class NameTaken(Exception):
+    """`create_workspace` refusing to open a second copy of something that
+    already exists. `kind` is "workspace" (one inside the same company) or
+    "company" (a company of the same name this account already owns)."""
+
+    def __init__(self, kind: str, existing: dict[str, Any]):
+        super().__init__(kind)
+        self.kind = kind
+        self.existing = existing
+
+
+def same_named_workspace(org_id: int, name: str) -> dict[str, Any] | None:
+    """A live workspace in this company that goes by this name already.
+
+    Compared in Python rather than with SQL `LOWER`: under the C collation
+    the database may run with, `LOWER` leaves Cyrillic alone, and a company
+    has a handful of workspaces, not thousands."""
+    key = name_key(name)
+    rows = fetch_all(
+        f"SELECT id, name, slug FROM {B2B_COMPANY_TABLE} "
+        f"WHERE org_id = %s AND is_active = TRUE ORDER BY id",
+        [org_id],
+    )
+    return next((row for row in rows if name_key(row["name"]) == key), None)
+
+
+def same_named_company(account_id: int, name: str) -> dict[str, Any] | None:
+    """A live company this account owns that goes by this name already —
+    what a second tap on "Kompaniya yaratish" would otherwise open again."""
+    key = name_key(name)
+    rows = fetch_all(
+        f"""
+        SELECT DISTINCT o.id, o.name
+          FROM {B2B_EMPLOYEE_TABLE} e
+          JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
+          JOIN b2b_org o ON o.id = c.org_id
+         WHERE e.account_id = %s AND e.is_active = TRUE AND e.role = 'owner'
+           AND o.is_active = TRUE
+         ORDER BY o.id
+        """,
+        [account_id],
+    )
+    return next((row for row in rows if name_key(row["name"]) == key), None)
+
+
 def create_workspace(
     *,
     account: dict[str, Any],
@@ -800,12 +982,54 @@ def create_workspace(
       owner-only act in a workspace — approving its deletion (§4), deciding
       what the admin role may do — needs an owner *in* it, and a room with
       nobody above the admin would be one nobody could ever close.
+
+    Raises [NameTaken] rather than open a second of something that exists:
+    a workspace named like one already in this company, or a company named
+    like one this account already owns. Both are how the switcher came to
+    list the same place twice — a slow answer tapped again, or one room
+    opened by two people — and the check runs under a lock on the company
+    (or, for a new one, on the account) so two taps cannot both pass it.
+    Everything is written in one transaction: a failure half-way no longer
+    leaves a company with no workspace, or a workspace with nobody in it.
     """
+    from django.db import transaction
+
+    name = (name or "").strip()
+    with transaction.atomic():
+        if org_id is None:
+            _hold_lock(CREATE_LOCK_NAMESPACE, 0, account["id"])
+            taken = same_named_company(account["id"], name)
+            if taken:
+                raise NameTaken("company", taken)
+        else:
+            _hold_lock(CREATE_LOCK_NAMESPACE, 1, org_id)
+            taken = same_named_workspace(org_id, name)
+            if taken:
+                raise NameTaken("workspace", taken)
+        return _open_workspace(
+            account=account,
+            name=name,
+            org_id=org_id,
+            description=description,
+            icon=icon,
+            workspace_name=workspace_name,
+            tax_id=tax_id,
+        )
+
+
+def _open_workspace(
+    *,
+    account: dict[str, Any],
+    name: str,
+    org_id: int | None,
+    description: str | None,
+    icon: str | None,
+    workspace_name: str | None,
+    tax_id: str | None,
+) -> dict[str, Any] | None:
     from apps.b2b.workspace.access import Role
 
-
     now = timezone.now()
-    name = (name or "").strip()
 
     # The one thing that changes when there is no org yet: what gets named
     # what. `name` is what the person typed on the "Kompaniya yaratish"

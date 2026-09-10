@@ -359,15 +359,38 @@ class AccountWorkspacesView(AccountAPIView):
             )
 
 
-        created = accounts.create_workspace(
-            account=request.user._data,
-            name=data["name"],
-            org_id=org_id,
-            description=data.get("description"),
-            icon=data.get("icon") or None,
-            workspace_name=data.get("workspace_name") or None,
-            tax_id=data.get("tax_id") or None,
-        )
+        try:
+            created = accounts.create_workspace(
+                account=request.user._data,
+                name=data["name"],
+                org_id=org_id,
+                description=data.get("description"),
+                icon=data.get("icon") or None,
+                workspace_name=data.get("workspace_name") or None,
+                tax_id=data.get("tax_id") or None,
+            )
+        except accounts.NameTaken as taken:
+            # 400 on the name field, not 409: every app build already out
+            # there reads a 409 from this endpoint as "finish your profile",
+            # while a field error is shown as written. `code` is what a
+            # build that knows about it translates instead.
+            message = (
+                _("This company already has a workspace with this name.")
+                if taken.kind == "workspace"
+                else _("You already have a company with this name.")
+            )
+            return Response(
+                {
+                    "name": [message],
+                    "code": f"{taken.kind}_name_taken",
+                    "existing": {
+                        "id": taken.existing.get("id"),
+                        "name": taken.existing.get("name"),
+                        "slug": taken.existing.get("slug"),
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if not created or not created.get("employee"):
             return Response(
                 {"detail": _("Could not create the workspace.")},

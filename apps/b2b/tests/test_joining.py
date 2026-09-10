@@ -1316,12 +1316,67 @@ def test_a_seat_in_another_company_does_not_open_this_one():
     create.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "kind, org_id, code",
+    [
+        ("workspace", 7, "workspace_name_taken"),
+        ("company", None, "company_name_taken"),
+    ],
+)
+def test_a_second_copy_is_refused_on_the_name_field(kind, org_id, code):
+    """Not a 409: every build of the app already out reads a 409 from this
+    endpoint as "finish your profile" — a field error it shows as written."""
+    from apps.b2b.workspace import accounts as accts
+    from apps.b2b.workspace.joining_views import AccountWorkspacesView
+
+    body = {"name": "Sotuv boʻlimi"}
+    if org_id is not None:
+        body["org_id"] = org_id
+    with patch(
+        "apps.b2b.workspace.joining_views.accounts.org_ids_for_account",
+        return_value=[7],
+    ), patch(
+        "apps.b2b.workspace.joining_views._may_create_workspace_in", return_value=True
+    ), patch(
+        "apps.b2b.workspace.joining_views.accounts.create_workspace",
+        side_effect=accts.NameTaken(kind, {"id": 3, "name": "Sotuv bo'limi", "slug": "sotuv"}),
+    ):
+        response = _call(
+            AccountWorkspacesView,
+            factory.post("/account/workspaces/", body, format="json"),
+            _account(),
+        )
+
+    assert response.status_code == 400
+    assert response.data["code"] == code
+    assert response.data["name"]
+    assert response.data["existing"]["id"] == 3
+
+
+@pytest.mark.parametrize(
+    "typed",
+    ["Sotuv bo'limi", "  sotuv   BOʻLIMI ", "Sotuv bo‘limi", "SOTUV BO`LIMI"],
+)
+def test_one_name_typed_on_different_keyboards_is_one_name(typed):
+    from apps.b2b.workspace.accounts import name_key
+
+    assert name_key(typed) == name_key("Sotuv bo'limi")
+
+
+def test_a_name_that_is_merely_similar_is_a_different_name():
+    from apps.b2b.workspace.accounts import name_key
+
+    assert name_key("Sotuv bo'limi 2") != name_key("Sotuv bo'limi")
+
+
 # ─── TZ v2 §2/§3: the company's owner is on every one of its workspaces ──────
 
 def _creating_in_org(creator, owners):
     """Run `accounts.create_workspace` for an existing org with the database
     stubbed: the company row insert answers a dict, memberships are recorded
     rather than written."""
+    from contextlib import nullcontext
+
     from apps.b2b.workspace import accounts as accts
 
     made = []
@@ -1330,7 +1385,9 @@ def _creating_in_org(creator, owners):
         made.append((account["id"], role))
         return {"id": 100 + account["id"], "company_id": company_id, "role": role}
 
-    with patch.object(accts, "org_owner_accounts", return_value=owners), patch.object(
+    with patch("django.db.transaction.atomic", nullcontext), patch.object(
+        accts, "same_named_workspace", return_value=None
+    ), patch.object(accts, "org_owner_accounts", return_value=owners), patch.object(
         accts, "fetch_one", return_value={"id": 77, "name": "Marketing", "org_id": 7}
     ), patch.object(accts, "free_workspace_slug", return_value="marketing"), patch.object(
         accts, "create_membership", side_effect=_membership

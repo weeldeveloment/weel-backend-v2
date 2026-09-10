@@ -19,6 +19,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.b2b.repository import get_company
+from apps.b2b.workspace import accounts
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import storage
 from apps.b2b.workspace import secondment_repository as srepo
@@ -239,7 +240,9 @@ class WorkspaceRequestListCreateView(WorkspaceAPIView):
                 {"to_employee_id": [_("This person cannot be asked from here.")]},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        if target["company_id"] == request.user.company_id:
+        if target["company_id"] == request.user.company_id or accounts.person_seated_in(
+            request.user.company_id, target["id"]
+        ):
             # The picker lists the whole org, this workspace included, so you
             # can look anyone up — but a secondment brings somebody *in*, and
             # this person is already here. Said plainly rather than folded into
@@ -355,6 +358,23 @@ class WorkspaceRequestRespondView(WorkspaceAPIView):
             return Response(
                 {"detail": _("This request was not sent to you.")},
                 status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if accounts.person_seated_in(ask["company_id"], ask["to_employee_id"]):
+            # Already there — on its staff, or lent to it by another request.
+            # A second seat would be a second copy of that workspace in their
+            # switcher, so the request is closed as the one that is not needed.
+            srepo.close_request(
+                ask["id"],
+                status=RequestStatus.DECLINED,
+                decline_reason=_("Already in this workspace."),
+            )
+            return Response(
+                {
+                    "detail": _("You are already in this workspace."),
+                    "code": "already_in_workspace",
+                },
+                status=status.HTTP_409_CONFLICT,
             )
 
         # Claim the request first. Everything after this creates rows, and
