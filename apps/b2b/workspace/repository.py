@@ -431,20 +431,14 @@ def list_team(company_id: int, *, search: str | None = None) -> list[dict[str, A
     """
     params: list[Any] = [company_id]
     if search:
-        # Name, position, phone and handle. The phone and the handle are what
-        # the picker on "So'rov yuborish" promises in its own placeholder, and
-        # a search that quietly ignores two of the three things it offers to
-        # match on is worse than not offering them.
-        #
-        # A leading "@" is dropped: it is how a handle is written and read
-        # everywhere in the app, and it is not part of the stored value.
-        needle = f"%{search.lstrip('@')}%"
-        sql += (
-            " AND (e.full_name ILIKE %s OR e.position ILIKE %s"
-            " OR e.phone ILIKE %s"
-            " OR COALESCE(a.username, e.username) ILIKE %s)"
-        )
-        params += [needle, needle, needle, needle]
+        # Name, handle, phone, position and department — the same box as the
+        # "So'rov yuborish" picker, so a person found in one is found in the
+        # other. See `people_search_clause` for how each is matched.
+        from apps.b2b.workspace.people_search import people_search_clause
+
+        clause, clause_params = people_search_clause(search, extra_columns=["d.name"])
+        sql += clause
+        params += clause_params
     sql += " ORDER BY e.full_name ASC"
     return fetch_all(sql, params)
 

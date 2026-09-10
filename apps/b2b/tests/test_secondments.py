@@ -138,6 +138,37 @@ def test_the_picker_spans_the_whole_org_and_only_drops_the_searcher():
     assert "exclude_company_id" not in search.call_args.kwargs
 
 
+@pytest.mark.parametrize("typed", ["90 111 22 33", "+998 (90) 111-22-33", "998901112233"])
+def test_a_phone_is_searched_by_its_digits(typed):
+    """A roster stores "+998901112233"; people type it with spaces and dashes."""
+    from apps.b2b.workspace.people_search import people_search_clause
+
+    clause, params = people_search_clause(typed)
+
+    assert "regexp_replace(e.phone, '[^0-9]', '', 'g') LIKE" in clause
+    assert "regexp_replace(a.phone, '[^0-9]', '', 'g') LIKE" in clause
+    assert params == ["%901112233%", "%901112233%"]
+
+
+def test_every_word_of_a_name_has_to_match_in_any_order():
+    """"Aziz Yusupov" finds the row a roster wrote as "Yusupov Aziz"."""
+    from apps.b2b.workspace.people_search import people_search_clause
+
+    clause, params = people_search_clause("Aziz  @Yusupov")
+
+    assert clause.count(") AND (") == 1
+    assert "%Aziz%" in params and "%Yusupov%" in params
+    assert "a.first_name" in clause and "a.last_name" in clause
+
+
+def test_the_apostrophe_a_name_is_typed_with_does_not_matter():
+    from apps.b2b.workspace.people_search import people_search_clause
+
+    _, params = people_search_clause("O‘ktam")
+
+    assert params[0] == "%Oktam%"
+
+
 def test_somebody_outside_the_org_cannot_be_asked():
     with patch(
         "apps.b2b.workspace.secondment_views.srepo.org_id_for_company", return_value=5

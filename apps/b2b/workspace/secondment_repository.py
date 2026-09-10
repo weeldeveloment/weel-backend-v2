@@ -23,6 +23,7 @@ from apps.b2b.raw.tables import (
     B2B_WORKSPACE_MEMBERSHIP_TABLE,
     B2B_WORKSPACE_REQUEST_TABLE,
 )
+from apps.b2b.workspace.people_search import people_search_clause
 from apps.b2b.workspace.secondment import Module, RequestRole, RequestStatus
 
 
@@ -101,13 +102,9 @@ def search_org_people(
         sql += " AND e.id <> %s"
         params.append(exclude_employee_id)
     if search:
-        needle = f"%{search.lstrip('@')}%"
-        sql += (
-            " AND (e.full_name ILIKE %s OR e.position ILIKE %s"
-            " OR e.phone ILIKE %s"
-            " OR COALESCE(a.username, e.username) ILIKE %s)"
-        )
-        params += [needle, needle, needle, needle]
+        clause, clause_params = people_search_clause(search)
+        sql += clause
+        params += clause_params
     sql += " ORDER BY e.full_name ASC LIMIT %s"
     params.append(limit)
     return fetch_all(sql, params)
