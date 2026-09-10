@@ -11005,32 +11005,6 @@
    ],
    "type": "object"
   },
-  "MetaApp": {
-   "properties": {
-    "app_id": {
-     "maxLength": 64,
-     "minLength": 1,
-     "title": "App id",
-     "type": "string"
-    },
-    "app_secret": {
-     "maxLength": 200,
-     "minLength": 1,
-     "title": "App secret",
-     "type": "string"
-    },
-    "verify_token": {
-     "maxLength": 120,
-     "title": "Verify token",
-     "type": "string"
-    }
-   },
-   "required": [
-    "app_id",
-    "app_secret"
-   ],
-   "type": "object"
-  },
   "MetaConnect": {
    "properties": {
     "authorize_url": {
@@ -23523,69 +23497,6 @@
     ]
    },
    "parameters": []
-  },
-  "/b2b/workspace/integrations/meta/app/": {
-   "delete": {
-    "description": "GET    /integrations/meta/app/ — what to paste into the Facebook app.\nPUT    /integrations/meta/app/ — connect through *this workspace's* app.\nDELETE /integrations/meta/app/ — go back to the deployment's app.\n\nThe second path, and why it exists: while our own Facebook app is in\nMeta's review only its listed testers can authorise it, and some customers\nwill not let their advertising data pass through an app they do not own.\nBoth are real, so a workspace may bring its own — and everything below\nthis line stops caring which, because `credentials.for_company` is the one\nplace that decides.",
-    "operationId": "b2b_workspace_integrations_meta_app_delete",
-    "parameters": [],
-    "responses": {
-     "200": {
-      "description": "",
-      "schema": {
-       "$ref": "#/definitions/MetaSetup"
-      }
-     }
-    },
-    "summary": "Stop using this workspace's own app",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   },
-   "get": {
-    "description": "GET    /integrations/meta/app/ — what to paste into the Facebook app.\nPUT    /integrations/meta/app/ — connect through *this workspace's* app.\nDELETE /integrations/meta/app/ — go back to the deployment's app.\n\nThe second path, and why it exists: while our own Facebook app is in\nMeta's review only its listed testers can authorise it, and some customers\nwill not let their advertising data pass through an app they do not own.\nBoth are real, so a workspace may bring its own — and everything below\nthis line stops caring which, because `credentials.for_company` is the one\nplace that decides.",
-    "operationId": "b2b_workspace_integrations_meta_app_list",
-    "parameters": [],
-    "responses": {
-     "200": {
-      "description": "",
-      "schema": {
-       "$ref": "#/definitions/MetaSetup"
-      }
-     }
-    },
-    "summary": "What to configure in the Facebook app",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   },
-   "parameters": [],
-   "put": {
-    "description": "GET    /integrations/meta/app/ — what to paste into the Facebook app.\nPUT    /integrations/meta/app/ — connect through *this workspace's* app.\nDELETE /integrations/meta/app/ — go back to the deployment's app.\n\nThe second path, and why it exists: while our own Facebook app is in\nMeta's review only its listed testers can authorise it, and some customers\nwill not let their advertising data pass through an app they do not own.\nBoth are real, so a workspace may bring its own — and everything below\nthis line stops caring which, because `credentials.for_company` is the one\nplace that decides.",
-    "operationId": "b2b_workspace_integrations_meta_app_update",
-    "parameters": [
-     {
-      "in": "body",
-      "name": "data",
-      "required": true,
-      "schema": {
-       "$ref": "#/definitions/MetaApp"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "",
-      "schema": {
-       "$ref": "#/definitions/MetaSetup"
-      }
-     }
-    },
-    "summary": "Use this workspace's own Facebook app",
-    "tags": [
-     "B2B / Workspace (mobile)"
-    ]
-   }
   },
   "/b2b/workspace/integrations/meta/connect/": {
    "parameters": [],
