@@ -85,87 +85,6 @@ def upsert_integration(
     )
 
 
-def set_company_app(
-    *,
-    company_id: int,
-    provider: str = IntegrationProvider.META,
-    app_id: str,
-    app_secret_enc: str,
-    verify_token: str,
-) -> dict[str, Any] | None:
-    """Give the workspace its own Facebook app to connect through.
-
-    Creates the row when there is none: the app has to be saved *before* the
-    OAuth flow can run through it, so this is routinely the first thing that
-    ever writes an integration row for a company. It is stored
-    ``disconnected`` because that is exactly what it is — configured, not yet
-    authorised.
-
-    Deliberately does not touch the token columns. Somebody correcting a typo
-    in their app secret has not disconnected their pages, and wiping the
-    tokens here would make a one-character fix cost a full reconnect.
-    """
-    now = timezone.now()
-    return fetch_one(
-        f"""
-        INSERT INTO {B2B_INTEGRATION_TABLE}
-            (company_id, provider, status, app_id, app_secret_enc,
-             webhook_verify_token, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (company_id, provider) DO UPDATE SET
-            app_id = EXCLUDED.app_id,
-            app_secret_enc = EXCLUDED.app_secret_enc,
-            webhook_verify_token = EXCLUDED.webhook_verify_token,
-            updated_at = EXCLUDED.updated_at
-        RETURNING *
-        """,
-        [
-            company_id, provider, IntegrationStatus.DISCONNECTED, app_id,
-            app_secret_enc, verify_token, now, now,
-        ],
-    )
-
-
-def clear_company_app(
-    company_id: int, provider: str = IntegrationProvider.META
-) -> bool:
-    """Go back to the deployment's own app.
-
-    The stored tokens go with it. They were issued *by* the app being removed
-    and are worthless to any other one — leaving them would show a workspace
-    as connected while every Graph call failed.
-    """
-    now = timezone.now()
-    return bool(execute(
-        f"""
-        UPDATE {B2B_INTEGRATION_TABLE}
-           SET app_id = NULL, app_secret_enc = NULL, webhook_verify_token = NULL,
-               access_token_enc = NULL, token_expires_at = NULL,
-               status = %s, last_error = NULL, updated_at = %s
-         WHERE company_id = %s AND provider = %s
-        """,
-        [IntegrationStatus.DISCONNECTED, now, company_id, provider],
-    ))
-
-
-def find_by_verify_token(
-    token: str, provider: str = IntegrationProvider.META
-) -> dict[str, Any] | None:
-    """Which workspace's app is being configured.
-
-    The subscription handshake carries a verify token and nothing else — no
-    page, no company — so this is the only thing that can answer it for a
-    company connecting through an app of their own.
-    """
-    if not token:
-        return None
-    return fetch_one(
-        f"SELECT * FROM {B2B_INTEGRATION_TABLE} "
-        f"WHERE provider = %s AND webhook_verify_token = %s",
-        [provider, token],
-    )
-
-
 def set_integration_status(
     integration_id: int, status: str, *, error: str | None = None
 ) -> None:
@@ -208,6 +127,23 @@ def delete_pages(integration_id: int) -> int:
     return execute(
         f"DELETE FROM {B2B_INTEGRATION_PAGE_TABLE} WHERE integration_id = %s",
         [integration_id],
+    )
+
+
+def delete_pages_except(integration_id: int, keep_page_ids: list[str]) -> int:
+    """Drop the pages this connection no longer covers.
+
+    A reconnect is the owner saying, on Meta's own screen, "these pages". A
+    page they left unticked — another client's, typically, for somebody who
+    administers several — has to stop feeding this company's funnel, and
+    has to stop holding the page against the company it really belongs to.
+    """
+    if not keep_page_ids:
+        return delete_pages(integration_id)
+    return execute(
+        f"DELETE FROM {B2B_INTEGRATION_PAGE_TABLE} "
+        f"WHERE integration_id = %s AND NOT (page_id = ANY(%s))",
+        [integration_id, list(keep_page_ids)],
     )
 
 
@@ -281,11 +217,22 @@ def upsert_page(
     `is_active` is left alone on a reconnect unless the caller says otherwise:
     somebody who turned one of their four pages off and then reconnected the
     account meant to keep it off.
+
+    **Returns None when the page belongs to another company.** A page is one
+    company's, and the webhook routes by page — so a second company taking
+    the row would silently start receiving the first one's customers. That
+    happens the moment one person administers pages for two companies (an
+    agency, a marketer, an owner of two businesses) and connects in either.
+    The guard is in the statement, not in a SELECT before it, so two
+    companies connecting the same page at once cannot both win.
+
+    A page whose company has since disconnected (no token on its connection)
+    is free to be taken: nothing is flowing to anybody through it.
     """
     now = timezone.now()
     return fetch_one(
         f"""
-        INSERT INTO {B2B_INTEGRATION_PAGE_TABLE}
+        INSERT INTO {B2B_INTEGRATION_PAGE_TABLE} AS page
             (integration_id, company_id, page_id, page_name, access_token_enc,
              subscribed, is_active, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -295,9 +242,15 @@ def upsert_page(
             page_name = EXCLUDED.page_name,
             access_token_enc = EXCLUDED.access_token_enc,
             subscribed = EXCLUDED.subscribed,
-            is_active = COALESCE(%s, {B2B_INTEGRATION_PAGE_TABLE}.is_active),
+            is_active = COALESCE(%s, page.is_active),
             last_error = NULL,
             updated_at = EXCLUDED.updated_at
+        WHERE page.company_id = EXCLUDED.company_id
+           OR NOT EXISTS (
+                SELECT 1 FROM {B2B_INTEGRATION_TABLE} holder
+                 WHERE holder.id = page.integration_id
+                   AND holder.access_token_enc IS NOT NULL
+           )
         RETURNING *
         """,
         [
@@ -306,6 +259,25 @@ def upsert_page(
             is_active,
         ],
     )
+
+
+def page_held_elsewhere(page_id: str, company_id: int) -> bool:
+    """Whether another company's live connection already owns this page.
+
+    Asked before subscribing, so a page that is not going to be ours is not
+    touched at Meta either. [upsert_page] enforces the same rule on its own —
+    this is only the early, readable answer.
+    """
+    row = fetch_one(
+        f"""
+        SELECT 1 FROM {B2B_INTEGRATION_PAGE_TABLE} page
+          JOIN {B2B_INTEGRATION_TABLE} holder ON holder.id = page.integration_id
+         WHERE page.page_id = %s AND page.company_id <> %s
+           AND holder.access_token_enc IS NOT NULL
+        """,
+        [page_id, company_id],
+    )
+    return row is not None
 
 
 def set_page_active(page_row_id: int, company_id: int, active: bool) -> dict[str, Any] | None:

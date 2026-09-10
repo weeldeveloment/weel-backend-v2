@@ -18,6 +18,7 @@ Neither of these is called by our app:
 from __future__ import annotations
 
 import hmac
+import html
 import json
 import logging
 
@@ -42,15 +43,23 @@ logger = logging.getLogger(__name__)
 
 # ─── The page the browser lands on ────────────────────────────────────────────
 
-def _result_page(title: str, body: str, ok: bool = True) -> HttpResponse:
+def _result_page(title: str, body: str, ok: bool = True, note: str = "") -> HttpResponse:
     """A self-contained page. No stylesheet, no script, no link out.
 
     This is opened in whatever browser the phone uses and read for about two
     seconds. Everything it needs is inline so it renders identically wherever
     it lands, and the one thing it says is what to do next.
+
+    Every piece of text is escaped. Some of it is not ours — `error` comes
+    straight off the query string, page names and error messages come from
+    Meta — and this page is served from our own API domain.
     """
+    title = html.escape(title)
+    body = html.escape(body)
+    if note:
+        body += "<br><br>" + html.escape(note)
     colour = "#15BE63" if ok else "#E5484D"
-    html = f"""<!doctype html>
+    document = f"""<!doctype html>
 <html lang="uz"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -69,7 +78,7 @@ def _result_page(title: str, body: str, ok: bool = True) -> HttpResponse:
     <p style="margin:0;font-size:15px;line-height:1.5;color:#667085;">{body}</p>
   </div>
 </body></html>"""
-    return HttpResponse(html, content_type="text/html; charset=utf-8")
+    return HttpResponse(document, content_type="text/html; charset=utf-8")
 
 
 class MetaOAuthCallbackView(APIView):
@@ -90,7 +99,10 @@ class MetaOAuthCallbackView(APIView):
             return _result_page("Ulanmadi", "So‘rov to‘liq emas.", ok=False)
 
         issued = cache.get(state_key(state))
-        if not issued:
+        # `delete` answers whether it removed anything, which makes the state
+        # single-use even when the same callback URL is opened twice at once
+        # — only one of the two gets to attach pages to the company.
+        if not issued or not cache.delete(state_key(state)):
             # Expired, or never issued. Both are refused the same way, so
             # nothing about which it was leaks to whoever is holding the URL.
             return _result_page(
@@ -98,16 +110,14 @@ class MetaOAuthCallbackView(APIView):
                 "Ulanish so‘rovi eskirdi. Ilovaga qaytib, qaytadan urinib ko‘ring.",
                 ok=False,
             )
-        cache.delete(state_key(state))
 
+        # The company comes from the state our own server issued to a signed-in
+        # owner, never from anything in this URL. That is the whole reason the
+        # Facebook account signing in here can only ever be attached to the
+        # workspace that pressed "Ulash".
         company_id = issued["company_id"]
         employee_id = issued["employee_id"]
-
-        # Whichever app this workspace signed in through — theirs if they set
-        # one up, ours otherwise. The token has to be exchanged against the
-        # same app that issued the code; using the other one fails with an
-        # error about a redirect URI that looks nothing like the real cause.
-        creds = credentials.for_company(company_id)
+        creds = credentials.global_credentials()
 
         try:
             short = meta.exchange_code(code, creds)
@@ -131,11 +141,18 @@ class MetaOAuthCallbackView(APIView):
         if not integration:
             return _result_page("Ulanmadi", "Ulanish saqlanmadi.", ok=False)
 
-        stored, failed = 0, []
+        stored, failed, taken, kept = 0, [], [], []
         for page in pages:
             page_id = str(page.get("id") or "")
             page_token = page.get("access_token")
             if not page_id or not page_token:
+                continue
+            name = page.get("name") or page_id
+            # Somebody who administers pages for several companies grants us
+            # all of them in one login. A page another workspace already has
+            # stays with that workspace — its leads are its customers.
+            if int_repo.page_held_elsewhere(page_id, company_id):
+                taken.append(name)
                 continue
             subscribed = True
             try:
@@ -157,24 +174,46 @@ class MetaOAuthCallbackView(APIView):
             )
             if row:
                 stored += 1
+                kept.append(page_id)
+            else:
+                # Lost the race to another company connecting it this second.
+                taken.append(name)
+
+        # What the owner ticked on Meta's screen this time is the whole list.
+        # A page from an earlier login that is not in it any more leaves.
+        int_repo.delete_pages_except(integration["id"], kept)
+
+        taken_note = (
+            "Bu sahifalar boshqa Weel kompaniyasiga ulangan, shu sababli "
+            "qo‘shilmadi: " + ", ".join(taken) + ". Ularni avval o‘sha "
+            "kompaniyada uzing."
+        ) if taken else ""
 
         if not stored:
+            error = taken_note or "Bu hisobda boshqariladigan sahifa topilmadi."
             int_repo.set_integration_status(
-                integration["id"],
-                IntegrationStatus.ERROR,
-                error="Bu hisobda boshqariladigan sahifa topilmadi.",
+                integration["id"], IntegrationStatus.ERROR, error=error[:1000],
             )
             return _result_page(
-                "Sahifa topilmadi",
-                "Bu Facebook hisobida siz boshqaradigan sahifa yo‘q. Sahifa "
-                "administratori bo‘lgan hisob bilan kiring.",
+                "Sahifa ulanmadi",
+                taken_note or (
+                    "Bu Facebook hisobida siz boshqaradigan sahifa yo‘q. Sahifa "
+                    "administratori bo‘lgan hisob bilan kiring."
+                ),
                 ok=False,
             )
 
         if failed:
             int_repo.set_integration_status(
                 integration["id"], IntegrationStatus.ERROR,
-                error="; ".join(failed)[:1000],
+                error="; ".join([*failed, taken_note] if taken_note else failed)[:1000],
+            )
+        elif taken_note:
+            # Connected, and working for the pages that are ours — the note is
+            # there so the owner is not left wondering where the others went.
+            int_repo.set_integration_status(
+                integration["id"], IntegrationStatus.CONNECTED,
+                error=taken_note[:1000],
             )
 
         # The leads that were submitted before this moment. A company connects
@@ -191,6 +230,7 @@ class MetaOAuthCallbackView(APIView):
             "Meta ulandi",
             f"{stored} ta sahifa ulandi. Ilovaga qayting — yangi leadlar "
             f"savdo varonkasida paydo bo‘ladi.",
+            note=taken_note,
         )
 
 
@@ -206,30 +246,17 @@ class MetaWebhookView(APIView):
 
     @swagger_auto_schema(auto_schema=None)
     def get(self, request):
-        """The handshake Meta performs once, when the webhook is configured.
-
-        It sends a challenge and expects it echoed back as plain text, having
-        first quoted a token only the two of us know.
-
-        One URL now serves several apps — ours, and every workspace connecting
-        through its own — and the handshake carries no company. So the token
-        itself is the identity: it matches the deployment's, or it matches one
-        workspace's stored token, or it is refused. That is safe because a
-        verify token *is* a shared secret; a caller who knows one already
-        knows the thing this check exists to prove.
-        """
+        """The handshake Meta performs once, when the webhook is configured
+        in Weel's app. It quotes `META_WEBHOOK_VERIFY_TOKEN` and expects its
+        challenge echoed back as plain text."""
         mode = request.query_params.get("hub.mode")
         token = (request.query_params.get("hub.verify_token") or "").strip()
         challenge = request.query_params.get("hub.challenge") or ""
-        if mode != "subscribe" or not token:
-            return HttpResponse("forbidden", status=403, content_type="text/plain")
-
         expected = credentials.global_credentials().verify_token
-        known = bool(expected) and hmac.compare_digest(token, expected)
-        if not known:
-            known = int_repo.find_by_verify_token(token) is not None
-
-        if known:
+        if (
+            mode == "subscribe" and token and expected
+            and hmac.compare_digest(token, expected)
+        ):
             return HttpResponse(challenge, content_type="text/plain")
         return HttpResponse("forbidden", status=403, content_type="text/plain")
 
@@ -242,15 +269,22 @@ class MetaWebhookView(APIView):
         and the answer goes back. A 200 for a payload we could not use is
         correct — Meta redelivering it would not make it usable.
 
-        **The signature is checked per page, not once for the request.** One
-        URL receives deliveries from several apps and each signs with its own
-        secret, so which secret to check against is decided by the page the
-        delivery names. Parsing the body before verifying is safe — parsing is
-        not acting — and nothing is queued until the delivery has proved it
-        was signed by the app that owns that page.
+        The signature is checked first, over the raw body, with Weel's app
+        secret — every delivery for every company comes from that one app.
+        Which company a lead belongs to is then decided by the *page* it
+        names, and only by that: `b2b_integration_page.page_id` is unique, so
+        a page answers with exactly one company or none.
         """
         body = request.body or b""
         signature = request.headers.get("X-Hub-Signature-256")
+        secret = credentials.global_credentials().app_secret
+        if not meta.verify_signature(body, signature, secret):
+            # Loud rather than a quiet 200: a signature that never verifies is
+            # either an attempt at this endpoint or an app secret rotated
+            # behind our back, and both should show up.
+            logger.warning("Meta webhook with a bad signature was dropped.")
+            return Response({"detail": "invalid signature"},
+                            status=status.HTTP_403_FORBIDDEN)
 
         try:
             payload = json.loads(body.decode() or "{}")
@@ -260,30 +294,16 @@ class MetaWebhookView(APIView):
         if payload.get("object") != "page":
             return Response({"status": "ignored"})
 
-        queued, refused = 0, 0
+        queued = 0
         for entry in payload.get("entry") or []:
             for change in entry.get("changes") or []:
                 if change.get("field") != "leadgen":
                     continue
-                result = self._queue(change.get("value") or {}, body, signature)
-                if result < 0:
-                    refused += 1
-                else:
-                    queued += result
-
-        if refused and not queued:
-            # Nothing in this delivery proved itself. Answering 403 rather
-            # than 200 is deliberate: a signature that never verifies is
-            # either an attempt at this endpoint or an app secret rotated
-            # behind our back, and both should be loud.
-            logger.warning("Meta webhook with a bad signature was dropped.")
-            return Response({"detail": "invalid signature"},
-                            status=status.HTTP_403_FORBIDDEN)
+                queued += self._queue(change.get("value") or {})
         return Response({"status": "ok", "queued": queued})
 
-    def _queue(self, value: dict, body: bytes, signature: str | None) -> int:
-        """One `leadgen` change. 1 if queued, 0 if ignored, -1 if the
-        signature did not check out."""
+    def _queue(self, value: dict) -> int:
+        """One `leadgen` change. 1 if queued, 0 if not."""
         leadgen_id = str(value.get("leadgen_id") or "").strip()
         page_id = str(value.get("page_id") or "").strip()
         if not leadgen_id or not page_id:
@@ -291,21 +311,10 @@ class MetaWebhookView(APIView):
 
         page = int_repo.find_page(page_id)
         if not page:
-            # Somebody else's page, or one this workspace disconnected. Not an
-            # error and not worth retrying — Meta keeps sending until the
-            # subscription is removed on their side.
+            # A page no workspace has connected, or one that was disconnected.
+            # Not an error and not worth retrying.
             logger.info("Meta lead for unknown page %s", page_id)
             return 0
-
-        # Whose app signs for this page. Resolved from the page rather than
-        # from the request, because the request cannot say — every app posts
-        # to the same URL.
-        creds = credentials.for_company(page["company_id"])
-        if not meta.verify_signature(body, signature, creds.app_secret):
-            logger.warning(
-                "Meta webhook for page %s was not signed by its app.", page_id
-            )
-            return -1
 
         if not page.get("is_active"):
             return 0

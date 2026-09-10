@@ -11,10 +11,11 @@ vocabulary) can connect or disconnect it. That is enforced on the server —
 
 ## The flow, end to end
 
-1. The owner opens **Profil → Integratsiya → Meta** and taps "Ulash".
+1. The owner opens **Profil → Integratsiya → Meta** (or the dashboard's
+   Integratsiyalar page) and taps "Ulash".
    `POST /api/b2b/workspace/integrations/meta/connect/` answers with an
    `authorize_url`; the phone opens it in its browser.
-2. They sign in to Facebook and grant the four scopes.
+2. They sign in to Facebook, pick their pages and grant the four scopes.
 3. Meta redirects the browser to
    `GET /api/b2b/integrations/meta/callback/`. That endpoint exchanges the
    code for a long-lived (~60 day) user token, reads every page the person
@@ -28,72 +29,44 @@ vocabulary) can connect or disconnect it. That is enforced on the server —
    board. Everybody in the workspace is notified, and the first to take it
    owns it.
 
-## One app, or one per company
+## One app, thousands of companies
 
-There are two models and the product supports both. Which one a workspace uses
-is decided in exactly one place — `credentials.for_company` — and nothing
-downstream knows the difference.
-
-### The deployment's app (the default)
-
-`META_APP_ID` / `META_APP_SECRET` in the settings are **Weel's own** Facebook
-app. One app serves every customer:
+`META_APP_ID` / `META_APP_SECRET` are **Weel's own** Facebook app, and it is
+the only one. A company never types an app id, a secret or a token — the owner
+presses "Ulash", signs in to Facebook as themselves, ticks their pages on
+Meta's own screen, and the token Meta issues is stored against their own
+`company_id`:
 
 ```
-settings          b2b_integration
-──────────        ─────────────────────────────────────
-META_APP_ID=123   company_id=10   token=***   (Alfa Trade)
-  (one, ours)     company_id=11   token=***   (Beta MChJ)
-                  company_id=12   token=***   (Vega)
-                  …one row per company, encrypted
+settings          b2b_integration                      b2b_integration_page
+──────────        ─────────────────────────────        ──────────────────────────
+META_APP_ID=123   company_id=10  token=***  (Alfa)     page_id=P1  company_id=10
+  (one, ours)     company_id=11  token=***  (Beta)     page_id=P2  company_id=11
+                  company_id=12  token=***  (Vega)     page_id=P3  company_id=12
 ```
 
-Nothing goes in the `.env` per customer. A company signs in with *their*
-Facebook account, and their token is stored against their own `company_id`.
-This is the same shape as the Gmail connection already in this codebase
-(`B2B_MAIL_GOOGLE_CLIENT_ID` is one value; each employee's refresh token lives
-in `b2b_mail_account`).
+Same shape as the Gmail connection (`B2B_MAIL_GOOGLE_CLIENT_ID` is one value;
+each employee's refresh token lives in `b2b_mail_account`). A workspace
+bringing its own Facebook app used to be possible; it was removed on
+2026-09-10 because it asked people for credentials.
 
-### The workspace's own app
+### How two companies are kept apart
 
-A company can instead connect through a Facebook app **they** own. Two reasons
-this is not optional:
-
-* Until Meta approves our app, `leads_retrieval` works only for accounts
-  listed on it as testers. A customer with their own approved app is not
-  blocked by our review.
-* Some customers will not let advertising data pass through an app they do not
-  control.
-
-The owner enters their App ID and App Secret in the app
-(**Profil → Integratsiya → Meta → O'z ilovangiz**). It is stored encrypted on
-`b2b_integration` and wins over the settings for that company alone:
-
-```
-b2b_integration
-  company_id=10   app_id=555   app_secret=***   token=***   ← their app
-  company_id=11   app_id=777   app_secret=***   token=***   ← their app
-  company_id=12   app_id=NULL                   token=***   ← ours
-```
-
-A deployment where every customer brings their own can leave `META_APP_ID` and
-`META_APP_SECRET` unset and keep `META_INTEGRATION_ENABLED=true`.
-
-**What differs when a workspace uses its own app**
-
-| | Deployment's app | Workspace's app |
-|---|---|---|
-| Redirect URI | one, in `META_REDIRECT_URI` | the same URL, registered in *their* app |
-| Webhook URL | one | the same URL |
-| Verify token | `META_WEBHOOK_VERIFY_TOKEN` | generated per workspace |
-| Webhook signature | our app secret | **their** app secret |
-
-The webhook is one URL for everyone. A delivery names a page, the page names a
-company, and the company names the app whose secret the signature is checked
-against — so two customers' apps posting to the same URL can never be confused
-for one another. `GET /integrations/meta/app/` answers with exactly the three
-values the owner has to paste, and the app screen shows them with a copy
-button.
+* **The company comes from our `state`, never from the URL.** `connect/`
+  issues a random single-use state tied to the signed-in owner's company; the
+  callback attaches pages only to that company.
+* **A page belongs to one company.** `b2b_integration_page.page_id` is unique
+  and the webhook routes every lead by it. When one person administers pages
+  for several companies (an agency, a marketer, an owner of two businesses),
+  Facebook hands us all of them in one login — a page another company
+  already has is **left with that company**, not subscribed again, and the
+  owner is told which ones and why. The rule is in `upsert_page`'s SQL, so
+  two companies connecting one page at the same moment cannot both win. A
+  page whose company has disconnected is free to be connected elsewhere.
+* **A reconnect is the new list.** Pages the owner left unticked on Meta's
+  screen are dropped from the company.
+* **Every other query is scoped by `company_id`** — pages, leads, the
+  "Sinxronlash" pass, notifications.
 
 ## Setting up the Meta app
 
@@ -109,6 +82,9 @@ At <https://developers.facebook.com> create a **Business** app and add the
        Callback URL:  https://<your-host>/api/b2b/integrations/meta/webhook/
        Verify token:  <whatever you put in META_WEBHOOK_VERIFY_TOKEN>
 
+   This is done once, by Weel, for the whole deployment — companies never see
+   these values.
+
    Meta calls the URL once with `hub.challenge`; the view echoes it back when
    the token matches.
 
@@ -120,12 +96,12 @@ At <https://developers.facebook.com> create a **Business** app and add the
 ## Environment
 
 One set of values for the whole deployment. Nothing here is per customer — see
-"One app, or one per company" above.
+"One app, thousands of companies" above.
 
 ```
 META_INTEGRATION_ENABLED=true
 
-# Weel's own Facebook app. Optional if every workspace brings its own.
+# Weel's own Facebook app — the only one.
 META_APP_ID=...
 META_APP_SECRET=...
 META_REDIRECT_URI=https://<your-host>/api/b2b/integrations/meta/callback/
@@ -173,7 +149,7 @@ the reason.
   `(company_id, source, external_id)`. Meta retries deliveries; both indexes,
   not a `SELECT`, are what decide.
 * **Unsigned webhooks are dropped.** Every delivery is verified against
-  `X-Hub-Signature-256` with the app secret before it is read.
+  `X-Hub-Signature-256` with Weel's app secret before it is read.
 * **Tokens are encrypted at rest** and no endpoint ever reads one back out.
 * **Disconnecting keeps the leads.** They are real deals somebody may be
   working; unplugging the source does not take them off the board.

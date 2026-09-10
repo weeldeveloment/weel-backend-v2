@@ -2,11 +2,9 @@
 
 Five calls and one signature check:
 
-* [authorize_url] / [exchange_code] — the login, which is plain OAuth 2.
-  Both take the [MetaCredentials] to sign in *through*, because a workspace
-  may connect with its own Facebook app rather than ours — see
-  `credentials.py`. Nothing here reads the settings; that decision is made in
-  one place and handed down.
+* [authorize_url] / [exchange_code] — the login, which is plain OAuth 2
+  through Weel's one Facebook app. Both take its [MetaCredentials] rather than
+  reading the settings themselves — see `credentials.py`.
 * [long_lived_token]  — a login token lasts about an hour; this trades it for
   one that lasts about sixty days, which is what gets stored.
 * [list_pages]        — the pages the person administers, each with its own
@@ -69,9 +67,8 @@ def _check(creds) -> None:
     """That the app we are about to call through is actually configured."""
     if not creds or not creds.is_complete:
         raise ImproperlyConfigured(
-            "No usable Meta app. Either set META_APP_ID, META_APP_SECRET and "
-            "META_REDIRECT_URI, or give the workspace its own app — see "
-            "apps/b2b/integrations/credentials.py."
+            "Weel's Meta app is not configured: set META_APP_ID, "
+            "META_APP_SECRET and META_REDIRECT_URI."
         )
 
 
@@ -267,10 +264,8 @@ def verify_signature(body: bytes, header: str | None, app_secret: str) -> bool:
     somebody's sales board — so an unsigned or wrongly signed delivery is
     dropped, not logged and processed.
 
-    The secret is passed in rather than read here because one webhook URL now
-    receives deliveries from several apps: ours, and every workspace that
-    connected through its own. Which secret to check against is decided by the
-    *page* the delivery names — see `MetaWebhookView`.
+    The secret is passed in rather than read here, so the one place that
+    knows which app we are (`credentials`) stays the only one.
     """
     if not app_secret or not header or not header.startswith("sha256="):
         return False

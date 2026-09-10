@@ -800,8 +800,10 @@ ESKIZ_OTP_TEMPLATE = os.getenv(
 # Retriever is the only way an Android app reads the code with no permission
 # and no tap from the user, and the price of it is this suffix: Google hands
 # the message to the app only when the text ends with an 11-character hash of
-# the app's signing certificate. Without it the apps fall back to the SMS User
-# Consent API, which works on any wording but costs a tap on a system sheet.
+# the app's signing certificate. Without it the code only reaches the
+# keyboard's suggestion bar (one tap), the same as on iOS — the SMS User
+# Consent fallback was removed from the apps on 2026-09-10 because its Google
+# sheet appeared on every sign-in.
 #
 # Comma-separated, because the hash is per signing certificate and the two b2b
 # Android apps are signed separately — both hashes go on the same last line,

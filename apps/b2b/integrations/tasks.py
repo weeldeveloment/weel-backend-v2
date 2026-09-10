@@ -132,12 +132,9 @@ def sync_meta_pages(company_id: int | None = None) -> int:
     """Pull recent submissions for every active page. Also the "Sinxronlash"
     button, which passes one company."""
     total = 0
+    if not credentials.is_available():
+        return total
     for page in int_repo.list_active_pages(company_id):
-        # Asked per page rather than once: with workspaces bringing their own
-        # Facebook apps, "is Meta configured" has a different answer for each
-        # company on the same server.
-        if not credentials.is_available(page["company_id"]):
-            continue
         try:
             total += ingest.sync_page(page)
         except Exception:  # noqa: BLE001 — one bad page must not stop the rest

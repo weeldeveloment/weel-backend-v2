@@ -20,45 +20,12 @@ class IntegrationPageSerializer(serializers.Serializer):
     last_error = serializers.CharField(allow_null=True)
 
 
-class MetaAppSerializer(serializers.Serializer):
-    """The workspace's own Facebook app — what it takes to connect through one.
-
-    The secret is write-only and never comes back: it is a credential we hold
-    on their behalf, exactly like the access token.
-    """
-
-    app_id = serializers.CharField(max_length=64)
-    app_secret = serializers.CharField(max_length=200, write_only=True)
-    #: Optional. Generated when it is left out, which is what should normally
-    #: happen — see `credentials.new_verify_token`.
-    verify_token = serializers.CharField(
-        max_length=120, required=False, allow_blank=True
-    )
-
-    def validate_app_id(self, value: str) -> str:
-        value = value.strip()
-        # Meta app ids are numeric. Catching it here turns "why does nothing
-        # happen when I press Ulash" into a message beside the field.
-        if not value.isdigit():
-            raise serializers.ValidationError(
-                "Meta App ID faqat raqamlardan iborat bo‘ladi."
-            )
-        return value
-
-    def validate_app_secret(self, value: str) -> str:
-        value = value.strip()
-        if len(value) < 16:
-            raise serializers.ValidationError("Meta App Secret juda qisqa.")
-        return value
-
-
 class MetaSetupSerializer(serializers.Serializer):
-    """Everything the owner has to paste into their Facebook app.
+    """Retired. The values a workspace once pasted into its own Facebook app.
 
-    Answered by the app endpoints so the screen can show it with a copy button
-    rather than sending somebody to a document — the three values below are
-    the entire difference between an integration that works and one that
-    silently receives nothing.
+    Every company now connects through Weel's one app by signing in, so
+    `setup` is always null. The shape stays in the schema so the builds
+    already on people's phones, and the API contract check, read it unchanged.
     """
 
     uses_own_app = serializers.BooleanField()
@@ -90,10 +57,7 @@ class IntegrationSerializer(serializers.Serializer):
     last_error = serializers.CharField(allow_null=True)
     lead_count = serializers.IntegerField()
     token_expires_at = serializers.DateTimeField(allow_null=True)
-    #: Whether this workspace connects through its own Facebook app rather
-    #: than the deployment's. The screen has to say which, because it decides
-    #: whose app settings the redirect URI belongs in. Meta only; null for
-    #: the AI providers.
+    #: Always null — see [MetaSetupSerializer].
     setup = MetaSetupSerializer(allow_null=True)
     pages = IntegrationPageSerializer(many=True)
     #: Claude / ChatGPT only; null for Meta.

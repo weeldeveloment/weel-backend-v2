@@ -10,7 +10,6 @@ from apps.b2b.integrations.ai_views import (
 )
 from apps.b2b.integrations.views import (
     IntegrationListView,
-    MetaAppView,
     MetaConnectView,
     MetaDisconnectView,
     MetaPageView,
@@ -22,9 +21,6 @@ from apps.b2b.integrations.views import (
 urlpatterns = [
     path("", IntegrationListView.as_view(), name="ws-integrations"),
     path("meta/connect/", MetaConnectView.as_view(), name="ws-integration-meta-connect"),
-    # This workspace's own Facebook app, for the companies that cannot use the
-    # deployment's — see `MetaAppView`.
-    path("meta/app/", MetaAppView.as_view(), name="ws-integration-meta-app"),
     path("meta/", MetaDisconnectView.as_view(), name="ws-integration-meta"),
     path("meta/sync/", MetaSyncView.as_view(), name="ws-integration-meta-sync"),
     path(

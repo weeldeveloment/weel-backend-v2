@@ -200,7 +200,7 @@ class EskizService:
         """Appends the SMS Retriever signature line, when one is configured.
 
         This suffix is the whole difference between the app filling the code in
-        silently and the user having to tap a consent sheet: Google's SMS
+        silently and the user tapping it off the keyboard bar: Google's SMS
         Retriever API hands a message to the app only if the text ends with an
         11-character hash of that app's signing certificate, and it is the one
         Android path that needs neither a permission nor a tap.
