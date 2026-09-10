@@ -39,13 +39,13 @@ logger = logging.getLogger(__name__)
 
 
 def _may_send(user) -> bool:
-    """Who may ask another workspace for help.
+    """Who may ask somebody elsewhere in the org for help.
 
-    An owner or a lider — see `roles.REQUEST_ROLES`. Not every manager: this
-    commits the workspace to letting an outsider in, with a role and a set of
-    modules, for a stretch of time.
+    The owner, a lider or a manager — `can_send_request`, as the owner set it
+    on 2026-09-10. An employee may search the org (see
+    [WorkspaceOrgPeopleView]) but not send, and a guest does neither.
     """
-    return bool(user.capabilities.get("can_request_help"))
+    return bool(user.capabilities.get("can_send_request"))
 
 
 def _join_requests_received(company_id: int) -> list[tuple]:
@@ -139,7 +139,10 @@ class WorkspaceOrgPeopleView(WorkspaceAPIView):
         responses={200: OrgPersonSerializer(many=True)},
     )
     def get(self, request):
-        if not _may_send(request.user):
+        # Anybody on the roster may look — an employee finds a colleague and
+        # is told on the send button that asking is not theirs to do. Only a
+        # guest is kept out: this is the host org's directory, not theirs.
+        if request.user.is_guest:
             return Response(
                 {"detail": _("Your role does not allow sending requests.")},
                 status=status.HTTP_403_FORBIDDEN,

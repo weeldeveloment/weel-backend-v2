@@ -710,6 +710,15 @@ def capabilities_from(
     # three through for `usd_rate` and nothing else on that row.
     flags["can_set_usd_rate"] = manager
 
+    # «So'rov yuborish» — asking somebody elsewhere in the org to come and
+    # help. The owner, the administrator ("lider") and the manager ("rahbar"),
+    # as the owner decided on 2026-09-10; an employee may search the org but
+    # not send. Its own flag rather than `can_request_help`, which is
+    # `employees.invite` — answering join requests and seating people — and
+    # stays as narrow as it was. A guest never sends: see
+    # `WorkspaceUser.capabilities`.
+    flags["can_send_request"] = manager
+
     flags["can_view_attendance"] = True
     flags["can_manage_attendance"] = manager
     flags["can_manage_attendance_location"] = owner

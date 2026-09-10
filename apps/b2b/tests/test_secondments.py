@@ -823,17 +823,46 @@ def test_a_lider_can_do_everything_a_manager_can():
             assert lider[capability] is True, capability
 
 
-def test_a_manager_cannot_send_even_though_they_manage():
-    manager = _user(EmployeeRole.PERFORMER, 5, HOST_COMPANY)
+def test_the_owner_a_lider_and_a_manager_may_send_and_an_employee_may_not():
+    """The owner's rule of 2026-09-10: whoever runs the workspace sends. Its own
+    flag — `can_request_help` (letting people in) stays owner-and-lider."""
+    assert capabilities_for(EmployeeRole.OWNER)["can_send_request"] is True
+    assert capabilities_for(EmployeeRole.LIDER)["can_send_request"] is True
+    assert capabilities_for(EmployeeRole.PERFORMER)["can_send_request"] is True
+    assert capabilities_for(EmployeeRole.EMPLOYEE)["can_send_request"] is False
 
-    response = _call(
+
+def test_an_employee_may_search_the_org_but_not_send():
+    employee = _user(EmployeeRole.EMPLOYEE, 5, HOST_COMPANY)
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.org_id_for_company", return_value=5
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.search_org_people",
+        return_value=[_person()],
+    ):
+        found = _call(
+            WorkspaceOrgPeopleView, factory.get("/org/people/?search=aziz"), employee
+        )
+    sent = _call(
         WorkspaceRequestListCreateView,
         factory.post(
             "/requests/", {"to_employee_id": AZIZ_ID, "role": "manager"}, format="json"
         ),
-        manager,
+        employee,
     )
 
+    assert found.status_code == 200
+    assert sent.status_code == 403
+
+
+def test_a_guest_neither_searches_nor_sends():
+    """Somebody lent in is not this org's to speak for."""
+    guest = _guest([Module.CHAT])
+
+    assert guest.capabilities["can_send_request"] is False
+    response = _call(
+        WorkspaceOrgPeopleView, factory.get("/org/people/?search=aziz"), guest
+    )
     assert response.status_code == 403
 
 
@@ -1180,6 +1209,9 @@ def test_join_requests_are_left_out_for_somebody_without_the_permission():
     manager = _user(EmployeeRole.PERFORMER, 5, HOST_COMPANY)
     with patch(
         "apps.b2b.workspace.secondment_views.srepo.list_requests_for_employee",
+        return_value=[],
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.list_requests_from_company",
         return_value=[],
     ), patch(
         "apps.b2b.workspace.access_repository.access_for_employee",

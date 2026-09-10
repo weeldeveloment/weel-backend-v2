@@ -96,7 +96,13 @@ class WorkspaceUser:
         from apps.b2b.workspace.access import capabilities_from
 
         modules, permissions = self.access
-        return capabilities_from(self.role, modules, permissions)
+        flags = capabilities_from(self.role, modules, permissions)
+        # Somebody lent in is not this workspace's to speak for: asking a
+        # third workspace for help from here would commit an office they
+        # were only borrowed by.
+        if self.is_guest:
+            flags["can_send_request"] = False
+        return flags
 
     # ── The TZ's access model: who → where → what ────────────────────────────
     #

@@ -11,14 +11,16 @@ MANAGER_ROLES = frozenset({
     EmployeeRole.LIDER,
 })
 
-# Who may ask another workspace to lend them somebody.
-#
-# Narrower than [MANAGER_ROLES] on purpose, and the one thing that separates a
-# lider from a manager. A request hands an outsider a role and a set of modules
-# in this workspace for a stretch of time — that is a commitment about who is
-# allowed in, which is the owner's or a team lead's call rather than something
-# anybody handing out work can do on their own.
-REQUEST_ROLES = frozenset({EmployeeRole.OWNER, EmployeeRole.LIDER})
+# Who may ask somebody elsewhere in the org to come and help — the owner, a
+# lider or a manager, as the owner set it on 2026-09-10. An employee may search
+# the org but not send. The flag the endpoints read is `can_send_request`,
+# computed in `access.capabilities_from`; this names the same three roles in
+# the roster's own vocabulary.
+REQUEST_ROLES = frozenset({
+    EmployeeRole.OWNER,
+    EmployeeRole.LIDER,
+    EmployeeRole.PERFORMER,
+})
 
 
 #: The inverse of `access.Role.ALIASES`. `Role.clean` reads either vocabulary
