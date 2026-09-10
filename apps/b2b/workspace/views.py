@@ -1700,15 +1700,26 @@ class WorkspaceEventListCreateView(WorkspaceAPIView):
         caps = request.user.capabilities
         participants = data.get("participant_ids") or []
 
-        if not caps["can_create_event"]:
-            # An employee keeps a private calendar: their own entries, no
-            # invitations to anyone else.
+        if not caps.get("can_invite_to_event"):
+            # A private calendar: their own entries, no invitations to anyone
+            # else. Employees hold the flag by default since 2026-09-10; the
+            # role editor may have taken it away, and a guest never had it.
             if participants and set(participants) != {request.user.id}:
                 return Response(
                     {"detail": _("Your role does not allow inviting other people to an event.")},
                     status=status.HTTP_403_FORBIDDEN,
                 )
             participants = [request.user.id]
+        elif not caps["can_create_event"]:
+            # Their own calendar, with colleagues asked to it. The entry is
+            # theirs first — it has to be on their day whatever the sheet
+            # sent — so they are on it ahead of whoever they picked. Somebody
+            # booking the shared calendar is left out of this: a manager
+            # putting a meeting on three people's days need not sit in it.
+            participants = [
+                request.user.id,
+                *(p for p in participants if p != request.user.id),
+            ]
 
         checked = _validated_employee_ids(request.user.company_id, participants)
         if checked is None:

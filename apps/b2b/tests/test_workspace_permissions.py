@@ -260,7 +260,16 @@ def test_can_reassign_is_the_author_or_a_manager_only(get_task, _activity):
 
 # ─── Calendar ─────────────────────────────────────────────────────────────────
 
-def test_employee_cannot_invite_colleagues_to_an_event():
+@patch("apps.b2b.workspace.views.repo.employee_ids_in_company", return_value={EMPLOYEE_ID, OWNER_ID})
+@patch("apps.b2b.workspace.views.repo.create_event")
+def test_employee_may_ask_colleagues_to_their_own_event(create_event, _ids):
+    """Since 2026-09-10, at the owner's request: the people row is on
+    everybody's sheet. The entry is still the employee's — they are on it
+    first, ahead of whoever they picked — and the shared calendar
+    (`can_create_event`) is still the manager's."""
+    create_event.return_value = {
+        "id": 3, "author_id": EMPLOYEE_ID, "participant_ids": [EMPLOYEE_ID, OWNER_ID],
+    }
     request = factory.post("/events/", {
         "title": "Yig'ilish",
         "starts_at": "2026-08-10T09:00:00Z",
@@ -268,6 +277,20 @@ def test_employee_cannot_invite_colleagues_to_an_event():
         "participant_ids": [OWNER_ID],
     }, format="json")
     response = _call(WorkspaceEventListCreateView, request, EMPLOYEE)
+    assert response.status_code == 201
+    assert create_event.call_args.kwargs["participant_ids"] == [EMPLOYEE_ID, OWNER_ID]
+
+
+def test_a_guest_cannot_invite_colleagues_to_an_event():
+    """A guest keeps the private calendar an employee used to have: their own
+    entries, nobody else on them."""
+    request = factory.post("/events/", {
+        "title": "Yig'ilish",
+        "starts_at": "2026-08-10T09:00:00Z",
+        "ends_at": "2026-08-10T10:00:00Z",
+        "participant_ids": [OWNER_ID],
+    }, format="json")
+    response = _call(WorkspaceEventListCreateView, request, _user("guest", 9))
     assert response.status_code == 403
 
 

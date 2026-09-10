@@ -143,6 +143,7 @@ MODULE_CAPABILITIES: dict[str, tuple[str, ...]] = {
         "can_create_event",
         "can_edit_any_event",
         "can_create_personal_event",
+        "can_invite_to_event",
     ),
 }
 

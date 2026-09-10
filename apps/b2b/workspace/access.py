@@ -479,6 +479,13 @@ DEFAULT_PERMISSIONS: dict[str, tuple[str, ...]] = {
         Permission.CHAT_DELETE_OWN,
         Permission.EVENT_VIEW,
         Permission.EVENT_CREATE_OWN,
+        # And the people on it. The owner asked for the guest list on
+        # 2026-09-10: an employee's event used to be theirs alone, and the
+        # sheet hid the people row — "the part where you add colleagues is
+        # not there". Inviting is not booking the shared calendar
+        # (`EVENT_CREATE` stays the manager's); it is asking somebody to
+        # your own entry, which they see on theirs.
+        Permission.EVENT_INVITE,
         # Raising a lead, and seeing the board it lands on. Not editing,
         # assigning, moving a stage or deleting: bringing a customer in is
         # everybody's job, and what happens to the deal afterwards is the
@@ -625,6 +632,11 @@ CAPABILITY_PERMISSIONS: dict[str, str] = {
     "can_create_event": Permission.EVENT_CREATE,
     "can_edit_any_event": Permission.EVENT_EDIT,
     "can_create_personal_event": Permission.EVENT_CREATE_OWN,
+    # Putting colleagues on an event. Its own flag, apart from
+    # `can_create_event`: an employee books their own calendar and, since
+    # 2026-09-10, may ask people to it — the shared calendar stays the
+    # manager's, the guest list does not. The role editor can take it back.
+    "can_invite_to_event": Permission.EVENT_INVITE,
     "can_post_lead": Permission.DEAL_CREATE,
     "can_create_group_chat": Permission.CHAT_MANAGE_GROUP,
     "can_chat": Permission.CHAT_SEND,
