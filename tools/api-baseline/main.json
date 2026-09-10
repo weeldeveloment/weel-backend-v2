@@ -8432,6 +8432,10 @@
      "title": "Available",
      "type": "boolean"
     },
+    "can_disconnect": {
+     "title": "Can disconnect",
+     "type": "boolean"
+    },
     "connected": {
      "title": "Connected",
      "type": "boolean"
@@ -23454,7 +23458,7 @@
       }
      }
     },
-    "summary": "List integrations (owner/administrator only)",
+    "summary": "List integrations (anybody but a guest)",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
