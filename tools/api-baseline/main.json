@@ -10922,6 +10922,61 @@
    ],
    "type": "object"
   },
+  "MemberAdd": {
+   "properties": {
+    "employee_id": {
+     "minimum": 1,
+     "title": "Employee id",
+     "type": "integer"
+    },
+    "modules": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array",
+     "x-nullable": true
+    },
+    "permissions": {
+     "items": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "type": "array",
+     "x-nullable": true
+    },
+    "role": {
+     "default": "employee",
+     "enum": [
+      "owner",
+      "admin",
+      "manager",
+      "employee",
+      "guest"
+     ],
+     "title": "Role",
+     "type": "string"
+    }
+   },
+   "required": [
+    "employee_id"
+   ],
+   "type": "object"
+  },
+  "MembersAdd": {
+   "properties": {
+    "members": {
+     "items": {
+      "$ref": "#/definitions/MemberAdd"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "members"
+   ],
+   "type": "object"
+  },
   "MessageEdit": {
    "properties": {
     "text": {
@@ -16588,6 +16643,12 @@
      "type": "string",
      "x-nullable": true
     },
+    "members": {
+     "items": {
+      "$ref": "#/definitions/MemberAdd"
+     },
+     "type": "array"
+    },
     "name": {
      "maxLength": 200,
      "minLength": 1,
@@ -20528,6 +20589,48 @@
    },
    "parameters": []
   },
+  "/b2b/workspace/account/orgs/{org_id}/people/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/account/orgs/<org_id>/people/?search=&for_company_id=\n\nWho in the company could be seated in a workspace — what the\n\"Xodimlarni tanlash\" step on the create screen searches. Account-level\nbecause at that moment there is no workspace session to ask from: the\nroom is not made yet.\n\nGated like the company's workspace list: holding any active seat in the\ncompany. Everyone on one of its rosters already sees the rest of the\ncompany through `WorkspaceOrgPeopleView`, so this shows nothing new — it\nonly makes it reachable from the screen that needs it. The caller is left",
+    "operationId": "b2b_workspace_account_orgs_people_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "search",
+      "type": "string"
+     },
+     {
+      "description": "Leave out people already on this workspace's roster.",
+      "in": "query",
+      "name": "for_company_id",
+      "type": "integer"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/OrgPerson"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "People in the company who can be added to a workspace",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "org_id",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
   "/b2b/workspace/account/orgs/{org_id}/workspaces/": {
    "get": {
     "description": "GET /api/b2b/workspace/account/orgs/<org_id>/workspaces/ — every\nworkspace under this company, for the \"Workspace'lar\" screen.\n\nGated the same way `POST /account/workspaces/` gates opening one inside\nan org: holding any active roster row in it. An org's workspaces are\nalready visible sideways to anyone on one of them — see\n`WorkspaceOrgPeopleView` — this is that same boundary applied to the list\nof workspaces rather than the list of people.",
@@ -22845,6 +22948,64 @@
      }
     },
     "summary": "Monthly task stats per employee (owner only)",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   },
+   "parameters": []
+  },
+  "/b2b/workspace/employees/add/": {
+   "parameters": [],
+   "post": {
+    "description": "POST /api/b2b/workspace/employees/add/ — seat colleagues here.",
+    "operationId": "b2b_workspace_employees_add_create",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "data",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/MembersAdd"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "",
+      "schema": {
+       "$ref": "#/definitions/MembersAdd"
+      }
+     }
+    },
+    "summary": "Add colleagues from the company to this workspace",
+    "tags": [
+     "B2B / Workspace (mobile)"
+    ]
+   }
+  },
+  "/b2b/workspace/employees/candidates/": {
+   "get": {
+    "description": "GET /api/b2b/workspace/employees/candidates/?search=\n\nPeople elsewhere in the company who are not on this roster — the\n\"Kompaniyadan qo'shish\" picker. The same right as minting a link: this is\nthe other way of letting somebody in, and the one that needs no link at\nall when the person is a colleague already.",
+    "operationId": "b2b_workspace_employees_candidates_list",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "search",
+      "type": "string"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "",
+      "schema": {
+       "items": {
+        "$ref": "#/definitions/OrgPerson"
+       },
+       "type": "array"
+      }
+     }
+    },
+    "summary": "Colleagues who could be added to this workspace",
     "tags": [
      "B2B / Workspace (mobile)"
     ]
