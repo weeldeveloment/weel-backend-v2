@@ -11694,6 +11694,11 @@
      "title": "Id",
      "type": "integer"
     },
+    "in_this_workspace": {
+     "default": false,
+     "title": "In this workspace",
+     "type": "boolean"
+    },
     "phone": {
      "minLength": 1,
      "title": "Phone",
@@ -11722,12 +11727,37 @@
      "title": "Username",
      "type": "string",
      "x-nullable": true
+    },
+    "workspaces": {
+     "items": {
+      "$ref": "#/definitions/OrgPersonWorkspace"
+     },
+     "type": "array"
     }
    },
    "required": [
     "id",
     "full_name",
     "company_id"
+   ],
+   "type": "object"
+  },
+  "OrgPersonWorkspace": {
+   "properties": {
+    "id": {
+     "title": "Id",
+     "type": "integer"
+    },
+    "name": {
+     "minLength": 1,
+     "title": "Name",
+     "type": "string",
+     "x-nullable": true
+    }
+   },
+   "required": [
+    "id",
+    "name"
    ],
    "type": "object"
   },
