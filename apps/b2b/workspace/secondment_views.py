@@ -148,12 +148,15 @@ class WorkspaceOrgPeopleView(WorkspaceAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         org_id = srepo.org_id_for_company(request.user.company_id)
-        people = srepo.search_org_people(
+        people = srepo.search_org_persons(
             org_id,
-            # The whole org, this workspace included — see `search_org_people`.
-            # Only the searcher themselves is dropped: a request has to go *to*
-            # somebody else.
+            # One row per person across the whole org, this workspace included,
+            # each saying whether they are already here — see
+            # `search_org_persons`. The searcher is dropped with every seat of
+            # theirs: a request has to go *to* somebody else.
+            here_company_id=request.user.company_id,
             exclude_employee_id=request.user.id,
+            exclude_account_id=request.user.get("account_id"),
             search=(request.query_params.get("search") or "").strip() or None,
         )
         return Response({"results": OrgPersonSerializer(people, many=True).data})
@@ -229,8 +232,14 @@ class WorkspaceRequestListCreateView(WorkspaceAPIView):
         data = serializer.validated_data
 
         org_id = srepo.org_id_for_company(request.user.company_id)
+        # Looked up by id rather than found in "the first thirty": the org can
+        # be bigger than one page of the picker.
         candidates = srepo.search_org_people(
-            org_id, exclude_employee_id=request.user.id
+            org_id,
+            exclude_employee_id=request.user.id,
+            exclude_account_id=request.user.get("account_id"),
+            employee_id=data["to_employee_id"],
+            limit=None,
         )
         target = next(
             (p for p in candidates if p["id"] == data["to_employee_id"]), None
@@ -315,9 +324,12 @@ class WorkspaceRequestRespondView(WorkspaceAPIView):
     # -- who may do what ----------------------------------------------------
 
     def _is_recipient(self, request, ask) -> bool:
-        # Against the *home* row: a person reading their inbox while signed in
-        # as a guest of a third workspace is still the person being asked.
-        return ask["to_employee_id"] == request.user.home_employee_id
+        # Against every seat of the person: the request names one of their
+        # seats, but it asks the human — whichever workspace they answer from,
+        # and as a guest of a third one through their *home* row.
+        return ask["to_employee_id"] in srepo.person_seat_ids(
+            request.user.home_employee_id
+        )
 
     def _closed(self, ask):
         return Response(

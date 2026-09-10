@@ -9,6 +9,7 @@ workspace" a question with a short answer.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any, Sequence
 
@@ -53,25 +54,27 @@ def search_org_people(
     *,
     exclude_company_id: int | None = None,
     exclude_employee_id: int | None = None,
+    exclude_account_id: int | None = None,
+    employee_id: int | None = None,
     search: str | None = None,
-    limit: int = 30,
+    limit: int | None = 30,
 ) -> list[dict[str, Any]]:
-    """People across the whole org, for the picker on "So'rov yuborish".
+    """Roster rows across the whole org — one per seat, not per person.
 
     By default this spans every workspace in the org, the searcher's own one
-    included — the picker is a "find anybody in the company by name, handle or
-    phone" box, and leaving out the roster you already stand on made it read as
-    broken for an org that has only one workspace. Pass `exclude_company_id` to
-    go back to *other* workspaces only, and `exclude_employee_id` to drop the
-    person doing the searching.
+    included. Pass `exclude_company_id` to go back to *other* workspaces only,
+    `exclude_employee_id` / `exclude_account_id` to drop the person doing the
+    searching, and `employee_id` to look up one row (the send checks its
+    target this way — reading "the first thirty" and looking for it there
+    refused anybody past the thirtieth name in a bigger org).
 
-    Guests are left out. Somebody already lent into a workspace from a third
-    one is not that workspace's to lend on, and the row that represents them is
-    a copy — inviting it would create a guest of a guest.
+    Guests and chat-only members are left out. Somebody already lent into a
+    workspace from a third one is not that workspace's to lend on, and the row
+    that represents them is a copy — inviting it would create a guest of a
+    guest; a chat-only member has no seat at all.
 
-    Bounded by `limit` because this is the one roster query that is not
-    naturally small: an org with twenty workspaces has twenty rosters behind
-    it, and the screen it feeds shows search results rather than a list.
+    The picker does not read this directly: it wants one row per *person*,
+    which is [search_org_persons].
     """
     if org_id is None:
         return []
@@ -86,13 +89,15 @@ def search_org_people(
         SELECT e.id, e.full_name,
                COALESCE(a.username, e.username) AS username,
                e.position, e.phone, e.photo,
-               e.role, e.company_id, c.name AS company_name
+               e.role, e.company_id, c.name AS company_name,
+               e.account_id
           FROM {B2B_EMPLOYEE_TABLE} e
           JOIN {B2B_COMPANY_TABLE} c ON c.id = e.company_id
           LEFT JOIN {B2B_ACCOUNT_TABLE} a ON a.id = e.account_id
          WHERE c.org_id = %s
            AND e.is_active = TRUE
            AND e.is_guest = FALSE
+           AND COALESCE(e.is_chat_only, FALSE) = FALSE
     """
     params: list[Any] = [org_id]
     if exclude_company_id is not None:
@@ -101,13 +106,157 @@ def search_org_people(
     if exclude_employee_id is not None:
         sql += " AND e.id <> %s"
         params.append(exclude_employee_id)
+    if exclude_account_id is not None:
+        sql += " AND e.account_id IS DISTINCT FROM %s"
+        params.append(exclude_account_id)
+    if employee_id is not None:
+        sql += " AND e.id = %s"
+        params.append(employee_id)
     if search:
         clause, clause_params = people_search_clause(search)
         sql += clause
         params += clause_params
-    sql += " ORDER BY e.full_name ASC LIMIT %s"
-    params.append(limit)
+    sql += " ORDER BY e.full_name ASC, e.id ASC"
+    if limit is not None:
+        sql += " LIMIT %s"
+        params.append(limit)
     return fetch_all(sql, params)
+
+
+def _person_key(seat: dict[str, Any], by_phone: dict[str, Any]) -> Any:
+    """Which person a roster row belongs to.
+
+    The account, when the row has one — one account is one human. A row with
+    no account yet (imported from a roster, never signed in) is matched on its
+    phone to a person already seen, because an account's phone is unique and
+    the start-up link joins such rows to that account by exactly this.
+    """
+    digits = re.sub(r"\D", "", seat.get("phone") or "")[-9:]
+    key = ("a", seat["account_id"]) if seat.get("account_id") else None
+    if key is None and len(digits) == 9:
+        key = by_phone.get(digits, ("p", digits))
+    if key is None:
+        key = ("e", seat["id"])
+    if len(digits) == 9:
+        by_phone.setdefault(digits, key)
+    return key
+
+
+def search_org_persons(
+    org_id: int | None,
+    *,
+    here_company_id: int,
+    exclude_employee_id: int | None = None,
+    exclude_account_id: int | None = None,
+    search: str | None = None,
+    limit: int = 30,
+) -> list[dict[str, Any]]:
+    """The picker on "So'rov yuborish": one row per person in the org.
+
+    A person holds a seat in every workspace they work in, and listing seats
+    showed somebody on three workspaces three times. Each row here is one
+    person with every workspace they sit in (`workspaces`), and whether one of
+    them is the searcher's own (`in_this_workspace`) — somebody already here
+    cannot be asked in, and the app says so on the row instead of letting the
+    send fail.
+
+    `id` is the seat a request goes to: the person's own seat outside this
+    workspace, the earliest one. Which seat it is does not matter to the
+    person — the inbox and the answer read every seat of theirs, see
+    [person_seat_ids].
+    """
+    seats = search_org_people(
+        org_id,
+        exclude_employee_id=exclude_employee_id,
+        exclude_account_id=exclude_account_id,
+        search=search,
+        # Seats, not people: a person on three workspaces is three of them.
+        limit=limit * 5,
+    )
+    people: dict[Any, dict[str, Any]] = {}
+    by_phone: dict[str, Any] = {}
+    for seat in seats:
+        key = _person_key(seat, by_phone)
+        person = people.get(key)
+        here = seat["company_id"] == here_company_id
+        if person is None:
+            if len(people) >= limit:
+                continue
+            person = people[key] = {
+                **seat,
+                "workspaces": [],
+                "in_this_workspace": False,
+                "_elsewhere_id": None,
+            }
+        person["workspaces"].append(
+            {"id": seat["company_id"], "name": seat["company_name"]}
+        )
+        person["in_this_workspace"] = person["in_this_workspace"] or here
+        if not here and (
+            person["_elsewhere_id"] is None or seat["id"] < person["_elsewhere_id"]
+        ):
+            person["_elsewhere_id"] = seat["id"]
+            for field in ("id", "company_id", "company_name", "position", "role"):
+                person[field] = seat[field]
+
+    elsewhere_ids = [p["id"] for p in people.values() if not p["in_this_workspace"]]
+    # A person lent here by an earlier request sits here as a guest row, which
+    # the seat query leaves out — asked once more, they are already here.
+    lent_here = (
+        _people_lent_to(here_company_id, elsewhere_ids) if elsewhere_ids else set()
+    )
+    result = []
+    for person in people.values():
+        person.pop("_elsewhere_id")
+        if person["id"] in lent_here:
+            person["in_this_workspace"] = True
+        person["workspaces"].sort(key=lambda w: (w["name"] or "").lower())
+        result.append(person)
+    return result
+
+
+def _people_lent_to(company_id: int, employee_ids: Sequence[int]) -> set[int]:
+    """Which of these seats' people already have a guest seat in `company_id`."""
+    rows = fetch_all(
+        f"""
+        SELECT x.id
+          FROM {B2B_EMPLOYEE_TABLE} x
+         WHERE x.id = ANY(%s)
+           AND EXISTS (
+               SELECT 1 FROM {B2B_EMPLOYEE_TABLE} g
+                WHERE g.company_id = %s
+                  AND g.is_active = TRUE
+                  AND (g.home_employee_id = x.id
+                       OR (x.account_id IS NOT NULL AND g.account_id = x.account_id)
+                       OR g.home_employee_id IN (
+                           SELECT o.id FROM {B2B_EMPLOYEE_TABLE} o
+                            WHERE x.account_id IS NOT NULL
+                              AND o.account_id = x.account_id))
+           )
+        """,
+        [list(employee_ids), company_id],
+    )
+    return {row["id"] for row in rows}
+
+
+def person_seat_ids(employee_id: int) -> list[int]:
+    """Every seat of the person behind this roster row, this one included.
+
+    A request is addressed to one seat, but it is asked of a person: whichever
+    workspace they have open, it is in their inbox and theirs to answer.
+    """
+    rows = fetch_all(
+        f"""
+        SELECT o.id
+          FROM {B2B_EMPLOYEE_TABLE} x
+          JOIN {B2B_EMPLOYEE_TABLE} o
+            ON o.id = x.id
+            OR (x.account_id IS NOT NULL AND o.account_id = x.account_id)
+         WHERE x.id = %s
+        """,
+        [employee_id],
+    )
+    return sorted({row["id"] for row in rows} | {employee_id})
 
 
 # ─── Requests ─────────────────────────────────────────────────────────────────
@@ -161,15 +310,20 @@ def pending_request_between(company_id: int, to_employee_id: int) -> dict[str, A
     with the request that already exists rather than with a unique-index
     error — the index is the backstop, this is the manners.
     """
+    # Any seat of theirs: the picker addresses a person through one of their
+    # seats, and asking the same person again through another one is still
+    # the second tap.
     return fetch_one(
         f"SELECT * FROM {B2B_WORKSPACE_REQUEST_TABLE} "
-        f"WHERE company_id = %s AND to_employee_id = %s AND status = %s",
-        [company_id, to_employee_id, RequestStatus.PENDING],
+        f"WHERE company_id = %s AND to_employee_id = ANY(%s) AND status = %s "
+        f"ORDER BY id LIMIT 1",
+        [company_id, person_seat_ids(to_employee_id), RequestStatus.PENDING],
     )
 
 
 def list_requests_for_employee(employee_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
-    """The inbox: what other workspaces have asked of this person."""
+    """The inbox: what other workspaces have asked of this person — through
+    any of their seats, whichever workspace they are reading it from."""
     return fetch_all(
         f"""
         SELECT r.*, c.name AS company_name,
@@ -178,11 +332,11 @@ def list_requests_for_employee(employee_id: int, *, limit: int = 50) -> list[dic
           FROM {B2B_WORKSPACE_REQUEST_TABLE} r
           JOIN {B2B_COMPANY_TABLE} c ON c.id = r.company_id
           LEFT JOIN {B2B_EMPLOYEE_TABLE} f ON f.id = r.from_employee_id
-         WHERE r.to_employee_id = %s
+         WHERE r.to_employee_id = ANY(%s)
          ORDER BY r.created_at DESC
          LIMIT %s
         """,
-        [employee_id, limit],
+        [person_seat_ids(employee_id), limit],
     )
 
 

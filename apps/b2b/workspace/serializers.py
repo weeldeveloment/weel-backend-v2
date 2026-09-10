@@ -1444,6 +1444,11 @@ class SecondmentRequestSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(required=False)
 
 
+class OrgPersonWorkspaceSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField(allow_null=True)
+
+
 class OrgPersonSerializer(serializers.Serializer):
     """Somebody in a sibling workspace, as the picker lists them.
 
@@ -1461,6 +1466,12 @@ class OrgPersonSerializer(serializers.Serializer):
     role = serializers.CharField(required=False)
     company_id = serializers.IntegerField()
     company_name = serializers.CharField(allow_null=True, required=False)
+    #: Every workspace in the org this person sits in — one row per person,
+    #: not per seat. `company_id`/`company_name` are the seat a request goes to.
+    workspaces = OrgPersonWorkspaceSerializer(many=True, required=False)
+    #: Already has a seat in the searcher's own workspace, so cannot be asked
+    #: in; the picker shows them and says so rather than letting the send fail.
+    in_this_workspace = serializers.BooleanField(required=False, default=False)
 
 
 # ─── Hisobot va analitika ───────────────────────────────────────────────────

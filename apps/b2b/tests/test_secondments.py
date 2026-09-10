@@ -78,7 +78,12 @@ def _nobody_is_seated_twice():
     with patch(
         "apps.b2b.workspace.secondment_views.accounts.person_seated_in",
         return_value=False,
-    ) as seated:
+    ) as seated, patch(
+        # Everybody here has one seat — the tests that are about a person on
+        # several workspaces patch this themselves.
+        "apps.b2b.workspace.secondment_repository.person_seat_ids",
+        side_effect=lambda employee_id: [employee_id],
+    ):
         yield seated
 
 
@@ -134,7 +139,7 @@ def test_the_picker_spans_the_whole_org_and_only_drops_the_searcher():
     with patch(
         "apps.b2b.workspace.secondment_views.srepo.org_id_for_company", return_value=5
     ), patch(
-        "apps.b2b.workspace.secondment_views.srepo.search_org_people",
+        "apps.b2b.workspace.secondment_views.srepo.search_org_persons",
         return_value=[_person()],
     ) as search:
         response = _call(
@@ -144,8 +149,10 @@ def test_the_picker_spans_the_whole_org_and_only_drops_the_searcher():
     assert response.status_code == 200
     assert search.call_args.args[0] == 5
     # The picker is a "find anyone in the company" box — every workspace in the
-    # org, this one included. Only the person doing the searching is left out,
-    # since a request has to go to somebody else.
+    # org, this one included, each person told apart by whether they are
+    # already here. Only the person doing the searching is left out, since a
+    # request has to go to somebody else.
+    assert search.call_args.kwargs["here_company_id"] == HOST_COMPANY
     assert search.call_args.kwargs["exclude_employee_id"] == LIDER_ID
     assert "exclude_company_id" not in search.call_args.kwargs
 
@@ -837,7 +844,7 @@ def test_an_employee_may_search_the_org_but_not_send():
     with patch(
         "apps.b2b.workspace.secondment_views.srepo.org_id_for_company", return_value=5
     ), patch(
-        "apps.b2b.workspace.secondment_views.srepo.search_org_people",
+        "apps.b2b.workspace.secondment_views.srepo.search_org_persons",
         return_value=[_person()],
     ):
         found = _call(
@@ -1383,3 +1390,87 @@ def test_choosing_your_own_row_is_no_longer_an_endpoint():
     from apps.b2b.workspace import views
 
     assert not hasattr(views, "WorkspaceReactionsView")
+
+
+# ─── One row per person on the picker ─────────────────────────────────────────
+
+def _seat(employee_id, company_id, company_name, account_id=501, phone="+998901112233"):
+    return {
+        **_person(employee_id=employee_id, company_id=company_id),
+        "company_name": company_name,
+        "account_id": account_id,
+        "phone": phone,
+    }
+
+
+def test_a_person_on_three_workspaces_is_one_row_with_all_three():
+    from apps.b2b.workspace import secondment_repository as repo
+
+    seats = [
+        _seat(31, 1, "Toshkent"),
+        _seat(32, 2, "Samarqand"),
+        # Imported without an account yet: the same phone is the same person.
+        _seat(33, 3, "Buxoro", account_id=None),
+        _seat(40, 2, "Samarqand", account_id=777, phone="+998905556677"),
+    ]
+    with patch.object(repo, "search_org_people", return_value=seats), patch.object(
+        repo, "_people_lent_to", return_value=set()
+    ):
+        people = repo.search_org_persons(9, here_company_id=HOST_COMPANY, search="a")
+
+    assert [p["id"] for p in people] == [31, 40]
+    assert [w["name"] for w in people[0]["workspaces"]] == [
+        "Buxoro", "Samarqand", "Toshkent",
+    ]
+    assert people[0]["in_this_workspace"] is False
+
+
+def test_a_person_already_here_says_so_and_is_addressed_elsewhere():
+    """Somebody on this workspace's staff cannot be asked in. The row still
+    names a seat of theirs outside it, the one a request would have gone to."""
+    from apps.b2b.workspace import secondment_repository as repo
+
+    seats = [_seat(31, HOST_COMPANY, "Bu yer"), _seat(32, 2, "Samarqand")]
+    with patch.object(repo, "search_org_people", return_value=seats), patch.object(
+        repo, "_people_lent_to", return_value=set()
+    ):
+        (person,) = repo.search_org_persons(9, here_company_id=HOST_COMPANY)
+
+    assert person["in_this_workspace"] is True
+    assert person["id"] == 32
+    assert person["company_name"] == "Samarqand"
+
+
+def test_a_person_lent_here_already_is_here():
+    from apps.b2b.workspace import secondment_repository as repo
+
+    with patch.object(
+        repo, "search_org_people", return_value=[_seat(32, 2, "Samarqand")]
+    ), patch.object(repo, "_people_lent_to", return_value={32}):
+        (person,) = repo.search_org_persons(9, here_company_id=HOST_COMPANY)
+
+    assert person["in_this_workspace"] is True
+
+
+def test_a_request_to_any_seat_of_mine_is_mine_to_answer():
+    """Asked through the Samarqand seat, answered from Toshkent."""
+    ask = _ask(to_employee_id=32)
+    me = _user(EmployeeRole.EMPLOYEE, 31, 1)
+    with patch(
+        "apps.b2b.workspace.secondment_repository.person_seat_ids",
+        return_value=[31, 32],
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.get_request", return_value=ask
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.close_request", return_value=True
+    ) as close:
+        response = _call(
+            WorkspaceRequestRespondView,
+            factory.post("/requests/7/decline/", {"reason": "Band"}, format="json"),
+            me,
+            request_id=7,
+            action="decline",
+        )
+
+    assert response.status_code == 200
+    assert close.call_args.kwargs["status"] == RequestStatus.DECLINED
