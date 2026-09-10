@@ -399,6 +399,47 @@ def test_accepting_creates_a_guest_row_and_a_membership():
     assert membership.call_args.kwargs["starts_at"] is not None
 
 
+def test_an_acceptance_is_announced_to_the_workspace_that_asked():
+    """The asking office hears it at once — its sent list and its roster —
+    rather than when somebody there next restarts the app; and the person
+    asked hears it on every seat of theirs."""
+    with patch(
+        "apps.b2b.workspace.secondment_views.srepo.get_request", return_value=_ask()
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.close_request", return_value=1
+    ), patch(
+        "apps.b2b.workspace.secondment_views.repo.get_workspace_employee",
+        return_value={"id": AZIZ_ID, "company_id": HOME_COMPANY, "full_name": "Aziz"},
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.create_guest_employee",
+        return_value={"id": AZIZ_GUEST_ID},
+    ), patch(
+        "apps.b2b.workspace.secondment_views.srepo.create_membership"
+    ), patch(
+        "apps.b2b.workspace.secondment_views._queue"
+    ), patch(
+        "apps.b2b.workspace.secondment_repository.person_seat_ids",
+        return_value=[AZIZ_ID, 55],
+    ), patch(
+        "apps.b2b.workspace.secondment_views.realtime.publish_company"
+    ) as company, patch(
+        "apps.b2b.workspace.secondment_views.realtime.publish_employees"
+    ) as people:
+        response = _call(
+            WorkspaceRequestRespondView,
+            factory.post("/requests/7/accept/"),
+            AZIZ,
+            request_id=7,
+            action="accept",
+        )
+
+    assert response.status_code == 200
+    told = {(c.args[0], c.args[1]) for c in company.call_args_list}
+    assert (HOST_COMPANY, "request") in told
+    assert (HOST_COMPANY, "team") in told
+    assert people.call_args.args[:2] == ([AZIZ_ID, 55], "request")
+
+
 def test_somebody_already_on_the_staff_there_is_not_lent_to_it(_nobody_is_seated_twice):
     """One account, a row in each workspace it works in: asked for as "the
     row in Toshkent" by a workspace they are already staff of, accepting

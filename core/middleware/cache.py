@@ -69,6 +69,14 @@ EXEMPT_PATH_PREFIXES = (
     # room. Conferences are the same endpoint shape and the same argument.
     "/api/b2b/workspace/calls/",
     "/api/b2b/workspace/conferences/",
+    # A request between two workspaces, and the seats it creates. Both are
+    # changed by somebody else — the person asked accepts from their own
+    # phone — so the asker's cached "kutilmoqda" and the accepter's cached
+    # workspace list outlived the answer by a minute, and the one way to see
+    # it was to close the app. Small reads; nothing to save by caching them.
+    "/api/b2b/workspace/requests/",
+    "/api/b2b/workspace/switch/",
+    "/api/b2b/workspace/account/workspaces/",
 )
 
 AUTH_HEADER_PREFIX = "Bearer "

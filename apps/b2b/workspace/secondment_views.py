@@ -19,7 +19,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.b2b.repository import get_company
-from apps.b2b.workspace import accounts
+from apps.b2b.workspace import accounts, realtime
 from apps.b2b.workspace import repository as repo
 from apps.b2b.workspace import storage
 from apps.b2b.workspace import secondment_repository as srepo
@@ -292,6 +292,7 @@ class WorkspaceRequestListCreateView(WorkspaceAPIView):
             )
 
         _queue(created["id"], "sent")
+        _announce(created)
         return Response(
             SecondmentRequestSerializer(created).data, status=status.HTTP_201_CREATED
         )
@@ -347,6 +348,7 @@ class WorkspaceRequestRespondView(WorkspaceAPIView):
             )
         if not srepo.close_request(ask["id"], status=RequestStatus.CANCELLED):
             return self._closed(ask)
+        _announce(ask)
         return Response(SecondmentRequestSerializer(srepo.get_request(ask["id"])).data)
 
     def _decline(self, request, ask):
@@ -366,6 +368,7 @@ class WorkspaceRequestRespondView(WorkspaceAPIView):
             return self._closed(ask)
 
         _queue(ask["id"], "declined")
+        _announce(ask)
         return Response(SecondmentRequestSerializer(srepo.get_request(ask["id"])).data)
 
     def _accept(self, request, ask):
@@ -429,6 +432,7 @@ class WorkspaceRequestRespondView(WorkspaceAPIView):
         )
 
         _queue(ask["id"], "accepted")
+        _announce(ask, team=True)
         return Response(SecondmentRequestSerializer(srepo.get_request(ask["id"])).data)
 
 
@@ -512,6 +516,30 @@ class WorkspaceSwitchView(WorkspaceAPIView):
             "employee_id": target_id,
             "company_id": employee["company_id"],
         })
+
+
+def _announce(ask: dict, *, team: bool = False) -> None:
+    """Tell both ends of a request that it moved, on the live feed.
+
+    `WorkspaceAPIView.finalize_response` already announces a write — but to
+    the workspace of whoever made it, and a request always has its other end
+    somewhere else. Accepted from Toshkent, the Samarqand office that asked
+    kept "kutilmoqda" on its sent list, and the person it had just gained
+    stayed off its roster, until the app was closed and opened again. So the
+    asking workspace hears `request` (and `team`, when somebody joined it),
+    and the person asked hears `request` on every seat of theirs.
+    """
+    try:
+        realtime.publish_company(ask["company_id"], realtime.EVENT_REQUEST, action="changed")
+        if team:
+            realtime.publish_company(ask["company_id"], realtime.EVENT_TEAM, action="changed")
+        realtime.publish_employees(
+            srepo.person_seat_ids(ask["to_employee_id"]),
+            realtime.EVENT_REQUEST,
+            action="changed",
+        )
+    except Exception:  # noqa: BLE001 - the request itself is stored
+        logger.exception("Could not announce request %s", ask.get("id"))
 
 
 def _queue(request_id: int, event: str) -> None:
