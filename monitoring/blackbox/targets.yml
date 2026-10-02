@@ -12,9 +12,6 @@
 - labels: { app: weel.uz, kind: frontend }
   targets:
     - https://partners.weel.uz/
-- labels: { app: dashboard_weel_uz, kind: frontend }
-  targets:
-    - https://weel.uz/
 - labels: { app: grafana, kind: monitoring }
   targets:
     - https://grafana.weel.uz/api/health
