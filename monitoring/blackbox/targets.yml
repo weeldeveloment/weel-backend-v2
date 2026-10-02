@@ -5,7 +5,7 @@
     - https://dev.weel.uz/health/
 - labels: { app: weel-b2b, kind: frontend }
   targets:
-    - https://business.weel.uz/
+    - https://weel.uz/
 - labels: { app: weel-admin, kind: frontend }
   targets:
     - https://admin.weel.uz/
