@@ -141,10 +141,15 @@ jobs:
       # expired ("invalid since ...") and `update` exits 100 — which took the
       # whole pipeline, and every deploy with it, on 2026-09-08. The archive
       # is frozen, not wrong; the check is what has to go.
+      #
+      # Then apt.postgresql.org dropped bullseye-pgdg altogether ("does not
+      # have a Release file", 2026-10-06) and moved it to apt-archive, so the
+      # image's PGDG source is pointed there before `update`.
       - name: Install pgvector into the database container
         run: |
           docker exec ${{ job.services.postgres.id }} sh -c \
-            "apt-get -o Acquire::Check-Valid-Until=false update -qq && \
+            "sed -i 's#http://apt.postgresql.org/pub/repos/apt#https://apt-archive.postgresql.org/pub/repos/apt#' /etc/apt/sources.list.d/*.list && \
+             apt-get -o Acquire::Check-Valid-Until=false update -qq && \
              apt-get install -y -qq postgresql-16-pgvector"
           docker restart ${{ job.services.postgres.id }}
           for i in $(seq 1 30); do
