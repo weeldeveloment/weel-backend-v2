@@ -71,7 +71,7 @@ groups:
         labels: { severity: warning, service: logs }
         annotations:
           summary: "weel-b2b brauzer xatolari: 10 daqiqada {{ $value | printf \"%.0f\" }} ta"
-          description: "business.weel.uz foydalanuvchilarida JS xatolar ko'paydi."
+          description: "ccd.weel.uz foydalanuvchilarida JS xatolar ko'paydi."
           dashboard: weel-frontend
 
       - alert: OOMKilledInLogs
