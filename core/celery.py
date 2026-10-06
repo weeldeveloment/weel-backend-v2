@@ -112,10 +112,6 @@ app.conf.beat_schedule = {
         "task": "notification.tasks.send_review_reminders",
         "schedule": crontab(hour=11, minute=30),  # daily at 11:30
     },
-    "send_partner_property_check_reminders": {
-        "task": "users.send_partner_property_check_reminders",
-        "schedule": crontab(hour=11, minute=0),  # daily at 11:00 (3-day gating inside task)
-    },
     "expire_stale_activity_bookings": {
         "task": "activities.expire_stale_pending_bookings",
         "schedule": crontab(minute="*/2"),  # hold TTL is 5 min — check often to release fast
