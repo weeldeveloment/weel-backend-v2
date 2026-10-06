@@ -2,7 +2,11 @@ groups:
   - name: monitoring-self
     rules:
       - alert: MonitoringTargetDown
-        expr: up{job!~"weel-backend|blackbox-http"} == 0
+        # pgbouncer-exporter shu qoidadan chiqarilgan: prometheus.yml'da izohlangani
+        # kabi PgBouncer stack'i hali deploy qilinmagan va target doim "down" bo'ladi
+        # (buzilish emas). O'ziga xos holat PgBouncerDown (pgbouncer.rules.yml) orqali
+        # kuzatiladi.
+        expr: up{job!~"weel-backend|blackbox-http|pgbouncer-exporter"} == 0
         for: 5m
         labels: { severity: warning, service: monitoring }
         annotations:
