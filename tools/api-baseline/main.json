@@ -971,7 +971,6 @@
      "x-nullable": true
     },
     "price": {
-     "format": "decimal",
      "title": "Price",
      "type": "string",
      "x-nullable": true
@@ -1243,7 +1242,6 @@
      "type": "boolean"
     },
     "latitude": {
-     "format": "decimal",
      "title": "Latitude",
      "type": "string",
      "x-nullable": true
@@ -1254,7 +1252,6 @@
      "x-nullable": true
     },
     "longitude": {
-     "format": "decimal",
      "title": "Longitude",
      "type": "string",
      "x-nullable": true
@@ -1275,7 +1272,6 @@
      "x-nullable": true
     },
     "price": {
-     "format": "decimal",
      "title": "Price",
      "type": "string"
     },
@@ -1419,13 +1415,11 @@
      "type": "boolean"
     },
     "latitude": {
-     "format": "decimal",
      "title": "Latitude",
      "type": "string",
      "x-nullable": true
     },
     "longitude": {
-     "format": "decimal",
      "title": "Longitude",
      "type": "string",
      "x-nullable": true
@@ -1441,7 +1435,6 @@
      "x-nullable": true
     },
     "price": {
-     "format": "decimal",
      "title": "Price",
      "type": "string"
     },
@@ -1602,7 +1595,6 @@
      "x-nullable": true
     },
     "price": {
-     "format": "decimal",
      "title": "Price",
      "type": "string",
      "x-nullable": true
@@ -1799,7 +1791,6 @@
      "x-nullable": true
     },
     "price": {
-     "format": "decimal",
      "title": "Price",
      "type": "string",
      "x-nullable": true
@@ -2166,13 +2157,11 @@
      "type": "boolean"
     },
     "latitude": {
-     "format": "decimal",
      "title": "Latitude",
      "type": "string",
      "x-nullable": true
     },
     "longitude": {
-     "format": "decimal",
      "title": "Longitude",
      "type": "string",
      "x-nullable": true
@@ -2188,7 +2177,6 @@
      "x-nullable": true
     },
     "price": {
-     "format": "decimal",
      "title": "Price",
      "type": "string"
     },
@@ -2492,7 +2480,6 @@
      "x-nullable": true
     },
     "amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Amount",
      "type": "string",
@@ -2619,7 +2606,6 @@
      "x-nullable": true
     },
     "prev_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Prev amount",
      "type": "string",
@@ -2746,7 +2732,6 @@
      "type": "string"
     },
     "price": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Price",
      "type": "string",
@@ -2948,7 +2933,6 @@
   "B2BDepartmentSummary": {
    "properties": {
     "budget_limit": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Budget limit",
      "type": "string",
@@ -2990,13 +2974,11 @@
      "type": "string"
     },
     "on_trip_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "On trip amount",
      "type": "string"
     },
     "remaining_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Remaining amount",
      "type": "string",
@@ -3014,7 +2996,6 @@
      "type": "string"
     },
     "used_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Used amount",
      "type": "string"
@@ -3105,7 +3086,6 @@
      "type": "integer"
     },
     "individual_limit": {
-     "format": "decimal",
      "title": "Individual limit",
      "type": "string",
      "x-nullable": true
@@ -3226,13 +3206,11 @@
      "type": "integer"
     },
     "individual_limit": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Individual limit",
      "type": "string"
     },
     "on_trip_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "On trip amount",
      "type": "string"
@@ -3252,7 +3230,6 @@
      "x-nullable": true
     },
     "remaining_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Remaining amount",
      "type": "string"
@@ -3268,7 +3245,6 @@
      "type": "string"
     },
     "used_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Used amount",
      "type": "string"
@@ -3519,7 +3495,6 @@
      "type": "string"
     },
     "price": {
-     "format": "decimal",
      "title": "Price",
      "type": "string"
     }
@@ -3534,7 +3509,6 @@
   "BudgetRequest": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -3545,7 +3519,6 @@
      "type": "string"
     },
     "department_budget_limit": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Department budget limit",
      "type": "string",
@@ -3564,7 +3537,6 @@
      "x-nullable": true
     },
     "department_used_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Department used amount",
      "type": "string"
@@ -3595,7 +3567,6 @@
      "x-nullable": true
     },
     "employee_used_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Employee used amount",
      "type": "string"
@@ -3718,7 +3689,6 @@
   "BusinessTrip": {
    "properties": {
     "budget": {
-     "format": "decimal",
      "title": "Budget",
      "type": "string",
      "x-nullable": true
@@ -4645,7 +4615,6 @@
      "type": "string"
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -4674,7 +4643,6 @@
      "type": "integer"
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     }
@@ -4940,19 +4908,16 @@
      "type": "array"
     },
     "price_on_weekends": {
-     "format": "decimal",
      "title": "Price on weekends",
      "type": "string",
      "x-nullable": true
     },
     "price_on_working_days": {
-     "format": "decimal",
      "title": "Price on working days",
      "type": "string",
      "x-nullable": true
     },
     "price_per_person": {
-     "format": "decimal",
      "title": "Price per person",
      "type": "string",
      "x-nullable": true
@@ -5271,19 +5236,16 @@
      "type": "array"
     },
     "price_on_weekends": {
-     "format": "decimal",
      "title": "Price on weekends",
      "type": "string",
      "x-nullable": true
     },
     "price_on_working_days": {
-     "format": "decimal",
      "title": "Price on working days",
      "type": "string",
      "x-nullable": true
     },
     "price_per_person": {
-     "format": "decimal",
      "title": "Price per person",
      "type": "string",
      "x-nullable": true
@@ -5434,19 +5396,16 @@
      "type": "array"
     },
     "price_on_weekends": {
-     "format": "decimal",
      "title": "Price on weekends",
      "type": "string",
      "x-nullable": true
     },
     "price_on_working_days": {
-     "format": "decimal",
      "title": "Price on working days",
      "type": "string",
      "x-nullable": true
     },
     "price_per_person": {
-     "format": "decimal",
      "title": "Price per person",
      "type": "string",
      "x-nullable": true
@@ -5541,19 +5500,16 @@
      "x-nullable": true
     },
     "price_on_weekends": {
-     "format": "decimal",
      "title": "Price on weekends",
      "type": "string",
      "x-nullable": true
     },
     "price_on_working_days": {
-     "format": "decimal",
      "title": "Price on working days",
      "type": "string",
      "x-nullable": true
     },
     "price_per_person": {
-     "format": "decimal",
      "title": "Price per person",
      "type": "string",
      "x-nullable": true
@@ -5663,19 +5619,16 @@
      "type": "array"
     },
     "price_on_weekends": {
-     "format": "decimal",
      "title": "Price on weekends",
      "type": "string",
      "x-nullable": true
     },
     "price_on_working_days": {
-     "format": "decimal",
      "title": "Price on working days",
      "type": "string",
      "x-nullable": true
     },
     "price_per_person": {
-     "format": "decimal",
      "title": "Price per person",
      "type": "string",
      "x-nullable": true
@@ -6113,7 +6066,6 @@
      "x-nullable": true
     },
     "total_amount": {
-     "format": "decimal",
      "title": "Total amount",
      "type": "string"
     }
@@ -6202,7 +6154,6 @@
      "x-nullable": true
     },
     "total_amount": {
-     "format": "decimal",
      "title": "Total amount",
      "type": "string"
     }
@@ -6238,7 +6189,6 @@
   "CrmDeal": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -6314,7 +6264,6 @@
   "CrmMonthlyAmount": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -6393,7 +6342,6 @@
      "type": "integer"
     },
     "debt": {
-     "format": "decimal",
      "title": "Debt",
      "type": "string"
     },
@@ -6414,7 +6362,6 @@
      "x-nullable": true
     },
     "paid": {
-     "format": "decimal",
      "title": "Paid",
      "type": "string"
     },
@@ -6423,7 +6370,6 @@
      "type": "string"
     },
     "total": {
-     "format": "decimal",
      "title": "Total",
      "type": "string"
     }
@@ -6464,12 +6410,10 @@
      "type": "string"
     },
     "purchases": {
-     "format": "decimal",
      "title": "Purchases",
      "type": "string"
     },
     "revenue": {
-     "format": "decimal",
      "title": "Revenue",
      "type": "string"
     }
@@ -6493,7 +6437,6 @@
      "type": "number"
     },
     "monthly_limit": {
-     "format": "decimal",
      "title": "Monthly limit",
      "type": "string"
     },
@@ -6502,7 +6445,6 @@
      "type": "integer"
     },
     "spent_this_month": {
-     "format": "decimal",
      "title": "Spent this month",
      "type": "string"
     }
@@ -6519,7 +6461,6 @@
   "DeltaPrice": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -6533,7 +6474,6 @@
      "type": "string"
     },
     "percent": {
-     "format": "decimal",
      "title": "Percent",
      "type": "string"
     }
@@ -6653,7 +6593,6 @@
   "Document": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string",
      "x-nullable": true
@@ -6765,13 +6704,11 @@
   "DocumentItem": {
    "properties": {
     "counted_quantity": {
-     "format": "decimal",
      "title": "Counted quantity",
      "type": "string",
      "x-nullable": true
     },
     "difference": {
-     "format": "decimal",
      "title": "Difference",
      "type": "string"
     },
@@ -6785,25 +6722,21 @@
      "x-nullable": true
     },
     "new_price": {
-     "format": "decimal",
      "title": "New price",
      "type": "string",
      "x-nullable": true
     },
     "new_wholesale": {
-     "format": "decimal",
      "title": "New wholesale",
      "type": "string",
      "x-nullable": true
     },
     "old_price": {
-     "format": "decimal",
      "title": "Old price",
      "type": "string",
      "x-nullable": true
     },
     "old_wholesale": {
-     "format": "decimal",
      "title": "Old wholesale",
      "type": "string",
      "x-nullable": true
@@ -6823,7 +6756,6 @@
      "type": "string"
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -6834,7 +6766,6 @@
      "x-nullable": true
     },
     "system_quantity": {
-     "format": "decimal",
      "title": "System quantity",
      "type": "string",
      "x-nullable": true
@@ -6845,19 +6776,16 @@
      "type": "string"
     },
     "unit_cost": {
-     "format": "decimal",
      "title": "Unit cost",
      "type": "string",
      "x-nullable": true
     },
     "unit_cost_usd": {
-     "format": "decimal",
      "title": "Unit cost usd",
      "type": "string",
      "x-nullable": true
     },
     "usd_rate": {
-     "format": "decimal",
      "title": "Usd rate",
      "type": "string",
      "x-nullable": true
@@ -6881,19 +6809,16 @@
   "DocumentItemWrite": {
    "properties": {
     "counted_quantity": {
-     "format": "decimal",
      "title": "Counted quantity",
      "type": "string",
      "x-nullable": true
     },
     "new_price": {
-     "format": "decimal",
      "title": "New price",
      "type": "string",
      "x-nullable": true
     },
     "new_wholesale": {
-     "format": "decimal",
      "title": "New wholesale",
      "type": "string",
      "x-nullable": true
@@ -6903,19 +6828,16 @@
      "type": "integer"
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string",
      "x-nullable": true
     },
     "unit_cost": {
-     "format": "decimal",
      "title": "Unit cost",
      "type": "string",
      "x-nullable": true
     },
     "unit_cost_usd": {
-     "format": "decimal",
      "title": "Unit cost usd",
      "type": "string",
      "x-nullable": true
@@ -6970,7 +6892,6 @@
      "x-nullable": true
     },
     "extra_costs": {
-     "format": "decimal",
      "title": "Extra costs",
      "type": "string"
     },
@@ -7117,7 +7038,6 @@
   "DocumentWithRecipients": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string",
      "x-nullable": true
@@ -7264,7 +7184,6 @@
      "x-nullable": true
     },
     "extra_costs": {
-     "format": "decimal",
      "title": "Extra costs",
      "type": "string"
     },
@@ -7913,14 +7832,12 @@
      "type": "integer"
     },
     "latitude": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Latitude",
      "type": "string",
      "x-nullable": true
     },
     "longitude": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Longitude",
      "type": "string",
@@ -8052,7 +7969,6 @@
      "type": "boolean"
     },
     "price": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Price",
      "type": "string",
@@ -8143,7 +8059,6 @@
      "x-nullable": true
     },
     "price": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Price",
      "type": "string",
@@ -8260,12 +8175,10 @@
      "type": "array"
     },
     "price_max": {
-     "format": "decimal",
      "title": "Price max",
      "type": "string"
     },
     "price_min": {
-     "format": "decimal",
      "title": "Price min",
      "type": "string"
     },
@@ -8343,7 +8256,6 @@
      "x-nullable": true
     },
     "initial_quantity": {
-     "format": "decimal",
      "title": "Initial quantity",
      "type": "string",
      "x-nullable": true
@@ -8360,7 +8272,6 @@
      "x-nullable": true
     },
     "min_stock": {
-     "format": "decimal",
      "title": "Min stock",
      "type": "string",
      "x-nullable": true
@@ -8370,13 +8281,11 @@
      "type": "string"
     },
     "purchase_price": {
-     "format": "decimal",
      "title": "Purchase price",
      "type": "string",
      "x-nullable": true
     },
     "sale_price": {
-     "format": "decimal",
      "title": "Sale price",
      "type": "string",
      "x-nullable": true
@@ -8402,7 +8311,6 @@
      "x-nullable": true
     },
     "wholesale_price": {
-     "format": "decimal",
      "title": "Wholesale price",
      "type": "string",
      "x-nullable": true
@@ -8666,7 +8574,6 @@
      "x-nullable": true
     },
     "extra_costs": {
-     "format": "decimal",
      "title": "Extra costs",
      "type": "string"
     },
@@ -8731,7 +8638,6 @@
      "x-nullable": true
     },
     "quantity_total": {
-     "format": "decimal",
      "title": "Quantity total",
      "type": "string"
     },
@@ -8798,7 +8704,6 @@
      "x-nullable": true
     },
     "total": {
-     "format": "decimal",
      "title": "Total",
      "type": "string",
      "x-nullable": true
@@ -8849,7 +8754,6 @@
   "InventorySummary": {
    "properties": {
     "adjusted_qty": {
-     "format": "decimal",
      "title": "Adjusted qty",
      "type": "string"
     },
@@ -8858,7 +8762,6 @@
      "type": "integer"
     },
     "cogs": {
-     "format": "decimal",
      "title": "Cogs",
      "type": "string",
      "x-nullable": true
@@ -8892,39 +8795,32 @@
      "type": "integer"
     },
     "profit": {
-     "format": "decimal",
      "title": "Profit",
      "type": "string",
      "x-nullable": true
     },
     "purchases": {
-     "format": "decimal",
      "title": "Purchases",
      "type": "string",
      "x-nullable": true
     },
     "quantity_total": {
-     "format": "decimal",
      "title": "Quantity total",
      "type": "string"
     },
     "received_qty": {
-     "format": "decimal",
      "title": "Received qty",
      "type": "string"
     },
     "retail_value": {
-     "format": "decimal",
      "title": "Retail value",
      "type": "string"
     },
     "returned_qty": {
-     "format": "decimal",
      "title": "Returned qty",
      "type": "string"
     },
     "revenue": {
-     "format": "decimal",
      "title": "Revenue",
      "type": "string"
     },
@@ -8933,12 +8829,10 @@
      "type": "integer"
     },
     "sold_qty": {
-     "format": "decimal",
      "title": "Sold qty",
      "type": "string"
     },
     "stock_value": {
-     "format": "decimal",
      "title": "Stock value",
      "type": "string",
      "x-nullable": true
@@ -8950,19 +8844,16 @@
      "type": "array"
     },
     "turnover_ratio": {
-     "format": "decimal",
      "title": "Turnover ratio",
      "type": "string",
      "x-nullable": true
     },
     "write_offs": {
-     "format": "decimal",
      "title": "Write offs",
      "type": "string",
      "x-nullable": true
     },
     "written_off_qty": {
-     "format": "decimal",
      "title": "Written off qty",
      "type": "string"
     }
@@ -9099,7 +8990,6 @@
   "Lead": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -9283,7 +9173,6 @@
      "x-nullable": true
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -9493,7 +9382,6 @@
      "type": "array"
     },
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -9683,7 +9571,6 @@
      "x-nullable": true
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -9768,7 +9655,6 @@
   "LeadItem": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -9791,7 +9677,6 @@
      "x-nullable": true
     },
     "qty": {
-     "format": "decimal",
      "title": "Qty",
      "type": "string"
     },
@@ -9817,7 +9702,6 @@
   "LeadItemWrite": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -9833,7 +9717,6 @@
      "x-nullable": true
     },
     "qty": {
-     "format": "decimal",
      "title": "Qty",
      "type": "string",
      "x-nullable": true
@@ -9871,7 +9754,6 @@
   "LeadPayment": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -9928,7 +9810,6 @@
   "LeadPaymentWrite": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -9985,7 +9866,6 @@
      "type": "integer"
     },
     "qty": {
-     "format": "decimal",
      "title": "Qty",
      "type": "string"
     }
@@ -10020,7 +9900,6 @@
   "LeadReturnable": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -10029,7 +9908,6 @@
      "type": "integer"
     },
     "left": {
-     "format": "decimal",
      "title": "Left",
      "type": "string"
     },
@@ -10044,12 +9922,10 @@
      "x-nullable": true
     },
     "qty": {
-     "format": "decimal",
      "title": "Qty",
      "type": "string"
     },
     "returned": {
-     "format": "decimal",
      "title": "Returned",
      "type": "string"
     },
@@ -10080,7 +9956,6 @@
   "LeadWrite": {
    "properties": {
     "amount": {
-     "format": "decimal",
      "title": "Amount",
      "type": "string"
     },
@@ -10163,7 +10038,6 @@
      "x-nullable": true
     },
     "paid_amount": {
-     "format": "decimal",
      "title": "Paid amount",
      "type": "string",
      "x-nullable": true
@@ -10186,7 +10060,6 @@
      "type": "string"
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -11140,7 +11013,6 @@
      "type": "integer"
     },
     "month_spend": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Month spend",
      "type": "string"
@@ -11174,7 +11046,6 @@
      "x-nullable": true
     },
     "cost_price": {
-     "format": "decimal",
      "title": "Cost price",
      "type": "string",
      "x-nullable": true
@@ -11255,7 +11126,6 @@
      "type": "string"
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -11293,7 +11163,6 @@
      "type": "string"
     },
     "unit_cost": {
-     "format": "decimal",
      "title": "Unit cost",
      "type": "string"
     },
@@ -11373,7 +11242,6 @@
      "type": "integer"
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -11400,13 +11268,11 @@
      "x-nullable": true
     },
     "unit_cost": {
-     "format": "decimal",
      "title": "Unit cost",
      "type": "string",
      "x-nullable": true
     },
     "unit_cost_usd": {
-     "format": "decimal",
      "title": "Unit cost usd",
      "type": "string",
      "x-nullable": true
@@ -12274,13 +12140,11 @@
      "type": "integer"
     },
     "new_price": {
-     "format": "decimal",
      "title": "New price",
      "type": "string",
      "x-nullable": true
     },
     "old_price": {
-     "format": "decimal",
      "title": "Old price",
      "type": "string",
      "x-nullable": true
@@ -12312,7 +12176,6 @@
      "type": "object"
     },
     "available": {
-     "format": "decimal",
      "title": "Available",
      "type": "string"
     },
@@ -12387,13 +12250,11 @@
      "type": "string"
     },
     "markup_percent": {
-     "format": "decimal",
      "title": "Markup percent",
      "type": "string",
      "x-nullable": true
     },
     "min_stock": {
-     "format": "decimal",
      "title": "Min stock",
      "type": "string"
     },
@@ -12420,24 +12281,20 @@
      "x-nullable": true
     },
     "purchase_price": {
-     "format": "decimal",
      "title": "Purchase price",
      "type": "string",
      "x-nullable": true
     },
     "purchase_price_usd": {
-     "format": "decimal",
      "title": "Purchase price usd",
      "type": "string",
      "x-nullable": true
     },
     "reserved": {
-     "format": "decimal",
      "title": "Reserved",
      "type": "string"
     },
     "sale_price": {
-     "format": "decimal",
      "title": "Sale price",
      "type": "string"
     },
@@ -12453,12 +12310,10 @@
      "type": "string"
     },
     "stock_total": {
-     "format": "decimal",
      "title": "Stock total",
      "type": "string"
     },
     "stock_value": {
-     "format": "decimal",
      "title": "Stock value",
      "type": "string",
      "x-nullable": true
@@ -12501,7 +12356,6 @@
      "x-nullable": true
     },
     "wholesale_price": {
-     "format": "decimal",
      "title": "Wholesale price",
      "type": "string"
     }
@@ -12610,7 +12464,6 @@
      "type": "boolean"
     },
     "initial_quantity": {
-     "format": "decimal",
      "title": "Initial quantity",
      "type": "string",
      "x-nullable": true
@@ -12634,13 +12487,11 @@
      "type": "string"
     },
     "markup_percent": {
-     "format": "decimal",
      "title": "Markup percent",
      "type": "string",
      "x-nullable": true
     },
     "min_stock": {
-     "format": "decimal",
      "title": "Min stock",
      "type": "string"
     },
@@ -12656,18 +12507,15 @@
      "x-nullable": true
     },
     "purchase_price": {
-     "format": "decimal",
      "title": "Purchase price",
      "type": "string"
     },
     "purchase_price_usd": {
-     "format": "decimal",
      "title": "Purchase price usd",
      "type": "string",
      "x-nullable": true
     },
     "sale_price": {
-     "format": "decimal",
      "title": "Sale price",
      "type": "string",
      "x-nullable": true
@@ -12695,7 +12543,6 @@
      "x-nullable": true
     },
     "wholesale_price": {
-     "format": "decimal",
      "title": "Wholesale price",
      "type": "string"
     }
@@ -12759,7 +12606,6 @@
      "type": "boolean"
     },
     "initial_quantity": {
-     "format": "decimal",
      "title": "Initial quantity",
      "type": "string",
      "x-nullable": true
@@ -12779,13 +12625,11 @@
      "type": "string"
     },
     "markup_percent": {
-     "format": "decimal",
      "title": "Markup percent",
      "type": "string",
      "x-nullable": true
     },
     "min_stock": {
-     "format": "decimal",
      "title": "Min stock",
      "type": "string"
     },
@@ -12801,18 +12645,15 @@
      "x-nullable": true
     },
     "purchase_price": {
-     "format": "decimal",
      "title": "Purchase price",
      "type": "string"
     },
     "purchase_price_usd": {
-     "format": "decimal",
      "title": "Purchase price usd",
      "type": "string",
      "x-nullable": true
     },
     "sale_price": {
-     "format": "decimal",
      "title": "Sale price",
      "type": "string",
      "x-nullable": true
@@ -12840,7 +12681,6 @@
      "x-nullable": true
     },
     "wholesale_price": {
-     "format": "decimal",
      "title": "Wholesale price",
      "type": "string"
     }
@@ -12927,13 +12767,11 @@
      "x-nullable": true
     },
     "price": {
-     "format": "decimal",
      "title": "Price",
      "type": "string",
      "x-nullable": true
     },
     "price_per_person": {
-     "format": "decimal",
      "title": "Price per person",
      "type": "string",
      "x-nullable": true
@@ -12998,7 +12836,6 @@
      "type": "number"
     },
     "min_price": {
-     "format": "decimal",
      "title": "Min price",
      "type": "string",
      "x-nullable": true
@@ -13042,7 +12879,6 @@
      "type": "number"
     },
     "price": {
-     "format": "decimal",
      "title": "Price",
      "type": "string",
      "x-nullable": true
@@ -13104,13 +12940,11 @@
      "type": "string"
     },
     "max_price": {
-     "format": "decimal",
      "title": "Max price",
      "type": "string",
      "x-nullable": true
     },
     "min_price": {
-     "format": "decimal",
      "title": "Min price",
      "type": "string",
      "x-nullable": true
@@ -13136,12 +12970,10 @@
      "type": "integer"
     },
     "max_price": {
-     "format": "decimal",
      "title": "Max price",
      "type": "string"
     },
     "min_price": {
-     "format": "decimal",
      "title": "Min price",
      "type": "string"
     }
@@ -13291,7 +13123,6 @@
      "type": "string"
     },
     "rating": {
-     "format": "decimal",
      "title": "Rating",
      "type": "string",
      "x-nullable": true
@@ -13340,7 +13171,6 @@
      "x-nullable": true
     },
     "rating": {
-     "format": "decimal",
      "title": "Rating",
      "type": "string"
     }
@@ -14164,12 +13994,10 @@
      "type": "string"
     },
     "usd_rate": {
-     "format": "decimal",
      "title": "Usd rate",
      "type": "string"
     },
     "write_off_alert": {
-     "format": "decimal",
      "title": "Write off alert",
      "type": "string"
     }
@@ -14201,12 +14029,10 @@
      "type": "string"
     },
     "usd_rate": {
-     "format": "decimal",
      "title": "Usd rate",
      "type": "string"
     },
     "write_off_alert": {
-     "format": "decimal",
      "title": "Write off alert",
      "type": "string"
     }
@@ -14295,17 +14121,14 @@
   "StockChange": {
    "properties": {
     "after": {
-     "format": "decimal",
      "title": "After",
      "type": "string"
     },
     "before": {
-     "format": "decimal",
      "title": "Before",
      "type": "string"
     },
     "change": {
-     "format": "decimal",
      "title": "Change",
      "type": "string"
     },
@@ -14350,7 +14173,6 @@
   "StockLine": {
    "properties": {
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -14436,7 +14258,6 @@
      "x-nullable": true
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -14524,7 +14345,6 @@
      "x-nullable": true
     },
     "quantity": {
-     "format": "decimal",
      "title": "Quantity",
      "type": "string"
     },
@@ -14767,7 +14587,6 @@
      "type": "integer"
     },
     "purchases": {
-     "format": "decimal",
      "title": "Purchases",
      "type": "string",
      "x-nullable": true
@@ -15806,7 +15625,6 @@
      "type": "object"
     },
     "spend": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Spend",
      "type": "string",
@@ -15833,18 +15651,15 @@
      "type": "integer"
     },
     "profit": {
-     "format": "decimal",
      "title": "Profit",
      "type": "string",
      "x-nullable": true
     },
     "revenue": {
-     "format": "decimal",
      "title": "Revenue",
      "type": "string"
     },
     "sold_qty": {
-     "format": "decimal",
      "title": "Sold qty",
      "type": "string"
     },
@@ -15976,7 +15791,6 @@
      "type": "array"
     },
     "budget_per_trip": {
-     "format": "decimal",
      "title": "Budget per trip",
      "type": "string",
      "x-nullable": true
@@ -15992,7 +15806,6 @@
      "type": "integer"
     },
     "monthly_budget": {
-     "format": "decimal",
      "title": "Monthly budget",
      "type": "string",
      "x-nullable": true
@@ -16034,7 +15847,6 @@
      "type": "string"
     },
     "budget_limit": {
-     "format": "decimal",
      "title": "Budget limit",
      "type": "string",
      "x-nullable": true
@@ -16074,7 +15886,6 @@
      "type": "string"
     },
     "used_amount": {
-     "format": "decimal",
      "readOnly": true,
      "title": "Used amount",
      "type": "string"
@@ -16103,7 +15914,6 @@
      "type": "string"
     },
     "budget_limit": {
-     "format": "decimal",
      "title": "Budget limit",
      "type": "string",
      "x-nullable": true
@@ -16131,7 +15941,6 @@
      "type": "string"
     },
     "budget_limit": {
-     "format": "decimal",
      "title": "Budget limit",
      "type": "string",
      "x-nullable": true
@@ -16398,12 +16207,10 @@
      "type": "integer"
     },
     "quantity_total": {
-     "format": "decimal",
      "title": "Quantity total",
      "type": "string"
     },
     "stock_value": {
-     "format": "decimal",
      "title": "Stock value",
      "type": "string",
      "x-nullable": true
@@ -26102,7 +25909,6 @@
       "x-nullable": true
      },
      {
-      "format": "decimal",
       "in": "formData",
       "name": "paid_amount",
       "required": false,
