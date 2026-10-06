@@ -2,7 +2,7 @@ groups:
   - name: monitoring-self
     rules:
       - alert: MonitoringTargetDown
-        expr: up{job!~"weel-backend|blackbox-http"} == 0
+        expr: up{job!~"weel-backend|blackbox-http|pgbouncer-exporter"} == 0
         for: 5m
         labels: { severity: warning, service: monitoring }
         annotations:
