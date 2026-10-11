@@ -5,7 +5,10 @@
     - https://dev.weel.uz/health/
 - labels: { app: weel-b2b, kind: frontend }
   targets:
-    - https://business.weel.uz/
+    # business.weel.uz Traefik'da route'siz (404) - weel-b2b frontend domen migratsiyasidan keyin
+    # weel.uz ostiga ko'chgan (/files, /reports, /tasks ...). EndpointDown 2026-10-06'dan beri
+    # yonib turardi (weel.uz/files - 200, b2b-web konteyner javobi bilan mos; business.weel.uz - Traefik 404).
+    - https://weel.uz/files
 - labels: { app: weel-admin, kind: frontend }
   targets:
     - https://admin.weel.uz/
