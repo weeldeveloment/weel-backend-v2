@@ -2,7 +2,6 @@
 # entrypoint.sh env'dan qo'yadi. Real qiymat bu faylga yozilmaydi.
 #
 # Oqim: Prometheus rules + Loki ruler  ->  Alertmanager  ->  Telegram
-#                                                        \->  alert-relay -> Claude Routine
 global:
   resolve_timeout: 5m
 
@@ -16,15 +15,15 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   routes:
-    # critical: tez Telegram + Claude tahlili
+    # critical: tez Telegram
     - matchers: [severity="critical"]
-      receiver: telegram-and-claude
+      receiver: telegram
       group_wait: 10s
       group_interval: 2m
       repeat_interval: 1h
-    # warning: Telegram + Claude (relay o'zi 15 daqiqada 1 martadan oshirmaydi)
+    # warning: Telegram
     - matchers: [severity="warning"]
-      receiver: telegram-and-claude
+      receiver: telegram
       repeat_interval: 4h
     # info: faqat Telegram, kamdan-kam takror
     - matchers: [severity="info"]
@@ -64,14 +63,3 @@ receivers:
         send_resolved: true
         disable_notifications: false
 
-  - name: telegram-and-claude
-    telegram_configs:
-      - bot_token: '__TELEGRAM_BOT_TOKEN__'
-        chat_id: __TELEGRAM_CHAT_ID__
-        parse_mode: HTML
-        message: '{{ template "telegram.weel" . }}'
-        send_resolved: true
-    webhook_configs:
-      - url: http://alert-relay:8080/alertmanager
-        send_resolved: false
-        max_alerts: 10

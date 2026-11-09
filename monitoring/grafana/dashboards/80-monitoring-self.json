@@ -720,91 +720,6 @@
   },
   {
    "type": "timeseries",
-   "title": "alert-relay: Claude Routine uyg'otishlar",
-   "description": "",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "increase(relay_fire_total[$__rate_interval])",
-     "legendFormat": "fired",
-     "range": true
-    },
-    {
-     "refId": "B",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "increase(relay_fire_failed_total[$__rate_interval])",
-     "legendFormat": "failed",
-     "range": true
-    },
-    {
-     "refId": "C",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "increase(relay_throttled_total[$__rate_interval])",
-     "legendFormat": "throttled",
-     "range": true
-    },
-    {
-     "refId": "D",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "increase(relay_disabled_total[$__rate_interval])",
-     "legendFormat": "disabled (URL yo'q)",
-     "range": true
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "custom": {
-      "drawStyle": "bars",
-      "lineWidth": 1,
-      "fillOpacity": 10,
-      "showPoints": "never",
-      "spanNulls": true,
-      "stacking": {
-       "mode": "none"
-      }
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom",
-     "showLegend": true,
-     "calcs": []
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   },
-   "gridPos": {
-    "x": 16,
-    "y": 17,
-    "w": 8,
-    "h": 7
-   },
-   "id": 214
-  },
-  {
-   "type": "timeseries",
    "title": "Monitoring konteynerlari xotirasi",
    "description": "",
    "datasource": {
@@ -818,7 +733,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum by (name) (container_memory_working_set_bytes{name=~\".*(grafana|prometheus|loki|tempo|alloy|alertmanager|cadvisor|exporter|relay|mcp).*\"})",
+     "expr": "sum by (name) (container_memory_working_set_bytes{name=~\".*(grafana|prometheus|loki|tempo|alloy|alertmanager|cadvisor|exporter|mcp).*\"})",
      "legendFormat": "{{name}}",
      "range": true
     }
@@ -857,7 +772,7 @@
     "w": 12,
     "h": 7
    },
-   "id": 215
+   "id": 214
   },
   {
    "type": "timeseries",
@@ -913,7 +828,7 @@
     "w": 12,
     "h": 7
    },
-   "id": 216
+   "id": 215
   }
  ]
 }
