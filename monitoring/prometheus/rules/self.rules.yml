@@ -25,14 +25,6 @@ groups:
           summary: "Prometheus TSDB hajm limitiga yaqin"
           description: "PROM_RETENTION_SIZE ni oshiring yoki retention'ni kamaytiring."
 
-      - alert: AlertmanagerNotificationFailing
-        expr: increase(alertmanager_notifications_failed_total[10m]) > 0
-        for: 5m
-        labels: { severity: critical, service: monitoring }
-        annotations:
-          summary: "Alertmanager {{ $labels.integration }} ga xabar yubora olmayapti"
-          description: "Telegram token/chat id. Alertlar jimgina yo'qolmoqda!"
-
       - alert: LokiIngestErrors
         expr: sum(increase(loki_request_duration_seconds_count{route=~"loki_api_v1_push|/loki/api/v1/push", status_code=~"5.."}[10m])) > 0
         for: 10m

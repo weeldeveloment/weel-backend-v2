@@ -11,9 +11,8 @@ docker run --rm -v "$TMP/prometheus.yml:/p/prometheus.yml:ro" -v "$PWD/prometheu
   --entrypoint promtool prom/prometheus:v3.5.5 check config /p/prometheus.yml | grep -E "SUCCESS|FAIL"
 
 echo "▶ alertmanager"
-mkdir -p "$TMP/am/templates"
-sed -e "s|__TELEGRAM_BOT_TOKEN__|1:x|g" -e "s|__TELEGRAM_CHAT_ID__|-1|g" -e "s|__GRAFANA_DOMAIN__|g|g" -e 's|/alertmanager/templates/|/am/templates/|' alertmanager/alertmanager.yml > "$TMP/am/alertmanager.yml"
-sed -e "s|__GRAFANA_DOMAIN__|g|g" alertmanager/templates/telegram.tmpl > "$TMP/am/templates/telegram.tmpl"
+mkdir -p "$TMP/am"
+cp alertmanager/alertmanager.yml "$TMP/am/alertmanager.yml"
 docker run --rm -v "$TMP/am:/am:ro" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /am/alertmanager.yml | grep -E "SUCCESS|FAIL"
 
 echo "▶ loki"

@@ -180,17 +180,9 @@ services:
       - --storage.path=/alertmanager
       - --web.external-url=https://${GRAFANA_DOMAIN}/alertmanager
       - --web.route-prefix=/
-    # api.telegram.org AAAA qaytaradi, konteynerda IPv6 marshruti yo'q -> "context deadline exceeded".
-    sysctls:
-      - net.ipv6.conf.all.disable_ipv6=1
-    environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-      GRAFANA_DOMAIN: ${GRAFANA_DOMAIN}
     volumes:
       - ./alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.template.yml:ro
-      - ./alertmanager/templates:/etc/alertmanager/templates:ro
       - alertmanager-data:/alertmanager
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9093/-/healthy >/dev/null || exit 1"]

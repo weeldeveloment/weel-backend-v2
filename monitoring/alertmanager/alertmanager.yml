@@ -1,34 +1,14 @@
-# SHABLON — __TELEGRAM_BOT_TOKEN__, __TELEGRAM_CHAT_ID__, __GRAFANA_DOMAIN__ ni
-# entrypoint.sh env'dan qo'yadi. Real qiymat bu faylga yozilmaydi.
-#
-# Oqim: Prometheus rules + Loki ruler  ->  Alertmanager  ->  Telegram
+# Alertmanager hech qayerga xabar YUBORMAYDI (Telegram 2026-11-09 da o'chirildi).
+# Alertlar faqat Grafana -> Alerting va Alertmanager UI'da ko'rinadi.
 global:
   resolve_timeout: 5m
 
-templates:
-  - /alertmanager/templates/*.tmpl
-
 route:
-  receiver: telegram
+  receiver: none
   group_by: ['alertname', 'service']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  routes:
-    # critical: tez Telegram
-    - matchers: [severity="critical"]
-      receiver: telegram
-      group_wait: 10s
-      group_interval: 2m
-      repeat_interval: 1h
-    # warning: Telegram
-    - matchers: [severity="warning"]
-      receiver: telegram
-      repeat_interval: 4h
-    # info: faqat Telegram, kamdan-kam takror
-    - matchers: [severity="info"]
-      receiver: telegram
-      repeat_interval: 24h
 
 inhibit_rules:
   # Backend butunlay yotgan bo'lsa — uning 5xx/latency/trafik simptomlari jim.
@@ -54,12 +34,4 @@ inhibit_rules:
     equal: [mountpoint]
 
 receivers:
-  - name: telegram
-    telegram_configs:
-      - bot_token: '__TELEGRAM_BOT_TOKEN__'
-        chat_id: __TELEGRAM_CHAT_ID__
-        parse_mode: HTML
-        message: '{{ template "telegram.weel" . }}'
-        send_resolved: true
-        disable_notifications: false
-
+  - name: none

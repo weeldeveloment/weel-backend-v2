@@ -13,7 +13,7 @@ monitoring/
 ├─ .env.example                  → Dokploy Environment (real qiymatlar hech qachon git'da emas)
 ├─ prometheus/  prometheus.yml   scrape config (SHABLON — entrypoint.sh env'dan render qiladi)
 │               rules/*.rules.yml  56 ta alert (backend, celery, postgres, redis, host, containers, blackbox, self)
-├─ alertmanager/ alertmanager.yml  route/inhibit/receivers (SHABLON), templates/telegram.tmpl (o'zbekcha)
+├─ alertmanager/ alertmanager.yml  route/inhibit (hech qayerga yubormaydi)
 ├─ loki/        loki.yml, rules/fake/logs.rules.yml   log asosidagi 9 ta alert (LogQL)
 ├─ alloy/       config.alloy       docker.sock → barcha konteyner loglari → Loki (JSON/celery/uvicorn parse)
 ├─ tempo/       tempo.yml          OTLP 4318/4317, span-metrics + service-graph → Prometheus
@@ -27,7 +27,7 @@ Alert oqimi (bitta pipeline, hammasi kodda):
 
 ```
 Prometheus rules ─┐
-                  ├─► Alertmanager ─ route ─► Telegram (bot, guruh)
+                  ├─► Alertmanager (faqat Grafana/UI'da ko'rinadi, xabar yubormaydi)
 Loki ruler (LogQL)┘   (inhibit, group)
 ```
 
@@ -37,8 +37,6 @@ Loki ruler (LogQL)┘   (inhibit, group)
 
 | Nima | Qayerdan |
 |---|---|
-| Telegram bot token | @BotFather → `/newbot` |
-| Telegram chat id | botni guruhga qo'shing, guruhga yozing, `https://api.telegram.org/bot<TOKEN>/getUpdates` → `"chat":{"id":-100...}` |
 | DNS | `grafana.weel.uz`, `mcp.weel.uz` → Dokploy server IP (A yozuv) |
 | Backend Dokploy app nomi | Dokploy → weel-backend ilovasi → General → **App Name** (masalan `weel-backend-v2-a1b2c3`) |
 | Postgres / Redis hostlari | Dokploy'dagi DB servislarining App Name'i (dokploy-network ichida DNS) |
@@ -55,7 +53,7 @@ Kam bo'lsa: `PROM_RETENTION=15d`, `PROM_RETENTION_SIZE=4GB`, loki.yml `retention
    branch `main`, **Compose Path** `monitoring/docker-compose.yml`, Compose Type **Docker Compose** (Stack emas).
 2. **Environment** bo'limiga `.env.example` dagi barcha o'zgaruvchilarni real qiymat bilan qo'ying.
    Majburiy: `GRAFANA_DOMAIN`, `MCP_DOMAIN`, `GRAFANA_ADMIN_PASSWORD`, `BACKEND_TARGET`,
-   `PROMETHEUS_METRICS_TOKEN`, `DB_*`, `REDIS_ADDR`, `CELERY_BROKER_URL`, `TELEGRAM_*`,
+   `PROMETHEUS_METRICS_TOKEN`, `DB_*`, `REDIS_ADDR`, `CELERY_BROKER_URL`,
    `GRAFANA_SA_TOKEN` (hozircha `glsa_placeholder` — 5-bosqichda almashtiriladi), `MCP_PATH_SECRET`.
 3. Tarmoq: compose `dokploy-network` ni `external` deb ko'rsatadi — Dokploy'da bu tarmoq bor.
    Backend, Postgres, Redis ham shu tarmoqda bo'lishi kerak (Dokploy default shunday).
@@ -104,16 +102,10 @@ Tekshirish (Grafana → Explore):
 - Tempo: Search → service `weel-backend` — jonli trafikdan 1 daqiqada trace'lar
 - Celery: `celery_worker_up` = 1 (worker birinchi task eventini yuborgach)
 
-## 3-bosqich. Alertlar → Telegram
+## 3-bosqich. Alertlar
 
-Telegram bot token va chat id 1-bosqichda env'ga qo'yilgan. Tekshirish:
-
-```bash
-# Dokploy serverida (yoki lokal):
-docker compose -p <project> exec alertmanager amtool alert add TestAlert severity=critical service=test \
-  --annotation=summary="Sinov alerti" --alertmanager.url=http://localhost:9093
-```
-10–30 soniyada Telegram guruhga 🔴 FIRING xabar keladi (5 daqiqadan keyin ✅ RESOLVED).
+Telegram'ga xabar yuborish 2026-11-09 da o'chirildi. Yonayotgan alertlar Grafana → Alerting
+(Alertmanager datasource) va `https://GRAFANA_DOMAIN/alertmanager` da ko'rinadi.
 
 Alert qoidalari: `prometheus/rules/`, `loki/rules/fake/`.
 Yangi qoida qo'shgach: `tools/check.sh` (promtool/amtool bilan tekshiradi), commit, Dokploy redeploy.
@@ -153,7 +145,7 @@ daqiqasiga ≤20, takrorlar 60s ichida bir marta. Grafana: **Weel — Frontend**
 Avval bu yerda alert-relay + ops-agent + bulutdagi Claude Routine'lar (`weel-ops-hourly`,
 `weel-ops-daily`) bor edi: har soat tekshirib, Telegram'ga hisobot yozardi va Claude tokenini sarflardi.
 Hammasi olib tashlandi; routine'lar claude.ai/code/routines da o'chirib qo'yilgan.
-Endi Telegram'ga faqat Alertmanager'ning oddiy alertlari boradi (Claude ishtirokisiz).
+Alertmanager'ning Telegram xabarlari ham o'chirildi — Telegram'ga hech narsa bormaydi.
 
 ---
 
@@ -169,7 +161,7 @@ Uptime → barcha probalar UP; Monitoring self → barcha targetlar `up`.
 
 `PROMETHEUS_METRICS_TOKEN` (backend + monitoring), `FRONTEND_LOG_TOKEN` (backend + 3 frontend build),
 `GRAFANA_SA_TOKEN`, `MCP_PATH_SECRET` (monitoring + .mcp.json + claude.ai connector),
-`TELEGRAM_BOT_TOKEN`, `GRAFANA_ADMIN_PASSWORD`. Hech biri git'da emas.
+`GRAFANA_ADMIN_PASSWORD`. Hech biri git'da emas.
 Tafsilot: `docs/SECRET_ROTATION.md`.
 
 ## Disk to'lsa
